@@ -57,6 +57,14 @@ jobs:
         working-directory: src-tauri
         run: cargo build --release --bin engine-smoke
 
+      # sACN wire-format tests (packet layout, stream termination, discovery
+      # paging). No GPU needed. --release reuses the dependency artifacts the
+      # builds above already produced, instead of compiling the tree again in
+      # the debug profile.
+      - name: Rust unit tests
+        working-directory: src-tauri
+        run: cargo test --release --lib
+
       # CI runners have no GPU; just confirm the error path is the designed one
       # (clear "no Vulkan adapter" message, nonzero exit) rather than a crash.
       - name: Engine smoke test (expected to fail cleanly without a GPU)

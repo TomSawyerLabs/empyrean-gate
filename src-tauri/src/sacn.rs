@@ -514,3 +514,189 @@ fn pad_source_name(name: &str) -> [u8; 64] {
 fn flags_len(len: usize) -> [u8; 2] {
     (0x7000u16 | (len as u16 & 0x0fff)).to_be_bytes()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn be16(b: &[u8]) -> u16 {
+        u16::from_be_bytes([b[0], b[1]])
+    }
+    fn be32(b: &[u8]) -> u32 {
+        u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+    }
+
+    const CID: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd,
+        0xef,
+    ];
+
+    #[test]
+    fn discovery_universe_maps_to_the_reserved_group() {
+        assert_eq!(multicast_group(DISCOVERY_UNIVERSE), Ipv4Addr::new(239, 255, 250, 214));
+        assert_eq!(multicast_group(1), Ipv4Addr::new(239, 255, 0, 1));
+    }
+
+    #[test]
+    fn discovery_page_layout_matches_e131() {
+        let name = pad_source_name("Empyrean Gate");
+        let pages = build_discovery_pages(&CID, &name, &[1, 2, 300]);
+        assert_eq!(pages.len(), 1);
+        let p = &pages[0];
+
+        assert_eq!(p.len(), 120 + 3 * 2);
+        assert_eq!(be16(&p[0..2]), 0x0010); // preamble
+        assert_eq!(be16(&p[2..4]), 0x0000); // post-amble
+        assert_eq!(&p[4..16], &ACN_ID);
+        assert_eq!(be16(&p[16..18]), 0x7000 | (p.len() - 16) as u16);
+        assert_eq!(be32(&p[18..22]), 0x0000_0008); // VECTOR_ROOT_E131_EXTENDED
+        assert_eq!(&p[22..38], &CID);
+
+        assert_eq!(be16(&p[38..40]), 0x7000 | (p.len() - 38) as u16);
+        assert_eq!(be32(&p[40..44]), 0x0000_0002); // VECTOR_E131_EXTENDED_DISCOVERY
+        assert_eq!(&p[44..108], &name[..]);
+        assert_eq!(&p[108..112], &[0, 0, 0, 0]); // reserved
+
+        assert_eq!(be16(&p[112..114]), 0x7000 | (p.len() - 112) as u16);
+        assert_eq!(be32(&p[114..118]), 0x0000_0001); // VECTOR_UNIVERSE_DISCOVERY_UNIVERSE_LIST
+        assert_eq!(p[118], 0); // page
+        assert_eq!(p[119], 0); // last page
+        assert_eq!(be16(&p[120..122]), 1);
+        assert_eq!(be16(&p[122..124]), 2);
+        assert_eq!(be16(&p[124..126]), 300);
+    }
+
+    #[test]
+    fn discovery_splits_into_pages_of_512() {
+        let universes: Vec<u16> = (1..=600).collect();
+        let pages = build_discovery_pages(&CID, &pad_source_name("x"), &universes);
+        assert_eq!(pages.len(), 2);
+        for (i, p) in pages.iter().enumerate() {
+            assert_eq!(p[118], i as u8, "page number");
+            assert_eq!(p[119], 1, "last page index, same on every page");
+        }
+        assert_eq!(pages[0].len(), 120 + 512 * 2);
+        assert_eq!(pages[1].len(), 120 + 88 * 2);
+        // Page 2 continues where page 1 stopped.
+        assert_eq!(be16(&pages[1][120..122]), 513);
+    }
+
+    #[test]
+    fn a_source_with_no_universes_still_advertises() {
+        let pages = build_discovery_pages(&CID, &pad_source_name("x"), &[]);
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].len(), 120);
+    }
+
+    #[test]
+    fn terminate_sets_the_option_bit_three_times_and_leaves_the_template_clean() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let dest = match receiver.local_addr().unwrap() {
+            std::net::SocketAddr::V4(a) => a,
+            _ => unreachable!(),
+        };
+
+        let mut plans = vec![UniversePlan {
+            universe: 7,
+            packet: build_data_template(&CID, &pad_source_name("x"), 100, 0, 7, 6),
+            src_offset: 0,
+            src_len: 6,
+            unicast: Some(dest),
+            multicast: None,
+            sequence: 41,
+        }];
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        assert_eq!(terminate_plans(&socket, &mut plans), TERMINATE_REPEATS);
+
+        let mut buf = [0u8; 1500];
+        for expected_seq in 42..=44u8 {
+            let n = receiver.recv(&mut buf).unwrap();
+            assert_eq!(n, SLOTS_OFFSET + 6);
+            assert_eq!(buf[OPTIONS_OFFSET], OPT_STREAM_TERMINATED);
+            assert_eq!(buf[SEQ_OFFSET], expected_seq);
+            assert_eq!(be16(&buf[113..115]), 7, "universe");
+        }
+        // A universe that comes back must resume as an ordinary stream.
+        assert_eq!(plans[0].packet[OPTIONS_OFFSET], 0);
+    }
+
+    #[test]
+    fn source_name_truncates_on_a_char_boundary_and_stays_terminated() {
+        let long = "é".repeat(40); // 80 bytes: must cut at 62, not mid-code-point
+        let out = pad_source_name(&long);
+        assert_eq!(out[62], 0, "null terminator inside the 64-byte field");
+        assert_eq!(out[63], 0);
+        let text = std::str::from_utf8(&out[..62]).expect("never cut mid-code-point");
+        assert_eq!(text.chars().count(), 31);
+    }
+
+    /// Offline sender: no destinations, so `send_frame`/`configure` touch no network
+    /// but still run the full planning, sequencing and termination logic.
+    fn offline(spokes: u32) -> (GeometryConfig, OutputConfig) {
+        let geo = GeometryConfig {
+            spokes,
+            pixels_per_spoke: 4,
+            ..Default::default()
+        };
+        let out = OutputConfig {
+            cid: "01234567-89ab-cdef-0123-456789abcdef".into(),
+            pixels_per_universe: 4,
+            multicast: false,  // no controllers configured either → no destinations
+            discovery: false,  // keep the test off the wire entirely
+            ..Default::default()
+        };
+        (geo, out)
+    }
+
+    #[test]
+    fn reconfigure_carries_sequence_numbers_and_drops_dead_universes() {
+        let mut s = SacnSender::new().unwrap();
+        let (geo, out) = offline(2);
+        s.configure(&geo, &out);
+        assert_eq!(s.plan.len(), 2, "one universe per spoke");
+
+        let rgb = vec![0u8; 2 * 4 * 3];
+        for _ in 0..5 {
+            s.send_frame(&rgb);
+        }
+        assert_eq!(s.plan[0].sequence, 5);
+        assert!(s.streaming);
+
+        // Shrink to one spoke: universe 1 survives, universe 2 is retired.
+        let (geo, out) = offline(1);
+        s.configure(&geo, &out);
+        assert_eq!(s.plan.len(), 1);
+        assert_eq!(s.plan[0].universe, 1);
+        assert_eq!(
+            s.plan[0].sequence, 5,
+            "a surviving universe must not restart its sequence — a receiver would \
+             discard the next packets as out-of-order"
+        );
+    }
+
+    #[test]
+    fn a_changed_cid_retires_every_universe() {
+        let mut s = SacnSender::new().unwrap();
+        let (geo, out) = offline(2);
+        s.configure(&geo, &out);
+        s.send_frame(&vec![0u8; 2 * 4 * 3]);
+
+        let (geo, mut out) = offline(2);
+        out.cid = "ffffffff-89ab-cdef-0123-456789abcdef".into();
+        s.configure(&geo, &out);
+        // Same universes, but a new identity: sequences start over with the new CID.
+        assert_eq!(s.plan.len(), 2);
+        assert_eq!(s.plan[0].sequence, 0);
+    }
+
+    #[test]
+    fn cid_parses_to_network_byte_order() {
+        let bytes = cid_bytes("01234567-89ab-cdef-0123-456789abcdef");
+        assert_eq!(bytes, CID);
+        // Garbage is survivable, not fatal — but it must not silently be zeros.
+        assert_ne!(cid_bytes("not-a-uuid"), [0u8; 16]);
+    }
+}

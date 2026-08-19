@@ -235,6 +235,44 @@ watching → the watcher's relink hits "Access is denied" and `tauri dev` DIES
       one layer fades in/out per step (4 s envelope), never fewer than
       `walk_min_layers` on (default 2). Off by default; toggle in Control → Autopilot.
 
+## Round 7 (2026-08-19, sACN protocol conformance)
+
+Prompted by "what is the CID, does it change every boot, are we using sACN well?" —
+audit found the identity/lifecycle half of E1.31 was unimplemented.
+
+- [x] **Persistent CID** (`output.cid`, UUID v4, generated once in `config::load` like
+      the join token). Was `b"EmpyreanGate" + process::id()` → **a new source identity
+      every launch**. Consequences that fixes: no more 2.5 s HTP-merge against our own
+      ghost after a restart; no burning a slot in controllers that cap sources per
+      universe (PixLite: a handful); and handovers are now genuinely seamless because
+      the successor process reads the *same* CID out of the config.
+      Added `uuid = "1.24.1"` (v4) — the old value was not an RFC 4122 UUID at all.
+- [x] **Stream termination** (options bit 6, 3 packets/universe): sent on output
+      disable, on app exit, and for universes a reconfigure drops. Previously the rig
+      held its last frame through the receiver's source-loss timeout and, on
+      hold-last-look controllers, indefinitely. **Deliberately NOT sent on handover**
+      (`state.leaving`) — the successor continues the same CID's stream, and
+      terminating would blink the rig between instances.
+      Exit needed a new `state.sacn_terminated` ack + a ≤500 ms wait in `lib::run`,
+      or the process died before the packets left the socket.
+- [x] **Universe discovery** (E1.31-2016): prebuilt pages, sent to 239.255.250.214
+      every 10 s from inside `send_frame` (only due while transmitting; keeps cadence
+      independent of frame rate). This is what makes the source visible in sACNView
+      and controller UIs. Toggle: `output.discovery`, default on.
+- [x] **Configurable source name** (`output.source_name`, default "Empyrean Gate"),
+      64-byte field, truncated on a char boundary.
+- [x] **First unit tests in the repo** (7, in `sacn.rs`): discovery packet layout
+      field-by-field, 512-universe paging, terminate option bit + sequence + template
+      restoration (over a real loopback UDP socket), name truncation, CID byte order.
+      CI runs them with `cargo test --release --lib` *after* the release builds, so it
+      reuses those artifacts instead of compiling the tree again in the debug profile.
+- Declined (agreed with user): per-address priority (start code 0xDD) — an ETC
+  convention, not core E1.31, and nothing in this rig consumes it.
+- Known, not done: when a controller IP is set **and** multicast is on, every packet
+  goes out twice. The receiver drops the duplicate (sequence delta 0) so it is
+  harmless, but it doubles wire traffic — these want to be a radio choice, not two
+  independent checkboxes.
+
 ## Next session pickup
 
 - Run `bun tauri dev` and eyeball the actual patterns; tune defaults.
