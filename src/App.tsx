@@ -74,9 +74,18 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
 }
 
 export default function App() {
-  const { connected, status, errors, dismissError, client, denied } = useGate();
+  const { connected, status, errors, dismissError, client, denied, savedPulse } = useGate();
   const [tab, setTab] = useState<TabId>(tabFromHash);
   const [showConnect, setShowConnect] = useState(false);
+  const [savedVisible, setSavedVisible] = useState(false);
+
+  // Flash "saved" whenever the backend confirms a config change (from any client).
+  useEffect(() => {
+    if (savedPulse === 0) return;
+    setSavedVisible(true);
+    const t = setTimeout(() => setSavedVisible(false), 1200);
+    return () => clearTimeout(t);
+  }, [savedPulse]);
 
   // Hash <-> tab sync, so PWA shortcuts / popped-out windows can pin a mode.
   useEffect(() => {
@@ -130,6 +139,7 @@ export default function App() {
           ))}
         </nav>
         <span className="spacer" />
+        <span className={`saved-chip ${savedVisible ? "show" : ""}`}>✓ saved</span>
         <button className="ghost" onClick={() => setShowConnect(true)}>
           ⊕ Connect
         </button>

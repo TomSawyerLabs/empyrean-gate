@@ -21,6 +21,10 @@ export default function Settings() {
   if (!config) return <p className="hint">Waiting for backend…</p>;
   return (
     <div className="settings-page">
+      <p className="hint">
+        There is no save button: every change applies to the show and persists on the
+        backend the moment you make it — watch for the "✓ saved" flash in the top bar.
+      </p>
       <LayersPanel config={config} />
       <AudioPanel config={config} />
       <OutputPanel config={config} />
@@ -439,22 +443,28 @@ function OutputPanel({ config }: { config: AppConfig }) {
           checked={out.enabled}
           onChange={(e) => client.setSacnEnabled(e.target.checked)}
         />
-        <strong>{out.enabled ? "OUTPUT LIVE" : "Output disabled"}</strong>
-        {status && out.enabled && (
-          <span className="hint">
-            {status.sacn_universes} universes · {status.sacn_pps} pkt/s
-            {status.sacn_pps === 0 && " — ⚠ nothing on the wire, check interface"}
-          </span>
-        )}
+        Enable sACN output
+        {status &&
+          (out.enabled ? (
+            status.sacn_pps > 0 ? (
+              <span className="live-pill">
+                TRANSMITTING · {status.sacn_universes} universes · {status.sacn_pps} pkt/s
+              </span>
+            ) : (
+              <span className="warn">⚠ enabled but nothing on the wire — check the interface below</span>
+            )
+          ) : (
+            <span className="hint">off</span>
+          ))}
       </label>
       <label className="field-row" style={{ maxWidth: 460 }}>
-        <span>Interface</span>
+        <span>Network interface</span>
         <select
           value={out.interface}
           onChange={(e) => commit({ interface: e.target.value })}
           style={{ flex: 1 }}
         >
-          <option value="">OS default route (often wrong on multi-homed machines)</option>
+          <option value="">OS default route</option>
           {(status?.interfaces ?? []).map((i) => {
             const ip = i.split("—").pop()?.trim() ?? i;
             return (
@@ -465,6 +475,9 @@ function OutputPanel({ config }: { config: AppConfig }) {
           })}
         </select>
       </label>
+      <p className="hint">
+        Pick the interface that is on the lighting network — multicast leaves through this NIC.
+      </p>
       <label className="toggle-row">
         <input
           type="checkbox"

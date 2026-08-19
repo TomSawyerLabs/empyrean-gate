@@ -3,6 +3,7 @@
 
 import { useEffect, useRef } from "react";
 import GateCanvas from "./GateCanvas";
+import Sparkbars from "./Sparkbars";
 import { useGate } from "./state";
 
 export default function View() {
@@ -33,10 +34,24 @@ export default function View() {
       <div className="preview-hud">
         <div ref={beatDotRef} className="beat-dot" />
         <span>{bpm > 0 ? `${bpm.toFixed(0)} BPM` : "no beat"}</span>
-        {status && <span>{status.engine_fps.toFixed(0)} fps</span>}
-        {status?.sacn_enabled && (
-          <span className="live-pill">sACN {status.sacn_pps > 0 ? `${status.sacn_pps} pkt/s` : "LIVE — 0 pkt/s ⚠"}</span>
+        {status && (
+          <Sparkbars
+            data={status.fps_history}
+            color="#38d1c2"
+            label="fps"
+            value={String(status.fps_history.at(-1) ?? 0)}
+          />
         )}
+        {status?.sacn_enabled && (
+          <Sparkbars
+            data={status.pps_history}
+            color="#7c5cff"
+            label="pkt/s"
+            value={String(status.sacn_pps)}
+            warn={status.sacn_pps === 0}
+          />
+        )}
+        {status?.sacn_enabled && <span className="live-pill">sACN LIVE</span>}
       </div>
     </div>
   );

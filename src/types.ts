@@ -117,6 +117,8 @@ export interface RenderConfig {
   master_brightness: number;
   master_speed: number;
   walk_enabled: boolean;
+  walk_layers: boolean;
+  walk_min_layers: number;
   walk_speed: number;
 }
 
@@ -149,6 +151,8 @@ export interface RuntimeStatus {
   sacn_enabled: boolean;
   sacn_universes: number;
   sacn_pps: number;
+  fps_history: number[];
+  pps_history: number[];
   clients: number;
   audio: AudioSourceStatus[];
   input_devices: string[];

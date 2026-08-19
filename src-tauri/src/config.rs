@@ -215,6 +215,11 @@ pub struct RenderConfig {
     /// unattended show keeps evolving for hours. Each layer's `walk_amount` scales
     /// how far its parameters may wander from where the sliders are set.
     pub walk_enabled: bool,
+    /// Also walk WHICH layers play (Gray-code style: one layer fades in or out per
+    /// step), on top of the parameter walk.
+    pub walk_layers: bool,
+    /// Never fewer than this many of the enabled layers playing at once.
+    pub walk_min_layers: u32,
     /// Walk rate multiplier (1.0 ≈ minutes-scale evolution).
     pub walk_speed: f32,
 }
@@ -226,6 +231,8 @@ impl Default for RenderConfig {
             master_brightness: 1.0,
             master_speed: 1.0,
             walk_enabled: true,
+            walk_layers: false,
+            walk_min_layers: 2,
             walk_speed: 1.0,
         }
     }

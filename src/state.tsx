@@ -20,6 +20,8 @@ interface Gate {
   connected: boolean;
   /** Set when the server refused this client (revoked / token required). */
   denied: string | null;
+  /** Bumps every time the backend confirms a config change (saved + broadcast). */
+  savedPulse: number;
   errors: string[];
   dismissError: (i: number) => void;
   /** Timestamp (performance.now()) of the last beat per source index. */
@@ -34,6 +36,7 @@ export function GateProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
   const [connected, setConnected] = useState(false);
   const [denied, setDenied] = useState<string | null>(null);
+  const [savedPulse, setSavedPulse] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
   const beatAt = useRef<number[]>([0, 0, 0, 0]);
 
@@ -41,7 +44,11 @@ export function GateProvider({ children }: { children: ReactNode }) {
     const offMsg = client.onMessage((msg: ServerMsg) => {
       switch (msg.type) {
         case "state":
-          setConfig(msg.config);
+          setConfig((prev) => {
+            // The very first state after connect is a greeting, not a save.
+            if (prev !== null) setSavedPulse((p) => p + 1);
+            return msg.config;
+          });
           setStatus(msg.status);
           break;
         case "status":
@@ -72,6 +79,7 @@ export function GateProvider({ children }: { children: ReactNode }) {
     status,
     connected,
     denied,
+    savedPulse,
     errors,
     dismissError: (i) => setErrors((e) => e.filter((_, j) => j !== i)),
     beatAt,

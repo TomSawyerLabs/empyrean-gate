@@ -214,6 +214,27 @@ watching → the watcher's relink hits "Access is denied" and `tauri dev` DIES
     the workflow; added `cache-on-failure: true` so red runs still prime it.
   - Repo made public on user request (also: free Actions minutes).
 
+## Round 6 (2026-08-19, live-testing feedback)
+
+- [x] **Alt-tab fps drop diagnosed + fixed**: Windows coarsens sleep granularity to
+      ~15.6 ms when the app loses foreground → engine pacing overshot. Fixed with
+      `timeBeginPeriod(1)` (winmm) in the engine thread. Affects real output, not
+      just UI.
+- [x] **Unsteady sACN rate fixed**: pacer was `last = now` (drifts + aliases against
+      the render tick); now accumulator-scheduled (`next += interval`), and
+      sync-to-render sends every rendered frame outright when the cap doesn't bind.
+- [x] **pkts/s display steadied**: per-second buckets instead of fractional-window
+      division; status reports the last full second.
+- [x] **fps + pkt/s history bars** (last 30 s, per-second buckets) in View HUD and
+      Control (Sparkbars component; single-series, direct-labeled, text-ink values).
+- [x] **UI fixes**: sACN enable row reads as an action ("Enable sACN output") with a
+      separate status pill; interface picker text cleaned up; "no save button —
+      changes are live" hint + "✓ saved" flash in the top bar on every confirmed
+      config change.
+- [x] **Gray-code layer walk**: autopilot can now walk WHICH layers play — exactly
+      one layer fades in/out per step (4 s envelope), never fewer than
+      `walk_min_layers` on (default 2). Off by default; toggle in Control → Autopilot.
+
 ## Next session pickup
 
 - Run `bun tauri dev` and eyeball the actual patterns; tune defaults.

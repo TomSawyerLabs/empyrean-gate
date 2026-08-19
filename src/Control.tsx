@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { EFFECTS } from "./effects";
+import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
 import { LAYER_LABELS } from "./types";
 
@@ -81,7 +82,24 @@ export default function Control() {
           <span className="slider-val">{speed.toFixed(2)}</span>
         </label>
         {status?.sacn_enabled && (
-          <p className="warn">sACN output is LIVE — {status.sacn_pps} pkt/s</p>
+          <p className="warn">
+            sACN output is LIVE{" "}
+            <Sparkbars
+              data={status.pps_history}
+              color="#7c5cff"
+              label="pkt/s"
+              value={String(status.sacn_pps)}
+              warn={status.sacn_pps === 0}
+            />
+          </p>
+        )}
+        {status && (
+          <Sparkbars
+            data={status.fps_history}
+            color="#38d1c2"
+            label="fps"
+            value={String(status.fps_history.at(-1) ?? 0)}
+          />
         )}
       </section>
 
@@ -111,6 +129,28 @@ export default function Control() {
             onChange={(e) => setRender({ walk_speed: Number(e.target.value) })}
           />
         </label>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={config?.render.walk_layers ?? false}
+            onChange={(e) => setRender({ walk_layers: e.target.checked })}
+          />
+          Walk which layers play (one fades in or out per step)
+        </label>
+        {config?.render.walk_layers && (
+          <label className="field-row" style={{ maxWidth: 280 }}>
+            <span>Minimum layers on</span>
+            <input
+              type="number"
+              min={1}
+              max={24}
+              value={config.render.walk_min_layers}
+              onChange={(e) =>
+                setRender({ walk_min_layers: Math.max(1, Number(e.target.value) || 1) })
+              }
+            />
+          </label>
+        )}
       </section>
 
       <section className="panel">

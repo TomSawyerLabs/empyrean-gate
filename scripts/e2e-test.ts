@@ -2,7 +2,7 @@
 // Verifies: HTTP serves the UI, WS speaks the protocol, preview frames stream,
 // effects trigger, and status updates arrive. Run: bun scripts/e2e-test.ts
 
-const BASE = "http://127.0.0.1:9520";
+const BASE = process.env.E2E_BASE ?? "http://127.0.0.1:9520";
 
 function fail(msg: string): never {
   console.error(`E2E FAIL: ${msg}`);
@@ -48,7 +48,12 @@ const done = new Promise<void>((resolve, reject) => {
         if (msg.config.geometry.spokes !== 64) reject(new Error("unexpected geometry"));
         if (msg.status.gpu_error) reject(new Error(`gpu_error: ${msg.status.gpu_error}`));
       }
-      if (msg.type === "status") gotStatus = true;
+      if (msg.type === "status") {
+        gotStatus = true;
+        if (!Array.isArray(msg.status.fps_history) || !Array.isArray(msg.status.pps_history)) {
+          reject(new Error("status missing fps/pps history"));
+        }
+      }
     } else {
       frames++;
       previewBytes = (ev.data as ArrayBuffer).byteLength ?? (ev.data as Blob).size;

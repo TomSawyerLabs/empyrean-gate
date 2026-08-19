@@ -501,7 +501,26 @@ pub fn spawn(state: Arc<SharedState>) -> std::thread::JoinHandle<()> {
         .expect("spawn engine thread")
 }
 
+/// Windows coarsens the sleep granularity to ~15.6 ms whenever no foreground app
+/// requests better — alt-tabbing away from our window visibly dropped the real
+/// frame rate. Pin the system timer to 1 ms for the life of the process so the
+/// frame loop paces identically focused, background, and headless.
+#[cfg(windows)]
+fn raise_timer_resolution() {
+    #[link(name = "winmm")]
+    unsafe extern "system" {
+        fn timeBeginPeriod(period: u32) -> u32;
+    }
+    unsafe {
+        timeBeginPeriod(1);
+    }
+}
+
+#[cfg(not(windows))]
+fn raise_timer_resolution() {}
+
 fn engine_thread(state: Arc<SharedState>) {
+    raise_timer_resolution();
     while !state.shutdown.load(Ordering::Relaxed) {
         let npix = state.config.read().geometry.pixel_count() as u32;
         // catch_unwind: wgpu panics (rather than erroring) on some init failures,
@@ -568,12 +587,29 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut layer_walks: Vec<LayerWalk> = Vec::new();
     let mut walk_rng = WalkRng::new();
     let mut last_frame = Instant::now();
-    let mut last_sacn = Instant::now();
+    // Accumulator schedule: `next_sacn += interval` (not `= now`) so the sACN rate
+    // never beats against the render tick — that aliasing showed up in sACNView as
+    // an unsteady frame rate.
+    let mut next_sacn = Instant::now();
     let mut last_status = Instant::now();
     let mut fps_ema = 0.0f32;
     let mut frame_ms_ema = 0.0f32;
     let mut frame_number: u64 = 0;
-    let mut sacn_packets: usize = 0;
+
+    // Per-second buckets for the UI history bars (frames rendered / packets sent).
+    let mut sec_start = Instant::now();
+    let mut frames_this_sec: u32 = 0;
+    let mut pkts_this_sec: u32 = 0;
+    let mut fps_hist: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
+    let mut pps_hist: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
+    const HIST_LEN: usize = 30;
+
+    // Gray-code layer walk: at most one layer's on/off state changes per step, and
+    // never fewer than `walk_min_layers` stay on. Fades via an opacity envelope so
+    // entrances/exits are gentle.
+    let mut layer_target: Vec<bool> = Vec::new();
+    let mut layer_env: Vec<f32> = Vec::new();
+    let mut next_flip = Instant::now();
 
     #[cfg(feature = "shader-hot-reload")]
     let shader_dirty = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -611,6 +647,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         }
         layer_phases.resize(cfg.layers.len(), 0.0);
         layer_walks.resize(cfg.layers.len(), LayerWalk::default());
+        layer_target.resize(cfg.layers.len(), true);
+        layer_env.resize(cfg.layers.len(), 1.0);
 
         // Pace the loop.
         let target_dt = Duration::from_secs_f32(1.0 / cfg.render.fps.clamp(1.0, 240.0));
@@ -648,17 +686,59 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // Autopilot: evolve walk offsets (~minutes time scale) and render the
         // walked parameter values; the config itself is never modified.
         let walk_tau = 45.0 / cfg.render.walk_speed.clamp(0.05, 20.0);
+
+        // Gray-code walk across which layers play: flip exactly one layer per step
+        // among the user-enabled pool, keeping at least `walk_min_layers` on.
+        let walk_layers_on = cfg.render.walk_enabled && cfg.render.walk_layers;
+        if walk_layers_on && now >= next_flip {
+            next_flip = now + Duration::from_secs_f32(walk_tau);
+            let eligible: Vec<usize> = cfg
+                .layers
+                .iter()
+                .enumerate()
+                .take(MAX_LAYERS)
+                .filter(|(_, l)| l.enabled)
+                .map(|(i, _)| i)
+                .collect();
+            let min_on = (cfg.render.walk_min_layers as usize).min(eligible.len());
+            let on_count = eligible.iter().filter(|i| layer_target[**i]).count();
+            if !eligible.is_empty() {
+                for _ in 0..8 {
+                    let pick = eligible[(walk_rng.next_u64() % eligible.len() as u64) as usize];
+                    if layer_target[pick] {
+                        if on_count > min_on {
+                            layer_target[pick] = false;
+                            break;
+                        }
+                    } else {
+                        layer_target[pick] = true;
+                        break;
+                    }
+                }
+            }
+        }
+
         let mut layers = Vec::with_capacity(cfg.layers.len().min(MAX_LAYERS));
         for (i, l) in cfg.layers.iter().take(MAX_LAYERS).enumerate() {
+            // Envelope eases layers in/out of the mix over a few seconds.
+            let target = if walk_layers_on { layer_target[i] } else { true };
+            let goal = if target { 1.0 } else { 0.0 };
+            layer_env[i] += (goal - layer_env[i]) * (dt / 4.0).min(1.0);
             if !l.enabled {
                 continue;
             }
-            let l = if cfg.render.walk_enabled && l.walk_amount > 0.0 {
+            if layer_env[i] < 0.005 {
+                // Fully faded out by the walk — keep its phase moving, skip the GPU.
+                layer_phases[i] += (l.speed * cfg.render.master_speed * dt) as f64;
+                continue;
+            }
+            let mut l = if cfg.render.walk_enabled && l.walk_amount > 0.0 {
                 walk_step(&mut layer_walks[i], &mut walk_rng, dt, walk_tau);
                 walked_layer(l, &layer_walks[i])
             } else {
                 l.clone()
             };
+            l.opacity *= layer_env[i];
             layer_phases[i] += (l.speed * cfg.render.master_speed * dt) as f64;
             layers.push(l.to_gpu(layer_phases[i] as f32));
         }
@@ -751,6 +831,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
 
         if let Some(rgb) = rgb {
             frame_number += 1;
+            frames_this_sec += 1;
 
             state.frames_rendered.fetch_add(1, Ordering::Relaxed);
 
@@ -767,17 +848,20 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             if cfg.output.enabled && sacn_allowed {
                 if let Some(s) = sacn.as_mut() {
                     let cap = cfg.output.fps.clamp(1.0, 120.0);
-                    // sync_to_render: every rendered frame up to the cap. The 0.9
-                    // tolerance stops beat-frequency frame drops when render fps
-                    // sits right at the cap.
-                    let interval = if cfg.output.sync_to_render {
-                        Duration::from_secs_f32(0.9 / cap)
+                    let send = if cfg.output.sync_to_render && cap >= cfg.render.fps {
+                        // Cap doesn't bind: one sACN frame per rendered frame, always.
+                        true
+                    } else if now >= next_sacn {
+                        // Accumulator schedule: steady cap rate, no aliasing against
+                        // the render tick.
+                        let interval = Duration::from_secs_f32(1.0 / cap);
+                        next_sacn = (next_sacn + interval).max(now - interval);
+                        true
                     } else {
-                        Duration::from_secs_f32(1.0 / cap)
+                        false
                     };
-                    if last_sacn.elapsed() >= interval {
-                        last_sacn = now;
-                        sacn_packets += s.send_frame(rgb);
+                    if send {
+                        pkts_this_sec += s.send_frame(rgb) as u32;
                     }
                 }
             }
@@ -793,18 +877,35 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             }
         }
 
+        // Close out per-second history buckets.
+        if sec_start.elapsed() >= Duration::from_secs(1) {
+            sec_start += Duration::from_secs(1);
+            fps_hist.push_back(frames_this_sec);
+            pps_hist.push_back(pkts_this_sec);
+            frames_this_sec = 0;
+            pkts_this_sec = 0;
+            while fps_hist.len() > HIST_LEN {
+                fps_hist.pop_front();
+            }
+            while pps_hist.len() > HIST_LEN {
+                pps_hist.pop_front();
+            }
+        }
+
         // Status at ~2 Hz.
         fps_ema = fps_ema * 0.9 + (1.0 / dt.max(1e-6)) * 0.1;
         frame_ms_ema = frame_ms_ema * 0.9 + frame_ms * 0.1;
         if last_status.elapsed() > Duration::from_millis(500) {
-            let window = last_status.elapsed().as_secs_f32();
             last_status = Instant::now();
             let status = {
                 let mut st = state.status.lock();
                 st.engine_fps = fps_ema;
                 st.frame_time_ms = frame_ms_ema;
                 st.sacn_enabled = cfg.output.enabled;
-                st.sacn_pps = (sacn_packets as f32 / window.max(0.001)) as u32;
+                // Last full-second bucket: steady, unlike a fractional-window ratio.
+                st.sacn_pps = pps_hist.back().copied().unwrap_or(0);
+                st.fps_history = fps_hist.iter().copied().collect();
+                st.pps_history = pps_hist.iter().copied().collect();
                 st.master_brightness = cfg.render.master_brightness;
                 st.master_speed = cfg.render.master_speed;
                 st.client_list = {
@@ -839,7 +940,6 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     .collect();
                 st.clone()
             };
-            sacn_packets = 0;
             let _ = state.events.send(ServerMsg::Status { status });
         }
 
