@@ -10,6 +10,19 @@ fallback renderers, just clear errors), read back, and scattered into prebuilt s
 packets with zero steady-state allocations. Audio from the DJ (multiple parallel
 sources) drives the patterns via beat tracking and band energies.
 
+## Screenshots
+
+![Live tab — the array with pens and effect pads beside it](docs/live-wide.png)
+
+| Squarish window — corner controls | Phone / portrait | Control | Settings |
+|---|---|---|---|
+| ![Live tab in a square window with controls in the corners](docs/live-square.png) | ![Live tab in portrait](docs/live-tall.png) | ![Control tab](docs/control.png) | ![Settings tab](docs/settings.png) |
+
+The Live surface adapts to the window: the array view stays as large as possible and
+the controls flow into whatever space is left — side columns, top/bottom bars, or the
+corners the circle never reaches. The empty ring center carries the title, beat, and
+live meters.
+
 ## Architecture
 
 - **Backend is the app.** Frame generation runs on a dedicated thread:

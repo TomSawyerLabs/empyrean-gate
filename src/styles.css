@@ -375,6 +375,53 @@ button.ghost {
   opacity: 1;
 }
 
+.disconnected-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(6, 4, 14, 0.88);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.disconnected-box {
+  max-width: 440px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.disconnected-box h1 {
+  margin: 0;
+  font-size: 22px;
+  color: var(--danger);
+}
+
+.disconnected-box p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.disconnected-spinner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid #2a2445;
+  border-top-color: var(--accent2);
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .denied-screen {
   align-items: center;
   justify-content: center;

@@ -155,7 +155,9 @@ export default function GateCanvas({
       const n = Math.min(g.count, frame.spokes * frame.pixels);
       gl.bindBuffer(gl.ARRAY_BUFFER, g.colorBuf);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, frame.rgb.subarray(0, n * 3));
-      gl.uniform1f(g.pointSizeLoc, Math.max(1.5, (canvas.width / frame.pixels) * 0.28));
+      // Points must overlap along a spoke (spacing ≈ 0.45·radius/pixels) or the
+      // array reads as dim dotted lines instead of continuous light.
+      gl.uniform1f(g.pointSizeLoc, Math.max(2.5, (canvas.width / frame.pixels) * 1.1));
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.POINTS, 0, n);
     });

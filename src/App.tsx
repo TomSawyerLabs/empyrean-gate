@@ -33,6 +33,52 @@ async function openNewWindow(tab: TabId) {
   });
 }
 
+/// Fullscreen overlay while the backend is unreachable. Appears after a short
+/// grace period (so sub-second blips never flash it) and dismisses itself the
+/// moment the connection returns.
+function DisconnectedOverlay() {
+  const { connected } = useGate();
+  const [visible, setVisible] = useState(false);
+  const [since, setSince] = useState<number | null>(null);
+  const [, forceTick] = useState(0);
+
+  useEffect(() => {
+    if (connected) {
+      setVisible(false);
+      setSince(null);
+      return;
+    }
+    const started = Date.now();
+    setSince(started);
+    const grace = setTimeout(() => setVisible(true), 2000);
+    const tick = setInterval(() => forceTick((n) => n + 1), 1000);
+    return () => {
+      clearTimeout(grace);
+      clearInterval(tick);
+    };
+  }, [connected]);
+
+  if (!visible || connected) return null;
+  const secs = since ? Math.floor((Date.now() - since) / 1000) : 0;
+  return (
+    <div className="disconnected-overlay">
+      <div className="disconnected-box">
+        <div className="disconnected-spinner" />
+        <h1>Backend unreachable</h1>
+        <p>
+          Lost the connection to the Empyrean Gate backend
+          {secs >= 5 ? ` ${secs} seconds ago` : ""}. Reconnecting automatically — this
+          message will disappear as soon as it&apos;s back.
+        </p>
+        <p className="hint">
+          If it doesn&apos;t come back: is the Gate app (or headless backend) running? Are
+          you on the same network?
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ConnectModal({ onClose }: { onClose: () => void }) {
   const { client, config, status } = useGate();
   const interfaces = status?.interfaces ?? [];
@@ -172,6 +218,7 @@ export default function App() {
       </main>
 
       {showConnect && <ConnectModal onClose={() => setShowConnect(false)} />}
+      <DisconnectedOverlay />
     </div>
   );
 }
