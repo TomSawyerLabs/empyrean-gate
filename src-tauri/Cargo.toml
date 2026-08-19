@@ -43,6 +43,12 @@ tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "t
 ureq = { version = "3.4.0", default-features = false, features = ["json"] }
 wgpu = { version = "29", default-features = false, features = ["wgsl", "vulkan"] }
 
+# macOS has no native Vulkan; wgpu's plain `vulkan` feature is not implemented there
+# and Instance::new panics. `vulkan-portability` routes Vulkan through MoltenVK —
+# still Vulkan-only by design, no Metal fallback.
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { version = "29", default-features = false, features = ["wgsl", "vulkan-portability"] }
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

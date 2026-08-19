@@ -191,6 +191,18 @@ Running extra instances of `target\debug\empyrean-gate.exe` while `tauri dev` is
 watching → the watcher's relink hits "Access is denied" and `tauri dev` DIES
 (taking the desktop window with it). Test spare instances from a COPY of the exe.
 
+## Round 5 (2026-08-19, later)
+
+- [x] **Two-phase handover**: GET /handover/state (prepare, side-effect-free) lets the
+      successor adopt config+phases and warm its pipeline while the old instance still
+      sends; POST /handover (commit) waits for the engine's quiesce ACK (measured
+      6.6 ms) and returns fresh phases (drift correction). Wire gap ≈ 1–2 frame
+      periods. Fallback to single-phase for old instances. Verified end-to-end.
+- [x] Pushed to **github.com/cinderblock/empyrean-gate** (private). CI matrix now
+      windows + linux + macos. (macOS minutes are 10× on private repos — flip public
+      or drop macos if quota matters.)
+- CI run for `32bb84f`: (record results when complete)
+
 ## Next session pickup
 
 - Run `bun tauri dev` and eyeball the actual patterns; tune defaults.

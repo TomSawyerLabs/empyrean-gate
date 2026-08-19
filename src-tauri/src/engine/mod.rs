@@ -504,7 +504,18 @@ pub fn spawn(state: Arc<SharedState>) -> std::thread::JoinHandle<()> {
 fn engine_thread(state: Arc<SharedState>) {
     while !state.shutdown.load(Ordering::Relaxed) {
         let npix = state.config.read().geometry.pixel_count() as u32;
-        match Engine::new(npix) {
+        // catch_unwind: wgpu panics (rather than erroring) on some init failures,
+        // e.g. no backend implemented for the platform. A panic here must surface
+        // as a clear error to the UI, not silently kill the engine thread.
+        let engine = std::panic::catch_unwind(|| Engine::new(npix)).unwrap_or_else(|p| {
+            let msg = p
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "unknown panic".into());
+            Err(anyhow::anyhow!("GPU init panicked: {msg}"))
+        });
+        match engine {
             Ok(mut engine) => {
                 state.status.lock().gpu_error = None;
                 state.status.lock().gpu_name = engine.gpu_name.clone();

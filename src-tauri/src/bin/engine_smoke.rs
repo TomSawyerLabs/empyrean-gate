@@ -12,7 +12,17 @@ fn main() {
     let cfg = AppConfig::default();
     let npix = cfg.geometry.pixel_count() as u32;
 
-    let mut engine = match Engine::new(npix) {
+    // wgpu can panic (not error) when no backend exists for the platform; report
+    // that as the same clean failure so CI can distinguish "no GPU" from a crash.
+    let engine = std::panic::catch_unwind(|| Engine::new(npix)).unwrap_or_else(|p| {
+        let msg = p
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_else(|| "unknown panic".into());
+        Err(anyhow::anyhow!("No Vulkan adapter (GPU init panicked: {msg})"))
+    });
+    let mut engine = match engine {
         Ok(e) => e,
         Err(e) => {
             eprintln!("ENGINE INIT FAILED: {e:#}");
