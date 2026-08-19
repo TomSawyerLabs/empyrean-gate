@@ -201,7 +201,18 @@ watching → the watcher's relink hits "Access is denied" and `tauri dev` DIES
 - [x] Pushed to **github.com/cinderblock/empyrean-gate** (private). CI matrix now
       windows + linux + macos. (macOS minutes are 10× on private repos — flip public
       or drop macos if quota matters.)
-- CI run for `32bb84f`: (record results when complete)
+- [x] CI green on ALL targets (run 32281656912, commit `825050f`): linux 8m ✓,
+      macos 9m ✓, windows 14m ✓; standalone binary artifacts 7–8 MB each.
+- Findings:
+  - macOS: wgpu's plain `vulkan` feature is unimplemented there — `Instance::new`
+    PANICS. Fixed with target-specific `vulkan-portability` (MoltenVK) + engine init
+    wrapped in `catch_unwind` (frame loop and engine-smoke) so init panics surface
+    as GPU errors, never dead threads.
+  - Fat LTO (`lto = true`, `codegen-units = 1`) made CI Linux jobs take 45+ min
+    (2-core runner, cache can't help the LTO relink). Switched to thin LTO +
+    `codegen-units = 4` → Linux 8 min WITHOUT cache. rust-cache@v2 was already in
+    the workflow; added `cache-on-failure: true` so red runs still prime it.
+  - Repo made public on user request (also: free Actions minutes).
 
 ## Next session pickup
 
