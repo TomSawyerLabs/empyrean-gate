@@ -267,6 +267,14 @@ watching → the watcher's relink hits "Access is denied" and `tauri dev` DIES
 
 ## Things not to do
 
+- **Unbrokered builds.** Wrap every cargo/vite build in the compute-budget broker:
+  `node ~/.claude/bin/cpu-slots.mjs run --slots 4 --label "empyrean cargo" -- cargo …`
+  (2 slots for vite, 1 per spare app instance). Don't build while `tauri dev` runs —
+  it also relinks the same exe (see the dev-app crash gotcha above).
+- Cross-compiling on sentinel: evaluated 2026-08-19, declined — Tauri Linux→Windows
+  cross builds are fragile; CI artifacts are the remote release builder; sccache (cache
+  on sentinel) is the approved-if-wanted accelerator for cold local builds.
+
 - No non-Vulkan wgpu backends, no CPU fallback renderer — error clearly instead.
 - Don't default sACN output on.
 - Don't add an installer/updater to CI — raw binary artifact only.
