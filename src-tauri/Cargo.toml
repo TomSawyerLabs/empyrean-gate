@@ -59,6 +59,9 @@ shader-hot-reload = ["dep:notify"]
 # Enabled by `tauri build` for release; serves embedded frontend assets.
 custom-protocol = ["tauri/custom-protocol"]
 
+# Thin LTO: near-fat-LTO quality at a fraction of the link time (this app's hot
+# paths are GPU compute + network I/O, so fat LTO buys nothing measurable and
+# serializes a massive relink that CI caches can't help with).
 [profile.release]
-lto = true
-codegen-units = 1
+lto = "thin"
+codegen-units = 4
