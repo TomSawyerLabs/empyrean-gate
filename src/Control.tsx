@@ -7,6 +7,38 @@ import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
 import { LAYER_LABELS } from "./types";
 
+function choose(n: number, k: number): number {
+  if (k < 0 || k > n) return 0;
+  let r = 1;
+  for (let i = 0; i < k; i++) r = (r * (n - i)) / (i + 1);
+  return Math.round(r);
+}
+
+function humanize(seconds: number): string {
+  if (seconds < 90) return `${Math.round(seconds)} s`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)} min`;
+  if (seconds < 172800) return `${(seconds / 3600).toFixed(1)} h`;
+  return `${(seconds / 86400).toFixed(1)} days`;
+}
+
+/** The autopilot's time horizons, computed from the current config. */
+function autopilotForecast(
+  enabledLayers: number,
+  minOn: number,
+  walkSpeed: number,
+  walkLayers: boolean,
+): { stepS: number; combos: number; tourS: number | null } {
+  const stepS = 45 / Math.max(0.05, walkSpeed);
+  if (!walkLayers || enabledLayers === 0) return { stepS, combos: 0, tourS: null };
+  const m = Math.min(minOn, enabledLayers);
+  let combos = 0;
+  for (let k = m; k <= enabledLayers; k++) combos += choose(enabledLayers, k);
+  // Expected cover time of the one-flip random walk over those states:
+  // coupon-collector core S·(ln S + γ) with a ~1.3 walk-vs-sampling factor.
+  const tourSteps = combos <= 1 ? 0 : combos * (Math.log(combos) + 0.577) * 1.3;
+  return { stepS, combos, tourS: tourSteps * stepS };
+}
+
 export default function Control() {
   const { client, config, status } = useGate();
   const setBrightness = useThrottled((v: number) => client.setMaster({ brightness: v }));
@@ -151,6 +183,7 @@ export default function Control() {
             />
           </label>
         )}
+        {config && <AutopilotForecast />}
       </section>
 
       <section className="panel">
@@ -159,6 +192,34 @@ export default function Control() {
           <LayerFader key={i} index={i} name={l.name || LAYER_LABELS[l.kind]} />
         ))}
       </section>
+    </div>
+  );
+}
+
+function AutopilotForecast() {
+  const { config } = useGate();
+  if (!config) return null;
+  const enabled = config.layers.filter((l) => l.enabled).length;
+  const f = autopilotForecast(
+    enabled,
+    config.render.walk_min_layers,
+    config.render.walk_speed,
+    config.render.walk_layers,
+  );
+  return (
+    <div className="forecast">
+      <p className="hint">
+        One walk step every ~{humanize(f.stepS)}.{" "}
+        {f.tourS !== null && f.combos > 1 ? (
+          <>
+            {f.combos} combinations of your {enabled} enabled layers (min{" "}
+            {Math.min(config.render.walk_min_layers, enabled)} on) — expect to tour them all in
+            roughly <strong>{humanize(f.tourS)}</strong>.{" "}
+          </>
+        ) : null}
+        The parameter walk itself never repeats — it drifts continuously with a ~
+        {humanize(f.stepS)} memory, so the show is different every night.
+      </p>
     </div>
   );
 }
