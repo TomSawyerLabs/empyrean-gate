@@ -41,19 +41,45 @@ pub fn start_backend() -> Backend {
     engine::spawn(state.clone());
 
     if takeover {
-        // Warm up before asking the old instance to stop, to minimize the gap.
+        // Two-phase takeover. Phase 1 (old instance keeps sending): fetch its
+        // running state and fully prepare — adopt config (sACN plan, buffers) and
+        // phases, then let a few frames flow through the render+readback pipeline
+        // so we could send *immediately*. Phase 2: commit — the old instance
+        // quiesces (acked), returns fresh phases (drift correction), and exits;
+        // we ungate sACN and the very next engine tick sends. Wire gap ≈ 1-2
+        // frame periods.
         wait_for_engine(&state, std::time::Duration::from_secs(8));
-        match request_handover(port) {
+        let t0 = std::time::Instant::now();
+        let prepared = match fetch_handover_state(port) {
             Ok(grant) => {
-                log::info!("handover granted; adopting running state");
+                log::info!("takeover phase 1: adopted running state; warming pipeline");
                 *state.layer_phases.lock() = grant.layer_phases;
                 state.phases_transplanted.store(true, Ordering::SeqCst);
                 state.update_config(|c| *c = grant.config);
+                wait_frames(&state, 3, std::time::Duration::from_secs(2));
+                true
+            }
+            Err(e) => {
+                log::warn!("old instance has no prepare endpoint ({e}); single-phase takeover");
+                false
+            }
+        };
+        match commit_handover(port) {
+            Ok(grant) => {
+                *state.layer_phases.lock() = grant.layer_phases;
+                state.phases_transplanted.store(true, Ordering::SeqCst);
+                if !prepared {
+                    state.update_config(|c| *c = grant.config);
+                }
+                log::info!(
+                    "takeover committed in {:.0} ms total; resuming sACN",
+                    t0.elapsed().as_secs_f32() * 1000.0
+                );
             }
             Err(e) => {
                 log::warn!(
-                    "takeover failed ({e}); continuing anyway — the server will retry \
-                     binding the port"
+                    "takeover commit failed ({e}); continuing anyway — the server will \
+                     retry binding the port"
                 );
             }
         }
@@ -86,15 +112,35 @@ fn wait_for_engine(state: &SharedState, timeout: std::time::Duration) {
     log::warn!("engine warm-up timed out; proceeding with takeover anyway");
 }
 
-fn request_handover(port: u16) -> anyhow::Result<protocol::HandoverGrant> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+fn handover_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(5)))
         .build()
-        .into();
-    let mut resp = agent
+        .into()
+}
+
+fn fetch_handover_state(port: u16) -> anyhow::Result<protocol::HandoverGrant> {
+    let mut resp = handover_agent()
+        .get(format!("http://127.0.0.1:{port}/handover/state"))
+        .call()?;
+    Ok(resp.body_mut().read_json::<protocol::HandoverGrant>()?)
+}
+
+fn commit_handover(port: u16) -> anyhow::Result<protocol::HandoverGrant> {
+    let mut resp = handover_agent()
         .post(format!("http://127.0.0.1:{port}/handover"))
         .send_empty()?;
     Ok(resp.body_mut().read_json::<protocol::HandoverGrant>()?)
+}
+
+/// Wait until the engine has rendered `n` more frames (pipeline warm with the
+/// adopted config) or the timeout passes.
+fn wait_frames(state: &SharedState, n: u64, timeout: std::time::Duration) {
+    let start = std::time::Instant::now();
+    let base = state.frames_rendered.load(Ordering::Relaxed);
+    while state.frames_rendered.load(Ordering::Relaxed) < base + n && start.elapsed() < timeout {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
 }
 
 /// Local IPv4 interfaces as "name — ip" for the sACN interface picker.

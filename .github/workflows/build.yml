@@ -18,6 +18,9 @@ jobs:
           - os: ubuntu-latest
             artifact: empyrean-gate-linux
             binary: src-tauri/target/release/empyrean-gate
+          - os: macos-latest
+            artifact: empyrean-gate-macos
+            binary: src-tauri/target/release/empyrean-gate
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

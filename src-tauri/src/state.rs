@@ -82,6 +82,12 @@ pub struct SharedState {
     /// Set once this instance has granted a handover: stop sACN immediately and
     /// shut down shortly after.
     pub leaving: AtomicBool,
+    /// Engine ack that it observed `leaving` and skipped a send — after this, no
+    /// more packets will ever leave this instance (the commit reply waits on it).
+    pub sacn_quiesced: AtomicBool,
+    /// Total frames rendered; the takeover waits for its adopted config to have
+    /// flowed through the render+readback pipeline before committing.
+    pub frames_rendered: AtomicU64,
     /// Currently-connected WS clients: connection serial -> client id.
     pub connected_clients: Mutex<HashMap<u64, String>>,
     pub conn_seq: AtomicU64,
@@ -109,6 +115,8 @@ impl SharedState {
             phases_transplanted: AtomicBool::new(false),
             sacn_hold: AtomicBool::new(false),
             leaving: AtomicBool::new(false),
+            sacn_quiesced: AtomicBool::new(false),
+            frames_rendered: AtomicU64::new(0),
             connected_clients: Mutex::new(HashMap::new()),
             conn_seq: AtomicU64::new(1),
             events,

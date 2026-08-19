@@ -66,6 +66,7 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
     let app = Router::new()
         .route("/ws", get(ws_upgrade))
         .route("/qr.svg", get(qr_svg))
+        .route("/handover/state", get(handover_state))
         .route("/handover", post(handover))
         .fallback(get(serve_asset))
         .with_state(ctx);
@@ -160,8 +161,27 @@ async fn qr_svg(Query(q): Query<QrQuery>) -> Response {
     }
 }
 
-/// A newer backend instance is taking over. Stop sACN NOW (before replying, so the
-/// wire never has two sources), hand back the running state, then exit shortly.
+/// Two-phase takeover, phase 1 (side-effect-free): a starting successor fetches the
+/// running state early so it can fully prepare (adopt config, build its sACN plan,
+/// fill its render pipeline) while THIS instance keeps sending.
+async fn handover_state(
+    State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> Response {
+    if !addr.ip().is_loopback() {
+        return (StatusCode::FORBIDDEN, "handover is local-only").into_response();
+    }
+    log::info!("handover state requested — a successor instance is preparing");
+    let grant = HandoverGrant {
+        config: ctx.state.config.read().clone(),
+        layer_phases: ctx.state.layer_phases.lock().clone(),
+    };
+    axum::Json(grant).into_response()
+}
+
+/// Phase 2 (commit): stop sACN NOW — and wait for the engine loop to ACK that it
+/// skipped a send, so the wire provably never has two sources — then hand back
+/// fresh layer phases (drift correction for the successor) and exit shortly.
 async fn handover(
     State(ctx): State<Ctx>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -170,10 +190,19 @@ async fn handover(
         return (StatusCode::FORBIDDEN, "handover is local-only").into_response();
     }
     let state = ctx.state.clone();
-    log::info!("handover requested by a successor instance — stopping sACN output");
+    log::info!("handover commit — stopping sACN output");
+    let t0 = Instant::now();
     state.leaving.store(true, Ordering::SeqCst);
-    // Let the engine loop observe the flag and finish any in-flight send.
-    tokio::time::sleep(Duration::from_millis(60)).await;
+    // Wait for the engine's quiesce ack (~1 frame period; cap in case the engine
+    // thread is down, e.g. GPU error — then it wasn't sending anyway).
+    while !state.sacn_quiesced.load(Ordering::SeqCst) && t0.elapsed() < Duration::from_millis(150)
+    {
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    log::info!(
+        "sACN quiesced in {:.1} ms",
+        t0.elapsed().as_secs_f32() * 1000.0
+    );
 
     let grant = HandoverGrant {
         config: state.config.read().clone(),

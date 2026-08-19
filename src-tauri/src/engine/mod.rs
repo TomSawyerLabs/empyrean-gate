@@ -741,11 +741,18 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         if let Some(rgb) = rgb {
             frame_number += 1;
 
+            state.frames_rendered.fetch_add(1, Ordering::Relaxed);
+
             // sACN first: the wire is the primary output. Held while a takeover
             // is pending (we must not send before the old instance stops) and
             // stopped for good once we've granted a handover to a successor.
-            let sacn_allowed = !state.sacn_hold.load(Ordering::Relaxed)
-                && !state.leaving.load(Ordering::Relaxed);
+            let leaving = state.leaving.load(Ordering::SeqCst);
+            if leaving {
+                // Ack: the commit reply to our successor waits on this — after it,
+                // no more packets ever leave this instance.
+                state.sacn_quiesced.store(true, Ordering::SeqCst);
+            }
+            let sacn_allowed = !state.sacn_hold.load(Ordering::Relaxed) && !leaving;
             if cfg.output.enabled && sacn_allowed {
                 if let Some(s) = sacn.as_mut() {
                     let cap = cfg.output.fps.clamp(1.0, 120.0);
