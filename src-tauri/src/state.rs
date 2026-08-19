@@ -6,7 +6,8 @@ use crate::config::AppConfig;
 use crate::layers::{EffectCfg, MAX_AUDIO_SOURCES};
 use crate::protocol::{RuntimeStatus, ServerMsg};
 use parking_lot::{Mutex, RwLock};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::broadcast;
@@ -69,6 +70,21 @@ pub struct SharedState {
     pub control: Mutex<ControlInputs>,
     pub status: Mutex<RuntimeStatus>,
     pub shutdown: AtomicBool,
+    /// Per-layer animation phases, owned by the engine loop but shared so a
+    /// handover can transplant them into a successor instance.
+    pub layer_phases: Mutex<Vec<f64>>,
+    /// Set after writing transplanted phases into `layer_phases`; the engine loop
+    /// swaps it false and adopts them.
+    pub phases_transplanted: AtomicBool,
+    /// sACN gated off while a takeover from an older instance is in progress
+    /// (this instance must not send before the old one has stopped).
+    pub sacn_hold: AtomicBool,
+    /// Set once this instance has granted a handover: stop sACN immediately and
+    /// shut down shortly after.
+    pub leaving: AtomicBool,
+    /// Currently-connected WS clients: connection serial -> client id.
+    pub connected_clients: Mutex<HashMap<u64, String>>,
+    pub conn_seq: AtomicU64,
     /// JSON events fanned out to every connected client.
     pub events: broadcast::Sender<ServerMsg>,
     /// Full-resolution frames; each client task decimates/throttles for itself.
@@ -89,6 +105,12 @@ impl SharedState {
             control: Mutex::new(ControlInputs::default()),
             status: Mutex::new(RuntimeStatus::default()),
             shutdown: AtomicBool::new(false),
+            layer_phases: Mutex::new(Vec::new()),
+            phases_transplanted: AtomicBool::new(false),
+            sacn_hold: AtomicBool::new(false),
+            leaving: AtomicBool::new(false),
+            connected_clients: Mutex::new(HashMap::new()),
+            conn_seq: AtomicU64::new(1),
             events,
             preview,
             started: Instant::now(),

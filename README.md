@@ -41,6 +41,16 @@ sources) drives the patterns via beat tracking and band energies.
   unattended show evolves for hours without repeating.
 - **Audio loopback**: pick a system *output* device as a source (WASAPI loopback) —
   music played on the show machine drives the beat with no cabling.
+- **Connect QR + client management**: ⊕ Connect in the top bar shows a QR (per
+  interface) that joins a phone/iPad straight to the web UI. Devices get persistent
+  ids and friendly names; Settings → Clients lets you rename, revoke (kicks live,
+  blocks rejoin), and optionally require the join token so only QR-scanned devices
+  can connect (rotate the token to lock everyone new out).
+- **Seamless takeover**: start a new backend while one is running and it warms its
+  GPU first, asks the old instance to stop and hand over its running state (config +
+  layer animation phases), then continues the output — the structure sees a sub-second
+  hold, no blackout, and patterns don't jump. Deploying a new build mid-show is just
+  "start the new binary".
 - **sACN**: pick the egress interface explicitly (multi-homed machines otherwise send
   multicast out the default route — invisible on the lighting NIC), sync sACN to
   render fps or fix a rate, and optionally enable E1.31 universe synchronization

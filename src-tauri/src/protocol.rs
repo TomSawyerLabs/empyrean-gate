@@ -86,6 +86,32 @@ pub enum ClientMsg {
         /// Rectified spectral flux — the onset signal the beat tracker consumes.
         flux: f32,
     },
+    /// Set this device's own friendly name (shown in the Clients panel).
+    SetClientName {
+        name: String,
+    },
+    /// Operator: rename a known client.
+    RenameClient {
+        id: String,
+        name: String,
+    },
+    /// Operator: revoke a client — kicks it live and blocks rejoin by id.
+    RevokeClient {
+        id: String,
+    },
+    UnrevokeClient {
+        id: String,
+    },
+    /// Operator: forget a disconnected client record entirely.
+    ForgetClient {
+        id: String,
+    },
+    /// Operator: replace the join token (invalidates old QR codes when
+    /// `require_token` is on).
+    RotateJoinToken,
+    SetRequireToken {
+        require: bool,
+    },
     /// Phone orientation / motion, mapped onto the global control bus.
     Imu {
         /// Compass-ish heading in radians.
@@ -132,6 +158,28 @@ pub enum ServerMsg {
     Error {
         message: String,
     },
+    /// Access refused (revoked, or join token required). The client stops
+    /// reconnecting and shows the reason.
+    Denied {
+        reason: String,
+    },
+}
+
+/// Everything a freshly-started backend needs to take over from this one with
+/// visual continuity (see `POST /handover`).
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct HandoverGrant {
+    pub config: AppConfig,
+    /// Per-layer animation phases, so patterns continue instead of jumping.
+    pub layer_phases: Vec<f64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ClientInfo {
+    pub id: String,
+    pub name: String,
+    pub connected: bool,
+    pub revoked: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -165,6 +213,8 @@ pub struct RuntimeStatus {
     pub output_devices: Vec<String>,
     /// Local IPv4 interfaces as "name — ip", for the sACN interface picker.
     pub interfaces: Vec<String>,
+    /// Known + connected client devices.
+    pub client_list: Vec<ClientInfo>,
     pub master_brightness: f32,
     pub master_speed: f32,
 }

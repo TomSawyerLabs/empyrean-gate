@@ -551,7 +551,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
 
     let mut epoch = u32::MAX;
     let mut output_cfg_key = String::new();
-    let mut layer_phases: Vec<f64> = Vec::new();
+    // Phases live in SharedState so a handover can transplant them; the engine
+    // loop is their only writer.
+    let mut layer_phases: Vec<f64> = state.layer_phases.lock().clone();
     let mut layer_walks: Vec<LayerWalk> = Vec::new();
     let mut walk_rng = WalkRng::new();
     let mut last_frame = Instant::now();
@@ -592,6 +594,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     state.status.lock().sacn_universes = s.universe_count();
                 }
             }
+        }
+        if state.phases_transplanted.swap(false, Ordering::SeqCst) {
+            layer_phases = state.layer_phases.lock().clone();
         }
         layer_phases.resize(cfg.layers.len(), 0.0);
         layer_walks.resize(cfg.layers.len(), LayerWalk::default());
@@ -646,6 +651,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             layer_phases[i] += (l.speed * cfg.render.master_speed * dt) as f64;
             layers.push(l.to_gpu(layer_phases[i] as f32));
         }
+        *state.layer_phases.lock() = layer_phases.clone();
 
         let effects: Vec<GpuEffect> = {
             let mut fx = state.effects.lock();
@@ -735,8 +741,12 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         if let Some(rgb) = rgb {
             frame_number += 1;
 
-            // sACN first: the wire is the primary output.
-            if cfg.output.enabled {
+            // sACN first: the wire is the primary output. Held while a takeover
+            // is pending (we must not send before the old instance stops) and
+            // stopped for good once we've granted a handover to a successor.
+            let sacn_allowed = !state.sacn_hold.load(Ordering::Relaxed)
+                && !state.leaving.load(Ordering::Relaxed);
+            if cfg.output.enabled && sacn_allowed {
                 if let Some(s) = sacn.as_mut() {
                     let cap = cfg.output.fps.clamp(1.0, 120.0);
                     // sync_to_render: every rendered frame up to the cap. The 0.9
@@ -779,6 +789,18 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 st.sacn_pps = (sacn_packets as f32 / window.max(0.001)) as u32;
                 st.master_brightness = cfg.render.master_brightness;
                 st.master_speed = cfg.render.master_speed;
+                st.client_list = {
+                    let connected = state.connected_clients.lock();
+                    cfg.clients
+                        .iter()
+                        .map(|c| crate::protocol::ClientInfo {
+                            id: c.id.clone(),
+                            name: c.name.clone(),
+                            connected: connected.values().any(|id| *id == c.id),
+                            revoked: c.revoked,
+                        })
+                        .collect()
+                };
                 st.audio = state
                     .audio
                     .iter()

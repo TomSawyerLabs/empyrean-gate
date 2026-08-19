@@ -163,6 +163,34 @@ sACN sender + preview channel.
 - Unicast question answered: multicast + IGMP snooping is correct; static controller
   IPs would NOT improve performance; unicast only for snooping-less switches/WiFi.
 
+## Round 4 (2026-08-19, later)
+
+- [x] Web UI auto-refresh on stale bundle (compare content-hashed entry script vs
+      freshly-fetched /index.html on every WS connect; sessionStorage loop guard).
+- [x] **Connect QR**: `/qr.svg?data=` endpoint (qrcode crate, SVG); ⊕ Connect modal
+      with per-interface join URL `http://<ip>:<port>/?join=<token>`.
+- [x] **Client management**: persistent client ids + names; ClientRecord list in
+      config; Clients panel (rename / revoke / unrevoke / forget); revoke kicks live
+      (checked on the 2 Hz event tick) and blocks rejoin; `require_token` +
+      `rotate_join_token` for real lockout; loopback always allowed; join token
+      captured from `?join=` into localStorage and sent in hello.
+- [x] **Seamless backend takeover**: new instance detects busy port → warms engine
+      (sACN gated by `sacn_hold`) → `POST /handover` (loopback-only) → old instance
+      stops sACN BEFORE replying (no two-source overlap), returns config +
+      layer_phases → new adopts (phases transplanted via flag) → old exits.
+      Verified end-to-end: A exits code 0, B serving in <2 s, sub-second sACN gap.
+- [x] `EMPYREAN_CONFIG` env var overrides config path (tests / isolated instances).
+- [x] Audio stream error log-throttling (underruns come in bursts).
+- [x] Fix: handover exit task originally died with the tokio runtime → zombie
+      process; exit now runs on a plain thread, and the headless main loop watches
+      the shutdown flag.
+
+### Gotcha (cost a dev-app crash)
+
+Running extra instances of `target\debug\empyrean-gate.exe` while `tauri dev` is
+watching → the watcher's relink hits "Access is denied" and `tauri dev` DIES
+(taking the desktop window with it). Test spare instances from a COPY of the exe.
+
 ## Next session pickup
 
 - Run `bun tauri dev` and eyeball the actual patterns; tune defaults.

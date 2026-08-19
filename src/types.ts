@@ -83,6 +83,21 @@ export interface ServerConfig {
   bind: string;
   port: number;
   auth_token: string | null;
+  join_token: string;
+  require_token: boolean;
+}
+
+export interface ClientRecord {
+  id: string;
+  name: string;
+  revoked: boolean;
+}
+
+export interface ClientInfo {
+  id: string;
+  name: string;
+  connected: boolean;
+  revoked: boolean;
 }
 
 export type AudioSourceConfig = {
@@ -112,6 +127,7 @@ export interface AppConfig {
   audio: AudioConfig;
   render: RenderConfig;
   layers: LayerCfg[];
+  clients: ClientRecord[];
 }
 
 export interface AudioSourceStatus {
@@ -138,6 +154,7 @@ export interface RuntimeStatus {
   input_devices: string[];
   output_devices: string[];
   interfaces: string[];
+  client_list: ClientInfo[];
   master_brightness: number;
   master_speed: number;
 }
@@ -154,7 +171,8 @@ export type ServerMsg =
       outer_radius_ft: number;
       inner_radius_ft: number;
     }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "denied"; reason: string };
 
 export interface PreviewMeta {
   spokes: number;

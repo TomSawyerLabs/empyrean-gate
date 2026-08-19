@@ -228,7 +228,16 @@ fn build_device_stream(
                 }
             });
         },
-        move |err| log::error!("audio stream error: {err}"),
+        {
+            // Underruns come in bursts (system sleep, load spikes); log-throttle.
+            let mut errors: u64 = 0;
+            move |err| {
+                errors += 1;
+                if errors.is_power_of_two() {
+                    log::warn!("audio stream error ({errors} total): {err}");
+                }
+            }
+        },
         None,
     )?;
     stream.play()?;

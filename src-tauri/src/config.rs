@@ -95,10 +95,16 @@ impl Default for OutputConfig {
 pub struct ServerConfig {
     pub bind: String,
     pub port: u16,
-    /// When set, clients must present this token in their Hello. None = open access
-    /// (current stage: trusted LAN; the field exists so auth can be added without a
-    /// protocol/config migration).
+    /// Legacy placeholder, superseded by `join_token` + `require_token`.
     pub auth_token: Option<String>,
+    /// Join token embedded in the connect QR URL. Generated on first run; the
+    /// "rotate" action replaces it (locking out devices that only had the old one,
+    /// when `require_token` is on).
+    pub join_token: String,
+    /// When true, unknown clients must present the join token (scan the QR) to
+    /// connect. Loopback clients (the desktop app's own webview) always may.
+    /// Off = open LAN access; revocation is then only a client-id blocklist.
+    pub require_token: bool,
 }
 
 impl Default for ServerConfig {
@@ -107,8 +113,43 @@ impl Default for ServerConfig {
             bind: "0.0.0.0".into(),
             port: 9520,
             auth_token: None,
+            join_token: String::new(),
+            require_token: false,
         }
     }
+}
+
+/// A client device that has connected at least once. Identified by the persistent
+/// id the client keeps in localStorage; named for humans; revocable.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClientRecord {
+    pub id: String,
+    pub name: String,
+    pub revoked: bool,
+}
+
+impl Default for ClientRecord {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            revoked: false,
+        }
+    }
+}
+
+/// Random URL-safe token (join links). Seeded from `RandomState`, which is
+/// randomly keyed per process — fine for LAN join control, not cryptography.
+pub fn generate_token() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut out = String::new();
+    for i in 0..2 {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u64(std::process::id() as u64 ^ (i as u64) << 32);
+        out.push_str(&format!("{:08x}", h.finish() as u32));
+    }
+    out
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,6 +240,8 @@ pub struct AppConfig {
     pub audio: AudioConfig,
     pub render: RenderConfig,
     pub layers: Vec<LayerCfg>,
+    /// Known client devices (see `ClientRecord`).
+    pub clients: Vec<ClientRecord>,
 }
 
 impl Default for AppConfig {
@@ -210,6 +253,7 @@ impl Default for AppConfig {
             audio: AudioConfig::default(),
             render: RenderConfig::default(),
             layers: default_layer_stack(),
+            clients: Vec::new(),
         }
     }
 }
@@ -273,6 +317,10 @@ fn default_layer_stack() -> Vec<LayerCfg> {
 }
 
 pub fn config_path() -> PathBuf {
+    // Override for tests / portable installs / running several isolated instances.
+    if let Ok(p) = std::env::var("EMPYREAN_CONFIG") {
+        return PathBuf::from(p);
+    }
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("EmpyreanGate")
@@ -281,7 +329,7 @@ pub fn config_path() -> PathBuf {
 
 pub fn load() -> AppConfig {
     let path = config_path();
-    match std::fs::read_to_string(&path) {
+    let mut cfg = match std::fs::read_to_string(&path) {
         Ok(text) => match serde_json::from_str(&text) {
             Ok(cfg) => {
                 log::info!("loaded config from {}", path.display());
@@ -296,7 +344,12 @@ pub fn load() -> AppConfig {
             log::info!("no config at {}; using defaults", path.display());
             AppConfig::default()
         }
+    };
+    if cfg.server.join_token.is_empty() {
+        cfg.server.join_token = generate_token();
+        save(&cfg);
     }
+    cfg
 }
 
 pub fn save(cfg: &AppConfig) {

@@ -207,6 +207,75 @@ button.ghost {
   font-size: 12px;
 }
 
+/* ---- Connect modal / clients ---- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 3, 10, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal {
+  background: var(--bg2);
+  border: 1px solid #332a55;
+  border-radius: 12px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  max-width: 420px;
+}
+
+.modal h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.qr {
+  width: 280px;
+  height: 280px;
+  background: #fff;
+  border-radius: 8px;
+}
+
+.join-url {
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+  text-align: center;
+}
+
+.client-row {
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 6px 0;
+}
+
+.conn-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #3a3556;
+  flex-shrink: 0;
+}
+
+.conn-dot.on {
+  background: var(--ok);
+}
+
+.denied-screen {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px;
+}
+
 .preview-hud {
   position: absolute;
   top: 12px;

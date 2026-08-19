@@ -9,21 +9,21 @@ type Listener = (msg: ServerMsg) => void;
 type FrameListener = (frame: PreviewFrame) => void;
 type StatusListener = (connected: boolean) => void;
 
-async function resolveWsUrl(): Promise<string> {
+async function resolveBase(): Promise<{ http: string; ws: string }> {
   // Inside the Tauri webview, ask the shell which port the backend bound.
   const w = window as unknown as { __TAURI_INTERNALS__?: unknown };
   if (w.__TAURI_INTERNALS__) {
     const { invoke } = await import("@tauri-apps/api/core");
     const info = (await invoke("backend_info")) as { wsPort: number };
-    return `ws://127.0.0.1:${info.wsPort}/ws`;
+    return { http: `http://127.0.0.1:${info.wsPort}`, ws: `ws://127.0.0.1:${info.wsPort}/ws` };
   }
   // Vite dev server: backend runs on its default port on the same host.
   if (location.port === "1420") {
-    return `ws://${location.hostname}:9520/ws`;
+    return { http: `http://${location.hostname}:9520`, ws: `ws://${location.hostname}:9520/ws` };
   }
   // Served by the backend itself.
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${location.host}/ws`;
+  return { http: location.origin, ws: `${proto}://${location.host}/ws` };
 }
 
 /// On (re)connect, detect a UI bundle older than what the backend now serves and
@@ -54,12 +54,30 @@ export class GateClient {
   private listeners = new Set<Listener>();
   private frameListeners = new Set<FrameListener>();
   private statusListeners = new Set<StatusListener>();
+  private deniedListeners = new Set<(reason: string) => void>();
   private closed = false;
   private retryMs = 500;
   clientId: string;
+  /** HTTP origin of the backend (for /qr.svg etc.); set once connect() resolves it. */
+  httpBase = "";
 
   constructor() {
     this.clientId = localStorage.getItem("empyrean-client-id") ?? this.newClientId();
+    // Arriving via a scanned connect QR: stash the join token, clean the URL.
+    const join = new URLSearchParams(location.search).get("join");
+    if (join) {
+      localStorage.setItem("empyrean-join-token", join);
+      history.replaceState(null, "", location.pathname + location.hash);
+    }
+  }
+
+  get deviceName(): string {
+    return localStorage.getItem("empyrean-client-name") ?? "";
+  }
+
+  setDeviceName(name: string) {
+    localStorage.setItem("empyrean-client-name", name);
+    this.send({ type: "set_client_name", name });
   }
 
   private newClientId(): string {
@@ -70,20 +88,31 @@ export class GateClient {
 
   async connect(): Promise<void> {
     if (this.closed) return;
-    const url = await resolveWsUrl();
-    const ws = new WebSocket(url);
+    const base = await resolveBase();
+    this.httpBase = base.http;
+    const ws = new WebSocket(base.ws);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
     ws.onopen = () => {
       this.retryMs = 500;
       void reloadIfStale();
-      this.send({ type: "hello", name: navigator.userAgent, client_id: this.clientId, token: "" });
+      this.send({
+        type: "hello",
+        name: this.deviceName,
+        client_id: this.clientId,
+        token: localStorage.getItem("empyrean-join-token") ?? "",
+      });
       this.statusListeners.forEach((l) => l(true));
     };
     ws.onmessage = (ev) => {
       if (typeof ev.data === "string") {
         const msg = JSON.parse(ev.data) as ServerMsg;
+        if (msg.type === "denied") {
+          // Refused: stop hammering the server with reconnects.
+          this.closed = true;
+          this.deniedListeners.forEach((l) => l(msg.reason));
+        }
         this.listeners.forEach((l) => l(msg));
       } else {
         const frame = parsePreview(ev.data as ArrayBuffer);
@@ -118,6 +147,11 @@ export class GateClient {
   onStatus(l: StatusListener): () => void {
     this.statusListeners.add(l);
     return () => this.statusListeners.delete(l);
+  }
+
+  onDenied(l: (reason: string) => void): () => void {
+    this.deniedListeners.add(l);
+    return () => this.deniedListeners.delete(l);
   }
 
   send(msg: Record<string, unknown>) {

@@ -25,8 +25,69 @@ export default function Settings() {
       <AudioPanel config={config} />
       <OutputPanel config={config} />
       <GeometryPanel config={config} />
+      <ClientsPanel />
       <ThisDevicePanel />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+function ClientsPanel() {
+  const { client, config, status } = useGate();
+  const list = status?.client_list ?? [];
+  return (
+    <section className="panel">
+      <h2>Clients</h2>
+      <p className="hint">
+        Devices that have connected. Revoking kicks a device immediately and blocks its id.
+        With open join (below unchecked) a determined device could rejoin with a fresh
+        identity — require the join token and rotate it for a real lockout.
+      </p>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={config?.server.require_token ?? false}
+          onChange={(e) => client.send({ type: "set_require_token", require: e.target.checked })}
+        />
+        Require join token (new devices must scan the Connect QR)
+        <button onClick={() => client.send({ type: "rotate_join_token" })}>Rotate token</button>
+      </label>
+      {list.length === 0 && <p className="hint">No devices yet — use ⊕ Connect in the top bar.</p>}
+      {list.map((c) => (
+        <div className="layer-head client-row" key={c.id}>
+          <span className={c.connected ? "conn-dot on" : "conn-dot"} />
+          <input
+            defaultValue={c.name}
+            onBlur={(e) => {
+              if (e.target.value !== c.name) {
+                client.send({ type: "rename_client", id: c.id, name: e.target.value });
+              }
+            }}
+            style={{ width: "12em" }}
+          />
+          <span className="hint">{c.id === client.clientId ? "this device" : c.id}</span>
+          <span className="spacer" />
+          {c.revoked ? (
+            <button onClick={() => client.send({ type: "unrevoke_client", id: c.id })}>
+              Restore
+            </button>
+          ) : (
+            <button
+              className="danger"
+              onClick={() => client.send({ type: "revoke_client", id: c.id })}
+            >
+              Revoke
+            </button>
+          )}
+          {!c.connected && (
+            <button className="danger" onClick={() => client.send({ type: "forget_client", id: c.id })}>
+              Forget
+            </button>
+          )}
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -545,6 +606,15 @@ function ThisDevicePanel() {
         Contribute this device's inputs to the show. Client id: <code>{client.clientId}</code> — add
         a Remote audio source with this id to use the mic as a beat source.
       </p>
+      <label className="field-row" style={{ maxWidth: 380 }}>
+        <span>Device name</span>
+        <input
+          defaultValue={client.deviceName}
+          placeholder="e.g. DJ booth iPad"
+          onBlur={(e) => client.setDeviceName(e.target.value)}
+          style={{ flex: 1 }}
+        />
+      </label>
       <div className="add-row">
         <button
           onClick={async () => {

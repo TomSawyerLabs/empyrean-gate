@@ -1,20 +1,33 @@
 //! HTTP + WebSocket server: serves the built web UI (embedded in the binary) and the
 //! control protocol used by every client — the Tauri webview, LAN browsers, phones.
 //!
-//! The frame loop never blocks on this server: frames arrive over a broadcast channel
-//! and slow clients simply lag (dropped preview frames), never back-pressuring the
-//! engine.
+//! Also hosts:
+//! - `/qr.svg?data=...` — QR rendering for the connect dialog.
+//! - `POST /handover` (loopback only) — lets a freshly-started backend take over:
+//!   this instance stops its sACN output, hands back config + layer phases, and
+//!   exits shortly after, so the successor can continue with visual continuity.
+//!
+//! Access control: clients identify with a persistent id. Revoked ids are refused
+//! and kicked live. With `server.require_token` on, unknown ids must present the
+//! join token (from the QR); loopback clients are always allowed.
+//!
+//! The frame loop never blocks on this server: frames arrive over a broadcast
+//! channel and slow clients simply lag (dropped preview frames), never
+//! back-pressuring the engine.
 
 use crate::audio::RemoteChains;
-use crate::protocol::{ClientMsg, ServerMsg, PREVIEW_MAGIC};
+use crate::config::ClientRecord;
+use crate::protocol::{ClientMsg, HandoverGrant, ServerMsg, PREVIEW_MAGIC};
 use crate::state::{PreviewFrame, SharedState};
+use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
+use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -52,20 +65,36 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
     let ctx = Ctx { state: state.clone(), remote };
     let app = Router::new()
         .route("/ws", get(ws_upgrade))
+        .route("/qr.svg", get(qr_svg))
+        .route("/handover", post(handover))
         .fallback(get(serve_asset))
         .with_state(ctx);
 
     let addr = format!("{bind}:{port}");
-    let listener = match tokio::net::TcpListener::bind(&addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            log::error!("cannot bind web server on {addr}: {e}");
-            return;
+    // Retry: after a takeover the previous instance needs a moment to exit and
+    // release the port.
+    let mut listener = None;
+    for attempt in 0..40 {
+        match tokio::net::TcpListener::bind(&addr).await {
+            Ok(l) => {
+                listener = Some(l);
+                break;
+            }
+            Err(e) if attempt == 39 => {
+                log::error!("cannot bind web server on {addr}: {e}");
+                return;
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(250)).await,
         }
-    };
+    }
+    let listener = listener.unwrap();
     log::info!("web UI + control server on http://{addr}");
     let shutdown_state = state.clone();
-    let server = axum::serve(listener, app).with_graceful_shutdown(async move {
+    let server = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
         while !shutdown_state.shutdown.load(Ordering::Relaxed) {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
@@ -74,6 +103,10 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         log::error!("web server error: {e}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Static assets, QR, handover
+// ---------------------------------------------------------------------------
 
 async fn serve_asset(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
@@ -103,12 +136,74 @@ fn mime_for(path: &str) -> &'static str {
         "json" | "map" => "application/json",
         "wasm" => "application/wasm",
         "woff2" => "font/woff2",
+        "webmanifest" => "application/manifest+json",
         _ => "application/octet-stream",
     }
 }
 
-async fn ws_upgrade(State(ctx): State<Ctx>, ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(move |socket| client_task(ctx, socket))
+#[derive(serde::Deserialize)]
+struct QrQuery {
+    data: String,
+}
+
+async fn qr_svg(Query(q): Query<QrQuery>) -> Response {
+    match qrcode::QrCode::new(q.data.as_bytes()) {
+        Ok(code) => {
+            let svg = code
+                .render::<qrcode::render::svg::Color>()
+                .min_dimensions(280, 280)
+                .quiet_zone(true)
+                .build();
+            ([(header::CONTENT_TYPE, "image/svg+xml")], svg).into_response()
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, format!("QR error: {e}")).into_response(),
+    }
+}
+
+/// A newer backend instance is taking over. Stop sACN NOW (before replying, so the
+/// wire never has two sources), hand back the running state, then exit shortly.
+async fn handover(
+    State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> Response {
+    if !addr.ip().is_loopback() {
+        return (StatusCode::FORBIDDEN, "handover is local-only").into_response();
+    }
+    let state = ctx.state.clone();
+    log::info!("handover requested by a successor instance — stopping sACN output");
+    state.leaving.store(true, Ordering::SeqCst);
+    // Let the engine loop observe the flag and finish any in-flight send.
+    tokio::time::sleep(Duration::from_millis(60)).await;
+
+    let grant = HandoverGrant {
+        config: state.config.read().clone(),
+        layer_phases: state.layer_phases.lock().clone(),
+    };
+
+    // Exit from a plain thread, not the tokio runtime: setting `shutdown` tears the
+    // runtime down (graceful server exit), which would cancel a tokio task before
+    // it ever reached `process::exit` — leaving a zombie process.
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(400));
+        log::info!("handover complete; this instance is exiting");
+        state.shutdown.store(true, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(300));
+        std::process::exit(0);
+    });
+
+    axum::Json(grant).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket clients
+// ---------------------------------------------------------------------------
+
+async fn ws_upgrade(
+    State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    ws.on_upgrade(move |socket| client_task(ctx, socket, addr))
 }
 
 struct PreviewSub {
@@ -117,12 +212,13 @@ struct PreviewSub {
     last_sent: Instant,
 }
 
-async fn client_task(ctx: Ctx, socket: WebSocket) {
+async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
     let state = ctx.state.clone();
     let mut events_rx = state.events.subscribe();
     let mut preview_rx = state.preview.subscribe();
     let (mut tx, mut rx) = socket.split();
 
+    let conn_id = state.conn_seq.fetch_add(1, Ordering::SeqCst);
     state.status.lock().clients += 1;
     let mut client_id = String::new();
     let mut preview: Option<PreviewSub> = None;
@@ -144,7 +240,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket) {
                         match serde_json::from_str::<ClientMsg>(&text) {
                             Ok(m) => {
                                 let mut reset_meta = false;
-                                if handle_msg(&ctx, m, &mut client_id, &mut preview, &mut reset_meta, &mut tx).await.is_err() {
+                                if handle_msg(&ctx, m, &mut client_id, conn_id, addr, &mut preview, &mut reset_meta, &mut tx).await.is_err() {
                                     break;
                                 }
                                 if reset_meta {
@@ -163,6 +259,13 @@ async fn client_task(ctx: Ctx, socket: WebSocket) {
                 }
             }
             ev = events_rx.recv() => {
+                // Live revocation: kicked within one event tick (status @2 Hz).
+                if !client_id.is_empty() && is_revoked(&state, &client_id) {
+                    let _ = send_json(&mut tx, &ServerMsg::Denied {
+                        reason: "Access revoked by the operator.".into(),
+                    }).await;
+                    break;
+                }
                 match ev {
                     Ok(ev) => { if send_json(&mut tx, &ev).await.is_err() { break; } }
                     Err(RecvError::Lagged(_)) => continue,
@@ -200,7 +303,17 @@ async fn client_task(ctx: Ctx, socket: WebSocket) {
         }
     }
 
+    state.connected_clients.lock().remove(&conn_id);
     state.status.lock().clients -= 1;
+}
+
+fn is_revoked(state: &SharedState, client_id: &str) -> bool {
+    state
+        .config
+        .read()
+        .clients
+        .iter()
+        .any(|c| c.id == client_id && c.revoked)
 }
 
 fn decimated_count(pixels: u32, decimate: u32) -> u32 {
@@ -237,20 +350,119 @@ async fn send_json(tx: &mut WsSink, msg: &ServerMsg) -> Result<(), axum::Error> 
     tx.send(Message::Text(text.into())).await
 }
 
+async fn deny(tx: &mut WsSink, reason: &str) -> Result<(), ()> {
+    let _ = send_json(
+        tx,
+        &ServerMsg::Denied {
+            reason: reason.into(),
+        },
+    )
+    .await;
+    Err(())
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn handle_msg(
     ctx: &Ctx,
     msg: ClientMsg,
     client_id: &mut String,
+    conn_id: u64,
+    addr: SocketAddr,
     preview: &mut Option<PreviewSub>,
     reset_meta: &mut bool,
     tx: &mut WsSink,
 ) -> Result<(), ()> {
     let state = &ctx.state;
     match msg {
-        ClientMsg::Hello { client_id: id, .. } => {
-            // Note: server.auth_token is not enforced yet (trusted LAN stage); the
-            // token field exists in the protocol so it can be without migration.
+        ClientMsg::Hello {
+            name,
+            client_id: id,
+            token,
+        } => {
+            let is_local = addr.ip().is_loopback();
+            let (known, revoked, token_ok) = {
+                let cfg = state.config.read();
+                let rec = cfg.clients.iter().find(|c| c.id == id);
+                (
+                    rec.is_some(),
+                    rec.is_some_and(|r| r.revoked),
+                    token == cfg.server.join_token,
+                )
+            };
+            if revoked {
+                return deny(tx, "Access revoked by the operator.").await;
+            }
+            if state.config.read().server.require_token && !is_local && !known && !token_ok {
+                return deny(
+                    tx,
+                    "This system requires a join token — scan the Connect QR code in the app.",
+                )
+                .await;
+            }
+            if !id.is_empty() {
+                state.connected_clients.lock().insert(conn_id, id.clone());
+                if !known {
+                    let display_name = if name.is_empty() {
+                        format!("device-{}", &id[id.len().saturating_sub(4)..])
+                    } else {
+                        name
+                    };
+                    state.update_config(|c| {
+                        c.clients.push(ClientRecord {
+                            id: id.clone(),
+                            name: display_name,
+                            revoked: false,
+                        });
+                    });
+                }
+            }
             *client_id = id;
+        }
+        ClientMsg::SetClientName { name } => {
+            let id = client_id.clone();
+            if !id.is_empty() && !name.is_empty() {
+                state.update_config(|c| {
+                    if let Some(r) = c.clients.iter_mut().find(|r| r.id == id) {
+                        r.name = name;
+                    }
+                });
+            }
+        }
+        ClientMsg::RenameClient { id, name } => {
+            state.update_config(|c| {
+                if let Some(r) = c.clients.iter_mut().find(|r| r.id == id) {
+                    r.name = name;
+                }
+            });
+        }
+        ClientMsg::RevokeClient { id } => {
+            state.update_config(|c| {
+                if let Some(r) = c.clients.iter_mut().find(|r| r.id == id) {
+                    r.revoked = true;
+                }
+            });
+        }
+        ClientMsg::UnrevokeClient { id } => {
+            state.update_config(|c| {
+                if let Some(r) = c.clients.iter_mut().find(|r| r.id == id) {
+                    r.revoked = false;
+                }
+            });
+        }
+        ClientMsg::ForgetClient { id } => {
+            state.update_config(|c| {
+                c.clients.retain(|r| r.id != id);
+            });
+        }
+        ClientMsg::RotateJoinToken => {
+            state.update_config(|c| {
+                c.server.join_token = crate::config::generate_token();
+            });
+        }
+        ClientMsg::SetRequireToken { require } => {
+            state.update_config(|c| {
+                c.server.require_token = require;
+            });
         }
         ClientMsg::GetState => {
             state.broadcast_state();
@@ -260,7 +472,17 @@ async fn handle_msg(
                 let cur = state.config.read();
                 cur.server.port != config.server.port || cur.server.bind != config.server.bind
             };
-            state.update_config(|c| *c = *config);
+            state.update_config(|c| {
+                // Client management + tokens are edited via their dedicated
+                // messages; don't let a stale full-config write clobber them.
+                let clients = c.clients.clone();
+                let join_token = c.server.join_token.clone();
+                let require_token = c.server.require_token;
+                *c = *config;
+                c.clients = clients;
+                c.server.join_token = join_token;
+                c.server.require_token = require_token;
+            });
             if port_changed {
                 let _ = send_json(
                     tx,

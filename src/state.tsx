@@ -18,6 +18,8 @@ interface Gate {
   config: AppConfig | null;
   status: RuntimeStatus | null;
   connected: boolean;
+  /** Set when the server refused this client (revoked / token required). */
+  denied: string | null;
   errors: string[];
   dismissError: (i: number) => void;
   /** Timestamp (performance.now()) of the last beat per source index. */
@@ -31,6 +33,7 @@ export function GateProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
   const [connected, setConnected] = useState(false);
+  const [denied, setDenied] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const beatAt = useRef<number[]>([0, 0, 0, 0]);
 
@@ -53,10 +56,12 @@ export function GateProvider({ children }: { children: ReactNode }) {
       }
     });
     const offStatus = client.onStatus(setConnected);
+    const offDenied = client.onDenied(setDenied);
     void client.connect();
     return () => {
       offMsg();
       offStatus();
+      offDenied();
       client.close();
     };
   }, [client]);
@@ -66,6 +71,7 @@ export function GateProvider({ children }: { children: ReactNode }) {
     config,
     status,
     connected,
+    denied,
     errors,
     dismissError: (i) => setErrors((e) => e.filter((_, j) => j !== i)),
     beatAt,

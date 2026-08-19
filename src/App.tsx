@@ -33,9 +33,50 @@ async function openNewWindow(tab: TabId) {
   });
 }
 
+function ConnectModal({ onClose }: { onClose: () => void }) {
+  const { client, config, status } = useGate();
+  const interfaces = status?.interfaces ?? [];
+  const [ip, setIp] = useState<string>("");
+  const chosen = ip || interfaces[0]?.split("—").pop()?.trim() || "";
+  const port = config?.server.port ?? 9520;
+  const url = `http://${chosen}:${port}/?join=${config?.server.join_token ?? ""}`;
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>Connect a device</h2>
+        <p className="hint">Scan from a phone/iPad on the same network, then Add to Home Screen.</p>
+        {interfaces.length > 1 && (
+          <select value={chosen} onChange={(e) => setIp(e.target.value)}>
+            {interfaces.map((i) => {
+              const addr = i.split("—").pop()?.trim() ?? i;
+              return (
+                <option key={i} value={addr}>
+                  {i}
+                </option>
+              );
+            })}
+          </select>
+        )}
+        {chosen ? (
+          <img
+            className="qr"
+            src={`${client.httpBase}/qr.svg?data=${encodeURIComponent(url)}`}
+            alt={`QR code for ${url}`}
+          />
+        ) : (
+          <p className="warn">No network interface found.</p>
+        )}
+        <code className="join-url">{url}</code>
+        <button onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
-  const { connected, status, errors, dismissError, client } = useGate();
+  const { connected, status, errors, dismissError, client, denied } = useGate();
   const [tab, setTab] = useState<TabId>(tabFromHash);
+  const [showConnect, setShowConnect] = useState(false);
 
   // Hash <-> tab sync, so PWA shortcuts / popped-out windows can pin a mode.
   useEffect(() => {
@@ -61,6 +102,18 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [client]);
 
+  if (denied) {
+    return (
+      <div className="app denied-screen">
+        <h1>Not connected</h1>
+        <p>{denied}</p>
+        <p className="hint">
+          Ask the operator, then reload this page (or re-scan the Connect QR code).
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -77,6 +130,9 @@ export default function App() {
           ))}
         </nav>
         <span className="spacer" />
+        <button className="ghost" onClick={() => setShowConnect(true)}>
+          ⊕ Connect
+        </button>
         {IN_TAURI && (
           <button className="ghost" onClick={() => void openNewWindow(tab)}>
             ⧉ New window
@@ -105,6 +161,8 @@ export default function App() {
         {tab === "control" && <Control />}
         {tab === "settings" && <Settings />}
       </main>
+
+      {showConnect && <ConnectModal onClose={() => setShowConnect(false)} />}
     </div>
   );
 }
