@@ -122,12 +122,24 @@ export interface RenderConfig {
   walk_speed: number;
 }
 
+export interface BeatTapConfig {
+  enabled: boolean;
+  audio_source: number;
+  spin: number;
+  vary: boolean;
+  radius: number;
+  intensity: number;
+  hue: number;
+  every: number;
+}
+
 export interface AppConfig {
   geometry: GeometryConfig;
   output: OutputConfig;
   server: ServerConfig;
   audio: AudioConfig;
   render: RenderConfig;
+  beat_taps: BeatTapConfig;
   layers: LayerCfg[];
   clients: ClientRecord[];
 }

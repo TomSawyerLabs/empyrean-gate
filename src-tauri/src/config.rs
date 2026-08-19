@@ -238,6 +238,43 @@ impl Default for RenderConfig {
     }
 }
 
+/// Automated "taps": fire a burst on every beat at a point that orbits the ring —
+/// the automated version of tapping the preview in a circle on the beat, which
+/// makes fun spiral effects.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BeatTapConfig {
+    pub enabled: bool,
+    /// Which audio source's beat drives the taps.
+    pub audio_source: u32,
+    /// Orbit speed in turns per beat; negative reverses. 0.0833 = one lap / 12 beats.
+    pub spin: f32,
+    /// Slowly drift the spin speed (autopilot-style), so the spiral keeps changing.
+    pub vary: bool,
+    /// Tap position radius, 0 (center) .. 1 (outer edge).
+    pub radius: f32,
+    pub intensity: f32,
+    /// Hue in turns; negative = white.
+    pub hue: f32,
+    /// Fire on every Nth beat (1 = every beat).
+    pub every: u32,
+}
+
+impl Default for BeatTapConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            audio_source: 0,
+            spin: 0.0833,
+            vary: true,
+            radius: 0.8,
+            intensity: 0.7,
+            hue: -1.0,
+            every: 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -246,6 +283,7 @@ pub struct AppConfig {
     pub server: ServerConfig,
     pub audio: AudioConfig,
     pub render: RenderConfig,
+    pub beat_taps: BeatTapConfig,
     pub layers: Vec<LayerCfg>,
     /// Known client devices (see `ClientRecord`).
     pub clients: Vec<ClientRecord>,
@@ -259,6 +297,7 @@ impl Default for AppConfig {
             server: ServerConfig::default(),
             audio: AudioConfig::default(),
             render: RenderConfig::default(),
+            beat_taps: BeatTapConfig::default(),
             layers: default_layer_stack(),
             clients: Vec::new(),
         }

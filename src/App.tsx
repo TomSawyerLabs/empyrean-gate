@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react";
 import Control from "./Control";
-import Draw from "./Draw";
 import { EFFECTS } from "./effects";
+import Live from "./Live";
 import Settings from "./Settings";
 import { useGate } from "./state";
-import View from "./View";
 
 const TABS = [
-  { id: "view", label: "View" },
-  { id: "draw", label: "Draw" },
+  { id: "live", label: "Live" },
   { id: "control", label: "Control" },
   { id: "settings", label: "Settings" },
 ] as const;
@@ -17,7 +15,9 @@ type TabId = (typeof TABS)[number]["id"];
 
 function tabFromHash(): TabId {
   const h = location.hash.replace("#", "");
-  return (TABS.find((t) => t.id === h)?.id ?? "view") as TabId;
+  // Old bookmarks / PWA shortcuts used #view and #draw; both merged into Live.
+  if (h === "view" || h === "draw") return "live";
+  return (TABS.find((t) => t.id === h)?.id ?? "live") as TabId;
 }
 
 const IN_TAURI = "__TAURI_INTERNALS__" in window;
@@ -166,8 +166,7 @@ export default function App() {
       ))}
 
       <main>
-        {tab === "view" && <View />}
-        {tab === "draw" && <Draw />}
+        {tab === "live" && <Live />}
         {tab === "control" && <Control />}
         {tab === "settings" && <Settings />}
       </main>

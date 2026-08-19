@@ -135,6 +135,8 @@ export default function Control() {
         )}
       </section>
 
+      <BeatTapsPanel />
+
       <section className="panel">
         <h2>Autopilot</h2>
         <p className="hint">
@@ -193,6 +195,100 @@ export default function Control() {
         ))}
       </section>
     </div>
+  );
+}
+
+function BeatTapsPanel() {
+  const { client, config } = useGate();
+  const bt = config?.beat_taps;
+  const commit = useThrottled((patch: Partial<NonNullable<typeof bt>>) => {
+    if (config && bt) client.setConfig({ ...config, beat_taps: { ...bt, ...patch } });
+  });
+  if (!config || !bt) return null;
+  return (
+    <section className="panel">
+      <h2>Beat taps</h2>
+      <p className="hint">
+        Fires a burst on every beat at a point that orbits the ring — like tapping the
+        array in a circle on the beat. Spin sets how far it advances per beat; Drift
+        slowly varies the spin so the spiral keeps changing character.
+      </p>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={bt.enabled}
+          onChange={(e) => commit({ enabled: e.target.checked })}
+        />
+        Enabled
+        <span className="spacer" />
+        <select
+          value={bt.audio_source}
+          onChange={(e) => commit({ audio_source: Number(e.target.value) })}
+        >
+          {config.audio.sources.map((s, i) => (
+            <option key={i} value={i}>
+              beat from: {s.id}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="slider-row">
+        <span>Spin / beat</span>
+        <input
+          type="range"
+          min={-0.25}
+          max={0.25}
+          step={0.005}
+          value={bt.spin}
+          onChange={(e) => commit({ spin: Number(e.target.value) })}
+        />
+        <span className="slider-val">
+          {bt.spin === 0 ? "0" : `${(1 / Math.abs(bt.spin)).toFixed(0)} beats/lap${bt.spin < 0 ? " ↺" : " ↻"}`}
+        </span>
+      </label>
+      <label className="slider-row">
+        <span>Radius</span>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.02}
+          value={bt.radius}
+          onChange={(e) => commit({ radius: Number(e.target.value) })}
+        />
+        <span className="slider-val">{bt.radius.toFixed(2)}</span>
+      </label>
+      <label className="slider-row">
+        <span>Intensity</span>
+        <input
+          type="range"
+          min={0.1}
+          max={1.5}
+          step={0.05}
+          value={bt.intensity}
+          onChange={(e) => commit({ intensity: Number(e.target.value) })}
+        />
+        <span className="slider-val">{bt.intensity.toFixed(2)}</span>
+      </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={bt.vary}
+          onChange={(e) => commit({ vary: e.target.checked })}
+        />
+        Drift the spin speed over time
+      </label>
+      <label className="field-row" style={{ maxWidth: 260 }}>
+        <span>Every Nth beat</span>
+        <input
+          type="number"
+          min={1}
+          max={16}
+          value={bt.every}
+          onChange={(e) => commit({ every: Math.max(1, Number(e.target.value) || 1) })}
+        />
+      </label>
+    </section>
   );
 }
 

@@ -105,7 +105,10 @@ export default function GateCanvas({
   const glRef = useRef<Gl | null>(null);
   const [meta, setMeta] = useState<PreviewMeta | null>(null);
   const pending = useRef<{ angle: number; radius: number }[]>([]);
-  const moved = useRef(false);
+  // Per-pointer stroke state (multitouch: each finger tracked separately).
+  const pointers = useRef(
+    new Map<number, { x: number; y: number; moved: boolean }>(),
+  );
   const penRef = useRef(drawPen);
   penRef.current = drawPen;
 
@@ -187,34 +190,48 @@ export default function GateCanvas({
     };
   };
 
+  // Tap vs. draw, unified: a press that never travels more than a few pixels is a
+  // tap (burst via onTap, even with a pen active — tapping on the beat must keep
+  // working); a drag is a stroke. Tracked per pointer so several fingers can draw
+  // while another taps.
+  const TAP_SLOP_PX = 8;
+
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drawPen) return;
+    if (!drawPen && !onTap) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    moved.current = false;
-    pending.current.push(toPolar(e));
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY, moved: false });
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drawPen || !e.currentTarget.hasPointerCapture(e.pointerId)) return;
-    moved.current = true;
+    const p = pointers.current.get(e.pointerId);
+    if (!p) return;
+    if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) < TAP_SLOP_PX) return;
+    if (!drawPen) return;
+    if (!p.moved) {
+      p.moved = true;
+      pending.current.push(toPolar({ clientX: p.x, clientY: p.y })); // stroke start
+    }
     const native = e.nativeEvent as PointerEvent;
     const events = native.getCoalescedEvents?.() ?? [native];
     for (const ev of events) pending.current.push(toPolar(ev));
   };
 
-  const onClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (drawPen || !onTap) return;
-    const p = toPolar(e);
-    onTap(p.angle, Math.min(1, p.radius));
+  const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const p = pointers.current.get(e.pointerId);
+    pointers.current.delete(e.pointerId);
+    if (!p || p.moved || !onTap) return;
+    const polar = toPolar(e);
+    onTap(polar.angle, Math.min(1, polar.radius));
   };
 
   return (
     <canvas
       ref={canvasRef}
       className="gate-canvas"
-      onClick={onClick}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={(e) => pointers.current.delete(e.pointerId)}
       style={{ touchAction: "none", cursor: drawPen ? "crosshair" : onTap ? "pointer" : "default" }}
     />
   );

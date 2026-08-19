@@ -611,6 +611,12 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut layer_env: Vec<f32> = Vec::new();
     let mut next_flip = Instant::now();
 
+    // Beat taps: orbiting bursts on the beat (see BeatTapConfig).
+    let mut prev_beat_phase = [0.0f32; MAX_AUDIO_SOURCES];
+    let mut tap_angle: f32 = 0.0;
+    let mut tap_beat_count: u64 = 0;
+    let mut tap_spin_walk = LayerWalk::default();
+
     #[cfg(feature = "shader-hot-reload")]
     let shader_dirty = Arc::new(std::sync::atomic::AtomicBool::new(false));
     #[cfg(feature = "shader-hot-reload")]
@@ -682,10 +688,41 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             };
         }
         let control = *state.control.lock();
+        let walk_tau = 45.0 / cfg.render.walk_speed.clamp(0.05, 20.0);
+
+        // Beat taps: on each detected beat (phase wrap) of the chosen source, fire
+        // a burst at a point orbiting the ring — the automated spiral-tap.
+        let bt = &cfg.beat_taps;
+        for (i, a) in audio.iter().enumerate() {
+            let wrapped = a.beat_phase < prev_beat_phase[i] - 0.5;
+            prev_beat_phase[i] = a.beat_phase;
+            if !bt.enabled || i != bt.audio_source as usize || !wrapped || a.bpm <= 0.0 {
+                continue;
+            }
+            tap_beat_count += 1;
+            // Optional slow drift of the spin rate (reuses the OU walk noise), so
+            // the spiral tightens and loosens over minutes.
+            let spin = if bt.vary {
+                walk_step(&mut tap_spin_walk, &mut walk_rng, 60.0 / a.bpm, walk_tau);
+                bt.spin * (tap_spin_walk.offsets[0] * 0.6).exp()
+            } else {
+                bt.spin
+            };
+            tap_angle = (tap_angle + spin * std::f32::consts::TAU).rem_euclid(std::f32::consts::TAU);
+            if tap_beat_count % bt.every.max(1) as u64 == 0 {
+                state.trigger_effect(crate::layers::EffectCfg {
+                    kind: crate::layers::EffectKind::Burst,
+                    angle: tap_angle,
+                    radius: bt.radius.clamp(0.0, 1.0),
+                    intensity: bt.intensity.clamp(0.0, 2.0),
+                    hue: bt.hue,
+                    duration: 0.0,
+                });
+            }
+        }
 
         // Autopilot: evolve walk offsets (~minutes time scale) and render the
         // walked parameter values; the config itself is never modified.
-        let walk_tau = 45.0 / cfg.render.walk_speed.clamp(0.05, 20.0);
 
         // Gray-code walk across which layers play: flip exactly one layer per step
         // among the user-enabled pool, keeping at least `walk_min_layers` on.

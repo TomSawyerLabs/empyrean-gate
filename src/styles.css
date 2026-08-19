@@ -111,53 +111,133 @@ main {
   overflow-y: auto;
 }
 
-/* ---- View / Draw ---- */
+/* ---- Live (merged view + draw, aspect-adaptive) ---- */
 
-.view-page {
-  position: relative;
+.live-page {
   height: 100%;
+  min-height: 0;
+  display: flex;
+  padding: 8px;
+  gap: 8px;
+}
+
+.live-page.tall {
+  flex-direction: column;
+}
+
+.live-page.square {
+  align-items: center;
+  justify-content: center;
+}
+
+.live-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 0;
 }
 
 .gate-canvas {
-  width: min(100%, 100vh - 120px);
+  width: min(100%, 100vh - 60px);
+  max-height: 100%;
   aspect-ratio: 1;
   user-select: none;
   -webkit-user-select: none;
 }
 
-.draw-page {
+.live-side {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  gap: 14px;
+  justify-content: center;
+  width: 150px;
+  flex-shrink: 0;
 }
 
-.draw-page .view-page {
-  flex: 1;
-  min-height: 0;
+.live-page.tall .live-side {
+  flex-direction: row;
+  width: auto;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
 }
 
-.draw-toolbar {
-  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  background: var(--bg2);
-  border-top: 1px solid #2a2445;
+.cluster {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 
-.pen-row {
+.cluster.effects {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.cluster.swatches {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.live-page.tall .cluster.pens {
+  flex-direction: row;
+}
+
+/* Square mode: clusters float in the canvas corners the circle never reaches. */
+.corner {
+  position: absolute;
+  padding: 8px;
+  background: rgba(20, 16, 36, 0.75);
+  border: 1px solid #2a2445;
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+}
+
+.corner.tl { top: 8px; left: 8px; }
+.corner.tr { top: 8px; right: 8px; }
+.corner.bl { bottom: 8px; left: 8px; }
+.corner.br { bottom: 8px; right: 8px; width: 170px; }
+
+/* The empty ring center carries identity + live status. */
+.ring-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  text-align: center;
+}
+
+.ring-title {
+  font-size: 13px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  opacity: 0.85;
+}
+
+.ring-status {
+  display: flex;
+  align-items: center;
   gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .pen-btn {
-  flex: 1;
-  padding: 12px 8px;
-  font-size: 15px;
+  padding: 10px 8px;
+  font-size: 14px;
 }
 
 .pen-btn.active {
@@ -165,15 +245,9 @@ main {
   border-color: var(--accent);
 }
 
-.swatch-row {
-  display: flex;
-  gap: 10px;
-  justify-content: space-between;
-}
-
 .swatch {
-  flex: 1;
-  height: 34px;
+  height: 30px;
+  min-width: 30px;
   border-radius: 8px;
   border: 2px solid transparent;
   padding: 0;
