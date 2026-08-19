@@ -108,7 +108,11 @@ fn audio_thread(state: Arc<SharedState>, remote: RemoteChains) {
 }
 
 fn build_sources(state: &Arc<SharedState>, remote: &RemoteChains, streams: &mut Vec<cpal::Stream>) {
-    state.status.lock().input_devices = list_input_devices();
+    {
+        let mut status = state.status.lock();
+        status.input_devices = list_input_devices();
+        status.output_devices = list_output_devices();
+    }
     let sources = state.config.read().audio.sources.clone();
     let mut new_remote = Vec::new();
 
@@ -125,9 +129,19 @@ fn build_sources(state: &Arc<SharedState>, remote: &RemoteChains, streams: &mut 
                 };
                 new_remote.push((client_id.clone(), Mutex::new(chain)));
             }
-            AudioSourceKind::Device { device, channels } => {
-                match build_device_stream(state.clone(), index, device.as_deref(), channels, src.gain)
-                {
+            AudioSourceKind::Device {
+                device,
+                channels,
+                loopback,
+            } => {
+                match build_device_stream(
+                    state.clone(),
+                    index,
+                    device.as_deref(),
+                    channels,
+                    *loopback,
+                    src.gain,
+                ) {
                     Ok(stream) => streams.push(stream),
                     Err(e) => {
                         log::error!("audio source '{}': {e:#}", src.id);
@@ -147,19 +161,33 @@ fn build_device_stream(
     index: usize,
     device_name: Option<&str>,
     channels: &[u32],
+    loopback: bool,
     gain: f32,
 ) -> anyhow::Result<cpal::Stream> {
     let host = cpal::default_host();
-    let device = match device_name {
-        None => host
+    // Loopback: capture what an OUTPUT device is playing. On WASAPI, building an
+    // input stream on an output device transparently enables loopback mode.
+    let device = match (device_name, loopback) {
+        (None, false) => host
             .default_input_device()
             .ok_or_else(|| anyhow::anyhow!("no default input device"))?,
-        Some(name) => host
+        (None, true) => host
+            .default_output_device()
+            .ok_or_else(|| anyhow::anyhow!("no default output device"))?,
+        (Some(name), false) => host
             .input_devices()?
             .find(|d| d.description().map(|d| d.name() == name).unwrap_or(false))
             .ok_or_else(|| anyhow::anyhow!("input device '{name}' not found"))?,
+        (Some(name), true) => host
+            .output_devices()?
+            .find(|d| d.description().map(|d| d.name() == name).unwrap_or(false))
+            .ok_or_else(|| anyhow::anyhow!("output device '{name}' not found"))?,
     };
-    let config = device.default_input_config()?;
+    let config = if loopback {
+        device.default_output_config()?
+    } else {
+        device.default_input_config()?
+    };
     let sample_rate = config.sample_rate() as f32;
     let n_channels = config.channels() as usize;
     let selected: Vec<usize> = if channels.is_empty() {
@@ -208,7 +236,8 @@ fn build_device_stream(
         .description()
         .map(|d| d.name().to_string())
         .unwrap_or_default();
-    log::info!("audio source {index}: capturing '{name}' @ {sample_rate} Hz, {n_channels} ch");
+    let mode = if loopback { "loopback of" } else { "capturing" };
+    log::info!("audio source {index}: {mode} '{name}' @ {sample_rate} Hz, {n_channels} ch");
     Ok(stream)
 }
 
@@ -216,6 +245,17 @@ fn build_device_stream(
 pub fn list_input_devices() -> Vec<String> {
     let host = cpal::default_host();
     match host.input_devices() {
+        Ok(devices) => devices
+            .filter_map(|d| d.description().ok().map(|d| d.name().to_string()))
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// List output devices — selectable as loopback beat sources (play music locally).
+pub fn list_output_devices() -> Vec<String> {
+    let host = cpal::default_host();
+    match host.output_devices() {
         Ok(devices) => devices
             .filter_map(|d| d.description().ok().map(|d| d.name().to_string()))
             .collect(),

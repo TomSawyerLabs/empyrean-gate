@@ -360,6 +360,89 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
             let v = mix(floor_v, 1.0, env) * L.brightness;
             return vec4f(vec3f(v), 1.0);
         }
+        // Rainbow — hue wheel around the circle, drifting; hue_range adds radial sweep
+        case 11u: {
+            let turns = max(1.0, floor(L.param_a * 4.0 + 0.5));
+            let hue = L.hue + (ctx.theta / TAU) * turns + ctx.rn * L.hue_range + L.phase * 0.03;
+            let v = L.brightness * (0.8 + aud * A.level * 0.6);
+            return vec4f(hsv2rgb(hue, L.saturation, max(v, 0.0)), 1.0);
+        }
+        // Wedges — rotating pie slices; onset flashes the dark slices up
+        case 12u: {
+            let n = 2.0 + floor(L.param_a * 14.0);
+            let soft = 0.05 + L.param_c * 0.3;
+            let w = fract((ctx.theta / TAU + L.phase * 0.03) * n + ctx.rn * L.param_b);
+            let d = abs(w - 0.5) * 2.0;
+            var v = smoothstep(0.5 - soft, 0.5 + soft, d);
+            v = max(v, aud * A.onset);
+            let hue = L.hue + step(0.5, w) * L.hue_range;
+            return vec4f(hsv2rgb(hue, L.saturation, v * L.brightness), v);
+        }
+        // Interference — two orbiting wave sources, moiré
+        case 13u: {
+            let orbit = 0.45 + L.param_b * 0.3;
+            let p1 = orbit * vec2f(cos(L.phase * 0.31), sin(L.phase * 0.31));
+            let p2 = -orbit * vec2f(cos(L.phase * 0.23), sin(L.phase * 0.23));
+            let freq = (4.0 + L.param_a * 20.0) * L.scale;
+            var v = sin(distance(ctx.pos, p1) * freq * TAU - L.phase)
+                + sin(distance(ctx.pos, p2) * freq * TAU + L.phase * 0.8);
+            v = v * 0.25 + 0.5;
+            v = pow(v, 1.0 + L.param_c * 4.0);
+            let amp = L.brightness * (0.6 + aud * A.mid * 0.8);
+            let hue = L.hue + v * L.hue_range;
+            return vec4f(hsv2rgb(hue, L.saturation, v * amp), v);
+        }
+        // Fire — noise flames climbing inward from the outer rim
+        case 14u: {
+            let A2 = AUDIO[L.audio_source];
+            // Flame coordinate: 0 at the rim, growing inward; noise scrolls inward.
+            let stretch = 2.0 + L.param_b * 4.0;
+            let p = vec3f(
+                cos(ctx.theta) * 3.0 * L.scale,
+                sin(ctx.theta) * 3.0 * L.scale,
+                0.0
+            ) + vec3f(0.0, 0.0, ctx.r01 * stretch - L.phase);
+            let n = fbm3(p, 4u) * 0.5 + 0.5;
+            let reach = 0.4 + L.param_a * 0.6 + aud * A2.bass * 0.35;
+            var heat = (1.0 - ctx.r01 / max(reach, 0.05)) * 1.3 - n * 0.9;
+            heat = clamp(heat, 0.0, 1.0);
+            let hue = L.hue + heat * 0.12; // default red base -> yellow tips
+            let sat = clamp(1.3 - heat * 0.7, 0.0, 1.0) * L.saturation;
+            let v = pow(heat, 1.4) * L.brightness;
+            return vec4f(hsv2rgb(hue, sat, v), heat);
+        }
+        // Meteors — random radial shooting stars with trails
+        case 15u: {
+            let rate = 0.15 + L.param_b * 1.2;
+            let h0 = hash01(ctx.spoke * 4099u);
+            let t = L.phase * rate + h0 * 7.0;
+            let epoch = u32(t);
+            let t_ep = fract(t);
+            let alive = step(1.0 - (0.1 + L.param_a * 0.5), hash01(ctx.spoke * 31337u + epoch * 269u));
+            let dir_r = select(ctx.r01, 1.0 - ctx.r01, L.param_c > 0.5); // inward / outward
+            let head = t_ep * 1.3;
+            let d = head - dir_r;
+            let tail = 0.08 + L.param_b * 0.15;
+            let v = alive * exp(-d / tail) * step(0.0, d) * step(dir_r, head);
+            let hue = L.hue + hash01(ctx.spoke * 911u + epoch) * L.hue_range;
+            return vec4f(hsv2rgb(hue, L.saturation, v * L.brightness), v);
+        }
+        // Warp — starfield streaming outward with streaks
+        case 16u: {
+            let cells = 6.0 + L.param_a * 20.0;
+            let u = ctx.r01 * cells + hash01(ctx.spoke * 7919u) * 13.0;
+            let spd = (0.5 + L.param_b * 2.0) * (1.0 + aud * A.level);
+            let flow = u + L.phase * spd; // r01 grows inward, so +phase streams outward
+            let cell = u32(flow);
+            let f = fract(flow);
+            let star = step(1.0 - (0.15 + L.param_a * 0.2), hash01(cell * 6151u + ctx.spoke * 389u));
+            let streak = (1.0 - f) * (1.0 - f);
+            // Stars brighten toward the rim (perspective).
+            let persp = 0.35 + (1.0 - ctx.r01) * 0.65;
+            let v = star * streak * persp;
+            let hue = L.hue + hash01(cell * 127u) * L.hue_range;
+            return vec4f(hsv2rgb(hue, L.saturation * 0.6, v * L.brightness), v);
+        }
         default: {
             return vec4f(0.0);
         }

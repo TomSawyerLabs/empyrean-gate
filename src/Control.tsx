@@ -10,6 +10,11 @@ export default function Control() {
   const { client, config, status } = useGate();
   const setBrightness = useThrottled((v: number) => client.setMaster({ brightness: v }));
   const setSpeed = useThrottled((v: number) => client.setMaster({ speed: v }));
+  const setRender = useThrottled((patch: Partial<NonNullable<typeof config>["render"]>) => {
+    if (config) {
+      client.setConfig({ ...config, render: { ...config.render, ...patch } });
+    }
+  });
 
   // Local mirror of master sliders so they track remote changes when idle.
   const [brightness, setBrightnessLocal] = useState(1);
@@ -75,7 +80,37 @@ export default function Control() {
           />
           <span className="slider-val">{speed.toFixed(2)}</span>
         </label>
-        {status?.sacn_enabled && <p className="warn">sACN output is LIVE</p>}
+        {status?.sacn_enabled && (
+          <p className="warn">sACN output is LIVE — {status.sacn_pps} pkt/s</p>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2>Autopilot</h2>
+        <p className="hint">
+          Slow random walk across layer parameters so the show evolves for hours
+          unattended. Each layer's "Walk" slider (Settings) limits how far its
+          parameters may wander from where you set them.
+        </p>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={config?.render.walk_enabled ?? true}
+            onChange={(e) => setRender({ walk_enabled: e.target.checked })}
+          />
+          Enabled
+        </label>
+        <label className="slider-row">
+          <span>Walk speed</span>
+          <input
+            type="range"
+            min={0.1}
+            max={5}
+            step={0.1}
+            defaultValue={config?.render.walk_speed ?? 1}
+            onChange={(e) => setRender({ walk_speed: Number(e.target.value) })}
+          />
+        </label>
       </section>
 
       <section className="panel">

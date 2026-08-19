@@ -176,6 +176,7 @@ function LayerEditor({ layer, index }: { layer: LayerCfg; index: number }) {
         <Slider label="Saturation" value={local.saturation} onChange={(v) => up({ saturation: v })} />
         <Slider label="Brightness" value={local.brightness} max={2} onChange={(v) => up({ brightness: v })} />
         <Slider label="Tilt (IMU)" value={local.tilt_amount} onChange={(v) => up({ tilt_amount: v })} />
+        <Slider label="Walk" value={local.walk_amount} onChange={(v) => up({ walk_amount: v })} />
         <Slider label={params[0] ?? "Param A"} value={local.param_a} onChange={(v) => up({ param_a: v })} />
         <Slider label={params[1] ?? "Param B"} value={local.param_b} onChange={(v) => up({ param_b: v })} />
         <Slider label={params[2] ?? "Param C"} value={local.param_c} onChange={(v) => up({ param_c: v })} />
@@ -242,22 +243,29 @@ function AudioPanel({ config }: { config: AppConfig }) {
                 style={{ width: "8em" }}
               />
               <select
-                value={s.kind}
+                value={s.kind === "device" ? (s.loopback ? "loopback" : "device") : "remote"}
                 onChange={(e) => {
                   const kind = e.target.value;
                   const base = { id: s.id, gain: s.gain };
                   commit(
                     sources.map((x, j) =>
                       j === i
-                        ? kind === "device"
-                          ? { ...base, kind: "device", device: null, channels: [] }
-                          : { ...base, kind: "remote", client_id: "" }
+                        ? kind === "remote"
+                          ? { ...base, kind: "remote", client_id: "" }
+                          : {
+                              ...base,
+                              kind: "device",
+                              device: null,
+                              channels: [],
+                              loopback: kind === "loopback",
+                            }
                         : x,
                     ) as AudioSourceConfig[],
                   );
                 }}
               >
-                <option value="device">Local device</option>
+                <option value="device">Input device</option>
+                <option value="loopback">System output (loopback)</option>
                 <option value="remote">Remote (browser mic)</option>
               </select>
               {s.kind === "device" && (
@@ -266,12 +274,14 @@ function AudioPanel({ config }: { config: AppConfig }) {
                     value={s.device ?? ""}
                     onChange={(e) => updateSource(i, { device: e.target.value || null })}
                   >
-                    <option value="">System default</option>
-                    {(status?.input_devices ?? []).map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
+                    <option value="">{s.loopback ? "Default output" : "System default"}</option>
+                    {(s.loopback ? (status?.output_devices ?? []) : (status?.input_devices ?? [])).map(
+                      (d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ),
+                    )}
                   </select>
                   <input
                     placeholder="channels e.g. 0,1"
@@ -318,7 +328,14 @@ function AudioPanel({ config }: { config: AppConfig }) {
           onClick={() =>
             commit([
               ...sources,
-              { id: `source-${sources.length}`, kind: "device", device: null, channels: [], gain: 1 },
+              {
+                id: `source-${sources.length}`,
+                kind: "device",
+                device: null,
+                channels: [],
+                loopback: false,
+                gain: 1,
+              },
             ])
           }
         >
@@ -348,6 +365,10 @@ function OutputPanel({ config }: { config: AppConfig }) {
   const commit = (patch: Partial<AppConfig["output"]>) =>
     client.setConfig({ ...config, output: { ...out, ...patch } });
 
+  // LED-wire fps ceiling: 800 kbps WS281x, 24 bits/px + ~300 µs reset per frame.
+  const pxPerString = config.geometry.pixels_per_spoke;
+  const wireFpsCap = 1 / ((pxPerString * 30e-6) + 300e-6);
+
   return (
     <section className="panel">
       <h2>sACN output</h2>
@@ -358,10 +379,50 @@ function OutputPanel({ config }: { config: AppConfig }) {
           onChange={(e) => client.setSacnEnabled(e.target.checked)}
         />
         <strong>{out.enabled ? "OUTPUT LIVE" : "Output disabled"}</strong>
-        {status && out.enabled && <span className="hint">{status.sacn_universes} universes</span>}
+        {status && out.enabled && (
+          <span className="hint">
+            {status.sacn_universes} universes · {status.sacn_pps} pkt/s
+            {status.sacn_pps === 0 && " — ⚠ nothing on the wire, check interface"}
+          </span>
+        )}
+      </label>
+      <label className="field-row" style={{ maxWidth: 460 }}>
+        <span>Interface</span>
+        <select
+          value={out.interface}
+          onChange={(e) => commit({ interface: e.target.value })}
+          style={{ flex: 1 }}
+        >
+          <option value="">OS default route (often wrong on multi-homed machines)</option>
+          {(status?.interfaces ?? []).map((i) => {
+            const ip = i.split("—").pop()?.trim() ?? i;
+            return (
+              <option key={i} value={ip}>
+                {i}
+              </option>
+            );
+          })}
+        </select>
+      </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={out.sync_to_render}
+          onChange={(e) => commit({ sync_to_render: e.target.checked })}
+        />
+        Sync sACN to render fps (capped by the fps field below)
       </label>
       <div className="field-grid">
-        <NumberField label="sACN fps" value={out.fps} onCommit={(v) => commit({ fps: v })} />
+        <NumberField
+          label={out.sync_to_render ? "fps cap" : "Fixed fps"}
+          value={out.fps}
+          onCommit={(v) => commit({ fps: v })}
+        />
+        <NumberField
+          label="Sync universe (0 = off)"
+          value={out.sync_universe}
+          onCommit={(v) => commit({ sync_universe: v })}
+        />
         <NumberField
           label="Start universe"
           value={out.start_universe}
@@ -385,13 +446,20 @@ function OutputPanel({ config }: { config: AppConfig }) {
         />
         <NumberField label="Priority" value={out.priority} onCommit={(v) => commit({ priority: v })} />
       </div>
+      <p className="hint">
+        LED-wire ceiling at {pxPerString} px/string: ~{wireFpsCap.toFixed(0)} fps (800 kbps ×
+        24 bits/px + reset). Ethernet is not the limit. Sync universe uses E1.31 universe
+        synchronization — PixLite Mk4 latches all universes on the sync packet (tear-free);
+        receivers without support ignore it.
+      </p>
       <label className="toggle-row">
         <input
           type="checkbox"
           checked={out.multicast}
           onChange={(e) => commit({ multicast: e.target.checked })}
         />
-        Multicast (239.255.x.x) — otherwise unicast to the controller IPs below
+        Multicast (239.255.x.x) — standard; needs IGMP-snooping switch to avoid flooding.
+        Unicast IPs below are optional.
       </label>
       <label className="field-col">
         <span>Controller IPs (one per line, in spoke order; controller N drives spokes N×4…N×4+3)</span>

@@ -11,7 +11,13 @@ export type LayerKind =
   | "spoke_chase"
   | "sparkle"
   | "beat_rings"
-  | "breathe";
+  | "breathe"
+  | "rainbow"
+  | "wedges"
+  | "interference"
+  | "fire"
+  | "meteors"
+  | "warp";
 
 export type BlendMode = "add" | "multiply" | "screen" | "alpha_over" | "max";
 
@@ -34,6 +40,7 @@ export interface LayerCfg {
   saturation: number;
   brightness: number;
   tilt_amount: number;
+  walk_amount: number;
   param_a: number;
   param_b: number;
   param_c: number;
@@ -59,7 +66,10 @@ export interface GeometryConfig {
 
 export interface OutputConfig {
   enabled: boolean;
+  interface: string;
+  sync_to_render: boolean;
   fps: number;
+  sync_universe: number;
   start_universe: number;
   pixels_per_universe: number;
   controllers: string[];
@@ -79,7 +89,7 @@ export type AudioSourceConfig = {
   id: string;
   gain: number;
 } & (
-  | { kind: "device"; device: string | null; channels: number[] }
+  | { kind: "device"; device: string | null; channels: number[]; loopback: boolean }
   | { kind: "remote"; client_id: string }
 );
 
@@ -91,6 +101,8 @@ export interface RenderConfig {
   fps: number;
   master_brightness: number;
   master_speed: number;
+  walk_enabled: boolean;
+  walk_speed: number;
 }
 
 export interface AppConfig {
@@ -120,9 +132,12 @@ export interface RuntimeStatus {
   frame_time_ms: number;
   sacn_enabled: boolean;
   sacn_universes: number;
+  sacn_pps: number;
   clients: number;
   audio: AudioSourceStatus[];
   input_devices: string[];
+  output_devices: string[];
+  interfaces: string[];
   master_brightness: number;
   master_speed: number;
 }
@@ -168,6 +183,12 @@ export const LAYER_KINDS: LayerKind[] = [
   "sparkle",
   "beat_rings",
   "breathe",
+  "rainbow",
+  "wedges",
+  "interference",
+  "fire",
+  "meteors",
+  "warp",
 ];
 
 export const BLEND_MODES: BlendMode[] = ["add", "multiply", "screen", "alpha_over", "max"];
@@ -184,6 +205,12 @@ export const LAYER_LABELS: Record<LayerKind, string> = {
   sparkle: "Sparkle",
   beat_rings: "Beat Rings",
   breathe: "Breathe",
+  rainbow: "Rainbow",
+  wedges: "Wedges",
+  interference: "Interference",
+  fire: "Fire",
+  meteors: "Meteors",
+  warp: "Warp",
 };
 
 /** Kind-specific labels for param_a..d, where meaningful. */
@@ -195,6 +222,12 @@ export const PARAM_LABELS: Partial<Record<LayerKind, [string?, string?, string?,
   sparkle: ["Density", "Twinkle rate"],
   beat_rings: ["Ring width", "Direction"],
   breathe: ["Depth floor"],
+  rainbow: ["Turns"],
+  wedges: ["Slices", "Radial twist", "Edge softness"],
+  interference: ["Frequency", "Orbit size", "Sharpness"],
+  fire: ["Flame reach", "Flame stretch"],
+  meteors: ["Density", "Rate/tail", "Direction"],
+  warp: ["Star density", "Speed"],
 };
 
 export function defaultLayer(kind: LayerKind): LayerCfg {
@@ -213,6 +246,7 @@ export function defaultLayer(kind: LayerKind): LayerCfg {
     saturation: 0.9,
     brightness: 1.0,
     tilt_amount: 0.0,
+    walk_amount: 0.25,
     param_a: 0.5,
     param_b: 0.5,
     param_c: 0.5,

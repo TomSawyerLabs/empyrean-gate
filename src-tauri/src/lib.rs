@@ -25,10 +25,26 @@ pub struct Backend {
 pub fn start_backend() -> Backend {
     let cfg = config::load();
     let state = SharedState::new(cfg);
+    state.status.lock().interfaces = list_interfaces();
     let remote_chains = audio::spawn(state.clone());
     engine::spawn(state.clone());
     server::spawn(state.clone(), remote_chains);
     Backend { state }
+}
+
+/// Local IPv4 interfaces as "name — ip" for the sACN interface picker.
+fn list_interfaces() -> Vec<String> {
+    match local_ip_address::list_afinet_netifas() {
+        Ok(ifas) => ifas
+            .into_iter()
+            .filter(|(_, ip)| ip.is_ipv4() && !ip.is_loopback())
+            .map(|(name, ip)| format!("{name} — {ip}"))
+            .collect(),
+        Err(e) => {
+            log::warn!("cannot enumerate network interfaces: {e}");
+            Vec::new()
+        }
+    }
 }
 
 /// The port the local web/WS server listens on — the webview client asks for this.

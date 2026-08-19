@@ -43,8 +43,18 @@ impl GeometryConfig {
 pub struct OutputConfig {
     /// Master switch — defaults OFF so a fresh install never floods a network.
     pub enabled: bool,
-    /// sACN frame rate (independent of render fps; frames are resampled by dropping).
+    /// Local interface IP to send from (source for unicast, egress for multicast).
+    /// Empty = OS default route — on a multi-homed machine that is often the wrong
+    /// NIC for the lighting network, so pick one in Settings.
+    pub interface: String,
+    /// Send an sACN frame for every rendered frame (capped by `fps`).
+    pub sync_to_render: bool,
+    /// sACN frame-rate cap (also the fixed rate when `sync_to_render` is off).
     pub fps: f32,
+    /// E1.31 universe synchronization: data packets carry this sync address and a
+    /// sync packet per frame releases all universes at once (tear-free on receivers
+    /// that support it, e.g. PixLite Mk4; others ignore it). 0 = disabled.
+    pub sync_universe: u16,
     /// First universe number; each spoke starts on a fresh universe boundary.
     pub start_universe: u16,
     /// Pixels per universe (170 * 3 = 510 channels fits the 512-channel DMX frame).
@@ -65,12 +75,15 @@ impl Default for OutputConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            interface: String::new(),
+            sync_to_render: true,
             fps: 60.0,
+            sync_universe: 0,
             start_universe: 1,
             pixels_per_universe: 170,
             controllers: Vec::new(),
             strings_per_controller: 4,
-            multicast: false,
+            multicast: true,
             priority: 100,
             led_gamma: 2.2,
         }
@@ -105,9 +118,13 @@ pub enum AudioSourceKind {
     /// `channels`: which channels of the device to mix into this source's mono
     /// analysis signal; empty = all channels. Lets one multichannel interface feed
     /// several sources (e.g. stage feed on 1+2, local mic on 3).
+    /// `loopback: true` captures an OUTPUT device's playback (WASAPI loopback) —
+    /// use whatever is playing on this machine as the beat source.
     Device {
         device: Option<String>,
         channels: Vec<u32>,
+        #[serde(default)]
+        loopback: bool,
     },
     /// Features streamed from a remote browser client (its microphone) over WebSocket.
     /// `client_id` is matched against the id the remote client announces.
@@ -139,6 +156,7 @@ impl Default for AudioConfig {
                 kind: AudioSourceKind::Device {
                     device: None,
                     channels: Vec::new(),
+                    loopback: false,
                 },
                 gain: 1.0,
             }],
@@ -152,6 +170,12 @@ pub struct RenderConfig {
     pub fps: f32,
     pub master_brightness: f32,
     pub master_speed: f32,
+    /// Autopilot: slow mean-reverting random walk over layer parameters, so an
+    /// unattended show keeps evolving for hours. Each layer's `walk_amount` scales
+    /// how far its parameters may wander from where the sliders are set.
+    pub walk_enabled: bool,
+    /// Walk rate multiplier (1.0 ≈ minutes-scale evolution).
+    pub walk_speed: f32,
 }
 
 impl Default for RenderConfig {
@@ -160,6 +184,8 @@ impl Default for RenderConfig {
             fps: 60.0,
             master_brightness: 1.0,
             master_speed: 1.0,
+            walk_enabled: true,
+            walk_speed: 1.0,
         }
     }
 }

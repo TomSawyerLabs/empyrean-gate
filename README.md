@@ -36,6 +36,16 @@ sources) drives the patterns via beat tracking and band energies.
 - **PWA**: open the web UI on an iPad/phone, "Add to Home Screen", and it runs
   standalone fullscreen — a touch control surface for the floor. Manifest shortcuts
   jump straight to Draw or Control.
+- **Autopilot**: a slow mean-reverting random walk drifts layer parameters around
+  wherever the sliders are set (per-layer "Walk" amount = wander radius), so an
+  unattended show evolves for hours without repeating.
+- **Audio loopback**: pick a system *output* device as a source (WASAPI loopback) —
+  music played on the show machine drives the beat with no cabling.
+- **sACN**: pick the egress interface explicitly (multi-homed machines otherwise send
+  multicast out the default route — invisible on the lighting NIC), sync sACN to
+  render fps or fix a rate, and optionally enable E1.31 universe synchronization
+  (PixLite Mk4 latches all universes per sync packet, tear-free). Live packets/s in
+  the status HUD tells you it's actually transmitting.
 
 ```
 src/                React UI (preview + settings), WebGL2 preview, sensors

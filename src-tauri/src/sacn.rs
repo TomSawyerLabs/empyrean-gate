@@ -7,6 +7,15 @@
 //! packet buffers, (2) bumps sequence numbers, (3) calls send_to. Zero heap traffic in
 //! the steady state.
 //!
+//! Multi-homed machines: the socket binds to `output.interface` (when set) and that
+//! address is also installed as the IPv4 multicast egress interface — otherwise
+//! Windows/Linux send multicast out the default-route NIC, which is usually NOT the
+//! lighting network.
+//!
+//! Frame coherence: when `output.sync_universe` != 0, every data packet carries that
+//! sync address and one E1.31 synchronization packet is sent per frame; receivers that
+//! support universe sync (PixLite Mk4 does) hold data and latch all universes at once.
+//!
 //! Universe layout: each spoke occupies `universes_per_spoke` consecutive universes
 //! starting at `start_universe + spoke * universes_per_spoke`, `pixels_per_universe`
 //! RGB pixels per universe, channel 1 = red of the spoke's outermost pixel.
@@ -17,10 +26,18 @@ use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 
 const SACN_PORT: u16 = 5568;
 const ACN_ID: [u8; 12] = *b"ASC-E1.17\0\0\0";
+/// Offset of the sync-address field within a data packet's framing layer.
+const SYNC_ADDR_OFFSET: usize = 109;
 /// Offset of the sequence-number byte within a data packet.
 const SEQ_OFFSET: usize = 111;
 /// Offset of the first DMX slot (after the start code).
 const SLOTS_OFFSET: usize = 126;
+/// Offset of the sequence byte within a sync packet.
+const SYNC_PKT_SEQ_OFFSET: usize = 44;
+
+fn multicast_group(universe: u16) -> Ipv4Addr {
+    Ipv4Addr::new(239, 255, (universe >> 8) as u8, (universe & 0xff) as u8)
+}
 
 struct UniversePlan {
     /// Prebuilt packet: headers + start code; slots filled per frame.
@@ -36,17 +53,31 @@ struct UniversePlan {
 
 pub struct SacnSender {
     socket: UdpSocket,
+    bound_interface: String,
     cid: [u8; 16],
     source_name: [u8; 64],
     plan: Vec<UniversePlan>,
+    /// Prebuilt E1.31 sync packet + its destinations; None when sync is disabled.
+    sync: Option<(Vec<u8>, Vec<SocketAddrV4>)>,
+    sync_sequence: u8,
     gamma_lut: [u8; 256],
     lut_gamma: f32,
+    send_errors: u64,
+}
+
+fn make_socket(interface: &str) -> std::io::Result<UdpSocket> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let iface: Ipv4Addr = interface.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    socket.bind(&SocketAddrV4::new(iface, 0).into())?;
+    // Route multicast out the chosen NIC instead of the default-route one.
+    socket.set_multicast_if_v4(&iface)?;
+    socket.set_multicast_ttl_v4(1)?;
+    Ok(socket.into())
 }
 
 impl SacnSender {
     pub fn new() -> std::io::Result<Self> {
-        let socket = UdpSocket::bind("0.0.0.0:0")?;
-
         // CID must be stable per source; derive one from a fixed tag + process id.
         let mut cid = *b"EmpyreanGate\0\0\0\0";
         cid[12..16].copy_from_slice(&std::process::id().to_le_bytes());
@@ -56,17 +87,36 @@ impl SacnSender {
         source_name[..name.len()].copy_from_slice(name);
 
         Ok(Self {
-            socket,
+            socket: make_socket("")?,
+            bound_interface: String::new(),
             cid,
             source_name,
             plan: Vec::new(),
+            sync: None,
+            sync_sequence: 0,
             gamma_lut: [0; 256],
             lut_gamma: 0.0,
+            send_errors: 0,
         })
     }
 
-    /// (Re)build packet templates and destinations. Call on config changes, not per frame.
+    /// (Re)build the socket, packet templates, and destinations. Call on config
+    /// changes, not per frame.
     pub fn configure(&mut self, geo: &GeometryConfig, out: &OutputConfig) {
+        if out.interface != self.bound_interface {
+            match make_socket(&out.interface) {
+                Ok(s) => {
+                    self.socket = s;
+                    self.bound_interface = out.interface.clone();
+                    log::info!(
+                        "sACN socket bound to interface '{}'",
+                        if out.interface.is_empty() { "default" } else { &out.interface }
+                    );
+                }
+                Err(e) => log::error!("sACN: cannot bind interface '{}': {e}", out.interface),
+            }
+        }
+
         self.plan.clear();
         let ppu = out.pixels_per_universe.max(1) as u32;
         let ups = geometry::universes_per_spoke(geo, out) as u32;
@@ -82,17 +132,15 @@ impl SacnSender {
                 }
                 let count = ppu.min(geo.pixels_per_spoke - first_pixel);
                 let universe = out.start_universe + (spoke * ups + u) as u16;
-                let multicast = out.multicast.then(|| {
-                    SocketAddrV4::new(
-                        Ipv4Addr::new(239, 255, (universe >> 8) as u8, (universe & 0xff) as u8),
-                        SACN_PORT,
-                    )
-                });
+                let multicast = out
+                    .multicast
+                    .then(|| SocketAddrV4::new(multicast_group(universe), SACN_PORT));
                 self.plan.push(UniversePlan {
-                    packet: build_packet_template(
+                    packet: build_data_template(
                         &self.cid,
                         &self.source_name,
                         out.priority,
+                        out.sync_universe,
                         universe,
                         (count * 3) as usize,
                     ),
@@ -105,6 +153,22 @@ impl SacnSender {
             }
         }
 
+        self.sync = (out.sync_universe != 0).then(|| {
+            let mut dests = Vec::new();
+            if out.multicast {
+                dests.push(SocketAddrV4::new(multicast_group(out.sync_universe), SACN_PORT));
+            }
+            let mut controller_ips: Vec<SocketAddrV4> = self
+                .plan
+                .iter()
+                .filter_map(|p| p.unicast)
+                .collect();
+            controller_ips.sort();
+            controller_ips.dedup();
+            dests.extend(controller_ips);
+            (build_sync_template(&self.cid, out.sync_universe), dests)
+        });
+
         if (self.lut_gamma - out.led_gamma).abs() > 1e-3 {
             for (i, v) in self.gamma_lut.iter_mut().enumerate() {
                 let x = i as f32 / 255.0;
@@ -116,9 +180,10 @@ impl SacnSender {
 
     /// Send one full frame of perceptual RGB data (as produced by the engine).
     /// LED gamma is applied here, scattering directly into the resident packets;
-    /// the preview shows the raw values.
-    pub fn send_frame(&mut self, rgb: &[u8]) -> std::io::Result<usize> {
-        let mut packets = 0;
+    /// the preview shows the raw values. Individual send failures are counted, not
+    /// fatal — one unreachable controller must not black out the rest.
+    pub fn send_frame(&mut self, rgb: &[u8]) -> usize {
+        let mut packets = 0usize;
         for plan in &mut self.plan {
             let Some(src) = rgb.get(plan.src_offset..plan.src_offset + plan.src_len) else {
                 continue; // frame size changed mid-reconfigure; skip until re-plan
@@ -130,16 +195,29 @@ impl SacnSender {
             plan.sequence = plan.sequence.wrapping_add(1);
             plan.packet[SEQ_OFFSET] = plan.sequence;
 
-            if let Some(addr) = plan.unicast {
-                self.socket.send_to(&plan.packet, addr)?;
-                packets += 1;
-            }
-            if let Some(addr) = plan.multicast {
-                self.socket.send_to(&plan.packet, addr)?;
-                packets += 1;
+            for dest in [plan.unicast, plan.multicast].into_iter().flatten() {
+                match self.socket.send_to(&plan.packet, dest) {
+                    Ok(_) => packets += 1,
+                    Err(e) => {
+                        self.send_errors += 1;
+                        if self.send_errors.is_power_of_two() {
+                            log::warn!("sACN send to {dest} failed ({} total): {e}", self.send_errors);
+                        }
+                    }
+                }
             }
         }
-        Ok(packets)
+
+        if let Some((packet, dests)) = &mut self.sync {
+            self.sync_sequence = self.sync_sequence.wrapping_add(1);
+            packet[SYNC_PKT_SEQ_OFFSET] = self.sync_sequence;
+            for dest in dests.iter() {
+                if self.socket.send_to(packet, *dest).is_ok() {
+                    packets += 1;
+                }
+            }
+        }
+        packets
     }
 
     pub fn universe_count(&self) -> u16 {
@@ -147,10 +225,11 @@ impl SacnSender {
     }
 }
 
-fn build_packet_template(
+fn build_data_template(
     cid: &[u8; 16],
     source_name: &[u8; 64],
     priority: u8,
+    sync_universe: u16,
     universe: u16,
     data_len: usize,
 ) -> Vec<u8> {
@@ -172,7 +251,8 @@ fn build_packet_template(
     p.extend_from_slice(&0x0000_0002u32.to_be_bytes()); // VECTOR_E131_DATA_PACKET
     p.extend_from_slice(source_name);
     p.push(priority);
-    p.extend_from_slice(&0u16.to_be_bytes()); // sync address
+    debug_assert_eq!(p.len(), SYNC_ADDR_OFFSET);
+    p.extend_from_slice(&sync_universe.to_be_bytes());
     debug_assert_eq!(p.len(), SEQ_OFFSET);
     p.push(0); // sequence, rewritten per frame
     p.push(0); // options
@@ -188,6 +268,30 @@ fn build_packet_template(
     p.push(0x00); // DMX start code
     debug_assert_eq!(p.len(), SLOTS_OFFSET);
     p.resize(total, 0);
+    p
+}
+
+/// E1.31-2016 universe synchronization packet (49 bytes).
+fn build_sync_template(cid: &[u8; 16], sync_universe: u16) -> Vec<u8> {
+    let total = 49usize;
+    let mut p = Vec::with_capacity(total);
+
+    // --- Root layer ---
+    p.extend_from_slice(&0x0010u16.to_be_bytes());
+    p.extend_from_slice(&0x0000u16.to_be_bytes());
+    p.extend_from_slice(&ACN_ID);
+    p.extend_from_slice(&flags_len(total - 16));
+    p.extend_from_slice(&0x0000_0008u32.to_be_bytes()); // VECTOR_ROOT_E131_EXTENDED
+    p.extend_from_slice(cid);
+
+    // --- Framing layer ---
+    p.extend_from_slice(&flags_len(total - 38));
+    p.extend_from_slice(&0x0000_0001u32.to_be_bytes()); // VECTOR_E131_EXTENDED_SYNCHRONIZATION
+    debug_assert_eq!(p.len(), SYNC_PKT_SEQ_OFFSET);
+    p.push(0); // sequence, rewritten per frame
+    p.extend_from_slice(&sync_universe.to_be_bytes());
+    p.extend_from_slice(&0u16.to_be_bytes()); // reserved
+    debug_assert_eq!(p.len(), total);
     p
 }
 

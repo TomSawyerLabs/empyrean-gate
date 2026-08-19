@@ -34,7 +34,9 @@ export default function View() {
         <div ref={beatDotRef} className="beat-dot" />
         <span>{bpm > 0 ? `${bpm.toFixed(0)} BPM` : "no beat"}</span>
         {status && <span>{status.engine_fps.toFixed(0)} fps</span>}
-        {status?.sacn_enabled && <span className="live-pill">sACN LIVE</span>}
+        {status?.sacn_enabled && (
+          <span className="live-pill">sACN {status.sacn_pps > 0 ? `${status.sacn_pps} pkt/s` : "LIVE — 0 pkt/s ⚠"}</span>
+        )}
       </div>
     </div>
   );

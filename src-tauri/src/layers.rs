@@ -35,10 +35,22 @@ pub enum LayerKind {
     BeatRings,
     /// Multiplicative breathing envelope (beat- or time-synced).
     Breathe,
+    /// Classic hue wheel: hue sweeps around the circle (and optionally the radius).
+    Rainbow,
+    /// Rotating pie slices, audio-flash on the beat.
+    Wedges,
+    /// Two orbiting wave sources creating moiré interference.
+    Interference,
+    /// Noise flames climbing inward from the outer rim, fire palette.
+    Fire,
+    /// Random radial shooting stars with trails.
+    Meteors,
+    /// Starfield streaming outward — warp speed.
+    Warp,
 }
 
 impl LayerKind {
-    pub const ALL: [LayerKind; 11] = [
+    pub const ALL: [LayerKind; 17] = [
         LayerKind::Solid,
         LayerKind::GradientRadial,
         LayerKind::NoiseField,
@@ -50,6 +62,12 @@ impl LayerKind {
         LayerKind::Sparkle,
         LayerKind::BeatRings,
         LayerKind::Breathe,
+        LayerKind::Rainbow,
+        LayerKind::Wedges,
+        LayerKind::Interference,
+        LayerKind::Fire,
+        LayerKind::Meteors,
+        LayerKind::Warp,
     ];
 
     pub fn gpu_id(self) -> u32 {
@@ -105,6 +123,10 @@ pub struct LayerCfg {
     pub brightness: f32,
     /// React to IMU tilt from a connected phone (layers that support it).
     pub tilt_amount: f32,
+    /// How far the autopilot random walk may push this layer's parameters away from
+    /// the slider positions (0 = frozen, 1 = full wander). The slider value is the
+    /// center of the walk, so it doubles as the limit.
+    pub walk_amount: f32,
     /// Kind-specific parameters, labeled in the UI per kind.
     pub param_a: f32,
     pub param_b: f32,
@@ -129,6 +151,7 @@ impl Default for LayerCfg {
             saturation: 0.9,
             brightness: 1.0,
             tilt_amount: 0.0,
+            walk_amount: 0.25,
             param_a: 0.5,
             param_b: 0.5,
             param_c: 0.5,

@@ -128,6 +128,12 @@ export default function GateCanvas({
   useEffect(() => {
     if (!meta || !canvasRef.current) return;
     glRef.current = buildGl(canvasRef.current, meta);
+    return () => {
+      // Browsers cap live WebGL contexts (~16); release explicitly or tab-hopping
+      // eventually kills rendering everywhere.
+      glRef.current?.gl.getExtension("WEBGL_lose_context")?.loseContext();
+      glRef.current = null;
+    };
   }, [meta]);
 
   useEffect(() => {

@@ -155,10 +155,16 @@ pub struct RuntimeStatus {
     pub frame_time_ms: f32,
     pub sacn_enabled: bool,
     pub sacn_universes: u16,
+    /// sACN packets actually sent per second — the "is it transmitting" truth.
+    pub sacn_pps: u32,
     pub clients: u32,
     pub audio: Vec<AudioSourceStatus>,
     /// Available local capture devices, for the settings UI dropdowns.
     pub input_devices: Vec<String>,
+    /// Output devices (selectable as loopback beat sources).
+    pub output_devices: Vec<String>,
+    /// Local IPv4 interfaces as "name — ip", for the sACN interface picker.
+    pub interfaces: Vec<String>,
     pub master_brightness: f32,
     pub master_speed: f32,
 }

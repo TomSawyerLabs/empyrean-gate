@@ -211,25 +211,31 @@ impl Engine {
         device: &wgpu::Device,
         bgl: &wgpu::BindGroupLayout,
     ) -> Result<wgpu::ComputePipeline> {
-        log::debug!("compiling shader module");
+        // Error scope instead of wgpu's default panic-on-validation-error: a broken
+        // shader (live editing with hot-reload!) must surface as a UI error, not
+        // kill the engine thread.
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gate.wgsl"),
             source: wgpu::ShaderSource::Wgsl(shader_source().into()),
         });
-        log::debug!("shader module compiled; creating pipeline");
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("gate"),
             bind_group_layouts: &[Some(bgl)],
             immediate_size: 0,
         });
-        Ok(device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("gate"),
             layout: Some(&layout),
             module: &shader,
             entry_point: Some("main"),
             compilation_options: Default::default(),
             cache: None,
-        }))
+        });
+        if let Some(err) = pollster::block_on(scope.pop()) {
+            anyhow::bail!("shader/pipeline validation failed: {err}");
+        }
+        Ok(pipeline)
     }
 
     /// Rebuild the pipeline from the (possibly edited) shader source. Dev feature.
@@ -422,6 +428,69 @@ fn bind(binding: u32, buffer: &wgpu::Buffer) -> wgpu::BindGroupEntry<'_> {
 }
 
 // ---------------------------------------------------------------------------
+// Autopilot: slow mean-reverting random walk over layer parameters
+// ---------------------------------------------------------------------------
+
+const WALK_PARAMS: usize = 8; // speed, scale, hue, hue_range, brightness, pa, pb, pc
+
+#[derive(Clone, Default)]
+struct LayerWalk {
+    offsets: [f32; WALK_PARAMS],
+}
+
+struct WalkRng(u64);
+
+impl WalkRng {
+    fn new() -> Self {
+        Self(0x853c_49e6_748f_ea9b ^ std::process::id() as u64)
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+
+    /// Roughly N(0,1) (sum of uniforms), plenty for drift noise.
+    fn gaussian(&mut self) -> f32 {
+        let mut acc = 0.0f32;
+        for _ in 0..3 {
+            acc += (self.next_u64() >> 40) as f32 / (1u64 << 24) as f32;
+        }
+        (acc - 1.5) * 1.6
+    }
+}
+
+/// Ornstein-Uhlenbeck step: offsets drift smoothly, mean-revert to 0 (i.e. to the
+/// slider positions), with stationary std ≈ 1. `tau` is the evolution time scale.
+fn walk_step(walk: &mut LayerWalk, rng: &mut WalkRng, dt: f32, tau: f32) {
+    let k = (dt / tau).min(0.5);
+    for o in walk.offsets.iter_mut() {
+        *o += -*o * k + rng.gaussian() * (2.0 * k).sqrt();
+        *o = o.clamp(-2.5, 2.5);
+    }
+}
+
+/// Apply a layer's walk offsets around its configured values. The user's slider
+/// value is the center; `walk_amount` scales the wander radius per parameter.
+fn walked_layer(l: &crate::layers::LayerCfg, w: &LayerWalk) -> crate::layers::LayerCfg {
+    let a = l.walk_amount;
+    let mut out = l.clone();
+    out.speed = l.speed + w.offsets[0] * 0.6 * a;
+    out.scale = (l.scale * (1.0 + w.offsets[1] * 0.4 * a)).clamp(0.05, 6.0);
+    out.hue = l.hue + w.offsets[2] * 0.12 * a; // hue wraps in the shader
+    out.hue_range = (l.hue_range + w.offsets[3] * 0.08 * a).clamp(0.0, 1.0);
+    out.brightness = (l.brightness * (1.0 + w.offsets[4] * 0.25 * a)).clamp(0.0, 2.0);
+    out.param_a = (l.param_a + w.offsets[5] * 0.2 * a).clamp(0.0, 1.0);
+    out.param_b = (l.param_b + w.offsets[6] * 0.2 * a).clamp(0.0, 1.0);
+    out.param_c = (l.param_c + w.offsets[7] * 0.2 * a).clamp(0.0, 1.0);
+    out
+}
+
+// ---------------------------------------------------------------------------
 // Frame loop
 // ---------------------------------------------------------------------------
 
@@ -483,12 +552,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut epoch = u32::MAX;
     let mut output_cfg_key = String::new();
     let mut layer_phases: Vec<f64> = Vec::new();
+    let mut layer_walks: Vec<LayerWalk> = Vec::new();
+    let mut walk_rng = WalkRng::new();
     let mut last_frame = Instant::now();
     let mut last_sacn = Instant::now();
     let mut last_status = Instant::now();
     let mut fps_ema = 0.0f32;
     let mut frame_ms_ema = 0.0f32;
     let mut frame_number: u64 = 0;
+    let mut sacn_packets: usize = 0;
 
     #[cfg(feature = "shader-hot-reload")]
     let shader_dirty = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -522,6 +594,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             }
         }
         layer_phases.resize(cfg.layers.len(), 0.0);
+        layer_walks.resize(cfg.layers.len(), LayerWalk::default());
 
         // Pace the loop.
         let target_dt = Duration::from_secs_f32(1.0 / cfg.render.fps.clamp(1.0, 240.0));
@@ -556,11 +629,20 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         }
         let control = *state.control.lock();
 
+        // Autopilot: evolve walk offsets (~minutes time scale) and render the
+        // walked parameter values; the config itself is never modified.
+        let walk_tau = 45.0 / cfg.render.walk_speed.clamp(0.05, 20.0);
         let mut layers = Vec::with_capacity(cfg.layers.len().min(MAX_LAYERS));
         for (i, l) in cfg.layers.iter().take(MAX_LAYERS).enumerate() {
             if !l.enabled {
                 continue;
             }
+            let l = if cfg.render.walk_enabled && l.walk_amount > 0.0 {
+                walk_step(&mut layer_walks[i], &mut walk_rng, dt, walk_tau);
+                walked_layer(l, &layer_walks[i])
+            } else {
+                l.clone()
+            };
             layer_phases[i] += (l.speed * cfg.render.master_speed * dt) as f64;
             layers.push(l.to_gpu(layer_phases[i] as f32));
         }
@@ -656,12 +738,18 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             // sACN first: the wire is the primary output.
             if cfg.output.enabled {
                 if let Some(s) = sacn.as_mut() {
-                    let interval = Duration::from_secs_f32(1.0 / cfg.output.fps.clamp(1.0, 120.0));
+                    let cap = cfg.output.fps.clamp(1.0, 120.0);
+                    // sync_to_render: every rendered frame up to the cap. The 0.9
+                    // tolerance stops beat-frequency frame drops when render fps
+                    // sits right at the cap.
+                    let interval = if cfg.output.sync_to_render {
+                        Duration::from_secs_f32(0.9 / cap)
+                    } else {
+                        Duration::from_secs_f32(1.0 / cap)
+                    };
                     if last_sacn.elapsed() >= interval {
                         last_sacn = now;
-                        if let Err(e) = s.send_frame(rgb) {
-                            log::warn!("sACN send failed: {e}");
-                        }
+                        sacn_packets += s.send_frame(rgb);
                     }
                 }
             }
@@ -681,12 +769,14 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         fps_ema = fps_ema * 0.9 + (1.0 / dt.max(1e-6)) * 0.1;
         frame_ms_ema = frame_ms_ema * 0.9 + frame_ms * 0.1;
         if last_status.elapsed() > Duration::from_millis(500) {
+            let window = last_status.elapsed().as_secs_f32();
             last_status = Instant::now();
             let status = {
                 let mut st = state.status.lock();
                 st.engine_fps = fps_ema;
                 st.frame_time_ms = frame_ms_ema;
                 st.sacn_enabled = cfg.output.enabled;
+                st.sacn_pps = (sacn_packets as f32 / window.max(0.001)) as u32;
                 st.master_brightness = cfg.render.master_brightness;
                 st.master_speed = cfg.render.master_speed;
                 st.audio = state
@@ -709,6 +799,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     .collect();
                 st.clone()
             };
+            sacn_packets = 0;
             let _ = state.events.send(ServerMsg::Status { status });
         }
 

@@ -143,8 +143,12 @@ async fn client_task(ctx: Ctx, socket: WebSocket) {
                     Message::Text(text) => {
                         match serde_json::from_str::<ClientMsg>(&text) {
                             Ok(m) => {
-                                if handle_msg(&ctx, m, &mut client_id, &mut preview, &mut tx).await.is_err() {
+                                let mut reset_meta = false;
+                                if handle_msg(&ctx, m, &mut client_id, &mut preview, &mut reset_meta, &mut tx).await.is_err() {
                                     break;
+                                }
+                                if reset_meta {
+                                    announced_meta = (0, 0, 0);
                                 }
                             }
                             Err(e) => {
@@ -238,6 +242,7 @@ async fn handle_msg(
     msg: ClientMsg,
     client_id: &mut String,
     preview: &mut Option<PreviewSub>,
+    reset_meta: &mut bool,
     tx: &mut WsSink,
 ) -> Result<(), ()> {
     let state = &ctx.state;
@@ -326,6 +331,9 @@ async fn handle_msg(
                 decimate: decimate.clamp(1, 64),
                 last_sent: Instant::now() - Duration::from_secs(1),
             });
+            // Force a fresh PreviewMeta: the client may be a newly-mounted canvas
+            // that never saw the one sent earlier on this connection.
+            *reset_meta = true;
         }
         ClientMsg::UnsubscribePreview => {
             *preview = None;

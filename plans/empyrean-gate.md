@@ -133,6 +133,36 @@ sACN sender + preview channel.
       (`/#draw` etc. — PWA shortcuts + popped-out windows pin a mode). Tauri app has
       "⧉ New window" (labels `aux-*`, capability added) for separate-window operation.
 
+## Round 3 (first live run feedback, 2026-08-19)
+
+- [x] **sACN egress interface picker** — root cause of "sACNView sees nothing":
+      socket bound 0.0.0.0, multicast went out the default-route NIC, not the
+      10.255.0.77 lighting network. `output.interface` binds the socket + sets
+      IP_MULTICAST_IF (socket2). NIC list via local-ip-address in status.
+- [x] Multicast now defaults ON (enable toggle still defaults OFF).
+- [x] `sacn_pps` live packets/s in status + HUD ("is it transmitting" truth).
+- [x] `sync_to_render` (default on, capped by fps field) + computed LED-wire fps
+      ceiling shown in UI (~88 fps at 350 px: 800 kbps × 24 bits + reset).
+- [x] **E1.31 universe synchronization** (`sync_universe`, 0=off): data packets carry
+      sync address; one sync packet/frame (multicast group + each controller unicast).
+      PixLite Mk4 latches tear-free; non-supporting receivers ignore.
+- [x] **Fixed: all tabs black after visiting Draw** — server sent PreviewMeta once per
+      connection; later canvas mounts resubscribed but never got meta → GL never
+      initialized. Meta now re-announced on every SubscribePreview. Also release GL
+      contexts on unmount (browser ~16-context cap).
+- [x] **Audio loopback sources** — WASAPI loopback via cpal (output device as input);
+      picker lists output devices.
+- [x] **Autopilot random walk** — OU (mean-reverting) drift per layer param, slider
+      value = walk center, per-layer `walk_amount` = radius (the "limit"), global
+      enable + speed (tau ≈ 45s/speed). Runtime-only; never rewrites config.
+- [x] **6 new layers**: Rainbow, Wedges, Interference, Fire, Meteors, Warp (17 total).
+- [x] Shader/pipeline validation now goes through an error scope → broken WGSL (live
+      editing) surfaces as a UI error instead of killing the engine thread.
+      (Found because `active` is a reserved WGSL keyword — the panic killed the loop.)
+- [x] `default-run = "empyrean-gate"` (two-binary crate broke `tauri dev`).
+- Unicast question answered: multicast + IGMP snooping is correct; static controller
+  IPs would NOT improve performance; unicast only for snooping-less switches/WiFi.
+
 ## Next session pickup
 
 - Run `bun tauri dev` and eyeball the actual patterns; tune defaults.
