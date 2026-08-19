@@ -26,6 +26,29 @@ async function resolveWsUrl(): Promise<string> {
   return `${proto}://${location.host}/ws`;
 }
 
+/// On (re)connect, detect a UI bundle older than what the backend now serves and
+/// refresh. Vite content-hashes bundle filenames, so comparing the entry script name
+/// in the freshly-fetched index.html against the one this page loaded is exact.
+/// Meaningless in the Tauri webview (assets ship with the binary) and vite dev (HMR).
+async function reloadIfStale(): Promise<void> {
+  if ("__TAURI_INTERNALS__" in window || import.meta.env.DEV) return;
+  try {
+    const res = await fetch("/index.html", { cache: "no-store" });
+    if (!res.ok) return;
+    const served = (await res.text()).match(/\/assets\/index-[\w-]+\.js/)?.[0];
+    const current = document
+      .querySelector('script[src*="/assets/index-"]')
+      ?.getAttribute("src");
+    if (!served || !current || served === current) return;
+    // One reload per target bundle — never loop even if something still serves stale.
+    if (sessionStorage.getItem("empyrean-reloaded-for") === served) return;
+    sessionStorage.setItem("empyrean-reloaded-for", served);
+    location.reload();
+  } catch {
+    // Offline or backend restarting; the next reconnect will check again.
+  }
+}
+
 export class GateClient {
   private ws: WebSocket | null = null;
   private listeners = new Set<Listener>();
@@ -54,6 +77,7 @@ export class GateClient {
 
     ws.onopen = () => {
       this.retryMs = 500;
+      void reloadIfStale();
       this.send({ type: "hello", name: navigator.userAgent, client_id: this.clientId, token: "" });
       this.statusListeners.forEach((l) => l(true));
     };
