@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Main window + popped-out aux windows (View/Draw/Control/Settings)",
+  "windows": ["main", "aux-*"],
+  "permissions": [
+    "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-set-title",
+    "core:window:allow-set-focus"
+  ]
+}

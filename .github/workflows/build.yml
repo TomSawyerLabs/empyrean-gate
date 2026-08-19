@@ -1,0 +1,77 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: empyrean-gate-windows
+            binary: src-tauri/target/release/empyrean-gate.exe
+          - os: ubuntu-latest
+            artifact: empyrean-gate-linux
+            binary: src-tauri/target/release/empyrean-gate
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system deps (webkit for the Tauri shell, ALSA for audio)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck frontend
+        run: bun run typecheck
+
+      # Builds the frontend (beforeBuildCommand), then the release binary with
+      # embedded UI assets. --no-bundle: standalone binary only, no installer.
+      - name: Build standalone binary
+        run: bun tauri build --no-bundle
+
+      - name: Build headless smoke-test binary
+        working-directory: src-tauri
+        run: cargo build --release --bin engine-smoke
+
+      # CI runners have no GPU; just confirm the error path is the designed one
+      # (clear "no Vulkan adapter" message, nonzero exit) rather than a crash.
+      - name: Engine smoke test (expected to fail cleanly without a GPU)
+        shell: bash
+        run: |
+          set +e
+          out=$(./src-tauri/target/release/engine-smoke 2>&1)
+          code=$?
+          echo "$out"
+          if [ $code -eq 0 ]; then
+            echo "GPU available on runner; smoke test passed for real."
+          elif echo "$out" | grep -q "No Vulkan adapter"; then
+            echo "No GPU on runner; clean error path confirmed."
+          else
+            echo "engine-smoke crashed instead of erroring cleanly"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error

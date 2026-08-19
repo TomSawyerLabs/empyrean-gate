@@ -1,0 +1,221 @@
+// Mirrors src-tauri/src/protocol.rs, config.rs, layers.rs (serde snake_case JSON).
+
+export type LayerKind =
+  | "solid"
+  | "gradient_radial"
+  | "noise_field"
+  | "noise_color"
+  | "radial_waves"
+  | "spiral"
+  | "plasma"
+  | "spoke_chase"
+  | "sparkle"
+  | "beat_rings"
+  | "breathe";
+
+export type BlendMode = "add" | "multiply" | "screen" | "alpha_over" | "max";
+
+export type EffectKind = "burst" | "strobe" | "swoosh" | "collapse";
+
+export type PenKind = "glow" | "ripple" | "sparkle";
+
+export interface LayerCfg {
+  kind: LayerKind;
+  enabled: boolean;
+  name: string;
+  blend: BlendMode;
+  opacity: number;
+  speed: number;
+  scale: number;
+  audio_source: number;
+  audio_amount: number;
+  hue: number;
+  hue_range: number;
+  saturation: number;
+  brightness: number;
+  tilt_amount: number;
+  param_a: number;
+  param_b: number;
+  param_c: number;
+  param_d: number;
+}
+
+export interface EffectCfg {
+  kind: EffectKind;
+  angle: number;
+  radius: number;
+  intensity: number;
+  hue: number;
+  duration: number;
+}
+
+export interface GeometryConfig {
+  spokes: number;
+  pixels_per_spoke: number;
+  outer_radius_ft: number;
+  inner_radius_ft: number;
+  leds_per_meter: number;
+}
+
+export interface OutputConfig {
+  enabled: boolean;
+  fps: number;
+  start_universe: number;
+  pixels_per_universe: number;
+  controllers: string[];
+  strings_per_controller: number;
+  multicast: boolean;
+  priority: number;
+  led_gamma: number;
+}
+
+export interface ServerConfig {
+  bind: string;
+  port: number;
+  auth_token: string | null;
+}
+
+export type AudioSourceConfig = {
+  id: string;
+  gain: number;
+} & (
+  | { kind: "device"; device: string | null; channels: number[] }
+  | { kind: "remote"; client_id: string }
+);
+
+export interface AudioConfig {
+  sources: AudioSourceConfig[];
+}
+
+export interface RenderConfig {
+  fps: number;
+  master_brightness: number;
+  master_speed: number;
+}
+
+export interface AppConfig {
+  geometry: GeometryConfig;
+  output: OutputConfig;
+  server: ServerConfig;
+  audio: AudioConfig;
+  render: RenderConfig;
+  layers: LayerCfg[];
+}
+
+export interface AudioSourceStatus {
+  id: string;
+  active: boolean;
+  level: number;
+  bass: number;
+  mid: number;
+  treble: number;
+  bpm: number;
+  beat_phase: number;
+}
+
+export interface RuntimeStatus {
+  gpu_error: string | null;
+  gpu_name: string;
+  engine_fps: number;
+  frame_time_ms: number;
+  sacn_enabled: boolean;
+  sacn_universes: number;
+  clients: number;
+  audio: AudioSourceStatus[];
+  input_devices: string[];
+  master_brightness: number;
+  master_speed: number;
+}
+
+export type ServerMsg =
+  | { type: "state"; config: AppConfig; status: RuntimeStatus }
+  | { type: "status"; status: RuntimeStatus }
+  | { type: "beat"; source: number; bpm: number }
+  | {
+      type: "preview_meta";
+      spokes: number;
+      pixels: number;
+      decimate: number;
+      outer_radius_ft: number;
+      inner_radius_ft: number;
+    }
+  | { type: "error"; message: string };
+
+export interface PreviewMeta {
+  spokes: number;
+  pixels: number;
+  decimate: number;
+  outer_radius_ft: number;
+  inner_radius_ft: number;
+}
+
+export interface PreviewFrame {
+  frameNumber: number;
+  spokes: number;
+  pixels: number;
+  rgb: Uint8Array;
+}
+
+export const LAYER_KINDS: LayerKind[] = [
+  "solid",
+  "gradient_radial",
+  "noise_field",
+  "noise_color",
+  "radial_waves",
+  "spiral",
+  "plasma",
+  "spoke_chase",
+  "sparkle",
+  "beat_rings",
+  "breathe",
+];
+
+export const BLEND_MODES: BlendMode[] = ["add", "multiply", "screen", "alpha_over", "max"];
+
+export const LAYER_LABELS: Record<LayerKind, string> = {
+  solid: "Solid",
+  gradient_radial: "Radial Gradient",
+  noise_field: "Noise Field",
+  noise_color: "Color Noise",
+  radial_waves: "Harmonic Rings",
+  spiral: "Spiral",
+  plasma: "Plasma",
+  spoke_chase: "Spoke Chase",
+  sparkle: "Sparkle",
+  beat_rings: "Beat Rings",
+  breathe: "Breathe",
+};
+
+/** Kind-specific labels for param_a..d, where meaningful. */
+export const PARAM_LABELS: Partial<Record<LayerKind, [string?, string?, string?, string?]>> = {
+  noise_field: ["Threshold"],
+  radial_waves: ["Base freq", "Harmonics"],
+  spiral: ["Arms", "Twist", "Sharpness"],
+  spoke_chase: ["Speed", "Direction", "Tail length"],
+  sparkle: ["Density", "Twinkle rate"],
+  beat_rings: ["Ring width", "Direction"],
+  breathe: ["Depth floor"],
+};
+
+export function defaultLayer(kind: LayerKind): LayerCfg {
+  return {
+    kind,
+    enabled: true,
+    name: LAYER_LABELS[kind],
+    blend: "add",
+    opacity: 1.0,
+    speed: 1.0,
+    scale: 1.0,
+    audio_source: 0,
+    audio_amount: 0.5,
+    hue: 0.6,
+    hue_range: 0.2,
+    saturation: 0.9,
+    brightness: 1.0,
+    tilt_amount: 0.0,
+    param_a: 0.5,
+    param_b: 0.5,
+    param_c: 0.5,
+    param_d: 0.5,
+  };
+}

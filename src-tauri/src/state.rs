@@ -1,0 +1,162 @@
+//! Shared state between the frame-generation thread (primary), the audio threads,
+//! the WebSocket server, and the Tauri shell. Everything is lock-light: the frame
+//! loop takes short locks to snapshot inputs and never blocks on clients.
+
+use crate::config::AppConfig;
+use crate::layers::{EffectCfg, MAX_AUDIO_SOURCES};
+use crate::protocol::{RuntimeStatus, ServerMsg};
+use parking_lot::{Mutex, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+use tokio::sync::broadcast;
+
+/// Per-source audio features, written by an analysis chain, read by the frame loop.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AudioFeatures {
+    pub active: bool,
+    pub level: f32,
+    pub bass: f32,
+    pub mid: f32,
+    pub treble: f32,
+    /// Decaying onset pulse (1.0 at each detected onset).
+    pub onset: f32,
+    /// 0..1 phase within the current beat.
+    pub beat_phase: f32,
+    pub bpm: f32,
+}
+
+/// Control inputs from remote phones (IMU) — a small global "control bus".
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ControlInputs {
+    pub yaw: f32,
+    pub pitch: f32,
+    pub roll: f32,
+    /// Decays over time; spiked by phone shakes.
+    pub shake: f32,
+}
+
+pub struct ActiveEffect {
+    pub cfg: EffectCfg,
+    pub born: Instant,
+}
+
+pub struct ActiveDab {
+    pub kind: crate::layers::PenKind,
+    pub angle: f32,
+    pub radius: f32,
+    pub hue: f32,
+    pub size: f32,
+    pub intensity: f32,
+    pub born: Instant,
+}
+
+/// One frame as produced by the engine: raw perceptual RGB (no LED gamma).
+pub struct PreviewFrame {
+    pub frame_number: u64,
+    pub spokes: u32,
+    pub pixels_per_spoke: u32,
+    pub rgb: Vec<u8>,
+}
+
+pub struct SharedState {
+    pub config: RwLock<AppConfig>,
+    /// Bumped on every config change; threads compare to notice reconfiguration.
+    pub config_epoch: AtomicU32,
+    pub effects: Mutex<Vec<ActiveEffect>>,
+    pub dabs: Mutex<Vec<ActiveDab>>,
+    pub audio: [Mutex<AudioFeatures>; MAX_AUDIO_SOURCES],
+    pub control: Mutex<ControlInputs>,
+    pub status: Mutex<RuntimeStatus>,
+    pub shutdown: AtomicBool,
+    /// JSON events fanned out to every connected client.
+    pub events: broadcast::Sender<ServerMsg>,
+    /// Full-resolution frames; each client task decimates/throttles for itself.
+    pub preview: broadcast::Sender<Arc<PreviewFrame>>,
+    pub started: Instant,
+}
+
+impl SharedState {
+    pub fn new(config: AppConfig) -> Arc<Self> {
+        let (events, _) = broadcast::channel(256);
+        let (preview, _) = broadcast::channel(4);
+        Arc::new(Self {
+            config: RwLock::new(config),
+            config_epoch: AtomicU32::new(0),
+            effects: Mutex::new(Vec::new()),
+            dabs: Mutex::new(Vec::new()),
+            audio: Default::default(),
+            control: Mutex::new(ControlInputs::default()),
+            status: Mutex::new(RuntimeStatus::default()),
+            shutdown: AtomicBool::new(false),
+            events,
+            preview,
+            started: Instant::now(),
+        })
+    }
+
+    pub fn bump_config(&self) {
+        self.config_epoch.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub fn epoch(&self) -> u32 {
+        self.config_epoch.load(Ordering::SeqCst)
+    }
+
+    /// Mutate the config, persist it, and notify all clients with fresh state.
+    pub fn update_config(&self, f: impl FnOnce(&mut AppConfig)) {
+        let snapshot = {
+            let mut cfg = self.config.write();
+            f(&mut cfg);
+            cfg.clone()
+        };
+        crate::config::save(&snapshot);
+        self.bump_config();
+        self.broadcast_state();
+    }
+
+    pub fn broadcast_state(&self) {
+        let config = Box::new(self.config.read().clone());
+        let status = self.status.lock().clone();
+        let _ = self.events.send(ServerMsg::State { config, status });
+    }
+
+    /// Add live-draw dabs; the oldest are evicted when the buffer is full so a
+    /// crowd drawing at once degrades gracefully instead of erroring.
+    pub fn paint(
+        &self,
+        kind: crate::layers::PenKind,
+        points: &[crate::layers::DabPoint],
+        hue: f32,
+        size: f32,
+        intensity: f32,
+    ) {
+        let mut dabs = self.dabs.lock();
+        for p in points {
+            if dabs.len() >= crate::layers::MAX_DABS {
+                dabs.remove(0);
+            }
+            dabs.push(ActiveDab {
+                kind,
+                angle: p.angle,
+                radius: p.radius.clamp(0.0, 1.2),
+                hue,
+                size: size.clamp(0.01, 1.0),
+                intensity: intensity.clamp(0.0, 2.0),
+                born: Instant::now(),
+            });
+        }
+    }
+
+    pub fn trigger_effect(&self, cfg: EffectCfg) {
+        let mut effects = self.effects.lock();
+        // Cap active effects; drop the oldest if the floor is spamming taps.
+        if effects.len() >= crate::layers::MAX_EFFECTS {
+            effects.remove(0);
+        }
+        effects.push(ActiveEffect {
+            cfg,
+            born: Instant::now(),
+        });
+    }
+}
