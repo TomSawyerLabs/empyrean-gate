@@ -143,6 +143,18 @@ fn wait_frames(state: &SharedState, n: u64, timeout: std::time::Duration) {
     }
 }
 
+/// Give the engine a moment to put E1.31 stream-termination packets on the wire
+/// before the process goes away. Without this, `run` returns straight into process
+/// teardown and the rig is left holding its last frame until the receivers time out.
+fn await_sacn_terminate(state: &SharedState) {
+    let start = std::time::Instant::now();
+    while !state.sacn_terminated.load(Ordering::SeqCst)
+        && start.elapsed() < std::time::Duration::from_millis(500)
+    {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
 /// Local IPv4 interfaces as "name — ip" for the sACN interface picker.
 fn list_interfaces() -> Vec<String> {
     match local_ip_address::list_afinet_netifas() {
@@ -176,6 +188,7 @@ pub fn run(headless: bool) {
         while !state.shutdown.load(Ordering::SeqCst) {
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
+        await_sacn_terminate(&state);
         return;
     }
 
@@ -186,4 +199,5 @@ pub fn run(headless: bool) {
         .expect("error while running tauri application");
 
     state.shutdown.store(true, Ordering::SeqCst);
+    await_sacn_terminate(&state);
 }

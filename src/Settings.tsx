@@ -478,6 +478,34 @@ function OutputPanel({ config }: { config: AppConfig }) {
       <p className="hint">
         Pick the interface that is on the lighting network — multicast leaves through this NIC.
       </p>
+      <label className="field-row" style={{ maxWidth: 460 }}>
+        <span>Source name</span>
+        <input
+          type="text"
+          key={out.source_name}
+          defaultValue={out.source_name}
+          maxLength={63}
+          placeholder="Empyrean Gate"
+          onBlur={(e) => commit({ source_name: e.target.value })}
+          style={{ flex: 1 }}
+        />
+      </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={out.discovery}
+          onChange={(e) => commit({ discovery: e.target.checked })}
+        />
+        Advertise our universe list on the discovery universe (64214) every 10 s
+      </label>
+      <p className="hint">
+        Receivers and tools like sACNView identify this source by name, and by its CID{" "}
+        <code>{out.cid}</code> — generated once and persistent, so a restart or a handover
+        between instances looks like the <em>same</em> source instead of a second one
+        fighting the first in the receiver's merge. Discovery is what makes the source and
+        its universes appear in those tools; turn it off only on a network where the extra
+        multicast is unwelcome.
+      </p>
       <label className="toggle-row">
         <input
           type="checkbox"

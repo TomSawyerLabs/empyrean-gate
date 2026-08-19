@@ -550,6 +550,9 @@ fn engine_thread(state: Arc<SharedState>) {
             }
         }
     }
+    // Backstop for the paths that leave `run_frames` early (GPU re-init, init
+    // failure): nothing more will be sent, so exit must not wait on us.
+    state.sacn_terminated.store(true, Ordering::SeqCst);
 }
 
 #[cfg(feature = "shader-hot-reload")]
@@ -591,6 +594,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     // never beats against the render tick — that aliasing showed up in sACNView as
     // an unsteady frame rate.
     let mut next_sacn = Instant::now();
+    // Edge-detects output going off, which is when the stream gets terminated.
+    let mut was_sending = false;
     let mut last_status = Instant::now();
     let mut fps_ema = 0.0f32;
     let mut frame_ms_ema = 0.0f32;
@@ -882,7 +887,19 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 state.sacn_quiesced.store(true, Ordering::SeqCst);
             }
             let sacn_allowed = !state.sacn_hold.load(Ordering::Relaxed) && !leaving;
-            if cfg.output.enabled && sacn_allowed {
+            let sending = cfg.output.enabled && sacn_allowed;
+            if !sending && was_sending && !leaving {
+                // Output was just switched off: close the stream with E1.31
+                // termination packets so receivers release the universes now,
+                // rather than holding the last frame through their 2.5 s
+                // source-loss timeout. Never on `leaving` — the successor
+                // instance carries the same CID's stream onward.
+                if let Some(s) = sacn.as_mut() {
+                    s.send_terminate();
+                }
+            }
+            was_sending = sending;
+            if sending {
                 if let Some(s) = sacn.as_mut() {
                     let cap = cfg.output.fps.clamp(1.0, 120.0);
                     let send = if cfg.output.sync_to_render && cap >= cfg.render.fps {
@@ -983,4 +1000,14 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // Decay the shake control input.
         state.control.lock().shake *= (-dt / 0.3).exp();
     }
+
+    // Shutdown (app exit). Close the stream so the rig goes dark deliberately
+    // instead of freezing on the last frame — but not after a handover, where the
+    // successor is already driving the same CID.
+    if !state.leaving.load(Ordering::SeqCst) {
+        if let Some(s) = sacn.as_mut() {
+            s.send_terminate();
+        }
+    }
+    state.sacn_terminated.store(true, Ordering::SeqCst);
 }

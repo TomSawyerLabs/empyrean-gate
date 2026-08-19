@@ -69,6 +69,23 @@ pub struct OutputConfig {
     pub priority: u8,
     /// Gamma applied to LED output only (preview shows the raw pattern).
     pub led_gamma: f32,
+    /// E1.31 source identity: a UUID that receivers key ALL per-source state on —
+    /// merge arbitration, sequence tracking, and the 2.5 s source-loss timeout.
+    /// Generated once on first run and then persistent: the spec requires it to
+    /// survive restarts and upgrades, and a changed CID makes every receiver treat
+    /// us as a brand-new source while the old identity lingers in its merge table
+    /// (visible HTP-merge artifacts, and controllers with a 2–4 source cap can
+    /// refuse the new one). A handover between instances is seamless precisely
+    /// because the successor reads this same CID out of the config.
+    pub cid: String,
+    /// E1.31 source name, shown by receivers and diagnostic tools. 64 bytes on the
+    /// wire (UTF-8, null-terminated); longer names are truncated.
+    pub source_name: String,
+    /// Advertise our universe list on the E1.31 discovery universe (64214,
+    /// 239.255.250.214) every 10 s while transmitting. This is what makes the
+    /// source — and which universes it drives — visible in sACNView and controller
+    /// UIs. Costs one small multicast packet per 10 s.
+    pub discovery: bool,
 }
 
 impl Default for OutputConfig {
@@ -86,6 +103,9 @@ impl Default for OutputConfig {
             multicast: true,
             priority: 100,
             led_gamma: 2.2,
+            cid: String::new(), // filled on first load (see `load`)
+            source_name: "Empyrean Gate".into(),
+            discovery: true,
         }
     }
 }
@@ -391,8 +411,19 @@ pub fn load() -> AppConfig {
             AppConfig::default()
         }
     };
+    // First-run identities. Both must be written back immediately: the sACN CID in
+    // particular is only useful if it is the SAME one next launch.
+    let mut dirty = false;
     if cfg.server.join_token.is_empty() {
         cfg.server.join_token = generate_token();
+        dirty = true;
+    }
+    if cfg.output.cid.is_empty() {
+        cfg.output.cid = uuid::Uuid::new_v4().to_string();
+        log::info!("generated sACN source CID {}", cfg.output.cid);
+        dirty = true;
+    }
+    if dirty {
         save(&cfg);
     }
     cfg

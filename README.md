@@ -69,6 +69,14 @@ live meters.
   render fps or fix a rate, and optionally enable E1.31 universe synchronization
   (PixLite Mk4 latches all universes per sync packet, tear-free). Live packets/s in
   the status HUD tells you it's actually transmitting.
+- **A well-behaved sACN source.** The CID (source identity) is generated once and
+  persisted, as the spec requires — so restarts and handovers look like the *same*
+  source instead of a second one fighting the first in every receiver's merge for
+  2.5 s. Streams are closed with E1.31 termination packets when output is switched
+  off or the app exits, rather than leaving the rig holding its last frame until the
+  receivers time out. The universe list is advertised on the discovery universe every
+  10 s, so the source shows up in sACNView and controller UIs. Source name is
+  configurable.
 
 ```
 src/                React UI (preview + settings), WebGL2 preview, sensors

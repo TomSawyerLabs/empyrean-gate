@@ -77,6 +77,10 @@ export interface OutputConfig {
   multicast: boolean;
   priority: number;
   led_gamma: number;
+  /** Persistent E1.31 source identity (UUID). Generated on first run; never changes. */
+  cid: string;
+  source_name: string;
+  discovery: boolean;
 }
 
 export interface ServerConfig {

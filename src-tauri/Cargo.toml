@@ -41,6 +41,8 @@ socket2 = "0.6.5"
 tauri = { version = "2", features = [] }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
 ureq = { version = "3.4.0", default-features = false, features = ["json"] }
+# sACN source identity (CID) — a real RFC 4122 v4 UUID, generated once and persisted.
+uuid = { version = "1.24.1", features = ["v4"] }
 wgpu = { version = "29", default-features = false, features = ["wgsl", "vulkan"] }
 
 # macOS has no native Vulkan; wgpu's plain `vulkan` feature is not implemented there
