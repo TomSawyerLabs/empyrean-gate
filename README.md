@@ -116,8 +116,20 @@ bun tauri build --no-bundle
 # → src-tauri/target/release/empyrean-gate(.exe)  — standalone, UI embedded
 ```
 
-CI (GitHub Actions) builds Windows and Linux binaries on every push. The same binary
-runs the desktop app or `--headless` for show machines.
+CI (GitHub Actions) builds Windows, Linux, and macOS binaries on every push. The same
+binary runs the desktop app or `--headless` for show machines.
+
+## Releases
+
+Releases are cut by CI only — push a version tag and the Release workflow runs the
+check suite, builds all targets, and publishes a GitHub Release with the standalone
+binaries attached:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+Grab binaries from https://github.com/cinderblock/empyrean-gate/releases.
 
 ## Safety notes
 
