@@ -371,10 +371,13 @@ impl SharedState {
         v.revision = v.revision.wrapping_add(1);
     }
 
-    pub fn stop_video(&self, conn_id: Option<u64>) {
+    /// Stop the current source, returning whether this caller actually owned (or
+    /// force-stopped) it. The return value lets the server clear soundtrack data
+    /// without a stale disconnect blanking the new owner's beat source.
+    pub fn stop_video(&self, conn_id: Option<u64>) -> bool {
         let mut v = self.video.lock();
         if conn_id.is_some_and(|id| id != v.owner_conn_id) {
-            return;
+            return false;
         }
         v.active = false;
         v.owner_conn_id = 0;
@@ -384,6 +387,7 @@ impl SharedState {
         v.fps = 0.0;
         v.last_frame = None;
         v.revision = v.revision.wrapping_add(1);
+        true
     }
 
     pub fn push_video_frame(

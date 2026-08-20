@@ -188,6 +188,9 @@ pub enum AudioSourceKind {
     /// Features streamed from a remote browser client (its microphone) over WebSocket.
     /// `client_id` is matched against the id the remote client announces.
     Remote { client_id: String },
+    /// Features extracted in the browser from the soundtrack of the currently
+    /// active video. Packets are accepted only from that video's owning client.
+    Video,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -229,6 +232,12 @@ pub struct RenderConfig {
     pub fps: f32,
     pub master_brightness: f32,
     pub master_speed: f32,
+    /// When set, drive the lighting beat clock at this BPM instead of following
+    /// the audio detector. Half/normal/double time is applied afterward.
+    pub manual_bpm: Option<f32>,
+    /// Musical clock presented to lighting effects. Tempo detection remains at the
+    /// source rate; this only changes the beat phase/BPM consumed by the show.
+    pub beat_time: BeatTime,
     /// Autopilot: slow mean-reverting random walk over layer parameters, so an
     /// unattended show keeps evolving for hours. Each layer's `walk_amount` scales
     /// how far its parameters may wander from where the sliders are set.
@@ -245,12 +254,33 @@ pub struct RenderConfig {
     pub walk_depth: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BeatTime {
+    Half,
+    #[default]
+    Normal,
+    Double,
+}
+
+impl BeatTime {
+    pub fn multiplier(self) -> f32 {
+        match self {
+            Self::Half => 0.5,
+            Self::Normal => 1.0,
+            Self::Double => 2.0,
+        }
+    }
+}
+
 impl Default for RenderConfig {
     fn default() -> Self {
         Self {
             fps: 60.0,
             master_brightness: 1.0,
             master_speed: 1.0,
+            manual_bpm: None,
+            beat_time: BeatTime::Normal,
             walk_enabled: true,
             walk_layers: false,
             walk_min_layers: 2,

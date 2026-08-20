@@ -55,6 +55,7 @@ export interface EffectCfg {
   angle: number;
   radius: number;
   intensity: number;
+  size: number;
   hue: number;
   duration: number;
 }
@@ -114,6 +115,7 @@ export type AudioSourceConfig = {
 } & (
   | { kind: "device"; device: string | null; channels: number[]; loopback: boolean }
   | { kind: "remote"; client_id: string }
+  | { kind: "video" }
 );
 
 export interface AudioConfig {
@@ -124,6 +126,8 @@ export interface RenderConfig {
   fps: number;
   master_brightness: number;
   master_speed: number;
+  manual_bpm: number | null;
+  beat_time: "half" | "normal" | "double";
   walk_enabled: boolean;
   walk_layers: boolean;
   walk_min_layers: number;
@@ -344,7 +348,7 @@ export function defaultLayer(kind: LayerKind): LayerCfg {
   };
   if (kind === "video") {
     layer.blend = "alpha_over";
-    layer.audio_amount = 0;
+    layer.audio_amount = 0.7;
     layer.hue_range = 1;
     layer.saturation = 1;
     layer.walk_amount = 0;

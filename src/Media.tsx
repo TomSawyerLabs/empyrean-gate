@@ -1,10 +1,21 @@
 import { useEffect, useRef, useState } from "react";
+import { startAudioFeatures } from "./sensors";
 import { defaultLayer } from "./types";
 import { useGate } from "./state";
 import type { ResolvedMedia } from "./ws";
 
 const FRAME_RATES = [10, 15, 24];
 const TEXTURE_SIZES = [64, 96, 128];
+type AudioMode = "none" | "video" | `source:${number}`;
+
+interface SoundtrackGraph {
+  element: HTMLVideoElement;
+  context: AudioContext;
+  source: MediaElementAudioSourceNode;
+  analyser: AnalyserNode;
+  output: GainNode;
+  stopFeatures: (() => void) | null;
+}
 
 export default function Media() {
   const { client, config, connected, status } = useGate();
@@ -15,14 +26,99 @@ export default function Media() {
   const [error, setError] = useState<string | null>(null);
   const [transportFps, setTransportFps] = useState(15);
   const [textureSize, setTextureSize] = useState(96);
+  const [audioMode, setAudioMode] = useState<AudioMode>("video");
+  const [audioAmount, setAudioAmount] = useState(0.7);
+  const [monitorSoundtrack, setMonitorSoundtrack] = useState(false);
   const [sent, setSent] = useState(0);
   const [dropped, setDropped] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const localObjectUrl = useRef<string | null>(null);
   const claimStartedAt = useRef(0);
+  const soundtrackRef = useRef<SoundtrackGraph | null>(null);
+
+  const pauseSoundtrack = () => {
+    const graph = soundtrackRef.current;
+    if (!graph) return;
+    graph.stopFeatures?.();
+    graph.stopFeatures = null;
+    graph.output.gain.value = 0;
+  };
+
+  const destroySoundtrack = () => {
+    const graph = soundtrackRef.current;
+    if (!graph) return;
+    pauseSoundtrack();
+    graph.source.disconnect();
+    graph.analyser.disconnect();
+    graph.output.disconnect();
+    void graph.context.close();
+    soundtrackRef.current = null;
+  };
+
+  const startSoundtrack = (video: HTMLVideoElement) => {
+    let graph = soundtrackRef.current;
+    if (!graph || graph.element !== video) {
+      destroySoundtrack();
+      const context = new AudioContext();
+      const source = context.createMediaElementSource(video);
+      const analyser = context.createAnalyser();
+      const output = context.createGain();
+      source.connect(analyser);
+      analyser.connect(output);
+      output.connect(context.destination);
+      graph = { element: video, context, source, analyser, output, stopFeatures: null };
+      soundtrackRef.current = graph;
+    }
+    // createMediaElementSource reroutes playback through this graph. Keep the
+    // element itself unmuted so the analyser receives samples; the output gain
+    // independently controls whether this iPad/laptop is audible.
+    video.muted = false;
+    graph.output.gain.value = monitorSoundtrack ? 1 : 0;
+    graph.stopFeatures ??= startAudioFeatures(client, graph.context, graph.analyser, "video");
+    void graph.context.resume();
+  };
+
+  const configureVideoReaction = (mode: AudioMode, amount: number): boolean => {
+    if (!config) return false;
+    const sources = [...config.audio.sources];
+    let sourceIndex = 0;
+    if (mode === "video") {
+      sourceIndex = sources.findIndex((source) => source.kind === "video");
+      if (sourceIndex < 0) {
+        if (sources.length >= 4) {
+          setError("All four audio-source slots are in use. Remove one in Settings to analyze the video soundtrack.");
+          return false;
+        }
+        sourceIndex = sources.length;
+        sources.push({ id: "video", kind: "video", gain: 1 });
+      }
+    } else if (mode.startsWith("source:")) {
+      sourceIndex = Number(mode.slice(7));
+      if (!sources[sourceIndex] || sources[sourceIndex].kind === "video") {
+        setError("That live audio source is no longer available. Choose another source.");
+        return false;
+      }
+    }
+
+    const layers = config.layers.map((layer) =>
+      layer.kind === "video"
+        ? { ...layer, audio_source: sourceIndex, audio_amount: mode === "none" ? 0 : amount }
+        : layer,
+    );
+    if (!layers.some((layer) => layer.kind === "video")) {
+      layers.push({
+        ...defaultLayer("video"),
+        audio_source: sourceIndex,
+        audio_amount: mode === "none" ? 0 : amount,
+      });
+    }
+    client.setConfig({ ...config, audio: { sources }, layers });
+    return true;
+  };
 
   const replaceMedia = (next: ResolvedMedia) => {
+    destroySoundtrack();
     if (localObjectUrl.current && localObjectUrl.current !== next.playbackUrl) {
       URL.revokeObjectURL(localObjectUrl.current);
       localObjectUrl.current = null;
@@ -62,20 +158,35 @@ export default function Media() {
   const goLive = () => {
     const video = videoRef.current;
     if (!video || !media) return;
+    if (!configureVideoReaction(audioMode, audioAmount)) return;
+    if (audioMode === "video") {
+      try {
+        startSoundtrack(video);
+      } catch (e) {
+        setError(`The soundtrack could not be analyzed: ${e instanceof Error ? e.message : e}`);
+        return;
+      }
+    } else {
+      pauseSoundtrack();
+    }
+    claimStartedAt.current = performance.now();
+    client.startVideo(media.title, media.sourceUrl);
     // Calling play synchronously from this tap matters on iPadOS.
     void video
       .play()
       .then(() => {
-        if (!config?.layers.some((layer) => layer.kind === "video")) {
-          client.addLayer(defaultLayer("video"));
-        }
         setBroadcasting(true);
       })
-      .catch((e) => setError(`Playback could not start: ${e instanceof Error ? e.message : e}`));
+      .catch((e) => {
+        pauseSoundtrack();
+        client.stopVideo();
+        setError(`Playback could not start: ${e instanceof Error ? e.message : e}`);
+      });
   };
 
   const stop = () => {
     setBroadcasting(false);
+    pauseSoundtrack();
     client.stopVideo();
   };
 
@@ -158,13 +269,36 @@ export default function Media() {
 
   useEffect(
     () => () => {
+      destroySoundtrack();
       if (localObjectUrl.current) URL.revokeObjectURL(localObjectUrl.current);
     },
     [],
   );
 
+  useEffect(() => {
+    const graph = soundtrackRef.current;
+    if (graph) graph.output.gain.value = monitorSoundtrack && broadcasting && audioMode === "video" ? 1 : 0;
+  }, [audioMode, broadcasting, monitorSoundtrack]);
+
   const active = status?.video;
   const ownedHere = active?.active && active.owner_id === client.clientId;
+  const soundtrackIndex = config?.audio.sources.findIndex((source) => source.kind === "video") ?? -1;
+  const soundtrackStatus = soundtrackIndex >= 0 ? status?.audio[soundtrackIndex] : undefined;
+
+  const changeAudioMode = (next: AudioMode) => {
+    setAudioMode(next);
+    if (!broadcasting) return;
+    if (!configureVideoReaction(next, audioAmount)) return;
+    if (next === "video" && videoRef.current) {
+      try {
+        startSoundtrack(videoRef.current);
+      } catch (e) {
+        setError(`The soundtrack could not be analyzed: ${e instanceof Error ? e.message : e}`);
+      }
+    } else {
+      pauseSoundtrack();
+    }
+  };
 
   return (
     <div className="media-page">
@@ -219,7 +353,7 @@ export default function Media() {
               src={media.playbackUrl}
               controls
               playsInline
-              muted
+              muted={audioMode !== "video" || !broadcasting}
               loop
               preload="metadata"
               crossOrigin="anonymous"
@@ -245,6 +379,59 @@ export default function Media() {
                 </select>
               </label>
             </div>
+          </div>
+          <div className="media-audio-controls">
+            <label>
+              Rhythm source
+              <select value={audioMode} onChange={(e) => changeAudioMode(e.target.value as AudioMode)}>
+                <option value="video">Video soundtrack</option>
+                {(config?.audio.sources ?? []).some((source) => source.kind !== "video") && (
+                  <optgroup label="Gate live inputs">
+                    {(config?.audio.sources ?? []).map((source, index) =>
+                      source.kind !== "video" ? (
+                        <option key={`${source.id}-${index}`} value={`source:${index}`}>
+                          {source.id}
+                        </option>
+                      ) : null,
+                    )}
+                  </optgroup>
+                )}
+                <option value="none">Visual only</option>
+              </select>
+            </label>
+            <label className="media-audio-amount">
+              Response <strong>{Math.round(audioAmount * 100)}%</strong>
+              <input
+                type="range"
+                min="0"
+                max="1.5"
+                step="0.05"
+                value={audioAmount}
+                disabled={audioMode === "none"}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  setAudioAmount(next);
+                  if (broadcasting) configureVideoReaction(audioMode, next);
+                }}
+              />
+            </label>
+            {audioMode === "video" && (
+              <label className="media-monitor-toggle">
+                <input
+                  type="checkbox"
+                  checked={monitorSoundtrack}
+                  onChange={(e) => setMonitorSoundtrack(e.target.checked)}
+                />
+                Hear soundtrack here
+              </label>
+            )}
+            {audioMode === "video" && broadcasting && (
+              <span className={soundtrackStatus?.active ? "ok" : "hint"}>
+                {soundtrackStatus?.active
+                  ? `Soundtrack live${soundtrackStatus.bpm > 0 ? ` · ${soundtrackStatus.bpm.toFixed(0)} BPM` : " · finding beat…"}`
+                  : "Starting soundtrack analysis…"}
+              </span>
+            )}
           </div>
           <div className="media-actions">
             {!broadcasting ? (
@@ -274,7 +461,8 @@ export default function Media() {
         <p className="hint">
           Add or edit a <strong>Video</strong> layer in Settings to shape it: Zoom, Kaleidoscope,
           Contrast, Rotation, saturation, tint/original-color mix, brightness, blend, opacity,
-          speed, and audio response all remain live and composable with the other patterns.
+          speed, and audio response all remain live and composable with the other patterns. The
+          rhythm source above can be the video's own soundtrack or any configured Gate input.
         </p>
         {active?.active && !broadcasting && (
           <button className="danger" onClick={() => client.stopVideo(true)}>Stop current source</button>

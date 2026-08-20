@@ -19,7 +19,7 @@ use crate::audio::RemoteChains;
 use crate::config::ClientRecord;
 use crate::media::{MediaResolver, ResolveRequest};
 use crate::protocol::{
-    ClientMsg, HandoverGrant, ServerMsg, PREVIEW_MAGIC, VIDEO_FRAME_MAGIC,
+    BrowserAudioStream, ClientMsg, HandoverGrant, ServerMsg, PREVIEW_MAGIC, VIDEO_FRAME_MAGIC,
 };
 use crate::state::{PreviewFrame, SharedState};
 use axum::extract::connect_info::ConnectInfo;
@@ -443,7 +443,9 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
         state.preview_gate.lock().release(conn_id, max);
     }
     state.connected_clients.lock().remove(&conn_id);
-    state.stop_video(Some(conn_id));
+    if state.stop_video(Some(conn_id)) {
+        deactivate_video_audio(&ctx);
+    }
     state.status.lock().clients -= 1;
 }
 
@@ -458,6 +460,15 @@ fn handle_video_frame(state: &SharedState, conn_id: u64, bytes: &[u8]) {
     let width = u16::from_le_bytes(bytes[8..10].try_into().unwrap());
     let height = u16::from_le_bytes(bytes[10..12].try_into().unwrap());
     let _ = state.push_video_frame(conn_id, width, height, &bytes[12..]);
+}
+
+fn deactivate_video_audio(ctx: &Ctx) {
+    let chains = ctx.remote.lock();
+    for (key, chain) in chains.iter() {
+        if matches!(key, crate::audio::BrowserAudioKey::Video) {
+            chain.lock().deactivate(&ctx.state);
+        }
+    }
 }
 
 fn is_revoked(state: &SharedState, client_id: &str) -> bool {
@@ -732,28 +743,39 @@ async fn handle_msg(
         }
         ClientMsg::StartVideo { title, source_url } => {
             if !client_id.is_empty() {
+                deactivate_video_audio(ctx);
                 state.start_video(conn_id, client_id, title, source_url);
             }
         }
         ClientMsg::StopVideo { force } => {
-            if !client_id.is_empty() {
-                state.stop_video(if force { None } else { Some(conn_id) });
+            if !client_id.is_empty()
+                && state.stop_video(if force { None } else { Some(conn_id) })
+            {
+                deactivate_video_audio(ctx);
             }
         }
         ClientMsg::AudioFrame {
+            stream,
             level,
             bass,
             mid,
             treble,
             flux,
         } => {
+            // A soundtrack is authoritative only while this connection owns the
+            // live video. Microphone packets retain their client-id routing.
+            if stream == BrowserAudioStream::Video {
+                let video = state.video.lock();
+                if !video.active || video.owner_conn_id != conn_id {
+                    return Ok(());
+                }
+            }
             let chains = ctx.remote.lock();
-            for (id, chain) in chains.iter() {
-                if id == client_id {
+            for (key, chain) in chains.iter() {
+                if key.matches(stream, client_id) {
                     chain
                         .lock()
                         .feed_remote(state, level, bass, mid, treble, flux);
-                    break;
                 }
             }
         }

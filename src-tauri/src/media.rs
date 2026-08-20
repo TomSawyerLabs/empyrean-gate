@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use url::Url;
 
 const MAX_HTML_BYTES: usize = 1_500_000;
@@ -117,29 +117,41 @@ impl MediaResolver {
         // optional capability: yt-dlp changes frequently and is not bundled into
         // the small standalone Gate binary. When present, request one muxed HTTP
         // stream that the browser can decode without ffmpeg.
-        if let Ok((url, title, headers)) = resolve_with_ytdlp(input).await {
-            let _ = validate_public_url(&url).await?;
-            // Extraction can succeed while a provider rejects the signed media
-            // URL (expired tokens, missing proof-of-origin, etc.). Probe it now so
-            // the UI gets an honest resolver error instead of a player that 403s.
-            if let Ok((url, response)) = self
-                .fetch_follow(url, headers.clone(), Some("bytes=0-0"))
-                .await
-            {
-                let ct = response
-                    .headers()
-                    .get(reqwest::header::CONTENT_TYPE)
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or("")
-                    .to_ascii_lowercase();
-                if is_direct_media(&url, &ct) {
-                    return Ok(self.make_session(url, headers, title, source, "yt-dlp"));
+        let provider_error = match resolve_with_ytdlp(input).await {
+            Ok((url, title, headers, available_at)) => {
+                let _ = validate_public_url(&url).await?;
+                // Some YouTube signatures deliberately become valid a few seconds
+                // after extraction. yt-dlp exposes that instant as `available_at`;
+                // probing early produces a misleading 403.
+                if let Some(delay) = provider_delay(available_at) {
+                    tokio::time::sleep(delay).await;
+                }
+                // Extraction can still succeed while a provider rejects the signed
+                // URL (expired tokens, missing proof-of-origin, etc.). Probe it now.
+                match self
+                    .fetch_follow(url, headers.clone(), Some("bytes=0-0"))
+                    .await
+                {
+                    Ok((url, response)) => {
+                        let ct = response
+                            .headers()
+                            .get(reqwest::header::CONTENT_TYPE)
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("")
+                            .to_ascii_lowercase();
+                        if is_direct_media(&url, &ct) {
+                            return Ok(self.make_session(url, headers, title, source, "yt-dlp"));
+                        }
+                        "the extracted stream was not browser-playable".to_owned()
+                    }
+                    Err(error) => format!("the provider rejected its extracted stream ({error:#})"),
                 }
             }
-        }
+            Err(error) => format!("the provider extractor failed ({error:#})"),
+        };
 
         bail!(
-            "No directly playable video was found. Try a direct MP4/WebM URL, a page with og:video metadata, or install yt-dlp on the Gate machine for provider links."
+            "No directly playable video was found: {provider_error}. Try another public URL, or update yt-dlp on the Gate machine."
         )
     }
 
@@ -312,7 +324,7 @@ fn html_title(html: &str) -> Option<String> {
     (!title.is_empty()).then_some(title)
 }
 
-async fn resolve_with_ytdlp(input: &str) -> Result<(Url, String, HeaderMap)> {
+async fn resolve_with_ytdlp(input: &str) -> Result<(Url, String, HeaderMap, Option<u64>)> {
     let mut command = tokio::process::Command::new("yt-dlp");
     command
         .kill_on_drop(true)
@@ -326,6 +338,14 @@ async fn resolve_with_ytdlp(input: &str) -> Result<(Url, String, HeaderMap)> {
             "1",
             "--extractor-retries",
             "1",
+            // Current YouTube extraction needs an external JS runtime. Node is
+            // already used to build the UI and this remains harmless elsewhere.
+            "--js-runtimes",
+            "node",
+            // Include the embedded client as a fallback: it still exposes a
+            // browser-decodable muxed MP4 for many public/embeddable videos.
+            "--extractor-args",
+            "youtube:player_client=default,web_embedded",
             "--format",
             "best[protocol^=http][vcodec!=none][acodec!=none][ext=mp4]/best[protocol^=http][vcodec!=none][acodec!=none]",
             "--",
@@ -343,6 +363,7 @@ async fn resolve_with_ytdlp(input: &str) -> Result<(Url, String, HeaderMap)> {
         .ok_or_else(|| anyhow!("yt-dlp returned no playable URL"))?;
     let url = Url::parse(raw_url)?;
     let title = json["title"].as_str().unwrap_or("Video").to_owned();
+    let available_at = json["available_at"].as_u64();
     let mut headers = HeaderMap::new();
     if let Some(source_headers) = json["http_headers"].as_object() {
         for key in ["User-Agent", "Referer", "Origin"] {
@@ -356,7 +377,13 @@ async fn resolve_with_ytdlp(input: &str) -> Result<(Url, String, HeaderMap)> {
             }
         }
     }
-    Ok((url, title, headers))
+    Ok((url, title, headers, available_at))
+}
+
+fn provider_delay(available_at: Option<u64>) -> Option<Duration> {
+    let ready = available_at?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+    (ready > now).then(|| Duration::from_secs((ready - now).min(15)))
 }
 
 async fn validate_public_url(url: &Url) -> Result<Vec<SocketAddr>> {

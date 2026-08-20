@@ -255,6 +255,7 @@ export class GateClient {
         angle: 0,
         radius: 1,
         intensity: 1,
+        size: 1,
         hue: -1,
         duration: 0,
         ...effect,
@@ -264,8 +265,11 @@ export class GateClient {
   subscribePreview(fps: number, decimate: number) {
     this.send({ type: "subscribe_preview", fps, decimate });
   }
-  sendAudioFrame(f: { level: number; bass: number; mid: number; treble: number; flux: number }) {
-    this.send({ type: "audio_frame", ...f });
+  sendAudioFrame(
+    f: { level: number; bass: number; mid: number; treble: number; flux: number },
+    stream: "microphone" | "video" = "microphone",
+  ) {
+    this.send({ type: "audio_frame", stream, ...f });
   }
   sendImu(f: { yaw: number; pitch: number; roll: number; shake: number }) {
     this.send({ type: "imu", ...f });

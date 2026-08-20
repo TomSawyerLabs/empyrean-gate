@@ -376,7 +376,7 @@ function AudioPanel({ config }: { config: AppConfig }) {
       <p className="hint">
         Up to 4 analyzed in parallel — e.g. main stage feed + a local mic. Channels lets one
         multichannel interface feed several sources (blank = mix all). Remote sources take
-        features from a browser client's mic (see "This device" on the phone).
+        features from a browser client's mic; Video soundtrack follows the current Video-tab source.
       </p>
       {sources.map((s, i) => {
         const st = status?.audio[i];
@@ -389,7 +389,7 @@ function AudioPanel({ config }: { config: AppConfig }) {
                 style={{ width: "8em" }}
               />
               <select
-                value={s.kind === "device" ? (s.loopback ? "loopback" : "device") : "remote"}
+                value={s.kind === "device" ? (s.loopback ? "loopback" : "device") : s.kind}
                 onChange={(e) => {
                   const kind = e.target.value;
                   const base = { id: s.id, gain: s.gain };
@@ -398,7 +398,9 @@ function AudioPanel({ config }: { config: AppConfig }) {
                       j === i
                         ? kind === "remote"
                           ? { ...base, kind: "remote", client_id: "" }
-                          : {
+                          : kind === "video"
+                            ? { ...base, kind: "video" }
+                            : {
                               ...base,
                               kind: "device",
                               device: null,
@@ -413,6 +415,7 @@ function AudioPanel({ config }: { config: AppConfig }) {
                 <option value="device">Input device</option>
                 <option value="loopback">System output (loopback)</option>
                 <option value="remote">Remote (browser mic)</option>
+                <option value="video">Video soundtrack</option>
               </select>
               {s.kind === "device" && (
                 <>

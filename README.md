@@ -59,8 +59,12 @@ live meters.
   fps; the backend retains only the latest frame, so congestion drops frames instead
   of adding latency. A Video layer maps it across the radial array with zoom,
   kaleidoscope, contrast, rotation, color treatment, blend, audio, and autopilot
-  controls. If `yt-dlp` is installed on the Gate machine, provider pages get an
-  additional best-effort resolver. DRM/login-gated sources remain unsupported.
+  controls. Its rhythm source can be the decoded video's own soundtrack or any
+  configured live Gate input; soundtrack analysis sends only compact features and
+  can stay silent on the control device. If current `yt-dlp` plus a supported
+  JavaScript runtime is installed on the Gate machine, provider pages such as public
+  YouTube videos get an additional best-effort resolver. DRM/login-gated sources
+  remain unsupported.
 - **Autopilot**: a slow mean-reverting random walk drifts layer parameters around
   wherever the sliders are set (per-layer "Walk" amount = wander radius), so an
   unattended show evolves for hours without repeating.
@@ -112,8 +116,9 @@ src-tauri/src/
 ## Development
 
 Requirements: [Rust](https://rustup.rs), [Bun](https://bun.sh), a Vulkan-capable GPU +
-driver. [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) is optional for resolving
-provider pages; direct media URLs, metadata pages, and local device files do not need it.
+driver. A current [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) installation with a
+supported external JavaScript runtime (Node works) is optional for resolving provider
+pages; direct media URLs, metadata pages, and local device files do not need it.
 
 ```sh
 bun install

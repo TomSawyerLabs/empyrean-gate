@@ -617,6 +617,39 @@ fn spawn_shader_watcher(flag: Arc<std::sync::atomic::AtomicBool>) -> Option<impl
     Some(watcher)
 }
 
+/// Convert the detector/manual base beat to the musical clock consumed by lights.
+/// The beat count supplies the missing parity needed for a true half-time phase.
+fn effective_beat_phase(
+    base_phase: f32,
+    base_beat_count: u64,
+    beat_time: crate::config::BeatTime,
+) -> f32 {
+    match beat_time {
+        crate::config::BeatTime::Half => (base_beat_count % 2) as f32 * 0.5 + base_phase * 0.5,
+        crate::config::BeatTime::Normal => base_phase,
+        crate::config::BeatTime::Double => (base_phase * 2.0).fract(),
+    }
+}
+
+#[cfg(test)]
+mod beat_time_tests {
+    use super::effective_beat_phase;
+    use crate::config::BeatTime;
+
+    #[test]
+    fn half_time_spans_two_base_beats() {
+        assert_eq!(effective_beat_phase(0.25, 0, BeatTime::Half), 0.125);
+        assert_eq!(effective_beat_phase(0.25, 1, BeatTime::Half), 0.625);
+        assert_eq!(effective_beat_phase(0.25, 2, BeatTime::Half), 0.125);
+    }
+
+    #[test]
+    fn double_time_wraps_halfway_through_a_base_beat() {
+        assert_eq!(effective_beat_phase(0.25, 0, BeatTime::Double), 0.5);
+        assert_eq!(effective_beat_phase(0.75, 0, BeatTime::Double), 0.5);
+    }
+}
+
 fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut sacn = match SacnSender::new() {
         Ok(s) => Some(s),
@@ -661,8 +694,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut layer_env: Vec<f32> = Vec::new();
     let mut next_flip = Instant::now();
 
-    // Beat taps: orbiting bursts on the beat (see BeatTapConfig).
+    // Beat taps and the operator beat pulse follow the lighting-time clock, which
+    // can run at half/normal/double the detector's inferred tempo.
+    let mut prev_raw_beat_phase = [0.0f32; MAX_AUDIO_SOURCES];
+    let mut raw_beat_count = [0u64; MAX_AUDIO_SOURCES];
+    let mut manual_beat_phase = 0.0f32;
+    let mut manual_beat_count = 0u64;
     let mut prev_beat_phase = [0.0f32; MAX_AUDIO_SOURCES];
+    let mut last_beat_time = None;
+    let mut was_manual = false;
     let mut tap_angle: f32 = 0.0;
     let mut tap_beat_count: u64 = 0;
     let mut tap_spin_walk = LayerWalk::default();
@@ -722,18 +762,34 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let dt = (now - last_frame).as_secs_f32();
         last_frame = now;
 
+        if let Some(bpm) = cfg.render.manual_bpm {
+            let next = manual_beat_phase + dt * bpm.clamp(20.0, 400.0) / 60.0;
+            manual_beat_count = manual_beat_count.wrapping_add(next.floor() as u64);
+            manual_beat_phase = next.fract();
+        }
+
         // Gather inputs.
         let mut audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
         for (i, slot) in state.audio.iter().enumerate() {
             let a = slot.lock();
+            if a.bpm <= 0.0 {
+                raw_beat_count[i] = 0;
+            } else if a.beat_phase < prev_raw_beat_phase[i] - 0.5 {
+                raw_beat_count[i] = raw_beat_count[i].wrapping_add(1);
+            }
+            prev_raw_beat_phase[i] = a.beat_phase;
+            let (base_phase, base_count, base_bpm) = match cfg.render.manual_bpm {
+                Some(bpm) => (manual_beat_phase, manual_beat_count, bpm.clamp(20.0, 400.0)),
+                None => (a.beat_phase, raw_beat_count[i], a.bpm),
+            };
             audio[i] = AudioUniform {
                 level: a.level,
                 bass: a.bass,
                 mid: a.mid,
                 treble: a.treble,
                 onset: a.onset,
-                beat_phase: a.beat_phase,
-                bpm: a.bpm,
+                beat_phase: effective_beat_phase(base_phase, base_count, cfg.render.beat_time),
+                bpm: base_bpm * cfg.render.beat_time.multiplier(),
                 _pad: 0.0,
                 bass_att: a.bass_att,
                 mid_att: a.mid_att,
@@ -756,9 +812,20 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // Beat taps: on each detected beat (phase wrap) of the chosen source, fire
         // a burst at a point orbiting the ring — the automated spiral-tap.
         let bt = &cfg.beat_taps;
+        let is_manual = cfg.render.manual_bpm.is_some();
+        let beat_time_changed =
+            last_beat_time != Some(cfg.render.beat_time) || is_manual != was_manual;
+        last_beat_time = Some(cfg.render.beat_time);
+        was_manual = is_manual;
         for (i, a) in audio.iter().enumerate() {
-            let wrapped = a.beat_phase < prev_beat_phase[i] - 0.5;
+            let wrapped = !beat_time_changed && a.beat_phase < prev_beat_phase[i] - 0.5;
             prev_beat_phase[i] = a.beat_phase;
+            if wrapped && a.bpm > 0.0 && i < cfg.audio.sources.len() {
+                let _ = state.events.send(crate::protocol::ServerMsg::Beat {
+                    source: i as u32,
+                    bpm: a.bpm,
+                });
+            }
             if !bt.enabled || i != bt.audio_source as usize || !wrapped || a.bpm <= 0.0 {
                 continue;
             }
@@ -778,6 +845,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     angle: tap_angle,
                     radius: bt.radius.clamp(0.0, 1.0),
                     intensity: bt.intensity.clamp(0.0, 2.0),
+                    size: 1.0,
                     hue: bt.hue,
                     duration: 0.0,
                 });
@@ -860,7 +928,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             fx.iter()
                 .map(|e| GpuEffect {
                     kind: e.cfg.kind.gpu_id(),
-                    _pad: 0,
+                    size: e.cfg.size.clamp(0.1, 4.0),
                     age: e.born.elapsed().as_secs_f32(),
                     duration: if e.cfg.duration > 0.0 {
                         e.cfg.duration
@@ -1077,7 +1145,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     .audio
                     .iter()
                     .zip(cfg.audio.sources.iter())
-                    .map(|(slot, src)| {
+                    .enumerate()
+                    .map(|(i, (slot, src))| {
                         let a = slot.lock();
                         crate::protocol::AudioSourceStatus {
                             id: src.id.clone(),
@@ -1090,8 +1159,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                             bass: a.bass,
                             mid: a.mid,
                             treble: a.treble,
-                            bpm: a.bpm,
-                            beat_phase: a.beat_phase,
+                            bpm: audio[i].bpm,
+                            beat_phase: audio[i].beat_phase,
                         }
                     })
                     .collect();

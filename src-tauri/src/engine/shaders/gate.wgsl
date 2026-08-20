@@ -67,7 +67,7 @@ struct Layer {
 
 struct Effect {
     kind: u32,
-    _pad: u32,
+    size: f32,
     age: f32,
     duration: f32,
     angle: f32,
@@ -534,7 +534,12 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
                 p = length(p) * vec2f(cos(a), sin(a));
             }
 
-            let zoom = mix(0.5, 1.5, clamp(L.param_a, 0.0, 1.0)) * max(L.scale, 0.05);
+            // Bass gently pumps the crop and onsets add a short punch. This is
+            // deliberately restrained so ambient material breathes instead of
+            // turning the source into a strobe at full response.
+            let transient = max(A.onset, max(A.bass - A.bass_att, 0.0) * 2.0);
+            let audio_zoom = 1.0 + aud * (A.bass * 0.08 + transient * 0.12);
+            let zoom = mix(0.5, 1.5, clamp(L.param_a, 0.0, 1.0)) * max(L.scale, 0.05) * audio_zoom;
             let uv = vec2f(0.5 + p.x / (2.0 * zoom), 0.5 - p.y / (2.0 * zoom));
             let sample = video_at(uv);
             if sample.a == 0.0 {
@@ -544,9 +549,9 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
             let saturated = mix(vec3f(lum), sample.rgb, clamp(L.saturation, 0.0, 2.0));
             let tinted = hsv2rgb(L.hue, 0.85, lum);
             var rgb = mix(tinted, saturated, clamp(L.hue_range, 0.0, 1.0));
-            let contrast = mix(0.5, 2.5, clamp(L.param_c, 0.0, 1.0));
+            let contrast = mix(0.5, 2.5, clamp(L.param_c, 0.0, 1.0)) + aud * transient * 0.3;
             rgb = clamp((rgb - vec3f(0.5)) * contrast + vec3f(0.5), vec3f(0.0), vec3f(1.0));
-            rgb *= L.brightness * (1.0 + aud * A.level);
+            rgb *= L.brightness * (1.0 + aud * (A.level * 0.25 + A.bass * 0.35 + transient * 0.55));
             return vec4f(rgb, sample.a);
         }
         default: {
@@ -588,7 +593,7 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
             let origin = E.radius * vec2f(cos(E.angle), sin(E.angle));
             let d = distance(ctx.pos, origin);
             let front = t * 2.2; // wavefront reaches the far side of the array
-            let width = 0.06 + t * 0.12;
+            let width = (0.06 + t * 0.12) * E.size;
             let ring = exp(-((d - front) * (d - front)) / (width * width));
             return col * ring * fade * E.intensity * 2.0;
         }

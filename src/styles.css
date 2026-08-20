@@ -218,6 +218,26 @@ main {
 .corner.bl { bottom: 8px; left: 8px; }
 .corner.br { bottom: 8px; right: 8px; width: 210px; }
 
+.corner-stack {
+  position: absolute;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.corner-stack.tr {
+  top: 8px;
+  right: 8px;
+  width: min(220px, calc(100vw - 32px));
+}
+
+.corner-card {
+  padding: 8px;
+  background: rgba(20, 16, 36, 0.75);
+  border: 1px solid #2a2445;
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+}
+
 /* The empty ring center carries identity + live status. */
 .queue-banner {
   position: absolute;
@@ -265,6 +285,54 @@ main {
   gap: 8px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.tempo-time-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.tempo-time-grid .effect-btn {
+  min-width: 0;
+  padding: 11px 6px;
+  font-size: 12px;
+}
+
+.tempo-time-grid .effect-btn.active,
+.tempo-mode-row button.active {
+  color: #fff;
+  border-color: var(--accent2);
+  background: rgba(124, 92, 255, 0.35);
+}
+
+.tempo-mode-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.tempo-mode-row button {
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
+.tempo-slider {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.tempo-slider input {
+  min-width: 0;
+  width: 100%;
+}
+
+.tempo-slider span {
+  min-width: 24px;
+  text-align: right;
 }
 
 /* ---- Development-only Uprising frame fixture ---- */
@@ -599,7 +667,8 @@ main {
    These come AFTER all base rules above: equal-specificity overrides win by order.
    Wide (default): side columns. Squarish: corner clusters. Tall: top/bottom bars. */
 
-.corner {
+.corner,
+.corner-stack {
   display: none;
 }
 
@@ -610,6 +679,9 @@ main {
   }
   .corner {
     display: block;
+  }
+  .corner-stack {
+    display: flex;
   }
   .live-page {
     align-items: center;
@@ -927,7 +999,20 @@ button.ghost {
 
 .slider-row input[type="range"] {
   flex: 1;
+  width: 100%;
+  min-width: 0;
   accent-color: var(--accent);
+}
+
+.size-ctl,
+.size-ctl .slider-row {
+  width: 100%;
+  min-width: 0;
+}
+
+.size-ctl .slider-row > span:not(.slider-val) {
+  width: auto;
+  flex: 0 0 32px;
 }
 
 .slider-val {
@@ -1317,6 +1402,38 @@ button:disabled {
   margin-top: 12px;
 }
 
+.media-audio-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(8, 6, 18, 0.45);
+}
+
+.media-audio-controls > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.media-audio-amount {
+  min-width: min(280px, 100%);
+}
+
+.media-audio-amount input[type="range"] {
+  width: 130px;
+}
+
+.media-monitor-toggle {
+  white-space: nowrap;
+}
+
 @media (max-width: 700px) {
   .media-page {
     padding: 10px;
@@ -1343,6 +1460,13 @@ button:disabled {
   }
   .media-transport-controls {
     flex-wrap: wrap;
+  }
+  .media-audio-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .media-audio-amount input[type="range"] {
+    flex: 1;
   }
 }
 

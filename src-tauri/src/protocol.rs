@@ -16,6 +16,14 @@ pub const PREVIEW_MAGIC: u32 = 0x4547_5056; // "VPGE"
 pub const VIDEO_FRAME_MAGIC: u32 = 0x4547_5646; // "FVGE"
 pub const MAX_VIDEO_DIMENSION: u16 = 256;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserAudioStream {
+    #[default]
+    Microphone,
+    Video,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMsg {
@@ -95,9 +103,13 @@ pub enum ClientMsg {
         #[serde(default)]
         force: bool,
     },
-    /// Audio features computed client-side from a remote browser microphone.
+    /// Audio features computed client-side from a remote browser microphone or
+    /// from the soundtrack of the browser-decoded video.
     /// Sent at the client's analysis hop rate (~40 Hz).
     AudioFrame {
+        /// Absent means microphone for backwards compatibility with older UIs.
+        #[serde(default)]
+        stream: BrowserAudioStream,
         level: f32,
         bass: f32,
         mid: f32,
@@ -295,5 +307,20 @@ mod tests {
     fn legacy_stop_video_message_is_owner_scoped() {
         let message: ClientMsg = serde_json::from_str(r#"{"type":"stop_video"}"#).unwrap();
         assert!(matches!(message, ClientMsg::StopVideo { force: false }));
+    }
+
+    #[test]
+    fn legacy_audio_frame_defaults_to_microphone() {
+        let message: ClientMsg = serde_json::from_str(
+            r#"{"type":"audio_frame","level":0.1,"bass":0.2,"mid":0.3,"treble":0.4,"flux":0.5}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            message,
+            ClientMsg::AudioFrame {
+                stream: BrowserAudioStream::Microphone,
+                ..
+            }
+        ));
     }
 }
