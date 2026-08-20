@@ -1,9 +1,8 @@
-name: Build
+name: Build (manual)
 
+# The three-platform Tauri matrix is intentionally manual: it is slow and expensive.
+# Release tags still run the equivalent checked build through release.yml.
 on:
-  push:
-    branches: [master]
-  pull_request:
   workflow_dispatch:
 
 jobs:
