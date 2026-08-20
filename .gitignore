@@ -5,3 +5,4 @@ src-tauri/gen/schemas/
 *.log
 tsconfig.tsbuildinfo
 headless.log
+demo-data/

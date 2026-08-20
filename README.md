@@ -42,10 +42,10 @@ live meters.
   stacked with blend modes, each bound to an audio source. Effects (burst / strobe /
   swoosh / collapse) fire from keyboard (1–4), clicks/taps on the preview, or remote
   clients.
-- **Four UI tabs**, deep-linkable by hash (`/#view`, `/#draw`, `/#control`,
-  `/#settings`): View (clean monitor, tap = burst), Draw, Control (touch-sized effect
-  pads + master/layer faders), Settings. In the desktop app, "New window" pops the
-  current tab out into its own window.
+- **Three UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Control
+  (touch-sized effect pads + master/layer faders), and Settings. In the desktop app,
+  "New window" pops the current tab out into its own window. Old `/#view` and `/#draw`
+  links redirect to Live.
 - **Live drawing**: paint on the array from any client with Glow / Ripple / Sparkle
   pens (color swatches + size). Strokes stream as polar dabs over WS and render on the
   GPU with ~2 s trails; multiple people can draw at once.
@@ -121,6 +121,11 @@ Useful during pattern development:
   standard deviation, throughput, and missed frames against `--fps-budget`.
 - `cargo run -- --headless` — full backend without the desktop window; open
   `http://localhost:9520` (or from a phone on the LAN).
+- `bun run demo:uprising` — optional convenience: use authenticated GitHub access to
+  fetch the small **Warm Windstorm** clip referenced by the saved 2024 show state. It
+  lands in ignored `demo-data/uprising/`. While Vite is running, open `/#replay` to use
+  the development-only frame fixture viewer; it is omitted from production navigation
+  and builds. Other testers can choose a clip from their own `Uprising-Data` checkout.
 - `bun scripts/e2e-test.ts` — protocol smoke test against a running backend.
 
 ## Production build

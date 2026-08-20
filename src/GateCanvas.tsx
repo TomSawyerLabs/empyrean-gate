@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useGate } from "./state";
-import type { PenKind, PreviewMeta } from "./types";
+import type { PenKind, PreviewFrame, PreviewMeta } from "./types";
 
 const VS = `#version 300 es
 layout(location=0) in vec2 a_pos;
@@ -30,12 +30,18 @@ void main() {
 
 interface Gl {
   gl: WebGL2RenderingContext;
+  program: WebGLProgram;
+  posBuf: WebGLBuffer;
   colorBuf: WebGLBuffer;
   count: number;
   pointSizeLoc: WebGLUniformLocation;
 }
 
-function buildGl(canvas: HTMLCanvasElement, meta: PreviewMeta): Gl | null {
+function buildGl(
+  canvas: HTMLCanvasElement,
+  meta: PreviewMeta,
+  pixel0AtInner = false,
+): Gl | null {
   // Transparent canvas: the array's light composites additively over the page,
   // so there is no background rectangle at all — the page gradient shows through
   // around and inside the ring.
@@ -50,9 +56,20 @@ function buildGl(canvas: HTMLCanvasElement, meta: PreviewMeta): Gl | null {
     const sh = gl.createShader(type)!;
     gl.shaderSource(sh, src);
     gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      console.error("stage preview shader failed", gl.getShaderInfoLog(sh));
+      gl.deleteShader(sh);
+      gl.deleteProgram(prog);
+      return null;
+    }
     gl.attachShader(prog, sh);
   }
   gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    console.error("stage preview program failed", gl.getProgramInfoLog(prog));
+    gl.deleteProgram(prog);
+    return null;
+  }
   gl.useProgram(prog);
 
   const { spokes, pixels } = meta;
@@ -63,13 +80,14 @@ function buildGl(canvas: HTMLCanvasElement, meta: PreviewMeta): Gl | null {
     const theta = (s / spokes) * Math.PI * 2 - Math.PI / 2; // spoke 0 at top
     for (let i = 0; i < pixels; i++) {
       const t = pixels > 1 ? i / (pixels - 1) : 0;
-      const r = (1 - t) * 0.95 + t * inner * 0.95; // pixel 0 = outer
+      const radial = pixel0AtInner ? t : 1 - t;
+      const r = (inner + radial * (1 - inner)) * 0.95;
       const o = (s * pixels + i) * 2;
       positions[o] = r * Math.cos(theta);
       positions[o + 1] = r * Math.sin(theta);
     }
   }
-  const posBuf = gl.createBuffer();
+  const posBuf = gl.createBuffer()!;
   gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
   gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0);
@@ -85,7 +103,22 @@ function buildGl(canvas: HTMLCanvasElement, meta: PreviewMeta): Gl | null {
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE);
 
-  return { gl, colorBuf, count, pointSizeLoc: gl.getUniformLocation(prog, "u_point_size")! };
+  return {
+    gl,
+    program: prog,
+    posBuf,
+    colorBuf,
+    count,
+    pointSizeLoc: gl.getUniformLocation(prog, "u_point_size")!,
+  };
+}
+
+/** An alternate source for the stage preview (for example an archived show recording). */
+export interface GatePreviewSource {
+  meta: PreviewMeta;
+  /** Uprising recordings store each spoke from the inner ring outward. */
+  pixel0AtInner?: boolean;
+  subscribe: (listener: (frame: PreviewFrame) => void) => () => void;
 }
 
 export interface DrawPen {
@@ -98,16 +131,19 @@ export interface DrawPen {
 export default function GateCanvas({
   onTap,
   drawPen,
+  previewSource,
 }: {
   /** Called with (angle, radius01) on a click/tap (when not drawing). */
   onTap?: (angle: number, radius: number) => void;
   /** When set, pointer drags stream Paint messages with this pen. */
   drawPen?: DrawPen;
+  /** Replaces the live backend stream. Used by the archived-show replay screen. */
+  previewSource?: GatePreviewSource;
 }) {
   const { client } = useGate();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glRef = useRef<Gl | null>(null);
-  const [meta, setMeta] = useState<PreviewMeta | null>(null);
+  const [meta, setMeta] = useState<PreviewMeta | null>(previewSource?.meta ?? null);
   const pending = useRef<{ angle: number; radius: number; dir: number }[]>([]);
   // Per-pointer stroke state (multitouch: each finger tracked separately).
   // Last cartesian position feeds the motion direction for directional pens.
@@ -119,6 +155,10 @@ export default function GateCanvas({
   // Phones get 20 fps at 1/6 pixels: ~1.4 Mbps each, so ~10 concurrent viewers
   // stay comfortable on ordinary venue WiFi (see server.max_preview_clients).
   useEffect(() => {
+    if (previewSource) {
+      setMeta(previewSource.meta);
+      return;
+    }
     const phone = window.innerWidth < 700;
     const decimate = phone ? 6 : 1;
     const sub = () => client.subscribePreview(phone ? 20 : 30, decimate);
@@ -132,21 +172,27 @@ export default function GateCanvas({
       offMsg();
       client.send({ type: "unsubscribe_preview" });
     };
-  }, [client]);
+  }, [client, previewSource]);
 
   useEffect(() => {
     if (!meta || !canvasRef.current) return;
-    glRef.current = buildGl(canvasRef.current, meta);
+    glRef.current = buildGl(canvasRef.current, meta, previewSource?.pixel0AtInner);
     return () => {
-      // Browsers cap live WebGL contexts (~16); release explicitly or tab-hopping
-      // eventually kills rendering everywhere.
-      glRef.current?.gl.getExtension("WEBGL_lose_context")?.loseContext();
+      // Release resources, but do not deliberately lose the canvas context:
+      // React StrictMode performs a setup-cleanup-setup cycle in development and
+      // a lost context cannot be synchronously reused on the second setup.
+      const current = glRef.current;
+      if (current) {
+        current.gl.deleteBuffer(current.posBuf);
+        current.gl.deleteBuffer(current.colorBuf);
+        current.gl.deleteProgram(current.program);
+      }
       glRef.current = null;
     };
-  }, [meta]);
+  }, [meta, previewSource]);
 
   useEffect(() => {
-    return client.onFrame((frame) => {
+    const draw = (frame: PreviewFrame) => {
       const g = glRef.current;
       const canvas = canvasRef.current;
       if (!g || !canvas) return;
@@ -166,8 +212,9 @@ export default function GateCanvas({
       gl.uniform1f(g.pointSizeLoc, Math.max(2.5, (canvas.width / frame.pixels) * 1.1));
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.POINTS, 0, n);
-    });
-  }, [client]);
+    };
+    return previewSource ? previewSource.subscribe(draw) : client.onFrame(draw);
+  }, [client, previewSource]);
 
   // Flush accumulated stroke points ~30x/s.
   useEffect(() => {
