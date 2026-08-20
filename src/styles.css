@@ -907,6 +907,25 @@ button.danger:hover {
   margin: 8px 0;
 }
 
+.channel-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.channel-btn {
+  min-width: 30px;
+  padding: 5px 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.channel-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 .meters {
   display: flex;
   align-items: center;

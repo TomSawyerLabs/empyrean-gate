@@ -338,25 +338,13 @@ function AudioPanel({ config }: { config: AppConfig }) {
                     <option value="">{s.loopback ? "Default output" : "System default"}</option>
                     {(s.loopback ? (status?.output_devices ?? []) : (status?.input_devices ?? [])).map(
                       (d) => (
-                        <option key={d} value={d}>
-                          {d}
+                        <option key={d.name} value={d.name}>
+                          {d.name} ({d.channels} ch)
                         </option>
                       ),
                     )}
                   </select>
-                  <input
-                    placeholder="channels: blank = all"
-                    defaultValue={s.channels.join(",")}
-                    style={{ width: "10em" }}
-                    onBlur={(e) => {
-                      const channels = e.target.value
-                        .split(",")
-                        .map((x) => parseInt(x.trim(), 10))
-                        .filter((x) => !Number.isNaN(x) && x >= 0);
-                      updateSource(i, { channels });
-                    }}
-                  />
-                  <span className="hint">0-based, e.g. 0,1 = first pair</span>
+                  <ChannelPicker source={s} onChange={(channels) => updateSource(i, { channels })} />
                 </>
               )}
               {s.kind === "remote" && (
@@ -405,6 +393,68 @@ function AudioPanel({ config }: { config: AppConfig }) {
         </button>
       )}
     </section>
+  );
+}
+
+/// Channels as checkboxes (labeled 1-based like audio gear; stored 0-based).
+/// All-checked is stored as [] = "all channels", so new devices Just Work.
+/// Falls back to a text field when the count is unknown or absurd.
+function ChannelPicker({
+  source,
+  onChange,
+}: {
+  source: AudioSourceConfig & { kind: "device" };
+  onChange: (channels: number[]) => void;
+}) {
+  const { status } = useGate();
+  const list = source.loopback ? (status?.output_devices ?? []) : (status?.input_devices ?? []);
+  const count = source.device
+    ? (list.find((d) => d.name === source.device)?.channels ?? 0)
+    : source.loopback
+      ? (status?.default_output_channels ?? 0)
+      : (status?.default_input_channels ?? 0);
+
+  if (count < 1 || count > 16) {
+    return (
+      <input
+        placeholder="channels: blank = all"
+        defaultValue={source.channels.join(",")}
+        style={{ width: "10em" }}
+        onBlur={(e) =>
+          onChange(
+            e.target.value
+              .split(",")
+              .map((x) => parseInt(x.trim(), 10))
+              .filter((x) => !Number.isNaN(x) && x >= 0),
+          )
+        }
+      />
+    );
+  }
+
+  const active = (ch: number) => source.channels.length === 0 || source.channels.includes(ch);
+  const toggle = (ch: number) => {
+    const next = Array.from({ length: count }, (_, c) => c).filter((c) =>
+      c === ch ? !active(c) : active(c),
+    );
+    // Never allow zero channels; and all-selected collapses to [] ("all").
+    if (next.length === 0) return;
+    onChange(next.length === count ? [] : next);
+  };
+
+  return (
+    <span className="channel-picker">
+      <span className="hint">ch</span>
+      {Array.from({ length: count }, (_, ch) => (
+        <button
+          key={ch}
+          className={`channel-btn ${active(ch) ? "active" : ""}`}
+          onClick={() => toggle(ch)}
+        >
+          {ch + 1}
+        </button>
+      ))}
+    </span>
   );
 }
 

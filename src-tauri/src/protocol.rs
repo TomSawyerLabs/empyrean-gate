@@ -182,6 +182,14 @@ pub struct ClientInfo {
     pub revoked: bool,
 }
 
+/// An audio device as shown in the settings UI.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DeviceInfo {
+    pub name: String,
+    /// Channel count of the device's default config (0 = unknown).
+    pub channels: u16,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct AudioSourceStatus {
     pub id: String,
@@ -213,9 +221,13 @@ pub struct RuntimeStatus {
     pub clients: u32,
     pub audio: Vec<AudioSourceStatus>,
     /// Available local capture devices, for the settings UI dropdowns.
-    pub input_devices: Vec<String>,
+    pub input_devices: Vec<DeviceInfo>,
     /// Output devices (selectable as loopback beat sources).
-    pub output_devices: Vec<String>,
+    pub output_devices: Vec<DeviceInfo>,
+    /// Channel counts of the default devices (0 = unknown), so the UI can render
+    /// per-channel checkboxes even when "system default" is selected.
+    pub default_input_channels: u16,
+    pub default_output_channels: u16,
     /// Local IPv4 interfaces as "name — ip", for the sACN interface picker.
     pub interfaces: Vec<String>,
     /// Known + connected client devices.

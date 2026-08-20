@@ -109,9 +109,20 @@ fn audio_thread(state: Arc<SharedState>, remote: RemoteChains) {
 
 fn build_sources(state: &Arc<SharedState>, remote: &RemoteChains, streams: &mut Vec<cpal::Stream>) {
     {
+        let host = cpal::default_host();
         let mut status = state.status.lock();
         status.input_devices = list_input_devices();
         status.output_devices = list_output_devices();
+        status.default_input_channels = host
+            .default_input_device()
+            .and_then(|d| d.default_input_config().ok())
+            .map(|c| c.channels())
+            .unwrap_or(0);
+        status.default_output_channels = host
+            .default_output_device()
+            .and_then(|d| d.default_output_config().ok())
+            .map(|c| c.channels())
+            .unwrap_or(0);
     }
     let sources = state.config.read().audio.sources.clone();
     let mut new_remote = Vec::new();
@@ -259,23 +270,31 @@ fn build_device_stream(
     Ok(stream)
 }
 
-/// List available input devices for the settings UI.
-pub fn list_input_devices() -> Vec<String> {
+/// List available input devices (with channel counts) for the settings UI.
+pub fn list_input_devices() -> Vec<crate::protocol::DeviceInfo> {
     let host = cpal::default_host();
     match host.input_devices() {
         Ok(devices) => devices
-            .filter_map(|d| d.description().ok().map(|d| d.name().to_string()))
+            .filter_map(|d| {
+                let name = d.description().ok()?.name().to_string();
+                let channels = d.default_input_config().map(|c| c.channels()).unwrap_or(0);
+                Some(crate::protocol::DeviceInfo { name, channels })
+            })
             .collect(),
         Err(_) => Vec::new(),
     }
 }
 
 /// List output devices — selectable as loopback beat sources (play music locally).
-pub fn list_output_devices() -> Vec<String> {
+pub fn list_output_devices() -> Vec<crate::protocol::DeviceInfo> {
     let host = cpal::default_host();
     match host.output_devices() {
         Ok(devices) => devices
-            .filter_map(|d| d.description().ok().map(|d| d.name().to_string()))
+            .filter_map(|d| {
+                let name = d.description().ok()?.name().to_string();
+                let channels = d.default_output_config().map(|c| c.channels()).unwrap_or(0);
+                Some(crate::protocol::DeviceInfo { name, channels })
+            })
             .collect(),
         Err(_) => Vec::new(),
     }

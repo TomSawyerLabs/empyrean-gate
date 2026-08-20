@@ -148,6 +148,12 @@ export interface AppConfig {
   clients: ClientRecord[];
 }
 
+export interface DeviceInfo {
+  name: string;
+  /** Channel count of the device's default config (0 = unknown). */
+  channels: number;
+}
+
 export interface AudioSourceStatus {
   id: string;
   active: boolean;
@@ -171,8 +177,10 @@ export interface RuntimeStatus {
   pps_history: number[];
   clients: number;
   audio: AudioSourceStatus[];
-  input_devices: string[];
-  output_devices: string[];
+  input_devices: DeviceInfo[];
+  output_devices: DeviceInfo[];
+  default_input_channels: number;
+  default_output_channels: number;
   interfaces: string[];
   client_list: ClientInfo[];
   master_brightness: number;
