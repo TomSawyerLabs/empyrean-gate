@@ -367,7 +367,9 @@ function AudioPanel({ config }: { config: AppConfig }) {
                 <Meter label="Mid" v={st.mid} />
                 <Meter label="Treble" v={st.treble} />
                 <span className="bpm">{st.bpm > 0 ? `${st.bpm.toFixed(0)} BPM` : "—"}</span>
-                <span className={st.active ? "ok" : "warn"}>{st.active ? "active" : "inactive"}</span>
+                <span className={st.active ? "ok" : "warn"}>
+                  {st.active ? "active" : st.detail || "inactive"}
+                </span>
               </div>
             )}
           </div>

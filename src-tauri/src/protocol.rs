@@ -194,6 +194,8 @@ pub struct DeviceInfo {
 pub struct AudioSourceStatus {
     pub id: String,
     pub active: bool,
+    /// Human-readable health note, e.g. "waiting for device". Empty when running.
+    pub detail: String,
     pub level: f32,
     pub bass: f32,
     pub mid: f32,

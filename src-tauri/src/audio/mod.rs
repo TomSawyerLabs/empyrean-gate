@@ -63,6 +63,7 @@ fn publish(
     }
     let mut slot = state.audio[index].lock();
     slot.active = true;
+    slot.health = HEALTH_OK;
     slot.level = level;
     slot.bass = bass;
     slot.mid = mid;
@@ -91,46 +92,207 @@ pub fn spawn(state: Arc<SharedState>) -> RemoteChains {
     remote
 }
 
+/// A device-backed source's live capture state. The audio thread owns these and
+/// keeps them healthy: a missing or vanished device is retried quietly (targeting
+/// ONLY the configured device — never substituting another), and "system default"
+/// sources follow the OS default when Windows changes it. The show never dies for
+/// lack of audio hardware; a silent source just means calm visuals.
+struct DeviceRuntime {
+    index: usize,
+    id: String,
+    device: Option<String>,
+    channels: Vec<u32>,
+    loopback: bool,
+    gain: f32,
+    stream: Option<cpal::Stream>,
+    /// The endpoint the running stream was actually built on (for default-follow).
+    resolved: String,
+    /// Millis (since app start) of the last data callback; watchdog input.
+    last_data: Arc<std::sync::atomic::AtomicU64>,
+    /// Set by the stream error callback on fatal device loss.
+    dead: Arc<std::sync::atomic::AtomicBool>,
+    last_attempt: std::time::Instant,
+    /// Log the "missing" message once per outage, and "recovered" once on return.
+    reported_down: bool,
+}
+
+/// Health codes stored in `AudioFeatures::health` (see protocol `detail`).
+pub const HEALTH_OK: u8 = 0;
+pub const HEALTH_WAITING: u8 = 1;
+
+const RETRY_EVERY: Duration = Duration::from_secs(2);
+const WATCHDOG_STALL: Duration = Duration::from_secs(3);
+
 fn audio_thread(state: Arc<SharedState>, remote: RemoteChains) {
     // Rebuild capture streams only when the AUDIO config actually changes — the
     // config epoch also bumps for unrelated tweaks (brightness sliders, layers)
     // and tearing down device streams for those would be wasteful and glitchy.
     let mut last_cfg = String::new();
-    let mut streams: Vec<cpal::Stream> = Vec::new();
+    let mut runtimes: Vec<DeviceRuntime> = Vec::new();
+    let mut last_device_scan = std::time::Instant::now() - Duration::from_secs(60);
 
     while !state.shutdown.load(Ordering::Relaxed) {
         let cfg = serde_json::to_string(&state.config.read().audio).unwrap_or_default();
         if cfg != last_cfg {
             last_cfg = cfg;
-            streams.clear(); // drop = stop capture
-            for slot in state.audio.iter() {
-                slot.lock().active = false;
-            }
-            build_sources(&state, &remote, &mut streams);
+            runtimes = build_sources(&state, &remote);
+            last_device_scan = std::time::Instant::now();
+            refresh_device_lists(&state);
+        }
+
+        // Refresh the pickable-device lists periodically so hot-plugged hardware
+        // shows up in the settings UI without a config touch.
+        if last_device_scan.elapsed() > Duration::from_secs(3) {
+            last_device_scan = std::time::Instant::now();
+            refresh_device_lists(&state);
+        }
+
+        for rt in runtimes.iter_mut() {
+            maintain(&state, rt);
         }
         std::thread::sleep(Duration::from_millis(200));
     }
 }
 
-fn build_sources(state: &Arc<SharedState>, remote: &RemoteChains, streams: &mut Vec<cpal::Stream>) {
-    {
-        let host = cpal::default_host();
-        let mut status = state.status.lock();
-        status.input_devices = list_input_devices();
-        status.output_devices = list_output_devices();
-        status.default_input_channels = host
-            .default_input_device()
-            .and_then(|d| d.default_input_config().ok())
-            .map(|c| c.channels())
-            .unwrap_or(0);
-        status.default_output_channels = host
-            .default_output_device()
-            .and_then(|d| d.default_output_config().ok())
-            .map(|c| c.channels())
-            .unwrap_or(0);
+fn refresh_device_lists(state: &Arc<SharedState>) {
+    let host = cpal::default_host();
+    let input_devices = list_input_devices();
+    let output_devices = list_output_devices();
+    let din = host
+        .default_input_device()
+        .and_then(|d| d.default_input_config().ok())
+        .map(|c| c.channels())
+        .unwrap_or(0);
+    let dout = host
+        .default_output_device()
+        .and_then(|d| d.default_output_config().ok())
+        .map(|c| c.channels())
+        .unwrap_or(0);
+    let mut status = state.status.lock();
+    status.input_devices = input_devices;
+    status.output_devices = output_devices;
+    status.default_input_channels = din;
+    status.default_output_channels = dout;
+}
+
+/// Name of the endpoint a source with `device: None` would bind right now.
+fn current_default_name(loopback: bool) -> Option<String> {
+    let host = cpal::default_host();
+    let dev = if loopback {
+        host.default_output_device()
+    } else {
+        host.default_input_device()
+    }?;
+    dev.description().ok().map(|d| d.name().to_string())
+}
+
+/// Mark a source silent (device gone): visuals should decay to quiet, not freeze
+/// on the last captured values.
+fn silence_slot(state: &SharedState, index: usize) {
+    if index >= MAX_AUDIO_SOURCES {
+        return;
     }
+    *state.audio[index].lock() = crate::state::AudioFeatures {
+        active: false,
+        health: HEALTH_WAITING,
+        ..Default::default()
+    };
+    *state.scope[index].lock() = Default::default();
+}
+
+/// Keep one device source healthy: watchdog a running stream, follow the OS
+/// default when configured for it, and quietly retry a missing device.
+fn maintain(state: &Arc<SharedState>, rt: &mut DeviceRuntime) {
+    let now_ms = state.started.elapsed().as_millis() as u64;
+
+    if rt.stream.is_some() {
+        let stalled = now_ms.saturating_sub(rt.last_data.load(Ordering::Relaxed))
+            > WATCHDOG_STALL.as_millis() as u64;
+        let dead = rt.dead.load(Ordering::Relaxed);
+        if dead || stalled {
+            rt.stream = None; // drop = release the endpoint
+            silence_slot(state, rt.index);
+            if !rt.reported_down {
+                rt.reported_down = true;
+                log::warn!(
+                    "audio source '{}': device '{}' {} — waiting for it to return \
+                     (will not switch to another device)",
+                    rt.id,
+                    rt.resolved,
+                    if dead { "was lost" } else { "stopped delivering data" }
+                );
+            }
+            return;
+        }
+
+        // The ONE permitted automatic change: a "system default" source follows
+        // the OS default device, because that is what "default" means.
+        if rt.device.is_none() && rt.last_attempt.elapsed() > RETRY_EVERY {
+            rt.last_attempt = std::time::Instant::now();
+            if let Some(current) = current_default_name(rt.loopback) {
+                if current != rt.resolved {
+                    log::info!(
+                        "audio source '{}': OS default changed '{}' -> '{}'; following",
+                        rt.id,
+                        rt.resolved,
+                        current
+                    );
+                    rt.stream = None;
+                    silence_slot(state, rt.index);
+                    // Fall through to the rebuild path below on the next tick.
+                }
+            }
+        }
+        return;
+    }
+
+    // No stream: retry the configured device, quietly, forever.
+    if rt.last_attempt.elapsed() < RETRY_EVERY {
+        return;
+    }
+    rt.last_attempt = std::time::Instant::now();
+    rt.dead.store(false, Ordering::Relaxed);
+    match build_device_stream(
+        state.clone(),
+        rt.index,
+        rt.device.as_deref(),
+        &rt.channels,
+        rt.loopback,
+        rt.gain,
+        rt.last_data.clone(),
+        rt.dead.clone(),
+    ) {
+        Ok((stream, resolved)) => {
+            rt.last_data.store(now_ms, Ordering::Relaxed);
+            rt.resolved = resolved;
+            rt.stream = Some(stream);
+            if rt.reported_down {
+                log::info!("audio source '{}': device '{}' is back", rt.id, rt.resolved);
+            }
+            rt.reported_down = false;
+        }
+        Err(e) => {
+            silence_slot(state, rt.index);
+            if !rt.reported_down {
+                rt.reported_down = true;
+                log::warn!(
+                    "audio source '{}': {e:#} — waiting for the device (retrying quietly)",
+                    rt.id
+                );
+            }
+        }
+    }
+}
+
+fn build_sources(state: &Arc<SharedState>, remote: &RemoteChains) -> Vec<DeviceRuntime> {
     let sources = state.config.read().audio.sources.clone();
     let mut new_remote = Vec::new();
+    let mut runtimes = Vec::new();
+
+    // Clear all slots first; runtimes re-activate theirs as streams come up.
+    for slot in state.audio.iter() {
+        slot.lock().active = false;
+    }
 
     for (index, src) in sources.iter().take(MAX_AUDIO_SOURCES).enumerate() {
         match &src.kind {
@@ -150,28 +312,31 @@ fn build_sources(state: &Arc<SharedState>, remote: &RemoteChains, streams: &mut 
                 channels,
                 loopback,
             } => {
-                match build_device_stream(
-                    state.clone(),
+                // Streams are built (and rebuilt) by `maintain`; starting with no
+                // stream means the first tick handles present and missing devices
+                // through one code path.
+                runtimes.push(DeviceRuntime {
                     index,
-                    device.as_deref(),
-                    channels,
-                    *loopback,
-                    src.gain,
-                ) {
-                    Ok(stream) => streams.push(stream),
-                    Err(e) => {
-                        log::error!("audio source '{}': {e:#}", src.id);
-                        let _ = state.events.send(ServerMsg::Error {
-                            message: format!("Audio source '{}': {e:#}", src.id),
-                        });
-                    }
-                }
+                    id: src.id.clone(),
+                    device: device.clone(),
+                    channels: channels.clone(),
+                    loopback: *loopback,
+                    gain: src.gain,
+                    stream: None,
+                    resolved: String::new(),
+                    last_data: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                    dead: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    last_attempt: std::time::Instant::now() - RETRY_EVERY,
+                    reported_down: false,
+                });
             }
         }
     }
     *remote.lock() = new_remote;
+    runtimes
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_device_stream(
     state: Arc<SharedState>,
     index: usize,
@@ -179,7 +344,9 @@ fn build_device_stream(
     channels: &[u32],
     loopback: bool,
     gain: f32,
-) -> anyhow::Result<cpal::Stream> {
+    last_data: Arc<std::sync::atomic::AtomicU64>,
+    dead: Arc<std::sync::atomic::AtomicBool>,
+) -> anyhow::Result<(cpal::Stream, String)> {
     let host = cpal::default_host();
     // Loopback: capture what an OUTPUT device is playing. On WASAPI, building an
     // input stream on an output device transparently enables loopback mode.
@@ -233,9 +400,11 @@ fn build_device_stream(
     let mut wave_cursor: usize = 0;
     let state_cb = state.clone();
 
+    let started = state.started;
     let stream = device.build_input_stream(
         config.into(),
         move |data: &[f32], _| {
+            last_data.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
             mono.clear();
             for frame in data.chunks_exact(n_channels) {
                 let mut acc = 0.0f32;
@@ -272,9 +441,14 @@ fn build_device_stream(
             });
         },
         {
-            // Underruns come in bursts (system sleep, load spikes); log-throttle.
+            // Fatal device loss flips the dead flag (the watchdog rebuilds);
+            // transient underruns come in bursts, so log-throttle those.
             let mut errors: u64 = 0;
             move |err| {
+                if err.kind() == cpal::ErrorKind::DeviceNotAvailable {
+                    dead.store(true, Ordering::Relaxed);
+                    return;
+                }
                 errors += 1;
                 if errors.is_power_of_two() {
                     log::warn!("audio stream error ({errors} total): {err}");
@@ -290,7 +464,7 @@ fn build_device_stream(
         .unwrap_or_default();
     let mode = if loopback { "loopback of" } else { "capturing" };
     log::info!("audio source {index}: {mode} '{name}' @ {sample_rate} Hz, {n_channels} ch");
-    Ok(stream)
+    Ok((stream, name))
 }
 
 /// List available input devices (with channel counts) for the settings UI.

@@ -16,6 +16,8 @@ use tokio::sync::broadcast;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AudioFeatures {
     pub active: bool,
+    /// See `audio::HEALTH_*` — surfaces "waiting for device" states to the UI.
+    pub health: u8,
     pub level: f32,
     pub bass: f32,
     pub mid: f32,

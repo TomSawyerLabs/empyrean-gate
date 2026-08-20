@@ -1021,6 +1021,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         crate::protocol::AudioSourceStatus {
                             id: src.id.clone(),
                             active: a.active,
+                            detail: match a.health {
+                                crate::audio::HEALTH_WAITING => "waiting for device".into(),
+                                _ => String::new(),
+                            },
                             level: a.level,
                             bass: a.bass,
                             mid: a.mid,

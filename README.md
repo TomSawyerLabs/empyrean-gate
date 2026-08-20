@@ -57,6 +57,12 @@ live meters.
   unattended show evolves for hours without repeating.
 - **Audio loopback**: pick a system *output* device as a source (WASAPI loopback) —
   music played on the show machine drives the beat with no cabling.
+- **Audio hardware can come and go.** A missing or unplugged device never crashes or
+  degrades the show: the source goes quiet (visuals decay calmly), reports "waiting
+  for device", and is retried every 2 s until *that* device returns — a selected
+  device is never silently substituted. The one automatic change: sources set to
+  "system default" follow the OS default device when Windows changes it. Hot-plugged
+  devices appear in the pickers within a few seconds.
 - **Connect QR + client management**: ⊕ Connect in the top bar shows a QR (per
   interface) that joins a phone/iPad straight to the web UI. Devices get persistent
   ids and friendly names; Settings → Clients lets you rename, revoke (kicks live,

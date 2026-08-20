@@ -159,6 +159,8 @@ export interface DeviceInfo {
 export interface AudioSourceStatus {
   id: string;
   active: boolean;
+  /** Health note, e.g. "waiting for device". Empty when running. */
+  detail: string;
   level: number;
   bass: number;
   mid: number;
