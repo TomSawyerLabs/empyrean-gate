@@ -24,7 +24,8 @@ out vec4 frag;
 void main() {
   vec2 d = gl_PointCoord - 0.5;
   float a = smoothstep(0.5, 0.15, length(d));
-  frag = vec4(v_color * a, 1.0);
+  // Premultiplied output; alpha accumulates so bright light occludes the page.
+  frag = vec4(v_color * a, a);
 }`;
 
 interface Gl {
@@ -35,7 +36,10 @@ interface Gl {
 }
 
 function buildGl(canvas: HTMLCanvasElement, meta: PreviewMeta): Gl | null {
-  const gl = canvas.getContext("webgl2");
+  // Transparent canvas: the array's light composites additively over the page,
+  // so there is no background rectangle at all — the page gradient shows through
+  // around and inside the ring.
+  const gl = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: true });
   if (!gl) return null;
 
   const prog = gl.createProgram();
@@ -77,7 +81,7 @@ function buildGl(canvas: HTMLCanvasElement, meta: PreviewMeta): Gl | null {
   gl.enableVertexAttribArray(1);
   gl.vertexAttribPointer(1, 3, gl.UNSIGNED_BYTE, true, 0, 0);
 
-  gl.clearColor(0.02, 0.02, 0.04, 1);
+  gl.clearColor(0, 0, 0, 0);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE);
 
