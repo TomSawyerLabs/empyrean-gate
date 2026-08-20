@@ -49,7 +49,14 @@ pub struct AudioUniform {
     pub beat_phase: f32,
     pub bpm: f32,
     pub _pad: f32,
+    pub bass_att: f32,
+    pub mid_att: f32,
+    pub treble_att: f32,
+    pub _pad2: f32,
 }
+
+/// Floats per source in the scope storage buffer (256 waveform + 64 spectrum).
+pub const SCOPE_FLOATS: usize = 256 + crate::audio::analysis::SPECTRUM_BINS;
 
 pub struct FrameInputs {
     pub globals: Globals,
@@ -57,6 +64,8 @@ pub struct FrameInputs {
     pub layers: Vec<GpuLayer>,
     pub effects: Vec<GpuEffect>,
     pub dabs: Vec<GpuDab>,
+    /// Per-source waveform + spectrum, flattened (see `SCOPE_FLOATS`).
+    pub scope: Vec<f32>,
 }
 
 pub struct Engine {
@@ -70,6 +79,7 @@ pub struct Engine {
     layers_buf: wgpu::Buffer,
     effects_buf: wgpu::Buffer,
     dabs_buf: wgpu::Buffer,
+    scope_buf: wgpu::Buffer,
     out_buf: wgpu::Buffer,
     staging: [wgpu::Buffer; 2],
     /// Submission index of the copy targeting each staging buffer.
@@ -160,6 +170,12 @@ impl Engine {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let scope_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("scope"),
+            size: (SCOPE_FLOATS * MAX_AUDIO_SOURCES * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let (out_buf, staging) = Self::make_pixel_buffers(&device, npix);
 
@@ -172,6 +188,7 @@ impl Engine {
                 storage_entry(3, true),
                 storage_entry(4, false),
                 storage_entry(5, true),
+                storage_entry(6, true),
             ],
         });
 
@@ -185,6 +202,7 @@ impl Engine {
                 &effects_buf,
                 &out_buf,
                 &dabs_buf,
+                &scope_buf,
             ),
             pipeline: Self::make_pipeline(&device, &bind_group_layout)?,
             device,
@@ -195,6 +213,7 @@ impl Engine {
             layers_buf,
             effects_buf,
             dabs_buf,
+            scope_buf,
             out_buf,
             staging,
             staging_submission: [None, None],
@@ -274,6 +293,7 @@ impl Engine {
         effects: &wgpu::Buffer,
         out: &wgpu::Buffer,
         dabs: &wgpu::Buffer,
+        scope: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("gate"),
@@ -285,6 +305,7 @@ impl Engine {
                 bind(3, effects),
                 bind(4, out),
                 bind(5, dabs),
+                bind(6, scope),
             ],
         })
     }
@@ -310,6 +331,7 @@ impl Engine {
             &self.effects_buf,
             &self.out_buf,
             &self.dabs_buf,
+            &self.scope_buf,
         );
     }
 
@@ -335,6 +357,8 @@ impl Engine {
             self.queue
                 .write_buffer(&self.dabs_buf, 0, bytemuck::cast_slice(&inputs.dabs));
         }
+        self.queue
+            .write_buffer(&self.scope_buf, 0, bytemuck::cast_slice(&inputs.scope));
 
         let mut encoder = self
             .device
@@ -690,7 +714,20 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 beat_phase: a.beat_phase,
                 bpm: a.bpm,
                 _pad: 0.0,
+                bass_att: a.bass_att,
+                mid_att: a.mid_att,
+                treble_att: a.treble_att,
+                _pad2: 0.0,
             };
+        }
+
+        // Waveform + spectrum arrays for the GPU (see Waveform/Spectrum layers).
+        let mut scope_data = vec![0.0f32; SCOPE_FLOATS * MAX_AUDIO_SOURCES];
+        for (i, s) in state.scope.iter().enumerate() {
+            let s = s.lock();
+            let base = i * SCOPE_FLOATS;
+            scope_data[base..base + 256].copy_from_slice(&s.wave);
+            scope_data[base + 256..base + SCOPE_FLOATS].copy_from_slice(&s.spectrum);
         }
         let control = *state.control.lock();
         let walk_tau = 45.0 / cfg.render.walk_speed.clamp(0.05, 20.0);
@@ -857,6 +894,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             layers,
             effects,
             dabs,
+            scope: scope_data,
         };
 
         let t0 = Instant::now();

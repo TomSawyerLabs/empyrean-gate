@@ -67,6 +67,11 @@ fn publish(
     slot.bass = bass;
     slot.mid = mid;
     slot.treble = treble;
+    // ~0.25 s EMA at the ~43 Hz hop rate: the MilkDrop-style "attenuated" twins.
+    const K: f32 = 0.09;
+    slot.bass_att += (bass - slot.bass_att) * K;
+    slot.mid_att += (mid - slot.mid_att) * K;
+    slot.treble_att += (treble - slot.treble_att) * K;
     slot.onset = tracker.onset;
     slot.beat_phase = tracker.beat_phase;
     slot.bpm = tracker.bpm();
@@ -224,6 +229,8 @@ fn build_device_stream(
     let mut extractor = FeatureExtractor::new(sample_rate);
     let mut tracker = BeatTracker::new(HOP_SIZE as f32 / sample_rate);
     let mut mono = Vec::with_capacity(4096);
+    let mut wave_ring = [0.0f32; 256];
+    let mut wave_cursor: usize = 0;
     let state_cb = state.clone();
 
     let stream = device.build_input_stream(
@@ -237,9 +244,25 @@ fn build_device_stream(
                 }
                 mono.push(acc / selected.len() as f32 * gain);
             }
+
+            // Ring-oscilloscope waveform for the GPU: decimate into a 256-sample
+            // ring, snapshot (oldest-first) into shared state once per callback.
+            let decim = (sample_rate / 12_000.0).max(1.0) as usize;
+            for s in mono.iter().step_by(decim) {
+                wave_ring[wave_cursor] = *s;
+                wave_cursor = (wave_cursor + 1) % wave_ring.len();
+            }
+            {
+                let mut scope = state_cb.scope[index].lock();
+                for (i, dst) in scope.wave.iter_mut().enumerate() {
+                    *dst = wave_ring[(wave_cursor + i) % wave_ring.len()];
+                }
+            }
+
             extractor.feed(&mono, |h| {
                 let beat = tracker.feed(h.flux);
                 publish(&state_cb, index, h.level, h.bass, h.mid, h.treble, &tracker);
+                state_cb.scope[index].lock().spectrum = h.spectrum;
                 if beat {
                     let _ = state_cb.events.send(ServerMsg::Beat {
                         source: index as u32,

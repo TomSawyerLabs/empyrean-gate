@@ -20,11 +20,32 @@ pub struct AudioFeatures {
     pub bass: f32,
     pub mid: f32,
     pub treble: f32,
+    /// Smoothed (~0.25 s) twins of the bands, MilkDrop-style: `bass / bass_att`
+    /// is per-band punch; `bass_att` is the groove.
+    pub bass_att: f32,
+    pub mid_att: f32,
+    pub treble_att: f32,
     /// Decaying onset pulse (1.0 at each detected onset).
     pub onset: f32,
     /// 0..1 phase within the current beat.
     pub beat_phase: f32,
     pub bpm: f32,
+}
+
+/// Raw audio shapes shipped to the GPU each frame: the recent waveform (a ring
+/// oscilloscope's worth) and the log-spaced spectrum. Written by capture threads.
+pub struct ScopeData {
+    pub wave: [f32; 256],
+    pub spectrum: [f32; crate::audio::analysis::SPECTRUM_BINS],
+}
+
+impl Default for ScopeData {
+    fn default() -> Self {
+        Self {
+            wave: [0.0; 256],
+            spectrum: [0.0; crate::audio::analysis::SPECTRUM_BINS],
+        }
+    }
 }
 
 /// Control inputs from remote phones (IMU) — a small global "control bus".
@@ -68,6 +89,7 @@ pub struct SharedState {
     pub effects: Mutex<Vec<ActiveEffect>>,
     pub dabs: Mutex<Vec<ActiveDab>>,
     pub audio: [Mutex<AudioFeatures>; MAX_AUDIO_SOURCES],
+    pub scope: [Mutex<ScopeData>; MAX_AUDIO_SOURCES],
     pub control: Mutex<ControlInputs>,
     pub status: Mutex<RuntimeStatus>,
     pub shutdown: AtomicBool,
@@ -113,6 +135,7 @@ impl SharedState {
             effects: Mutex::new(Vec::new()),
             dabs: Mutex::new(Vec::new()),
             audio: Default::default(),
+            scope: Default::default(),
             control: Mutex::new(ControlInputs::default()),
             status: Mutex::new(RuntimeStatus::default()),
             shutdown: AtomicBool::new(false),

@@ -40,7 +40,10 @@ fn main() {
         onset: 0.8,
         beat_phase: 0.3,
         bpm: 128.0,
-        _pad: 0.0,
+        bass_att: 0.5,
+        mid_att: 0.4,
+        treble_att: 0.4,
+        ..Default::default()
     };
 
     let mut checksum = 0u64;
@@ -74,6 +77,11 @@ fn main() {
             layers,
             effects: Vec::new(),
             dabs: Vec::new(),
+            scope: vec![
+                0.0;
+                empyrean_gate_lib::engine::SCOPE_FLOATS
+                    * empyrean_gate_lib::layers::MAX_AUDIO_SOURCES
+            ],
         };
         match engine.render(&inputs) {
             Ok(Some(rgb)) => {

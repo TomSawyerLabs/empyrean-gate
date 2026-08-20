@@ -35,6 +35,11 @@ struct AudioU {
     beat_phase: f32,
     bpm: f32,
     _pad: f32,
+    // Smoothed (~0.25 s) twins: bass / bass_att > 1 means "hitting right now".
+    bass_att: f32,
+    mid_att: f32,
+    treble_att: f32,
+    _pad2: f32,
 }
 
 struct Layer {
@@ -88,6 +93,24 @@ struct Dab {
 @group(0) @binding(3) var<storage, read> FX: array<Effect>;
 @group(0) @binding(4) var<storage, read_write> OUT: array<u32>;
 @group(0) @binding(5) var<storage, read> DABS: array<Dab>;
+// Per-source raw audio shapes: 256 waveform samples then 64 spectrum bins, per
+// source, flattened. See `wave_at` / `spec_at`.
+@group(0) @binding(6) var<storage, read> SCOPE: array<f32>;
+
+const WAVE_N: u32 = 256u;
+const SPEC_N: u32 = 64u;
+const SCOPE_STRIDE: u32 = WAVE_N + SPEC_N;
+
+/// Waveform sample at t in [0,1) (oldest -> newest), roughly -1..1.
+fn wave_at(src: u32, t: f32) -> f32 {
+    let i = u32(fract(t) * f32(WAVE_N)) % WAVE_N;
+    return SCOPE[src * SCOPE_STRIDE + i];
+}
+
+/// Normalized log-spaced spectrum bin (0 = lowest freq), 0..1.
+fn spec_at(src: u32, i: u32) -> f32 {
+    return SCOPE[src * SCOPE_STRIDE + WAVE_N + min(i, SPEC_N - 1u)];
+}
 
 const PI: f32 = 3.14159265359;
 const TAU: f32 = 6.28318530718;
@@ -442,6 +465,31 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
             let v = star * streak * persp;
             let hue = L.hue + hash01(cell * 127u) * L.hue_range;
             return vec4f(hsv2rgb(hue, L.saturation * 0.6, v * L.brightness), v);
+        }
+        // Waveform — the raw PCM bent into a ring: a circular oscilloscope.
+        // pa = base ring radius, pb = displacement depth, pc = line thickness.
+        case 17u: {
+            let t = fract(ctx.theta / TAU + L.phase * 0.03);
+            let w = wave_at(L.audio_source, t);
+            let depth = (0.08 + L.param_b * 0.3) * (1.0 + aud * A.level);
+            let ring_r = mix(0.35, 0.95, L.param_a) + w * depth;
+            let d = abs(ctx.rn - ring_r);
+            let width = 0.012 + L.param_c * 0.06;
+            let v = exp(-(d * d) / (width * width));
+            let hue = L.hue + w * L.hue_range;
+            return vec4f(hsv2rgb(hue, L.saturation, v * L.brightness), v);
+        }
+        // Spectrum — spoke-per-bin circular analyzer. Bars grow from the chosen
+        // end of the spokes (pb: outer/inner); pa = bar length gain.
+        case 18u: {
+            let t = fract(ctx.theta / TAU + L.phase * 0.02);
+            let e = spec_at(L.audio_source, u32(t * f32(SPEC_N)));
+            let extent = clamp(e * (0.35 + L.param_a * 0.9), 0.0, 1.0);
+            // Position along the spoke measured from the bar's root end.
+            let pos = select(ctx.r01, 1.0 - ctx.r01, L.param_b > 0.5);
+            let v = smoothstep(extent, extent - 0.2, pos) * (0.35 + e * 0.65);
+            let hue = L.hue + t * L.hue_range;
+            return vec4f(hsv2rgb(hue, L.saturation, v * L.brightness), v);
         }
         default: {
             return vec4f(0.0);

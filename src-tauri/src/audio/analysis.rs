@@ -15,14 +15,32 @@ use std::sync::Arc;
 pub const FFT_SIZE: usize = 2048;
 pub const HOP_SIZE: usize = 1024;
 
+/// Log-spaced spectrum bins shipped to the GPU (spoke-per-bin layers etc.).
+pub const SPECTRUM_BINS: usize = 64;
+
 /// Output of one analysis hop.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct HopFeatures {
     pub level: f32,
     pub bass: f32,
     pub mid: f32,
     pub treble: f32,
     pub flux: f32,
+    /// Normalized log-spaced spectrum (~35 Hz .. ~11 kHz), 0..1 per bin.
+    pub spectrum: [f32; SPECTRUM_BINS],
+}
+
+impl Default for HopFeatures {
+    fn default() -> Self {
+        Self {
+            level: 0.0,
+            bass: 0.0,
+            mid: 0.0,
+            treble: 0.0,
+            flux: 0.0,
+            spectrum: [0.0; SPECTRUM_BINS],
+        }
+    }
 }
 
 pub struct FeatureExtractor {
@@ -34,6 +52,10 @@ pub struct FeatureExtractor {
     sample_rate: f32,
     /// Slow AGC so band outputs sit near 0..1 regardless of input gain.
     agc: BandAgc,
+    /// FFT-bin ranges for each log-spaced spectrum bin.
+    spectrum_edges: [(usize, usize); SPECTRUM_BINS],
+    /// Slow-decaying peak used to normalize the spectrum display bins.
+    spectrum_peak: f32,
 }
 
 struct BandAgc {
@@ -67,6 +89,17 @@ impl FeatureExtractor {
                 0.5 - 0.5 * (std::f32::consts::TAU * t).cos()
             })
             .collect();
+        // Log-spaced bin edges, ~35 Hz to ~11 kHz.
+        let bin_hz = sample_rate / FFT_SIZE as f32;
+        let f_lo = 35.0f32;
+        let f_hi = (sample_rate * 0.45).min(11_000.0);
+        let spectrum_edges = std::array::from_fn(|i| {
+            let t0 = i as f32 / SPECTRUM_BINS as f32;
+            let t1 = (i + 1) as f32 / SPECTRUM_BINS as f32;
+            let a = (f_lo * (f_hi / f_lo).powf(t0) / bin_hz) as usize;
+            let b = ((f_lo * (f_hi / f_lo).powf(t1) / bin_hz) as usize).max(a + 1);
+            (a.min(FFT_SIZE / 2 - 1), b.min(FFT_SIZE / 2))
+        });
         Self {
             fft,
             window,
@@ -75,6 +108,8 @@ impl FeatureExtractor {
             scratch: vec![Complex32::default(); FFT_SIZE],
             sample_rate,
             agc: BandAgc { peaks: [1e-4; 4] },
+            spectrum_edges,
+            spectrum_peak: 1e-4,
         }
     }
 
@@ -124,12 +159,32 @@ impl FeatureExtractor {
         let treble = band(2000.0, 8000.0, &mags);
         let [level, bass, mid, treble] = self.agc.normalize([rms, bass, mid, treble]);
 
+        // Display spectrum: log-spaced bins, normalized by a slow-decaying peak so
+        // the shape reads at any input gain. Sqrt compresses dynamic range a bit.
+        let mut spectrum = [0.0f32; SPECTRUM_BINS];
+        let mut frame_max = 0.0f32;
+        for (i, (a, b)) in self.spectrum_edges.iter().enumerate() {
+            let v = mags[*a..*b].iter().sum::<f32>() / (*b - *a) as f32;
+            spectrum[i] = v;
+            frame_max = frame_max.max(v);
+        }
+        if frame_max > self.spectrum_peak {
+            self.spectrum_peak = frame_max;
+        } else {
+            self.spectrum_peak *= 0.9995;
+        }
+        let norm = self.spectrum_peak.max(1e-5);
+        for v in spectrum.iter_mut() {
+            *v = (*v / norm).clamp(0.0, 1.0).sqrt();
+        }
+
         HopFeatures {
             level,
             bass,
             mid,
             treble,
             flux,
+            spectrum,
         }
     }
 }

@@ -17,7 +17,9 @@ export type LayerKind =
   | "interference"
   | "fire"
   | "meteors"
-  | "warp";
+  | "warp"
+  | "waveform"
+  | "spectrum";
 
 export type BlendMode = "add" | "multiply" | "screen" | "alpha_over" | "max";
 
@@ -235,6 +237,8 @@ export const LAYER_KINDS: LayerKind[] = [
   "fire",
   "meteors",
   "warp",
+  "waveform",
+  "spectrum",
 ];
 
 export const BLEND_MODES: BlendMode[] = ["add", "multiply", "screen", "alpha_over", "max"];
@@ -257,6 +261,8 @@ export const LAYER_LABELS: Record<LayerKind, string> = {
   fire: "Fire",
   meteors: "Meteors",
   warp: "Warp",
+  waveform: "Waveform",
+  spectrum: "Spectrum",
 };
 
 /** Kind-specific labels for param_a..d, where meaningful. */
@@ -274,6 +280,8 @@ export const PARAM_LABELS: Partial<Record<LayerKind, [string?, string?, string?,
   fire: ["Flame reach", "Flame stretch"],
   meteors: ["Density", "Rate/tail", "Direction"],
   warp: ["Star density", "Speed"],
+  waveform: ["Ring radius", "Depth", "Thickness"],
+  spectrum: ["Bar length", "From outer/inner"],
 };
 
 export function defaultLayer(kind: LayerKind): LayerCfg {

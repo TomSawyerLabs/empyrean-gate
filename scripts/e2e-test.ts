@@ -41,6 +41,10 @@ const done = new Promise<void>((resolve, reject) => {
     ws.send(JSON.stringify({ type: "paint", pen: "glow", points: [{ angle: 0.5, radius: 0.7 }, { angle: 0.6, radius: 0.7 }], hue: 0.5, size: 0.15, intensity: 1 }));
     ws.send(JSON.stringify({ type: "paint", pen: "comet", points: [{ angle: 1.5, radius: 0.6, dir: 2.2 }], hue: -1, size: 0.2, intensity: 1 }));
     ws.send(JSON.stringify({ type: "paint", pen: "ring", points: [{ angle: 0, radius: 0.5 }], hue: 0.8, size: 0.1, intensity: 1 }));
+    // Round-trip the audio-shape layer kinds (waveform ring + spectrum analyzer).
+    for (const kind of ["waveform", "spectrum"]) {
+      ws.send(JSON.stringify({ type: "add_layer", layer: { kind, enabled: true, name: `e2e-${kind}`, blend: "add", opacity: 0.5, speed: 1, scale: 1, audio_source: 0, audio_amount: 0.5, hue: 0.5, hue_range: 0.2, saturation: 0.9, brightness: 1, tilt_amount: 0, walk_amount: 0, param_a: 0.5, param_b: 0.5, param_c: 0.5, param_d: 0.5 } }));
+    }
   };
   ws.onmessage = (ev) => {
     if (typeof ev.data === "string") {

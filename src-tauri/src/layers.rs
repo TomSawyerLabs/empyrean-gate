@@ -47,10 +47,14 @@ pub enum LayerKind {
     Meteors,
     /// Starfield streaming outward — warp speed.
     Warp,
+    /// The raw waveform bent into a ring: a circular oscilloscope (MilkDrop-style).
+    Waveform,
+    /// Spoke-per-bin circular spectrum analyzer.
+    Spectrum,
 }
 
 impl LayerKind {
-    pub const ALL: [LayerKind; 17] = [
+    pub const ALL: [LayerKind; 19] = [
         LayerKind::Solid,
         LayerKind::GradientRadial,
         LayerKind::NoiseField,
@@ -68,6 +72,8 @@ impl LayerKind {
         LayerKind::Fire,
         LayerKind::Meteors,
         LayerKind::Warp,
+        LayerKind::Waveform,
+        LayerKind::Spectrum,
     ];
 
     pub fn gpu_id(self) -> u32 {

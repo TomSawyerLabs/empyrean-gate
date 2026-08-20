@@ -35,7 +35,10 @@ live meters.
   extracted client-side, same beat tracker as local sources) and its IMU orientation
   (steers layers/effects). See Settings → This device.
 - **Layers**: noise fields (3D simplex / multidimensional color noise), harmonic radial
-  waves, spirals, plasma, spoke chases, sparkles, beat rings, breathing envelopes —
+  waves, spirals, plasma, spoke chases, sparkles, beat rings, breathing envelopes,
+  rainbows, wedges, interference, fire, meteors, warp — plus MilkDrop-style raw-audio
+  layers: **Waveform** (the PCM bent into a circular oscilloscope) and **Spectrum**
+  (spoke-per-bin circular analyzer) —
   stacked with blend modes, each bound to an audio source. Effects (burst / strobe /
   swoosh / collapse) fire from keyboard (1–4), clicks/taps on the preview, or remote
   clients.
