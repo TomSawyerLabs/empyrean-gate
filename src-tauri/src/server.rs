@@ -564,6 +564,12 @@ async fn handle_msg(
                 }
             });
         }
+        ClientMsg::CheckUpdate => {
+            state.update_check_requested.store(true, Ordering::SeqCst);
+        }
+        ClientMsg::InstallUpdate => {
+            state.update_install_requested.store(true, Ordering::SeqCst);
+        }
         ClientMsg::TriggerEffect { effect } => {
             state.trigger_effect(effect);
         }

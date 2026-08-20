@@ -12,6 +12,7 @@ pub mod protocol;
 pub mod sacn;
 pub mod server;
 pub mod state;
+pub mod updater;
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -32,7 +33,11 @@ pub fn start_backend() -> Backend {
     let port = cfg.server.port;
     let takeover = port_in_use(port);
     let state = SharedState::new(cfg);
-    state.status.lock().interfaces = list_interfaces();
+    {
+        let mut st = state.status.lock();
+        st.interfaces = list_interfaces();
+        st.version = updater::CURRENT_VERSION.to_string();
+    }
     if takeover {
         log::info!("port {port} is busy — attempting takeover of the running instance");
         state.sacn_hold.store(true, Ordering::SeqCst);
@@ -87,6 +92,7 @@ pub fn start_backend() -> Backend {
     }
 
     server::spawn(state.clone(), remote_chains);
+    updater::spawn(state.clone());
     Backend { state }
 }
 
@@ -181,6 +187,7 @@ pub fn run(headless: bool) {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let backend = start_backend();
     let state = backend.state.clone();
+    state.headless.store(headless, Ordering::SeqCst);
 
     if headless {
         log::info!("headless mode: no desktop window; web UI only");

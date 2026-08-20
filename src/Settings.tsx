@@ -26,8 +26,54 @@ export default function Settings() {
       <OutputPanel config={config} />
       <GeometryPanel config={config} />
       <ClientsPanel />
+      <UpdatesPanel config={config} />
       <ThisDevicePanel />
     </div>
+  );
+}
+
+function UpdatesPanel({ config }: { config: AppConfig }) {
+  const { client, status } = useGate();
+  const commit = (patch: Partial<AppConfig["update"]>) =>
+    client.setConfig({ ...config, update: { ...config.update, ...patch } });
+  return (
+    <section className="panel">
+      <h2>Updates</h2>
+      <p className="hint">
+        Running v{status?.version ?? "?"}
+        {status?.update_available
+          ? ` — v${status.update_available} is available.`
+          : status?.update_state
+            ? ` — ${status.update_state}.`
+            : "."}{" "}
+        Updating downloads the new binary beside this one and hot-swaps via the seamless
+        takeover — the structure sees at most a frame.
+      </p>
+      <div className="add-row">
+        <button onClick={() => client.send({ type: "check_update" })}>Check now</button>
+        {status?.update_available && (
+          <button onClick={() => client.send({ type: "install_update" })}>
+            Update to v{status.update_available}
+          </button>
+        )}
+      </div>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={config.update.auto_check}
+          onChange={(e) => commit({ auto_check: e.target.checked })}
+        />
+        Check automatically (startup + every 6 h)
+      </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={config.update.auto_install}
+          onChange={(e) => commit({ auto_install: e.target.checked })}
+        />
+        Install automatically when found
+      </label>
+    </section>
   );
 }
 

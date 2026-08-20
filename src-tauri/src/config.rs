@@ -295,6 +295,26 @@ impl Default for BeatTapConfig {
     }
 }
 
+/// Self-update behavior (see `updater.rs`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateConfig {
+    /// Poll GitHub Releases for newer versions (startup + every 6 h).
+    pub auto_check: bool,
+    /// Install updates as soon as they are found. The swap is a seamless takeover,
+    /// but taking an update mid-show is the operator's call — off by default.
+    pub auto_install: bool,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            auto_check: true,
+            auto_install: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -303,6 +323,7 @@ pub struct AppConfig {
     pub server: ServerConfig,
     pub audio: AudioConfig,
     pub render: RenderConfig,
+    pub update: UpdateConfig,
     pub beat_taps: BeatTapConfig,
     pub layers: Vec<LayerCfg>,
     /// Known client devices (see `ClientRecord`).
@@ -317,6 +338,7 @@ impl Default for AppConfig {
             server: ServerConfig::default(),
             audio: AudioConfig::default(),
             render: RenderConfig::default(),
+            update: UpdateConfig::default(),
             beat_taps: BeatTapConfig::default(),
             layers: default_layer_stack(),
             clients: Vec::new(),

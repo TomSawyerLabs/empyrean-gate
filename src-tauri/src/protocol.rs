@@ -112,6 +112,10 @@ pub enum ClientMsg {
     SetRequireToken {
         require: bool,
     },
+    /// Ask the updater to poll GitHub Releases now.
+    CheckUpdate,
+    /// Download + hot-swap to the staged update (two-phase takeover).
+    InstallUpdate,
     /// Phone orientation / motion, mapped onto the global control bus.
     Imu {
         /// Compass-ish heading in radians.
@@ -236,4 +240,10 @@ pub struct RuntimeStatus {
     pub client_list: Vec<ClientInfo>,
     pub master_brightness: f32,
     pub master_speed: f32,
+    /// Running app version (CARGO_PKG_VERSION).
+    pub version: String,
+    /// Newer release version, when one is known.
+    pub update_available: Option<String>,
+    /// Updater progress / result note ("up to date", "downloading…", errors).
+    pub update_state: String,
 }

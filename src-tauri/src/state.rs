@@ -117,6 +117,11 @@ pub struct SharedState {
     /// Total frames rendered; the takeover waits for its adopted config to have
     /// flowed through the render+readback pipeline before committing.
     pub frames_rendered: AtomicU64,
+    /// Set by the UI/auto-check to ask the updater thread to act.
+    pub update_check_requested: AtomicBool,
+    pub update_install_requested: AtomicBool,
+    /// Whether this instance runs headless (the updater passes it to a successor).
+    pub headless: AtomicBool,
     /// Currently-connected WS clients: connection serial -> client id.
     pub connected_clients: Mutex<HashMap<u64, String>>,
     pub conn_seq: AtomicU64,
@@ -148,6 +153,9 @@ impl SharedState {
             sacn_quiesced: AtomicBool::new(false),
             sacn_terminated: AtomicBool::new(false),
             frames_rendered: AtomicU64::new(0),
+            update_check_requested: AtomicBool::new(false),
+            update_install_requested: AtomicBool::new(false),
+            headless: AtomicBool::new(false),
             connected_clients: Mutex::new(HashMap::new()),
             conn_seq: AtomicU64::new(1),
             events,

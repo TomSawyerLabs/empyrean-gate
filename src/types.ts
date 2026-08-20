@@ -128,6 +128,11 @@ export interface RenderConfig {
   walk_speed: number;
 }
 
+export interface UpdateConfig {
+  auto_check: boolean;
+  auto_install: boolean;
+}
+
 export interface BeatTapConfig {
   enabled: boolean;
   audio_source: number;
@@ -145,6 +150,7 @@ export interface AppConfig {
   server: ServerConfig;
   audio: AudioConfig;
   render: RenderConfig;
+  update: UpdateConfig;
   beat_taps: BeatTapConfig;
   layers: LayerCfg[];
   clients: ClientRecord[];
@@ -189,6 +195,9 @@ export interface RuntimeStatus {
   client_list: ClientInfo[];
   master_brightness: number;
   master_speed: number;
+  version: string;
+  update_available: string | null;
+  update_state: string;
 }
 
 export type ServerMsg =

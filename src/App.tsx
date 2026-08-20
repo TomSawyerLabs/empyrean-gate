@@ -79,6 +79,40 @@ function DisconnectedOverlay() {
   );
 }
 
+/// Small version tag in the corner. Click checks for updates; when a newer
+/// release is known it lights up and a click hot-swaps to it (seamless takeover).
+function VersionChip() {
+  const { client, status } = useGate();
+  const [busy, setBusy] = useState(false);
+  if (!status?.version) return null;
+  const next = status.update_available;
+  const note = status.update_state;
+
+  if (next) {
+    return (
+      <button
+        className="version-chip update"
+        onClick={() => {
+          setBusy(true);
+          client.send({ type: "install_update" });
+        }}
+      >
+        v{status.version} → v{next}
+        {busy || note ? ` · ${note || "updating…"}` : " · click to update"}
+      </button>
+    );
+  }
+  return (
+    <button
+      className="version-chip"
+      onClick={() => client.send({ type: "check_update" })}
+    >
+      v{status.version}
+      {note ? ` · ${note}` : ""}
+    </button>
+  );
+}
+
 function ConnectModal({ onClose }: { onClose: () => void }) {
   const { client, config, status } = useGate();
   const interfaces = status?.interfaces ?? [];
@@ -198,6 +232,7 @@ export default function App() {
         <span className={connected ? "conn ok" : "conn bad"}>
           {connected ? "connected" : "reconnecting…"}
         </span>
+        <VersionChip />
       </header>
 
       {status?.gpu_error && (
