@@ -296,6 +296,21 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
       https://github.com/cinderblock/empyrean-gate/releases/tag/v0.2.0
 - Note: v0.1.0 binaries predate the updater — first swap to 0.2.0 is manual.
 
+## Round 9 (2026-08-20): windows restore, viewer queue, walk visibility
+
+- [x] Window restore across restarts/self-updates (tauri-plugin-window-state, stable
+      aux labels, aux_open recreated at startup, 5 s periodic saves). Needs one
+      visual verification pass by the user.
+- [x] Preview-slot queue: `server.max_preview_clients` (default 10) rations the
+      preview stream (>98% of client bandwidth); control is never gated; FIFO with
+      live position banner. queue-test.ts verifies (cap 2, 3 viewers, promotion).
+- [x] Phone preview default 20 fps @ 1/6 px ≈ 1.4 Mbps/phone (was ~4.1) — ~10
+      viewers ≈ 14 Mbps, comfortable on venue WiFi.
+- [x] Walk visibility: global "Walk depth" (0–3) multiplier + "Add missing kinds"
+      button so the gray-code layer walk can tour all 19 patterns. (Walk was
+      working but too subtle at defaults, and only ever tours stack layers.)
+- [x] v0.3.0 tagged (window fix + these features; bump in its own commit).
+
 ## Next session pickup
 
 - Run `bun tauri dev` and eyeball the actual patterns; tune defaults.

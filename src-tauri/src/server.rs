@@ -253,6 +253,9 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
     let mut preview: Option<PreviewSub> = None;
     let mut announced_meta = (0u32, 0u32, 0u32);
     let mut queued_notified: Option<u32> = None;
+    // Loopback clients (the desktop window, aux windows, local browsers) are
+    // exempt from preview-slot rationing: their frames never cross the NIC.
+    let is_local = addr.ip().is_loopback();
     let max_preview = |state: &SharedState| {
         state.config.read().server.max_preview_clients.max(1) as usize
     };
@@ -300,7 +303,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                     break;
                 }
                 // Queue position updates for clients waiting on a preview slot.
-                if preview.is_some() {
+                if preview.is_some() && !is_local {
                     let pos = state.preview_gate.lock().position(conn_id);
                     if pos != queued_notified {
                         queued_notified = pos;
@@ -321,9 +324,12 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                     Err(RecvError::Closed) => break,
                 };
                 let Some(sub) = preview.as_mut() else { continue };
-                // Bandwidth rationing: only slot holders stream frames.
-                let max = max_preview(&state);
-                if !state.preview_gate.lock().is_active(conn_id, max) { continue; }
+                // Bandwidth rationing: only slot holders stream frames (loopback
+                // clients are always allowed — no NIC involved).
+                if !is_local {
+                    let max = max_preview(&state);
+                    if !state.preview_gate.lock().is_active(conn_id, max) { continue; }
+                }
                 if sub.last_sent.elapsed() < sub.min_interval { continue; }
                 sub.last_sent = Instant::now();
                 let meta = (frame.spokes, frame.pixels_per_spoke, sub.decimate);
@@ -608,11 +614,14 @@ async fn handle_msg(
                 decimate: decimate.clamp(1, 64),
                 last_sent: Instant::now() - Duration::from_secs(1),
             });
-            let max = state.config.read().server.max_preview_clients.max(1) as usize;
-            let active = state.preview_gate.lock().request(conn_id, max);
-            if !active {
-                let position = state.preview_gate.lock().position(conn_id).unwrap_or(0);
-                let _ = send_json(tx, &ServerMsg::PreviewQueue { position }).await;
+            // Loopback clients bypass slot rationing (no NIC traffic).
+            if !addr.ip().is_loopback() {
+                let max = state.config.read().server.max_preview_clients.max(1) as usize;
+                let active = state.preview_gate.lock().request(conn_id, max);
+                if !active {
+                    let position = state.preview_gate.lock().position(conn_id).unwrap_or(0);
+                    let _ = send_json(tx, &ServerMsg::PreviewQueue { position }).await;
+                }
             }
             // Force a fresh PreviewMeta: the client may be a newly-mounted canvas
             // that never saw the one sent earlier on this connection.
