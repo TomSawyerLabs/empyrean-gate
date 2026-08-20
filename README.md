@@ -140,6 +140,16 @@ git tag v0.2.0 && git push origin v0.2.0
 
 Grab binaries from https://github.com/cinderblock/empyrean-gate/releases.
 
+## Self-update
+
+No installer needed. The app checks GitHub Releases (startup + every 6 h; toggle in
+Settings → Updates) and shows a lit version chip in the top bar when a newer release
+exists — click it (or use Settings) to update: the new binary downloads *beside* the
+running one, launches, and takes over via the seamless handover. Mid-show updates
+cost about one frame. Auto-install is available but off by default; old versioned
+binaries are cleaned up automatically. (Instances older than v0.2.0 predate the
+updater and need one manual swap.)
+
 ## Safety notes
 
 - **sACN output is OFF by default** — enable it in Settings → sACN output. 192

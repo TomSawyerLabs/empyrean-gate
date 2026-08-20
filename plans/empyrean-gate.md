@@ -280,6 +280,21 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
   assets: windows-x64.exe (19.4 MB), linux-x64 (23.8 MB), macos-arm64 (19.7 MB).
   Future releases: `git tag vX.Y.Z && git push origin vX.Y.Z` — CI does the rest.
 
+## Round 8 (2026-08-20): self-update
+
+- [x] Updater thread (`updater.rs`): GitHub Releases API check (6 h + startup,
+      auto_check default on), download platform asset to a VERSIONED SIBLING file
+      (never overwrite the locked running exe), spawn → two-phase takeover → old
+      exits. Old versioned binaries cleaned up at later startups. auto_install
+      opt-in. `EMPYREAN_FAKE_VERSION` test hook.
+- [x] Version chip in the top-bar corner (click = check; lit = click to hot-swap) +
+      Settings → Updates panel.
+- [x] Verified end-to-end against the real v0.1.0 release: download → spawn →
+      handover → successor serving (scripts/update-test.ts).
+- [x] v0.2.0 bumped (separate commit, per user rule: bumps never mix with code) and
+      tagged; release run 32340746040.
+- Note: v0.1.0 binaries predate the updater — first swap to 0.2.0 is manual.
+
 ## Next session pickup
 
 - Run `bun tauri dev` and eyeball the actual patterns; tune defaults.
