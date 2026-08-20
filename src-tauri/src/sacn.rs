@@ -136,7 +136,12 @@ impl SacnSender {
         let ups = geometry::universes_per_spoke(geo, out) as u32;
 
         for spoke in 0..geo.spokes {
-            let unicast = geometry::controller_for_spoke(out, spoke)
+            // Destination mode is exclusive. The old UI exposed multicast and
+            // controller IPs independently, which sent every packet twice when
+            // both were configured (same sequence number, wasted wire traffic).
+            let unicast = (!out.multicast)
+                .then(|| geometry::controller_for_spoke(out, spoke))
+                .flatten()
                 .and_then(|ip| ip.parse::<Ipv4Addr>().ok())
                 .map(|ip| SocketAddrV4::new(ip, SACN_PORT));
             for u in 0..ups {
@@ -682,7 +687,7 @@ mod tests {
         let mut s = SacnSender::new().unwrap();
         let (geo, out) = offline(2);
         s.configure(&geo, &out);
-        s.send_frame(&vec![0u8; 2 * 4 * 3]);
+        s.send_frame(&[0u8; 2 * 4 * 3]);
 
         let (geo, mut out) = offline(2);
         out.cid = "ffffffff-89ab-cdef-0123-456789abcdef".into();
@@ -698,5 +703,22 @@ mod tests {
         assert_eq!(bytes, CID);
         // Garbage is survivable, not fatal — but it must not silently be zeros.
         assert_ne!(cid_bytes("not-a-uuid"), [0u8; 16]);
+    }
+
+    #[test]
+    fn destination_mode_never_duplicates_multicast_and_unicast() {
+        let mut sender = SacnSender::new().unwrap();
+        let (geo, mut out) = offline(1);
+        out.controllers = vec!["127.0.0.1".into()];
+
+        out.multicast = true;
+        sender.configure(&geo, &out);
+        assert!(sender.plan[0].multicast.is_some());
+        assert!(sender.plan[0].unicast.is_none());
+
+        out.multicast = false;
+        sender.configure(&geo, &out);
+        assert!(sender.plan[0].multicast.is_none());
+        assert!(sender.plan[0].unicast.is_some());
     }
 }

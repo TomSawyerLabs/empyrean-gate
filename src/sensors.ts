@@ -3,17 +3,17 @@
 
 import type { GateClient } from "./ws";
 
-/** Stream mic features (~40 Hz). Returns a stop function. */
-export async function startMic(client: GateClient): Promise<() => void> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-  });
-  const ctx = new AudioContext();
-  const src = ctx.createMediaStreamSource(stream);
-  const analyser = ctx.createAnalyser();
+export type BrowserAudioStream = "microphone" | "video";
+
+/** Analyze an AudioNode and send compact features (~40 Hz) to the Gate. */
+export function startAudioFeatures(
+  client: GateClient,
+  ctx: AudioContext,
+  analyser: AnalyserNode,
+  stream: BrowserAudioStream,
+): () => void {
   analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0;
-  src.connect(analyser);
 
   const bins = analyser.frequencyBinCount;
   const freq = new Uint8Array(bins);
@@ -29,7 +29,7 @@ export async function startMic(client: GateClient): Promise<() => void> {
     return sum / ((b - a + 1) * 255);
   };
 
-  const interval = setInterval(() => {
+  const interval = window.setInterval(() => {
     analyser.getByteFrequencyData(freq);
     analyser.getByteTimeDomainData(time);
     let rms = 0;
@@ -40,22 +40,40 @@ export async function startMic(client: GateClient): Promise<() => void> {
     rms = Math.sqrt(rms / time.length);
     let flux = 0;
     for (let i = 0; i < bins; i++) {
-      const m = freq[i] / 255;
-      const d = m - prev[i];
-      if (d > 0) flux += d;
-      prev[i] = m;
+      const magnitude = freq[i] / 255;
+      const delta = magnitude - prev[i];
+      if (delta > 0) flux += delta;
+      prev[i] = magnitude;
     }
-    client.sendAudioFrame({
-      level: Math.min(1, rms * 3),
-      bass: band(20, 150),
-      mid: band(150, 2000),
-      treble: band(2000, 8000),
-      flux,
-    });
+    client.sendAudioFrame(
+      {
+        level: Math.min(1, rms * 3),
+        bass: band(20, 150),
+        mid: band(150, 2000),
+        treble: band(2000, 8000),
+        flux,
+      },
+      stream,
+    );
   }, 25);
 
+  return () => window.clearInterval(interval);
+}
+
+/** Stream mic features (~40 Hz). Returns a stop function. */
+export async function startMic(client: GateClient): Promise<() => void> {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+  });
+  const ctx = new AudioContext();
+  const src = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  src.connect(analyser);
+  await ctx.resume();
+  const stopFeatures = startAudioFeatures(client, ctx, analyser, "microphone");
+
   return () => {
-    clearInterval(interval);
+    stopFeatures();
     void ctx.close();
     stream.getTracks().forEach((t) => t.stop());
   };

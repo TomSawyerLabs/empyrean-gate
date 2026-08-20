@@ -8,6 +8,7 @@ pub mod config;
 pub mod engine;
 pub mod geometry;
 pub mod layers;
+pub mod media;
 pub mod protocol;
 pub mod sacn;
 pub mod server;

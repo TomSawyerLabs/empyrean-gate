@@ -17,12 +17,16 @@
 
 use crate::audio::RemoteChains;
 use crate::config::ClientRecord;
-use crate::protocol::{ClientMsg, HandoverGrant, ServerMsg, PREVIEW_MAGIC};
+use crate::media::{MediaResolver, ResolveRequest};
+use crate::protocol::{
+    BrowserAudioStream, ClientMsg, HandoverGrant, ServerMsg, PREVIEW_MAGIC, VIDEO_FRAME_MAGIC,
+};
 use crate::state::{PreviewFrame, SharedState};
 use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Query, State};
-use axum::http::{header, StatusCode, Uri};
+use axum::body::Body;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
@@ -32,6 +36,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
+use tower_http::cors::{Any, CorsLayer};
 
 #[derive(rust_embed::Embed)]
 #[folder = "../dist"]
@@ -41,6 +46,7 @@ struct Assets;
 struct Ctx {
     state: Arc<SharedState>,
     remote: RemoteChains,
+    media: Arc<MediaResolver>,
 }
 
 pub fn spawn(state: Arc<SharedState>, remote: RemoteChains) -> std::thread::JoinHandle<()> {
@@ -62,13 +68,22 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         let cfg = state.config.read();
         (cfg.server.bind.clone(), cfg.server.port)
     };
-    let ctx = Ctx { state: state.clone(), remote };
+    let media = MediaResolver::new().expect("media resolver HTTP client");
+    let ctx = Ctx { state: state.clone(), remote, media };
     let app = Router::new()
         .route("/ws", get(ws_upgrade))
         .route("/qr.svg", get(qr_svg))
         .route("/handover/state", get(handover_state))
         .route("/handover", post(handover))
+        .route("/media/resolve", post(resolve_media))
+        .route("/media/stream/{id}", get(stream_media))
         .fallback(get(serve_asset))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+                .allow_headers([header::CONTENT_TYPE, header::RANGE]),
+        )
         .with_state(ctx);
 
     let addr = format!("{bind}:{port}");
@@ -103,6 +118,70 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
     if let Err(e) = server.await {
         log::error!("web server error: {e}");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Browser-decodable media proxy
+// ---------------------------------------------------------------------------
+
+fn media_authorized(state: &SharedState, addr: SocketAddr, req: &ResolveRequest) -> bool {
+    let cfg = state.config.read();
+    if cfg
+        .clients
+        .iter()
+        .any(|c| c.id == req.client_id && c.revoked)
+    {
+        return false;
+    }
+    if addr.ip().is_loopback() || !cfg.server.require_token {
+        return true;
+    }
+    cfg.clients.iter().any(|c| c.id == req.client_id)
+        || (!req.token.is_empty() && req.token == cfg.server.join_token)
+}
+
+async fn resolve_media(
+    State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    axum::Json(req): axum::Json<ResolveRequest>,
+) -> Response {
+    if !media_authorized(&ctx.state, addr, &req) {
+        return (StatusCode::FORBIDDEN, "media access denied").into_response();
+    }
+    match ctx.media.resolve(&req.url).await {
+        Ok(resolved) => axum::Json(resolved).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, format!("{e:#}")).into_response(),
+    }
+}
+
+async fn stream_media(
+    State(ctx): State<Ctx>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
+    let upstream = match ctx.media.stream(&id, range).await {
+        Ok(response) => response,
+        Err(e) => return (StatusCode::BAD_GATEWAY, format!("media stream error: {e:#}")).into_response(),
+    };
+    let status = upstream.status();
+    let mut builder = Response::builder().status(status);
+    for name in [
+        header::CONTENT_TYPE,
+        header::CONTENT_LENGTH,
+        header::CONTENT_RANGE,
+        header::ACCEPT_RANGES,
+        header::CACHE_CONTROL,
+        header::ETAG,
+        header::LAST_MODIFIED,
+    ] {
+        if let Some(value) = upstream.headers().get(&name) {
+            builder = builder.header(name, value);
+        }
+    }
+    builder
+        .body(Body::from_stream(upstream.bytes_stream()))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +369,11 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                             }
                         }
                     }
+                    Message::Binary(bytes) => {
+                        if !client_id.is_empty() {
+                            handle_video_frame(&state, conn_id, &bytes);
+                        }
+                    }
                     Message::Close(_) => break,
                     _ => {}
                 }
@@ -359,7 +443,32 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
         state.preview_gate.lock().release(conn_id, max);
     }
     state.connected_clients.lock().remove(&conn_id);
+    if state.stop_video(Some(conn_id)) {
+        deactivate_video_audio(&ctx);
+    }
     state.status.lock().clients -= 1;
+}
+
+fn handle_video_frame(state: &SharedState, conn_id: u64, bytes: &[u8]) {
+    if bytes.len() < 12 {
+        return;
+    }
+    let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+    if magic != VIDEO_FRAME_MAGIC {
+        return;
+    }
+    let width = u16::from_le_bytes(bytes[8..10].try_into().unwrap());
+    let height = u16::from_le_bytes(bytes[10..12].try_into().unwrap());
+    let _ = state.push_video_frame(conn_id, width, height, &bytes[12..]);
+}
+
+fn deactivate_video_audio(ctx: &Ctx) {
+    let chains = ctx.remote.lock();
+    for (key, chain) in chains.iter() {
+        if matches!(key, crate::audio::BrowserAudioKey::Video) {
+            chain.lock().deactivate(&ctx.state);
+        }
+    }
 }
 
 fn is_revoked(state: &SharedState, client_id: &str) -> bool {
@@ -632,20 +741,41 @@ async fn handle_msg(
             let max = state.config.read().server.max_preview_clients.max(1) as usize;
             state.preview_gate.lock().release(conn_id, max);
         }
+        ClientMsg::StartVideo { title, source_url } => {
+            if !client_id.is_empty() {
+                deactivate_video_audio(ctx);
+                state.start_video(conn_id, client_id, title, source_url);
+            }
+        }
+        ClientMsg::StopVideo { force } => {
+            if !client_id.is_empty()
+                && state.stop_video(if force { None } else { Some(conn_id) })
+            {
+                deactivate_video_audio(ctx);
+            }
+        }
         ClientMsg::AudioFrame {
+            stream,
             level,
             bass,
             mid,
             treble,
             flux,
         } => {
+            // A soundtrack is authoritative only while this connection owns the
+            // live video. Microphone packets retain their client-id routing.
+            if stream == BrowserAudioStream::Video {
+                let video = state.video.lock();
+                if !video.active || video.owner_conn_id != conn_id {
+                    return Ok(());
+                }
+            }
             let chains = ctx.remote.lock();
-            for (id, chain) in chains.iter() {
-                if id == client_id {
+            for (key, chain) in chains.iter() {
+                if key.matches(stream, client_id) {
                     chain
                         .lock()
                         .feed_remote(state, level, bass, mid, treble, flux);
-                    break;
                 }
             }
         }

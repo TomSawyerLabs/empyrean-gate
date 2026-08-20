@@ -51,10 +51,12 @@ pub enum LayerKind {
     Waveform,
     /// Spoke-per-bin circular spectrum analyzer.
     Spectrum,
+    /// Live video texture supplied by a browser client and mapped across the ring.
+    Video,
 }
 
 impl LayerKind {
-    pub const ALL: [LayerKind; 19] = [
+    pub const ALL: [LayerKind; 20] = [
         LayerKind::Solid,
         LayerKind::GradientRadial,
         LayerKind::NoiseField,
@@ -74,6 +76,7 @@ impl LayerKind {
         LayerKind::Warp,
         LayerKind::Waveform,
         LayerKind::Spectrum,
+        LayerKind::Video,
     ];
 
     pub fn gpu_id(self) -> u32 {
@@ -211,6 +214,8 @@ pub struct EffectCfg {
     /// Origin radius, normalized 0 (center) .. 1 (outer edge).
     pub radius: f32,
     pub intensity: f32,
+    /// Width multiplier for effects with a spatial footprint (1 = default).
+    pub size: f32,
     /// Hue in turns; negative = white.
     pub hue: f32,
     /// Seconds; 0 = use the kind's default.
@@ -224,6 +229,7 @@ impl Default for EffectCfg {
             angle: 0.0,
             radius: 1.0,
             intensity: 1.0,
+            size: 1.0,
             hue: -1.0,
             duration: 0.0,
         }
@@ -334,7 +340,7 @@ pub struct GpuDab {
 #[derive(Debug, Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuEffect {
     pub kind: u32,
-    pub _pad: u32,
+    pub size: f32,
     pub age: f32,
     pub duration: f32,
     pub angle: f32,

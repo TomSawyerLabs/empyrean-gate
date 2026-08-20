@@ -11,6 +11,19 @@ use serde::{Deserialize, Serialize};
 /// then `spokes * pixels` RGB triplets (pixel 0 = outer end of spoke).
 pub const PREVIEW_MAGIC: u32 = 0x4547_5056; // "VPGE"
 
+/// Binary video input frame (client -> backend), little endian:
+/// `u32 magic, u32 sequence, u16 width, u16 height`, then RGBA8 pixels.
+pub const VIDEO_FRAME_MAGIC: u32 = 0x4547_5646; // "FVGE"
+pub const MAX_VIDEO_DIMENSION: u16 = 256;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserAudioStream {
+    #[default]
+    Microphone,
+    Video,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMsg {
@@ -76,9 +89,27 @@ pub enum ClientMsg {
         decimate: u32,
     },
     UnsubscribePreview,
-    /// Audio features computed client-side from a remote browser microphone.
+    /// Claim the single live video input. Binary VIDEO_FRAME_MAGIC messages from
+    /// this connection are accepted until it stops or disconnects.
+    StartVideo {
+        #[serde(default)]
+        title: String,
+        #[serde(default)]
+        source_url: String,
+    },
+    StopVideo {
+        /// Normal cleanup may stop only the caller's own source. An explicit UI
+        /// action can force-stop another connected device's source.
+        #[serde(default)]
+        force: bool,
+    },
+    /// Audio features computed client-side from a remote browser microphone or
+    /// from the soundtrack of the browser-decoded video.
     /// Sent at the client's analysis hop rate (~40 Hz).
     AudioFrame {
+        /// Absent means microphone for backwards compatibility with older UIs.
+        #[serde(default)]
+        stream: BrowserAudioStream,
         level: f32,
         bass: f32,
         mid: f32,
@@ -215,6 +246,19 @@ pub struct AudioSourceStatus {
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
+pub struct VideoSourceStatus {
+    pub active: bool,
+    pub owner_id: String,
+    pub owner_name: String,
+    pub title: String,
+    pub source_url: String,
+    pub width: u16,
+    pub height: u16,
+    pub fps: f32,
+    pub frames: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeStatus {
     /// Set when Vulkan init failed — the UI shows this prominently. No fallbacks.
     pub gpu_error: Option<String>,
@@ -252,4 +296,31 @@ pub struct RuntimeStatus {
     pub update_available: Option<String>,
     /// Updater progress / result note ("up to date", "downloading…", errors).
     pub update_state: String,
+    pub video: VideoSourceStatus,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_stop_video_message_is_owner_scoped() {
+        let message: ClientMsg = serde_json::from_str(r#"{"type":"stop_video"}"#).unwrap();
+        assert!(matches!(message, ClientMsg::StopVideo { force: false }));
+    }
+
+    #[test]
+    fn legacy_audio_frame_defaults_to_microphone() {
+        let message: ClientMsg = serde_json::from_str(
+            r#"{"type":"audio_frame","level":0.1,"bass":0.2,"mid":0.3,"treble":0.4,"flux":0.5}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            message,
+            ClientMsg::AudioFrame {
+                stream: BrowserAudioStream::Microphone,
+                ..
+            }
+        ));
+    }
 }

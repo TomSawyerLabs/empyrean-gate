@@ -29,7 +29,7 @@ pub fn total_universes(geo: &GeometryConfig, out: &OutputConfig) -> u16 {
 }
 
 /// The unicast destination (controller IP) for a given spoke, if configured.
-pub fn controller_for_spoke<'a>(out: &'a OutputConfig, spoke: u32) -> Option<&'a str> {
+pub fn controller_for_spoke(out: &OutputConfig, spoke: u32) -> Option<&str> {
     let idx = (spoke / out.strings_per_controller.max(1)) as usize;
     out.controllers.get(idx).map(|s| s.as_str()).filter(|s| !s.is_empty())
 }

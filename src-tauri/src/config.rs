@@ -59,11 +59,13 @@ pub struct OutputConfig {
     pub start_universe: u16,
     /// Pixels per universe (170 * 3 = 510 channels fits the 512-channel DMX frame).
     pub pixels_per_universe: u16,
-    /// Unicast destinations, one per controller in spoke order. Controller i drives
-    /// `strings_per_controller` consecutive spokes. Empty entries fall back to multicast.
+    /// Unicast destinations, one per controller in spoke order. Used only when
+    /// `multicast` is false; controller i drives `strings_per_controller` spokes.
+    /// Empty entries leave the corresponding spokes without an output destination.
     pub controllers: Vec<String>,
     pub strings_per_controller: u32,
-    /// Also/instead send to sACN multicast groups (239.255.u.u).
+    /// Destination mode: true sends only to sACN multicast groups (239.255.u.u),
+    /// false sends only to the configured controller addresses.
     pub multicast: bool,
     /// E1.31 priority (default 100).
     pub priority: u8,
@@ -147,22 +149,12 @@ impl Default for ServerConfig {
 
 /// A client device that has connected at least once. Identified by the persistent
 /// id the client keeps in localStorage; named for humans; revocable.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClientRecord {
     pub id: String,
     pub name: String,
     pub revoked: bool,
-}
-
-impl Default for ClientRecord {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: String::new(),
-            revoked: false,
-        }
-    }
 }
 
 /// Random URL-safe token (join links). Seeded from `RandomState`, which is
@@ -196,6 +188,9 @@ pub enum AudioSourceKind {
     /// Features streamed from a remote browser client (its microphone) over WebSocket.
     /// `client_id` is matched against the id the remote client announces.
     Remote { client_id: String },
+    /// Features extracted in the browser from the soundtrack of the currently
+    /// active video. Packets are accepted only from that video's owning client.
+    Video,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,6 +232,12 @@ pub struct RenderConfig {
     pub fps: f32,
     pub master_brightness: f32,
     pub master_speed: f32,
+    /// When set, drive the lighting beat clock at this BPM instead of following
+    /// the audio detector. Half/normal/double time is applied afterward.
+    pub manual_bpm: Option<f32>,
+    /// Musical clock presented to lighting effects. Tempo detection remains at the
+    /// source rate; this only changes the beat phase/BPM consumed by the show.
+    pub beat_time: BeatTime,
     /// Autopilot: slow mean-reverting random walk over layer parameters, so an
     /// unattended show keeps evolving for hours. Each layer's `walk_amount` scales
     /// how far its parameters may wander from where the sliders are set.
@@ -253,12 +254,33 @@ pub struct RenderConfig {
     pub walk_depth: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BeatTime {
+    Half,
+    #[default]
+    Normal,
+    Double,
+}
+
+impl BeatTime {
+    pub fn multiplier(self) -> f32 {
+        match self {
+            Self::Half => 0.5,
+            Self::Normal => 1.0,
+            Self::Double => 2.0,
+        }
+    }
+}
+
 impl Default for RenderConfig {
     fn default() -> Self {
         Self {
             fps: 60.0,
             master_brightness: 1.0,
             master_speed: 1.0,
+            manual_bpm: None,
+            beat_time: BeatTime::Normal,
             walk_enabled: true,
             walk_layers: false,
             walk_min_layers: 2,

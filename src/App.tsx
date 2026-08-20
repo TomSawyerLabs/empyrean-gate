@@ -1,22 +1,27 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import Control from "./Control";
 import { EFFECTS } from "./effects";
 import Live from "./Live";
+import Media from "./Media";
 import Settings from "./Settings";
 import { useGate } from "./state";
 
 const TABS = [
   { id: "live", label: "Live" },
+  { id: "media", label: "Video" },
   { id: "control", label: "Control" },
   { id: "settings", label: "Settings" },
 ] as const;
 
-type TabId = (typeof TABS)[number]["id"];
+type TabId = (typeof TABS)[number]["id"] | "replay";
+
+const DevReplay = import.meta.env.DEV ? lazy(() => import("./Replay")) : null;
 
 function tabFromHash(): TabId {
   const h = location.hash.replace("#", "");
   // Old bookmarks / PWA shortcuts used #view and #draw; both merged into Live.
   if (h === "view" || h === "draw") return "live";
+  if (import.meta.env.DEV && h === "replay") return "replay";
   return (TABS.find((t) => t.id === h)?.id ?? "live") as TabId;
 }
 
@@ -32,7 +37,7 @@ async function openNewWindow(tab: TabId) {
 /// Fullscreen overlay while the backend is unreachable. Appears after a short
 /// grace period (so sub-second blips never flash it) and dismisses itself the
 /// moment the connection returns.
-function DisconnectedOverlay() {
+function DisconnectedOverlay({ disabled = false }: { disabled?: boolean }) {
   const { connected } = useGate();
   const [visible, setVisible] = useState(false);
   const [since, setSince] = useState<number | null>(null);
@@ -54,7 +59,7 @@ function DisconnectedOverlay() {
     };
   }, [connected]);
 
-  if (!visible || connected) return null;
+  if (disabled || !visible || connected) return null;
   const secs = since ? Math.floor((Date.now() - since) / 1000) : 0;
   return (
     <div className="disconnected-overlay">
@@ -244,12 +249,25 @@ export default function App() {
 
       <main>
         {tab === "live" && <Live />}
+        {/* Keep the decoder mounted while the operator visits Live/Settings.
+            An offscreen composited video continues producing frames on iPadOS;
+            unmounting it would stop the Gate feed at every tab change. */}
+        <div
+          className={tab === "media" ? "media-tab-active" : "media-tab-background"}
+          aria-hidden={tab !== "media"}
+          inert={tab !== "media"}
+        >
+          <Media />
+        </div>
+        {tab === "replay" && DevReplay && (
+          <Suspense fallback={null}><DevReplay /></Suspense>
+        )}
         {tab === "control" && <Control />}
         {tab === "settings" && <Settings />}
       </main>
 
       {showConnect && <ConnectModal onClose={() => setShowConnect(false)} />}
-      <DisconnectedOverlay />
+      <DisconnectedOverlay disabled={tab === "replay"} />
     </div>
   );
 }

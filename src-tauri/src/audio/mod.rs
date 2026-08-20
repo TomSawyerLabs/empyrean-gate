@@ -9,7 +9,7 @@ pub mod analysis;
 
 use crate::config::AudioSourceKind;
 use crate::layers::MAX_AUDIO_SOURCES;
-use crate::protocol::ServerMsg;
+use crate::protocol::BrowserAudioStream;
 use crate::state::SharedState;
 use analysis::{BeatTracker, FeatureExtractor, HOP_SIZE};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -38,13 +38,18 @@ impl AnalysisChain {
         treble: f32,
         flux: f32,
     ) {
-        let beat = self.tracker.feed(flux);
+        let gain = self.gain.max(0.0);
+        let level = (level * gain).clamp(0.0, 1.0);
+        let bass = (bass * gain).clamp(0.0, 1.0);
+        let mid = (mid * gain).clamp(0.0, 1.0);
+        let treble = (treble * gain).clamp(0.0, 1.0);
+        self.tracker.feed((flux * gain).max(0.0));
         publish(state, self.source_index, level, bass, mid, treble, &self.tracker);
-        if beat {
-            let _ = state.events.send(ServerMsg::Beat {
-                source: self.source_index as u32,
-                bpm: self.tracker.bpm(),
-            });
+    }
+
+    pub fn deactivate(&self, state: &SharedState) {
+        if self.source_index < MAX_AUDIO_SOURCES {
+            *state.audio[self.source_index].lock() = Default::default();
         }
     }
 }
@@ -78,9 +83,25 @@ fn publish(
     slot.bpm = tracker.bpm();
 }
 
-/// Registry of remote-source chains, keyed by the announced client id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrowserAudioKey {
+    Microphone(String),
+    Video,
+}
+
+impl BrowserAudioKey {
+    pub fn matches(&self, stream: BrowserAudioStream, client_id: &str) -> bool {
+        match (self, stream) {
+            (Self::Microphone(expected), BrowserAudioStream::Microphone) => expected == client_id,
+            (Self::Video, BrowserAudioStream::Video) => true,
+            _ => false,
+        }
+    }
+}
+
+/// Registry of browser-source chains, keyed by remote microphone client or video.
 /// The WS server looks up a chain when AudioFrame packets arrive.
-pub type RemoteChains = Arc<Mutex<Vec<(String, Mutex<AnalysisChain>)>>>;
+pub type RemoteChains = Arc<Mutex<Vec<(BrowserAudioKey, Mutex<AnalysisChain>)>>>;
 
 pub fn spawn(state: Arc<SharedState>) -> RemoteChains {
     let remote: RemoteChains = Arc::new(Mutex::new(Vec::new()));
@@ -305,7 +326,16 @@ fn build_sources(state: &Arc<SharedState>, remote: &RemoteChains) -> Vec<DeviceR
                     gain: src.gain,
                     source_index: index,
                 };
-                new_remote.push((client_id.clone(), Mutex::new(chain)));
+                new_remote.push((BrowserAudioKey::Microphone(client_id.clone()), Mutex::new(chain)));
+            }
+            AudioSourceKind::Video => {
+                let chain = AnalysisChain {
+                    extractor: None,
+                    tracker: BeatTracker::new(1024.0 / 48000.0),
+                    gain: src.gain,
+                    source_index: index,
+                };
+                new_remote.push((BrowserAudioKey::Video, Mutex::new(chain)));
             }
             AudioSourceKind::Device {
                 device,
@@ -429,15 +459,9 @@ fn build_device_stream(
             }
 
             extractor.feed(&mono, |h| {
-                let beat = tracker.feed(h.flux);
+                tracker.feed(h.flux);
                 publish(&state_cb, index, h.level, h.bass, h.mid, h.treble, &tracker);
                 state_cb.scope[index].lock().spectrum = h.spectrum;
-                if beat {
-                    let _ = state_cb.events.send(ServerMsg::Beat {
-                        source: index as u32,
-                        bpm: tracker.bpm(),
-                    });
-                }
             });
         },
         {
@@ -494,5 +518,21 @@ pub fn list_output_devices() -> Vec<crate::protocol::DeviceInfo> {
             })
             .collect(),
         Err(_) => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod browser_routing_tests {
+    use super::*;
+
+    #[test]
+    fn microphone_and_video_feature_streams_cannot_cross_route() {
+        let mic = BrowserAudioKey::Microphone("ipad".into());
+        let video = BrowserAudioKey::Video;
+        assert!(mic.matches(BrowserAudioStream::Microphone, "ipad"));
+        assert!(!mic.matches(BrowserAudioStream::Microphone, "other"));
+        assert!(!mic.matches(BrowserAudioStream::Video, "ipad"));
+        assert!(video.matches(BrowserAudioStream::Video, "any-owner"));
+        assert!(!video.matches(BrowserAudioStream::Microphone, "any-owner"));
     }
 }

@@ -38,20 +38,33 @@ live meters.
   waves, spirals, plasma, spoke chases, sparkles, beat rings, breathing envelopes,
   rainbows, wedges, interference, fire, meteors, warp — plus MilkDrop-style raw-audio
   layers: **Waveform** (the PCM bent into a circular oscilloscope) and **Spectrum**
-  (spoke-per-bin circular analyzer) —
+  (spoke-per-bin circular analyzer), plus **Video** (live browser-decoded texture,
+  radial/kaleidoscope mapping and color treatment) —
   stacked with blend modes, each bound to an audio source. Effects (burst / strobe /
   swoosh / collapse) fire from keyboard (1–4), clicks/taps on the preview, or remote
   clients.
-- **Four UI tabs**, deep-linkable by hash (`/#view`, `/#draw`, `/#control`,
-  `/#settings`): View (clean monitor, tap = burst), Draw, Control (touch-sized effect
-  pads + master/layer faders), Settings. In the desktop app, "New window" pops the
-  current tab out into its own window.
+- **Four UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Video
+  (URL/file intake), Control (touch-sized effect pads + master/layer faders), and Settings. In the desktop app,
+  "New window" pops the current tab out into its own window. Old `/#view` and `/#draw`
+  links redirect to Live.
 - **Live drawing**: paint on the array from any client with Glow / Ripple / Sparkle
   pens (color swatches + size). Strokes stream as polar dabs over WS and render on the
   GPU with ~2 s trails; multiple people can draw at once.
 - **PWA**: open the web UI on an iPad/phone, "Add to Home Screen", and it runs
   standalone fullscreen — a touch control surface for the floor. Manifest shortcuts
   jump straight to Draw or Control.
+- **Video intake**: paste a direct MP4/WebM URL or a publisher page with standard
+  `og:video` / HTML video metadata, or choose a file on the iPad. The browser uses
+  its native hardware decoder and sends a bounded 64–128 px RGBA texture at 10–24
+  fps; the backend retains only the latest frame, so congestion drops frames instead
+  of adding latency. A Video layer maps it across the radial array with zoom,
+  kaleidoscope, contrast, rotation, color treatment, blend, audio, and autopilot
+  controls. Its rhythm source can be the decoded video's own soundtrack or any
+  configured live Gate input; soundtrack analysis sends only compact features and
+  can stay silent on the control device. If current `yt-dlp` plus a supported
+  JavaScript runtime is installed on the Gate machine, provider pages such as public
+  YouTube videos get an additional best-effort resolver. DRM/login-gated sources
+  remain unsupported.
 - **Autopilot**: a slow mean-reverting random walk drifts layer parameters around
   wherever the sliders are set (per-layer "Walk" amount = wander radius), so an
   unattended show evolves for hours without repeating.
@@ -78,6 +91,8 @@ live meters.
   render fps or fix a rate, and optionally enable E1.31 universe synchronization
   (PixLite Mk4 latches all universes per sync packet, tear-free). Live packets/s in
   the status HUD tells you it's actually transmitting.
+  Multicast and controller unicast are exclusive destination modes, so a configured
+  receiver never gets duplicate sequence-identical packets.
 - **A well-behaved sACN source.** The CID (source identity) is generated once and
   persisted, as the spec requires — so restarts and handovers look like the *same*
   source instead of a second one fighting the first in every receiver's merge for
@@ -94,13 +109,16 @@ src-tauri/src/
   audio/            cpal capture (per-source channel select) + FFT features + beat tracker
   sacn.rs           allocation-free E1.31 sender (prebuilt per-universe packets)
   server.rs         axum HTTP + WS (serves UI, speaks the protocol)
+  media.rs          guarded URL resolver + ranged same-origin media proxy
   config.rs         geometry / output / audio / layers, persisted JSON
 ```
 
 ## Development
 
 Requirements: [Rust](https://rustup.rs), [Bun](https://bun.sh), a Vulkan-capable GPU +
-driver.
+driver. A current [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) installation with a
+supported external JavaScript runtime (Node works) is optional for resolving provider
+pages; direct media URLs, metadata pages, and local device files do not need it.
 
 ```sh
 bun install
@@ -111,11 +129,23 @@ Useful during pattern development:
 
 - Edit `src-tauri/src/engine/shaders/gate.wgsl` while the app runs — the pipeline
   rebuilds on save.
-- `cargo run --bin engine-smoke` (in `src-tauri/`) — headless one-shot render +
-  timing, no window.
+- `cargo run --bin engine-smoke` (in `src-tauri/`) — quick headless correctness +
+  timing check, no window.
+- `cargo run --release --bin engine-smoke -- --suite --warmup 120 --frames 600`
+  — repeatable GPU regression suite at the 24,192-pixel installation size plus
+  a 70k heavy-load headroom case. Add
+  `--json` for a versioned machine-readable report, or use `--pixels`, `--layers`,
+  `--effects`, and `--dabs` to define one workload. Reports mean, p50/p95/p99/max,
+  standard deviation, throughput, and missed frames against `--fps-budget`.
 - `cargo run -- --headless` — full backend without the desktop window; open
   `http://localhost:9520` (or from a phone on the LAN).
+- `bun run demo:uprising` — optional convenience: use authenticated GitHub access to
+  fetch the small **Warm Windstorm** clip referenced by the saved 2024 show state. It
+  lands in ignored `demo-data/uprising/`. While Vite is running, open `/#replay` to use
+  the development-only frame fixture viewer; it is omitted from production navigation
+  and builds. Other testers can choose a clip from their own `Uprising-Data` checkout.
 - `bun scripts/e2e-test.ts` — protocol smoke test against a running backend.
+  It also sends a generated video texture and verifies live source status.
 
 ## Production build
 
@@ -157,9 +187,14 @@ updater and need one manual swap.)
   multicast.
 - Everything about the geometry (spoke count, pixels, radii, universe layout) is
   config, editable live in Settings and persisted to the user config dir.
+- Remote media fetching accepts only HTTP(S), rejects credentials and local/private/
+  reserved destinations, pins each connection to its validated DNS answers,
+  bypasses system proxies, revalidates redirects, caps inspected HTML and live proxy
+  sessions, and exposes streams through short-lived opaque URLs. This prevents the
+  feature becoming an unauthenticated proxy into the show/control network.
 
 ## Not yet
 
-- Auth tokens for remote clients (field exists in config/protocol, unenforced).
-- Video-file playback as a layer.
+- Bundled extraction for changing provider sites; optional `yt-dlp` is best-effort,
+  and DRM/login-gated video is intentionally out of scope.
 - Batched UDP I/O (`sendmmsg`/RIO) for 100k+ pixel scales.

@@ -144,7 +144,7 @@ sACN sender + preview channel.
 - [x] `sync_to_render` (default on, capped by fps field) + computed LED-wire fps
       ceiling shown in UI (~88 fps at 350 px: 800 kbps × 24 bits + reset).
 - [x] **E1.31 universe synchronization** (`sync_universe`, 0=off): data packets carry
-      sync address; one sync packet/frame (multicast group + each controller unicast).
+      sync address; one sync packet/frame to the selected output destination(s).
       PixLite Mk4 latches tear-free; non-supporting receivers ignore.
 - [x] **Fixed: all tabs black after visiting Draw** — server sent PreviewMeta once per
       connection; later canvas mounts resubscribed but never got meta → GL never
@@ -268,10 +268,8 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
       reuses those artifacts instead of compiling the tree again in the debug profile.
 - Declined (agreed with user): per-address priority (start code 0xDD) — an ETC
   convention, not core E1.31, and nothing in this rig consumes it.
-- Known, not done: when a controller IP is set **and** multicast is on, every packet
-  goes out twice. The receiver drops the duplicate (sequence delta 0) so it is
-  harmless, but it doubles wire traffic — these want to be a radio choice, not two
-  independent checkboxes.
+- [x] Fixed in Round 8: multicast and controller unicast are now exclusive modes, so
+      saved controller addresses no longer duplicate every packet while multicast is on.
 
 ## Released
 
@@ -311,13 +309,48 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
       working but too subtle at defaults, and only ever tours stack layers.)
 - [x] v0.3.0 tagged (window fix + these features; bump in its own commit).
 
+## Round 10 (2026-08-20): live video input + destination cleanup
+
+- [x] **Video is a first-class GPU layer** (20th layer kind): a bounded RGBA storage
+      texture is sampled directly in WGSL and remains composable with blend, opacity,
+      audio response, and autopilot. Treatment controls: zoom, 0–10-way mirrored
+      kaleidoscope, contrast, rotation/spin, saturation, tint/original-color mix, and
+      brightness.
+- [x] **iPad/browser transmitter**: Video tab accepts a URL or local video file,
+      decodes with the browser's hardware media stack, square-crops to 64/96/128 px,
+      and sends binary RGBA frames at 10/15/24 fps. Backpressure drops frames rather
+      than queueing latency. The decoder stays mounted offscreen while the operator
+      visits Live or Settings, and reconnect/takeover reclaims the source.
+- [x] **URL resolution**: direct video, `og:video`, `twitter:player:stream`, and HTML
+      `<video>/<source>` are supported. Short-lived opaque proxy paths forward Range
+      requests and make canvas extraction CORS-clean. Optional `yt-dlp` fallback is
+      probed before returning a provider result; DRM/login-gated pages are not claimed.
+- [x] **SSRF defense**: HTTP(S) only, no URL credentials, public IP space only across
+      DNS + every redirect, DNS answers pinned to the validated connection, redirect
+      cap, bounded HTML inspection, request timeouts, and HTTP authorization matching
+      the WS join policy.
+- [x] **Single-source ownership**: one connection owns live video frames; another may
+      take over deliberately, stale connections cannot inject/stop it, and disconnect
+      clears the frame immediately. Source title/owner/dimensions/fps/frame count are
+      visible to every client.
+- [x] **sACN destination mode is exclusive**: multicast vs controller unicast is now
+      an explicit choice. Controller addresses remain saved when switching modes, but
+      sequence-identical duplicate packets are no longer emitted.
+- [x] Verification: frontend production build + typecheck; all Rust targets compile;
+      15 library tests and 6 benchmark tests; Vulkan shader validated with all 20
+      layers plus a video-only GPU scenario; isolated-port HTTP/CORS/Range/SSRF tests;
+      WS E2E video-frame test; real in-app browser test at desktop, iPad portrait, and
+      narrow phone viewports.
+
 ## Next session pickup
 
 - Run `bun tauri dev` and eyeball the actual patterns; tune defaults.
 - Get real geometry numbers from the user (px/spoke, radii, LED density) and
   controller IPs; test against a PixLite.
 - Consider GitHub remote + first CI run.
-- Stretch: video layer (decode → texture → sample in shader), auth tokens, sendmmsg/RIO.
+- Next performance ceiling: batched UDP I/O (`sendmmsg`/RIO) for 100k+ pixel scales.
+- Media follow-ups: resilient provider-specific extraction and authenticated/DRM
+  sources only if a deployment actually requires them.
 
 ## Findings / gotchas
 
@@ -338,8 +371,8 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
 1. Exact pixel count / density / minor radius — defaults chosen, all editable in
    Settings → Geometry. Update `default-config` when real numbers are known.
 2. Show machine OS? CI builds Windows + Linux; add macOS on request.
-3. Stretch goal (video file as layer) not in first pass — needs decoder (ffmpeg) +
-   texture-sampling layer; architecture leaves room (layer kind + sampled texture).
+3. Which public video providers matter in practice? Direct files and standards-based
+   metadata work now; changing provider sites remain optional `yt-dlp` territory.
 
 ## Things not to do
 

@@ -21,9 +21,9 @@ struct Globals {
     shake: f32,
     yaw: f32,
     dab_count: u32,
-    _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
+    video_width: u32,
+    video_height: u32,
+    video_active: u32,
 }
 
 struct AudioU {
@@ -67,7 +67,7 @@ struct Layer {
 
 struct Effect {
     kind: u32,
-    _pad: u32,
+    size: f32,
     age: f32,
     duration: f32,
     angle: f32,
@@ -96,6 +96,8 @@ struct Dab {
 // Per-source raw audio shapes: 256 waveform samples then 64 spectrum bins, per
 // source, flattened. See `wave_at` / `spec_at`.
 @group(0) @binding(6) var<storage, read> SCOPE: array<f32>;
+// Latest browser-decoded video frame, packed RGBA8 (one u32 per texel).
+@group(0) @binding(7) var<storage, read> VIDEO: array<u32>;
 
 const WAVE_N: u32 = 256u;
 const SPEC_N: u32 = 64u;
@@ -110,6 +112,28 @@ fn wave_at(src: u32, t: f32) -> f32 {
 /// Normalized log-spaced spectrum bin (0 = lowest freq), 0..1.
 fn spec_at(src: u32, i: u32) -> f32 {
     return SCOPE[src * SCOPE_STRIDE + WAVE_N + min(i, SPEC_N - 1u)];
+}
+
+fn video_texel(x: u32, y: u32) -> vec4f {
+    let ix = min(x, G.video_width - 1u);
+    let iy = min(y, G.video_height - 1u);
+    return unpack4x8unorm(VIDEO[iy * G.video_width + ix]);
+}
+
+/// Bilinear sampling of the small live texture. UV origin matches HTML canvas:
+/// top-left, with both axes in [0,1].
+fn video_at(uv: vec2f) -> vec4f {
+    if G.video_active == 0u || G.video_width == 0u || G.video_height == 0u
+        || any(uv < vec2f(0.0)) || any(uv > vec2f(1.0)) {
+        return vec4f(0.0);
+    }
+    let p = uv * vec2f(f32(G.video_width - 1u), f32(G.video_height - 1u));
+    let p0 = vec2u(floor(p));
+    let p1 = min(p0 + vec2u(1u), vec2u(G.video_width - 1u, G.video_height - 1u));
+    let f = fract(p);
+    let a = mix(video_texel(p0.x, p0.y), video_texel(p1.x, p0.y), f.x);
+    let b = mix(video_texel(p0.x, p1.y), video_texel(p1.x, p1.y), f.x);
+    return mix(a, b, f.y);
 }
 
 const PI: f32 = 3.14159265359;
@@ -491,6 +515,45 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
             let hue = L.hue + t * L.hue_range;
             return vec4f(hsv2rgb(hue, L.saturation, v * L.brightness), v);
         }
+        // Video — square-cropped browser video mapped across the radial array.
+        // pa = zoom, pb = kaleidoscope segments, pc = contrast, pd = rotation.
+        case 19u: {
+            if G.video_active == 0u {
+                return vec4f(0.0);
+            }
+            var p = ctx.pos;
+            let rotation = (L.param_d - 0.5) * TAU + L.phase * 0.08;
+            let cr = cos(rotation);
+            let sr = sin(rotation);
+            p = vec2f(p.x * cr - p.y * sr, p.x * sr + p.y * cr);
+
+            let mirrors = u32(floor(clamp(L.param_b, 0.0, 1.0) * 10.0 + 0.5));
+            if mirrors >= 2u {
+                let sector = TAU / f32(mirrors);
+                let a = abs(((atan2(p.y, p.x) + sector * 0.5) % sector) - sector * 0.5);
+                p = length(p) * vec2f(cos(a), sin(a));
+            }
+
+            // Bass gently pumps the crop and onsets add a short punch. This is
+            // deliberately restrained so ambient material breathes instead of
+            // turning the source into a strobe at full response.
+            let transient = max(A.onset, max(A.bass - A.bass_att, 0.0) * 2.0);
+            let audio_zoom = 1.0 + aud * (A.bass * 0.08 + transient * 0.12);
+            let zoom = mix(0.5, 1.5, clamp(L.param_a, 0.0, 1.0)) * max(L.scale, 0.05) * audio_zoom;
+            let uv = vec2f(0.5 + p.x / (2.0 * zoom), 0.5 - p.y / (2.0 * zoom));
+            let sample = video_at(uv);
+            if sample.a == 0.0 {
+                return sample;
+            }
+            let lum = dot(sample.rgb, vec3f(0.2126, 0.7152, 0.0722));
+            let saturated = mix(vec3f(lum), sample.rgb, clamp(L.saturation, 0.0, 2.0));
+            let tinted = hsv2rgb(L.hue, 0.85, lum);
+            var rgb = mix(tinted, saturated, clamp(L.hue_range, 0.0, 1.0));
+            let contrast = mix(0.5, 2.5, clamp(L.param_c, 0.0, 1.0)) + aud * transient * 0.3;
+            rgb = clamp((rgb - vec3f(0.5)) * contrast + vec3f(0.5), vec3f(0.0), vec3f(1.0));
+            rgb *= L.brightness * (1.0 + aud * (A.level * 0.25 + A.bass * 0.35 + transient * 0.55));
+            return vec4f(rgb, sample.a);
+        }
         default: {
             return vec4f(0.0);
         }
@@ -530,7 +593,7 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
             let origin = E.radius * vec2f(cos(E.angle), sin(E.angle));
             let d = distance(ctx.pos, origin);
             let front = t * 2.2; // wavefront reaches the far side of the array
-            let width = 0.06 + t * 0.12;
+            let width = (0.06 + t * 0.12) * E.size;
             let ring = exp(-((d - front) * (d - front)) / (width * width));
             return col * ring * fade * E.intensity * 2.0;
         }

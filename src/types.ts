@@ -19,7 +19,8 @@ export type LayerKind =
   | "meteors"
   | "warp"
   | "waveform"
-  | "spectrum";
+  | "spectrum"
+  | "video";
 
 export type BlendMode = "add" | "multiply" | "screen" | "alpha_over" | "max";
 
@@ -54,6 +55,7 @@ export interface EffectCfg {
   angle: number;
   radius: number;
   intensity: number;
+  size: number;
   hue: number;
   duration: number;
 }
@@ -113,6 +115,7 @@ export type AudioSourceConfig = {
 } & (
   | { kind: "device"; device: string | null; channels: number[]; loopback: boolean }
   | { kind: "remote"; client_id: string }
+  | { kind: "video" }
 );
 
 export interface AudioConfig {
@@ -123,6 +126,8 @@ export interface RenderConfig {
   fps: number;
   master_brightness: number;
   master_speed: number;
+  manual_bpm: number | null;
+  beat_time: "half" | "normal" | "double";
   walk_enabled: boolean;
   walk_layers: boolean;
   walk_min_layers: number;
@@ -205,6 +210,19 @@ export interface RuntimeStatus {
   version: string;
   update_available: string | null;
   update_state: string;
+  video: VideoSourceStatus;
+}
+
+export interface VideoSourceStatus {
+  active: boolean;
+  owner_id: string;
+  owner_name: string;
+  title: string;
+  source_url: string;
+  width: number;
+  height: number;
+  fps: number;
+  frames: number;
 }
 
 export type ServerMsg =
@@ -258,6 +276,7 @@ export const LAYER_KINDS: LayerKind[] = [
   "warp",
   "waveform",
   "spectrum",
+  "video",
 ];
 
 export const BLEND_MODES: BlendMode[] = ["add", "multiply", "screen", "alpha_over", "max"];
@@ -282,6 +301,7 @@ export const LAYER_LABELS: Record<LayerKind, string> = {
   warp: "Warp",
   waveform: "Waveform",
   spectrum: "Spectrum",
+  video: "Video",
 };
 
 /** Kind-specific labels for param_a..d, where meaningful. */
@@ -301,10 +321,11 @@ export const PARAM_LABELS: Partial<Record<LayerKind, [string?, string?, string?,
   warp: ["Star density", "Speed"],
   waveform: ["Ring radius", "Depth", "Thickness"],
   spectrum: ["Bar length", "From outer/inner"],
+  video: ["Zoom", "Kaleidoscope", "Contrast", "Rotation"],
 };
 
 export function defaultLayer(kind: LayerKind): LayerCfg {
-  return {
+  const layer: LayerCfg = {
     kind,
     enabled: true,
     name: LAYER_LABELS[kind],
@@ -325,4 +346,15 @@ export function defaultLayer(kind: LayerKind): LayerCfg {
     param_c: 0.5,
     param_d: 0.5,
   };
+  if (kind === "video") {
+    layer.blend = "alpha_over";
+    layer.audio_amount = 0.7;
+    layer.hue_range = 1;
+    layer.saturation = 1;
+    layer.walk_amount = 0;
+    layer.param_a = 0.5;
+    layer.param_b = 0;
+    layer.param_c = 0.35;
+  }
+  return layer;
 }
