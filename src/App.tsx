@@ -23,14 +23,10 @@ function tabFromHash(): TabId {
 const IN_TAURI = "__TAURI_INTERNALS__" in window;
 
 async function openNewWindow(tab: TabId) {
-  const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-  const label = `aux-${tab}-${Date.now() % 100000}`;
-  new WebviewWindow(label, {
-    url: `/#${tab}`,
-    title: `Empyrean Gate — ${tab}`,
-    width: 900,
-    height: 900,
-  });
+  // Rust creates it with a stable label (aux-<tab>) so its geometry persists and
+  // it is recreated after restarts/self-updates; re-invoking focuses the existing.
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("open_aux", { tab });
 }
 
 /// Fullscreen overlay while the backend is unreachable. Appears after a short

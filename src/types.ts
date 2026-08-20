@@ -133,6 +133,10 @@ export interface UpdateConfig {
   auto_install: boolean;
 }
 
+export interface WindowsConfig {
+  aux_open: string[];
+}
+
 export interface BeatTapConfig {
   enabled: boolean;
   audio_source: number;
@@ -151,6 +155,7 @@ export interface AppConfig {
   audio: AudioConfig;
   render: RenderConfig;
   update: UpdateConfig;
+  windows: WindowsConfig;
   beat_taps: BeatTapConfig;
   layers: LayerCfg[];
   clients: ClientRecord[];

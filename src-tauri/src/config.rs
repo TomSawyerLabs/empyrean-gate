@@ -315,6 +315,16 @@ impl Default for UpdateConfig {
     }
 }
 
+/// Desktop window bookkeeping, so a restart (or self-update handover) restores the
+/// same set of windows. Geometry itself is persisted per-label by
+/// tauri-plugin-window-state; this only remembers WHICH aux windows were open.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WindowsConfig {
+    /// Tabs with a popped-out window open (e.g. "control", "live").
+    pub aux_open: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -324,6 +334,7 @@ pub struct AppConfig {
     pub audio: AudioConfig,
     pub render: RenderConfig,
     pub update: UpdateConfig,
+    pub windows: WindowsConfig,
     pub beat_taps: BeatTapConfig,
     pub layers: Vec<LayerCfg>,
     /// Known client devices (see `ClientRecord`).
@@ -339,6 +350,7 @@ impl Default for AppConfig {
             audio: AudioConfig::default(),
             render: RenderConfig::default(),
             update: UpdateConfig::default(),
+            windows: WindowsConfig::default(),
             beat_taps: BeatTapConfig::default(),
             layers: default_layer_stack(),
             clients: Vec::new(),

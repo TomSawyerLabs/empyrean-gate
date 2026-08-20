@@ -201,10 +201,88 @@ pub fn run(headless: bool) {
 
     tauri::Builder::default()
         .manage(backend)
-        .invoke_handler(tauri::generate_handler![backend_info])
+        // Persists per-label window geometry (position/size/maximized) across
+        // restarts — and across versions, since the state file lives in the app
+        // config dir. Combined with stable aux labels, a self-update handover
+        // brings every window back where it was.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .invoke_handler(tauri::generate_handler![backend_info, open_aux])
+        .setup(|app| {
+            use tauri::Manager;
+            // Recreate the aux windows that were open last run (their geometry is
+            // restored by the window-state plugin via their stable labels).
+            let aux: Vec<String> = {
+                let backend = app.state::<Backend>();
+                let cfg = backend.state.config.read();
+                cfg.windows.aux_open.clone()
+            };
+            for tab in aux {
+                if let Err(e) = open_aux_window(app.handle(), &tab) {
+                    log::warn!("could not restore '{tab}' window: {e}");
+                }
+            }
+            // The handover exit path is process::exit, which skips graceful window
+            // teardown — save window state periodically so at most ~5 s of window
+            // moves can be lost.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    let _ = handle.save_window_state(StateFlags::all());
+                }
+            });
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // A user closing an aux window removes it from the restore list;
+            // process teardown fires Destroyed (not CloseRequested), so app exit
+            // keeps the list intact.
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if let Some(tab) = window.label().strip_prefix("aux-") {
+                    use tauri::Manager;
+                    let tab = tab.to_string();
+                    let backend = window.app_handle().state::<Backend>();
+                    backend.state.update_config(|c| {
+                        c.windows.aux_open.retain(|t| *t != tab);
+                    });
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 
     state.shutdown.store(true, Ordering::SeqCst);
     await_sacn_terminate(&state);
+}
+
+/// Create (or focus) the popped-out window for a tab, with a stable label so the
+/// window-state plugin can restore its geometry. Records it for restore-on-start.
+#[tauri::command]
+fn open_aux(app: tauri::AppHandle, tab: String, state: tauri::State<'_, Backend>) -> Result<(), String> {
+    use tauri::Manager;
+    let label = format!("aux-{tab}");
+    if let Some(existing) = app.get_webview_window(&label) {
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+    open_aux_window(&app, &tab).map_err(|e| e.to_string())?;
+    state.state.update_config(|c| {
+        if !c.windows.aux_open.contains(&tab) {
+            c.windows.aux_open.push(tab.clone());
+        }
+    });
+    Ok(())
+}
+
+fn open_aux_window(app: &tauri::AppHandle, tab: &str) -> tauri::Result<()> {
+    let label = format!("aux-{tab}");
+    // The hash is applied by an init script (a fragment inside WebviewUrl::App
+    // paths does not survive URL conversion reliably).
+    tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App("index.html".into()))
+        .title(format!("Empyrean Gate — {tab}"))
+        .inner_size(900.0, 900.0)
+        .initialization_script(format!("if (!location.hash) location.hash = '#{tab}';"))
+        .build()?;
+    Ok(())
 }
