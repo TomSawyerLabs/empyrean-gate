@@ -190,7 +190,7 @@ fn build_device_stream(
     };
     let sample_rate = config.sample_rate() as f32;
     let n_channels = config.channels() as usize;
-    let selected: Vec<usize> = if channels.is_empty() {
+    let mut selected: Vec<usize> = if channels.is_empty() {
         (0..n_channels).collect()
     } else {
         channels
@@ -199,7 +199,16 @@ fn build_device_stream(
             .filter(|c| *c < n_channels)
             .collect()
     };
-    anyhow::ensure!(!selected.is_empty(), "no valid channels selected");
+    // Recover, don't refuse: a bad channel list (e.g. 1-based entry, or numbers
+    // beyond the device) falls back to all channels with a warning — a show tool
+    // must keep making sound-reactive light, not die on a typo.
+    if selected.is_empty() {
+        log::warn!(
+            "audio source {index}: channel selection {channels:?} matches none of the \
+             device's {n_channels} channels (they are 0-based); using all channels"
+        );
+        selected = (0..n_channels).collect();
+    }
 
     let mut extractor = FeatureExtractor::new(sample_rate);
     let mut tracker = BeatTracker::new(HOP_SIZE as f32 / sample_rate);

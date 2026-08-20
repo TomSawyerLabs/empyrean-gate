@@ -113,6 +113,10 @@ main {
 
 /* ---- Live (merged view + draw, aspect-adaptive) ---- */
 
+/* Layout is chosen by VIEWPORT aspect ratio, in pure CSS: wide (default) puts
+   controls in side columns; squarish floats them in the canvas corners; tall
+   stacks them above/below. No JS resize handling — correct at first paint. */
+
 .live-page {
   height: 100%;
   min-height: 0;
@@ -121,14 +125,6 @@ main {
   gap: 8px;
 }
 
-.live-page.tall {
-  flex-direction: column;
-}
-
-.live-page.square {
-  align-items: center;
-  justify-content: center;
-}
 
 .live-canvas-wrap {
   position: relative;
@@ -157,13 +153,6 @@ main {
   flex-shrink: 0;
 }
 
-.live-page.tall .live-side {
-  flex-direction: row;
-  width: auto;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-}
 
 .cluster {
   display: flex;
@@ -183,10 +172,6 @@ main {
   gap: 6px;
 }
 
-.live-page.tall .cluster.pens {
-  flex-direction: row;
-}
-
 /* Square mode: clusters float in the canvas corners the circle never reaches. */
 .corner {
   position: absolute;
@@ -200,7 +185,7 @@ main {
 .corner.tl { top: 8px; left: 8px; }
 .corner.tr { top: 8px; right: 8px; }
 .corner.bl { bottom: 8px; left: 8px; }
-.corner.br { bottom: 8px; right: 8px; width: 170px; }
+.corner.br { bottom: 8px; right: 8px; width: 210px; }
 
 /* The empty ring center carries identity + live status. */
 .ring-center {
@@ -359,6 +344,51 @@ main {
 .swatch.active {
   border-color: #fff;
   box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* ---- Live layout modes (viewport aspect ratio, pure CSS) ----
+   These come AFTER all base rules above: equal-specificity overrides win by order.
+   Wide (default): side columns. Squarish: corner clusters. Tall: top/bottom bars. */
+
+.corner {
+  display: none;
+}
+
+/* Squarish: 0.78 <= aspect <= 1.30 */
+@media (max-aspect-ratio: 13/10) and (min-aspect-ratio: 39/50) {
+  .live-side {
+    display: none;
+  }
+  .corner {
+    display: block;
+  }
+  .live-page {
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+/* Tall: aspect < 0.78 */
+@media (max-aspect-ratio: 39/50) {
+  .live-page {
+    flex-direction: column;
+  }
+  .live-side {
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: auto;
+    align-items: center;
+    justify-content: center;
+    gap: 8px 12px;
+  }
+  .live-side .cluster.pens {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  /* Column layout: the canvas square is height-driven (aspect-ratio derives width). */
+  .gate-canvas {
+    width: auto;
+    height: min(100%, calc(100vw - 16px));
+  }
 }
 
 /* ---- Control ---- */

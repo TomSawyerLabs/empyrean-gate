@@ -38,27 +38,12 @@ function swatchColor(hue: number): string {
   return hue < 0 ? "#ffffff" : `hsl(${hue * 360}deg 90% 60%)`;
 }
 
-type Mode = "wide" | "tall" | "square";
-
 export default function Live() {
   const { client, status, beatAt } = useGate();
   const [tool, setTool] = useState<ToolKind>("tap");
   const [hue, setHue] = useState(0.5);
   const [size, setSize] = useState(0.12);
-  const [mode, setMode] = useState<Mode>("wide");
-  const pageRef = useRef<HTMLDivElement>(null);
   const beatDotRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = pageRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      const a = el.clientWidth / Math.max(1, el.clientHeight);
-      setMode(a > 1.3 ? "wide" : a < 0.77 ? "tall" : "square");
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   useEffect(() => {
     let raf = 0;
@@ -173,27 +158,18 @@ export default function Live() {
         )}
         {status?.sacn_enabled && <span className="live-pill">sACN LIVE</span>}
       </div>
-      {mode === "square" && (
-        <>
-          <div className="corner tl">{pens}</div>
-          <div className="corner tr">{effects}</div>
-          <div className="corner bl">{colors}</div>
-          <div className="corner br">{sizeCtl}</div>
-        </>
-      )}
+      {/* Square-ish windows: controls float in the corners the circle never
+          reaches. Visibility is pure CSS (aspect-ratio media queries), so the
+          layout is right at first paint with no resize-observer fragility. */}
+      <div className="corner tl">{pens}</div>
+      <div className="corner tr">{effects}</div>
+      <div className="corner bl">{colors}</div>
+      <div className="corner br">{sizeCtl}</div>
     </div>
   );
 
-  if (mode === "square") {
-    return (
-      <div ref={pageRef} className="live-page square">
-        {canvas}
-      </div>
-    );
-  }
-
   return (
-    <div ref={pageRef} className={`live-page ${mode}`}>
+    <div className="live-page">
       <div className="live-side a">
         {pens}
         {effects}

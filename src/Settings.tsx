@@ -21,10 +21,6 @@ export default function Settings() {
   if (!config) return <p className="hint">Waiting for backend…</p>;
   return (
     <div className="settings-page">
-      <p className="hint">
-        There is no save button: every change applies to the show and persists on the
-        backend the moment you make it — watch for the "✓ saved" flash in the top bar.
-      </p>
       <LayersPanel config={config} />
       <AudioPanel config={config} />
       <OutputPanel config={config} />
@@ -349,9 +345,9 @@ function AudioPanel({ config }: { config: AppConfig }) {
                     )}
                   </select>
                   <input
-                    placeholder="channels e.g. 0,1"
+                    placeholder="channels: blank = all"
                     defaultValue={s.channels.join(",")}
-                    style={{ width: "9em" }}
+                    style={{ width: "10em" }}
                     onBlur={(e) => {
                       const channels = e.target.value
                         .split(",")
@@ -360,6 +356,7 @@ function AudioPanel({ config }: { config: AppConfig }) {
                       updateSource(i, { channels });
                     }}
                   />
+                  <span className="hint">0-based, e.g. 0,1 = first pair</span>
                 </>
               )}
               {s.kind === "remote" && (
