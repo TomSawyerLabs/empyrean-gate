@@ -88,6 +88,7 @@ export interface OutputConfig {
 export interface ServerConfig {
   bind: string;
   port: number;
+  max_preview_clients: number;
   auth_token: string | null;
   join_token: string;
   require_token: boolean;
@@ -126,6 +127,7 @@ export interface RenderConfig {
   walk_layers: boolean;
   walk_min_layers: number;
   walk_speed: number;
+  walk_depth: number;
 }
 
 export interface UpdateConfig {
@@ -218,7 +220,8 @@ export type ServerMsg =
       inner_radius_ft: number;
     }
   | { type: "error"; message: string }
-  | { type: "denied"; reason: string };
+  | { type: "denied"; reason: string }
+  | { type: "preview_queue"; position: number };
 
 export interface PreviewMeta {
   spokes: number;

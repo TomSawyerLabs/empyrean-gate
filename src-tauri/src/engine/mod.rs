@@ -813,7 +813,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             }
             let mut l = if cfg.render.walk_enabled && l.walk_amount > 0.0 {
                 walk_step(&mut layer_walks[i], &mut walk_rng, dt, walk_tau);
-                walked_layer(l, &layer_walks[i])
+                // Global depth scales how far every layer wanders from its sliders.
+                let mut scaled = l.clone();
+                scaled.walk_amount = (l.walk_amount * cfg.render.walk_depth).clamp(0.0, 3.0);
+                walked_layer(&scaled, &layer_walks[i])
             } else {
                 l.clone()
             };

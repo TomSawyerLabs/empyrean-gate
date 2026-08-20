@@ -99,6 +99,30 @@ function ClientsPanel() {
         Require join token (new devices must scan the Connect QR)
         <button onClick={() => client.send({ type: "rotate_join_token" })}>Rotate token</button>
       </label>
+      <label className="field-row" style={{ maxWidth: 320 }}>
+        <span>Max live viewers (WiFi guard)</span>
+        <input
+          type="number"
+          min={1}
+          max={64}
+          value={config?.server.max_preview_clients ?? 10}
+          onChange={(e) => {
+            if (config) {
+              client.setConfig({
+                ...config,
+                server: {
+                  ...config.server,
+                  max_preview_clients: Math.max(1, Number(e.target.value) || 1),
+                },
+              });
+            }
+          }}
+        />
+      </label>
+      <p className="hint">
+        Only this many clients stream the live view at once (~1.4 Mbps per phone);
+        extras queue for a slot but keep full control of taps, drawing, and effects.
+      </p>
       {list.length === 0 && <p className="hint">No devices yet — use ⊕ Connect in the top bar.</p>}
       {list.map((c) => (
         <div className="layer-head client-row" key={c.id}>
@@ -311,7 +335,21 @@ function LayersPanel({ config }: { config: AppConfig }) {
           ))}
         </select>
         <button onClick={() => client.addLayer(defaultLayer(kind))}>Add layer</button>
+        <button
+          onClick={() => {
+            const have = new Set(config.layers.map((l) => l.kind));
+            for (const k of LAYER_KINDS) {
+              if (!have.has(k)) client.addLayer(defaultLayer(k));
+            }
+          }}
+        >
+          Add missing kinds
+        </button>
       </div>
+      <p className="hint">
+        "Add missing kinds" gives the stack one layer of every pattern — pair it with
+        Autopilot's "walk which layers play" (Control tab) to tour them all hands-free.
+      </p>
     </section>
   );
 }

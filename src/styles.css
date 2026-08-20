@@ -188,6 +188,22 @@ main {
 .corner.br { bottom: 8px; right: 8px; width: 210px; }
 
 /* The empty ring center carries identity + live status. */
+.queue-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(51, 40, 15, 0.9);
+  color: #ffe9a8;
+  border: 1px solid #6b5518;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  max-width: 90%;
+  text-align: center;
+  z-index: 5;
+}
+
 .ring-center {
   position: absolute;
   top: 50%;

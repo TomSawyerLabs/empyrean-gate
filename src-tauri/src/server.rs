@@ -252,6 +252,10 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
     let mut client_id = String::new();
     let mut preview: Option<PreviewSub> = None;
     let mut announced_meta = (0u32, 0u32, 0u32);
+    let mut queued_notified: Option<u32> = None;
+    let max_preview = |state: &SharedState| {
+        state.config.read().server.max_preview_clients.max(1) as usize
+    };
 
     // Greet with full state immediately.
     let hello = ServerMsg::State {
@@ -295,6 +299,15 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                     }).await;
                     break;
                 }
+                // Queue position updates for clients waiting on a preview slot.
+                if preview.is_some() {
+                    let pos = state.preview_gate.lock().position(conn_id);
+                    if pos != queued_notified {
+                        queued_notified = pos;
+                        let msg = ServerMsg::PreviewQueue { position: pos.unwrap_or(0) };
+                        if send_json(&mut tx, &msg).await.is_err() { break; }
+                    }
+                }
                 match ev {
                     Ok(ev) => { if send_json(&mut tx, &ev).await.is_err() { break; } }
                     Err(RecvError::Lagged(_)) => continue,
@@ -308,6 +321,9 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                     Err(RecvError::Closed) => break,
                 };
                 let Some(sub) = preview.as_mut() else { continue };
+                // Bandwidth rationing: only slot holders stream frames.
+                let max = max_preview(&state);
+                if !state.preview_gate.lock().is_active(conn_id, max) { continue; }
                 if sub.last_sent.elapsed() < sub.min_interval { continue; }
                 sub.last_sent = Instant::now();
                 let meta = (frame.spokes, frame.pixels_per_spoke, sub.decimate);
@@ -332,6 +348,10 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
         }
     }
 
+    {
+        let max = max_preview(&state);
+        state.preview_gate.lock().release(conn_id, max);
+    }
     state.connected_clients.lock().remove(&conn_id);
     state.status.lock().clients -= 1;
 }
@@ -588,12 +608,20 @@ async fn handle_msg(
                 decimate: decimate.clamp(1, 64),
                 last_sent: Instant::now() - Duration::from_secs(1),
             });
+            let max = state.config.read().server.max_preview_clients.max(1) as usize;
+            let active = state.preview_gate.lock().request(conn_id, max);
+            if !active {
+                let position = state.preview_gate.lock().position(conn_id).unwrap_or(0);
+                let _ = send_json(tx, &ServerMsg::PreviewQueue { position }).await;
+            }
             // Force a fresh PreviewMeta: the client may be a newly-mounted canvas
             // that never saw the one sent earlier on this connection.
             *reset_meta = true;
         }
         ClientMsg::UnsubscribePreview => {
             *preview = None;
+            let max = state.config.read().server.max_preview_clients.max(1) as usize;
+            state.preview_gate.lock().release(conn_id, max);
         }
         ClientMsg::AudioFrame {
             level,

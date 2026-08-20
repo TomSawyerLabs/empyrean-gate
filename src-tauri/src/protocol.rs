@@ -167,6 +167,12 @@ pub enum ServerMsg {
     Denied {
         reason: String,
     },
+    /// The live-preview slots are full; this client is queued at `position`
+    /// (1 = next). Control input still works while waiting. Sent with position 0
+    /// when a slot is granted after queueing.
+    PreviewQueue {
+        position: u32,
+    },
 }
 
 /// Everything a freshly-started backend needs to take over from this one with

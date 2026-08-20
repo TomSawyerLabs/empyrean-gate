@@ -43,7 +43,15 @@ export default function Live() {
   const [tool, setTool] = useState<ToolKind>("tap");
   const [hue, setHue] = useState(0.5);
   const [size, setSize] = useState(0.12);
+  const [queuePos, setQueuePos] = useState(0);
   const beatDotRef = useRef<HTMLDivElement>(null);
+
+  // Viewer-slot queue: >0 means the preview is rationed and we're waiting.
+  useEffect(() => {
+    return client.onMessage((m) => {
+      if (m.type === "preview_queue") setQueuePos(m.position);
+    });
+  }, [client]);
 
   useEffect(() => {
     let raf = 0;
@@ -133,6 +141,12 @@ export default function Live() {
             : undefined
         }
       />
+      {queuePos > 0 && (
+        <div className="queue-banner">
+          Live view is full — you're #{queuePos} in line. Taps, drawing, and effects
+          still reach the lights!
+        </div>
+      )}
       <div className="ring-center">
         <div className="ring-title">Empyrean Gate</div>
         <div className="ring-status">

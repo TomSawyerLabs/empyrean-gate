@@ -115,6 +115,11 @@ impl Default for OutputConfig {
 pub struct ServerConfig {
     pub bind: String,
     pub port: u16,
+    /// Max clients streaming the live preview at once — the preview is >98% of
+    /// per-client bandwidth, so this is the WiFi safety valve. Clients beyond the
+    /// cap keep full control (taps/drawing/effects are tiny) and wait in a queue
+    /// for a viewing slot.
+    pub max_preview_clients: u32,
     /// Legacy placeholder, superseded by `join_token` + `require_token`.
     pub auth_token: Option<String>,
     /// Join token embedded in the connect QR URL. Generated on first run; the
@@ -132,6 +137,7 @@ impl Default for ServerConfig {
         Self {
             bind: "0.0.0.0".into(),
             port: 9520,
+            max_preview_clients: 10,
             auth_token: None,
             join_token: String::new(),
             require_token: false,
@@ -242,6 +248,9 @@ pub struct RenderConfig {
     pub walk_min_layers: u32,
     /// Walk rate multiplier (1.0 ≈ minutes-scale evolution).
     pub walk_speed: f32,
+    /// Global multiplier on every layer's walk amount: how FAR parameters wander.
+    /// 1.0 = subtle; 2-3 = clearly visible evolution.
+    pub walk_depth: f32,
 }
 
 impl Default for RenderConfig {
@@ -254,6 +263,7 @@ impl Default for RenderConfig {
             walk_layers: false,
             walk_min_layers: 2,
             walk_speed: 1.0,
+            walk_depth: 1.0,
         }
     }
 }

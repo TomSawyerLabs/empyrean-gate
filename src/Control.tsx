@@ -163,6 +163,21 @@ export default function Control() {
             onChange={(e) => setRender({ walk_speed: Number(e.target.value) })}
           />
         </label>
+        <label className="slider-row">
+          <span>Walk depth</span>
+          <input
+            type="range"
+            min={0}
+            max={3}
+            step={0.1}
+            defaultValue={config?.render.walk_depth ?? 1}
+            onChange={(e) => setRender({ walk_depth: Number(e.target.value) })}
+          />
+        </label>
+        <p className="hint">
+          Depth is how far parameters wander from your sliders (1 = subtle, 3 = wild);
+          speed is how fast. The wander is mean-reverting, so it always comes home.
+        </p>
         <label className="toggle-row">
           <input
             type="checkbox"

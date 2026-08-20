@@ -112,9 +112,12 @@ export default function GateCanvas({
   penRef.current = drawPen;
 
   // Subscribe to the preview stream while mounted (resubscribe on reconnect).
+  // Phones get 20 fps at 1/6 pixels: ~1.4 Mbps each, so ~10 concurrent viewers
+  // stay comfortable on ordinary venue WiFi (see server.max_preview_clients).
   useEffect(() => {
-    const decimate = window.innerWidth < 700 ? 4 : 1;
-    const sub = () => client.subscribePreview(30, decimate);
+    const phone = window.innerWidth < 700;
+    const decimate = phone ? 6 : 1;
+    const sub = () => client.subscribePreview(phone ? 20 : 30, decimate);
     sub();
     const offStatus = client.onStatus((up) => up && sub());
     const offMsg = client.onMessage((m) => {

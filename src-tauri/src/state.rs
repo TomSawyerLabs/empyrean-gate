@@ -84,6 +84,58 @@ pub struct PreviewFrame {
     pub rgb: Vec<u8>,
 }
 
+/// Rations concurrent preview streams (the bandwidth-heavy part of a client) to
+/// `max` slots; everyone else waits FIFO. Control traffic is never gated.
+#[derive(Default)]
+pub struct PreviewGate {
+    pub active: Vec<u64>,
+    pub waiting: Vec<u64>,
+}
+
+impl PreviewGate {
+    /// Register interest; returns true if immediately active.
+    pub fn request(&mut self, conn: u64, max: usize) -> bool {
+        if self.active.contains(&conn) {
+            return true;
+        }
+        if !self.waiting.contains(&conn) {
+            self.waiting.push(conn);
+        }
+        self.promote(max);
+        self.active.contains(&conn)
+    }
+
+    pub fn release(&mut self, conn: u64, max: usize) {
+        self.active.retain(|c| *c != conn);
+        self.waiting.retain(|c| *c != conn);
+        self.promote(max);
+    }
+
+    /// True when this connection holds a slot; promotes waiters as slots free up.
+    pub fn is_active(&mut self, conn: u64, max: usize) -> bool {
+        self.promote(max);
+        self.active.contains(&conn)
+    }
+
+    /// 1-based queue position, if waiting.
+    pub fn position(&self, conn: u64) -> Option<u32> {
+        self.waiting.iter().position(|c| *c == conn).map(|p| p as u32 + 1)
+    }
+
+    fn promote(&mut self, max: usize) {
+        while self.active.len() < max && !self.waiting.is_empty() {
+            let next = self.waiting.remove(0);
+            self.active.push(next);
+        }
+        // A lowered cap sheds the newest active first.
+        while self.active.len() > max {
+            if let Some(demoted) = self.active.pop() {
+                self.waiting.insert(0, demoted);
+            }
+        }
+    }
+}
+
 pub struct SharedState {
     pub config: RwLock<AppConfig>,
     /// Bumped on every config change; threads compare to notice reconfiguration.
@@ -122,6 +174,8 @@ pub struct SharedState {
     pub update_install_requested: AtomicBool,
     /// Whether this instance runs headless (the updater passes it to a successor).
     pub headless: AtomicBool,
+    /// Preview-stream slot rationing (see `PreviewGate`).
+    pub preview_gate: Mutex<PreviewGate>,
     /// Currently-connected WS clients: connection serial -> client id.
     pub connected_clients: Mutex<HashMap<u64, String>>,
     pub conn_seq: AtomicU64,
@@ -156,6 +210,7 @@ impl SharedState {
             update_check_requested: AtomicBool::new(false),
             update_install_requested: AtomicBool::new(false),
             headless: AtomicBool::new(false),
+            preview_gate: Mutex::new(PreviewGate::default()),
             connected_clients: Mutex::new(HashMap::new()),
             conn_seq: AtomicU64::new(1),
             events,
