@@ -59,11 +59,13 @@ pub struct OutputConfig {
     pub start_universe: u16,
     /// Pixels per universe (170 * 3 = 510 channels fits the 512-channel DMX frame).
     pub pixels_per_universe: u16,
-    /// Unicast destinations, one per controller in spoke order. Controller i drives
-    /// `strings_per_controller` consecutive spokes. Empty entries fall back to multicast.
+    /// Unicast destinations, one per controller in spoke order. Used only when
+    /// `multicast` is false; controller i drives `strings_per_controller` spokes.
+    /// Empty entries leave the corresponding spokes without an output destination.
     pub controllers: Vec<String>,
     pub strings_per_controller: u32,
-    /// Also/instead send to sACN multicast groups (239.255.u.u).
+    /// Destination mode: true sends only to sACN multicast groups (239.255.u.u),
+    /// false sends only to the configured controller addresses.
     pub multicast: bool,
     /// E1.31 priority (default 100).
     pub priority: u8,
@@ -147,22 +149,12 @@ impl Default for ServerConfig {
 
 /// A client device that has connected at least once. Identified by the persistent
 /// id the client keeps in localStorage; named for humans; revocable.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClientRecord {
     pub id: String,
     pub name: String,
     pub revoked: bool,
-}
-
-impl Default for ClientRecord {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: String::new(),
-            revoked: false,
-        }
-    }
 }
 
 /// Random URL-safe token (join links). Seeded from `RandomState`, which is

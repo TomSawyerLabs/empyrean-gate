@@ -4,6 +4,14 @@
 import type { EffectCfg, LayerCfg, AppConfig, PreviewFrame, ServerMsg } from "./types";
 
 const PREVIEW_MAGIC = 0x45475056;
+const VIDEO_FRAME_MAGIC = 0x45475646;
+
+export interface ResolvedMedia {
+  playbackUrl: string;
+  title: string;
+  sourceUrl: string;
+  resolvedBy: string;
+}
 
 type Listener = (msg: ServerMsg) => void;
 type FrameListener = (frame: PreviewFrame) => void;
@@ -57,6 +65,7 @@ export class GateClient {
   private deniedListeners = new Set<(reason: string) => void>();
   private closed = false;
   private retryMs = 500;
+  private videoSequence = 0;
   clientId: string;
   /** HTTP origin of the backend (for /qr.svg etc.); set once connect() resolves it. */
   httpBase = "";
@@ -158,6 +167,63 @@ export class GateClient {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
     }
+  }
+
+  async resolveMedia(url: string): Promise<ResolvedMedia> {
+    const response = await fetch(`${this.httpBase}/media/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url,
+        client_id: this.clientId,
+        token: localStorage.getItem("empyrean-join-token") ?? "",
+      }),
+    });
+    if (!response.ok) throw new Error((await response.text()) || `Media resolver returned ${response.status}`);
+    const value = (await response.json()) as {
+      playback_url: string;
+      title: string;
+      source_url: string;
+      resolved_by: string;
+    };
+    return {
+      playbackUrl: new URL(value.playback_url, `${this.httpBase}/`).toString(),
+      title: value.title,
+      sourceUrl: value.source_url,
+      resolvedBy: value.resolved_by,
+    };
+  }
+
+  startVideo(title: string, sourceUrl: string) {
+    this.videoSequence = 0;
+    this.send({ type: "start_video", title, source_url: sourceUrl });
+  }
+
+  stopVideo(force = false) {
+    this.send({ type: "stop_video", force });
+  }
+
+  /** Sends one RGBA8 frame if the socket is keeping up; otherwise drops it. */
+  sendVideoFrame(width: number, height: number, rgba: Uint8ClampedArray): boolean {
+    const ws = this.ws;
+    const size = width * height * 4;
+    if (
+      !ws ||
+      ws.readyState !== WebSocket.OPEN ||
+      rgba.byteLength !== size ||
+      ws.bufferedAmount > size * 2
+    ) {
+      return false;
+    }
+    const packet = new Uint8Array(12 + size);
+    const header = new DataView(packet.buffer);
+    header.setUint32(0, VIDEO_FRAME_MAGIC, true);
+    header.setUint32(4, this.videoSequence++, true);
+    header.setUint16(8, width, true);
+    header.setUint16(10, height, true);
+    packet.set(rgba, 12);
+    ws.send(packet);
+    return true;
   }
 
   // --- convenience wrappers ---

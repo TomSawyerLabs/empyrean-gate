@@ -34,6 +34,37 @@ pub struct AudioFeatures {
     pub bpm: f32,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn video_frames_are_bounded_and_owned_by_one_connection() {
+        let state = SharedState::new(AppConfig::default());
+        state.start_video(7, "ipad", "clip".into(), "https://example.com/clip.mp4".into());
+        let rgba = vec![42u8; 4 * 3 * 4];
+
+        assert!(!state.push_video_frame(8, 4, 3, &rgba), "wrong connection");
+        assert!(!state.push_video_frame(7, 0, 3, &[]), "zero width");
+        assert!(!state.push_video_frame(7, 4, 3, &rgba[..rgba.len() - 1]), "bad payload size");
+        assert!(state.push_video_frame(7, 4, 3, &rgba));
+
+        {
+            let video = state.video.lock();
+            assert!(video.active);
+            assert_eq!((video.width, video.height), (4, 3));
+            assert_eq!(video.frames, 1);
+            assert_eq!(video.rgba, rgba);
+        }
+
+        state.stop_video(Some(8));
+        assert!(state.video.lock().active, "a stale connection cannot stop the owner");
+        state.stop_video(Some(7));
+        assert!(!state.video.lock().active);
+        assert!(state.video.lock().rgba.is_empty());
+    }
+}
+
 /// Raw audio shapes shipped to the GPU each frame: the recent waveform (a ring
 /// oscilloscope's worth) and the log-spaced spectrum. Written by capture threads.
 pub struct ScopeData {
@@ -136,6 +167,43 @@ impl PreviewGate {
     }
 }
 
+/// Latest browser-decoded video frame. Only the newest frame is retained: video
+/// input is a real-time control signal, so network jitter drops frames instead of
+/// building latency.
+pub struct VideoInput {
+    pub active: bool,
+    pub owner_conn_id: u64,
+    pub owner_id: String,
+    pub title: String,
+    pub source_url: String,
+    pub width: u16,
+    pub height: u16,
+    pub rgba: Vec<u8>,
+    pub revision: u64,
+    pub frames: u64,
+    pub fps: f32,
+    last_frame: Option<Instant>,
+}
+
+impl Default for VideoInput {
+    fn default() -> Self {
+        Self {
+            active: false,
+            owner_conn_id: 0,
+            owner_id: String::new(),
+            title: String::new(),
+            source_url: String::new(),
+            width: 0,
+            height: 0,
+            rgba: Vec::new(),
+            revision: 0,
+            frames: 0,
+            fps: 0.0,
+            last_frame: None,
+        }
+    }
+}
+
 pub struct SharedState {
     pub config: RwLock<AppConfig>,
     /// Bumped on every config change; threads compare to notice reconfiguration.
@@ -183,6 +251,7 @@ pub struct SharedState {
     pub events: broadcast::Sender<ServerMsg>,
     /// Full-resolution frames; each client task decimates/throttles for itself.
     pub preview: broadcast::Sender<Arc<PreviewFrame>>,
+    pub video: Mutex<VideoInput>,
     pub started: Instant,
 }
 
@@ -215,6 +284,7 @@ impl SharedState {
             conn_seq: AtomicU64::new(1),
             events,
             preview,
+            video: Mutex::new(VideoInput::default()),
             started: Instant::now(),
         })
     }
@@ -283,5 +353,75 @@ impl SharedState {
             cfg,
             born: Instant::now(),
         });
+    }
+
+    pub fn start_video(&self, conn_id: u64, owner_id: &str, title: String, source_url: String) {
+        let mut v = self.video.lock();
+        v.active = true;
+        v.owner_conn_id = conn_id;
+        v.owner_id = owner_id.to_owned();
+        v.title = title.chars().take(160).collect();
+        v.source_url = source_url.chars().take(2048).collect();
+        v.width = 0;
+        v.height = 0;
+        v.rgba.clear();
+        v.frames = 0;
+        v.fps = 0.0;
+        v.last_frame = None;
+        v.revision = v.revision.wrapping_add(1);
+    }
+
+    pub fn stop_video(&self, conn_id: Option<u64>) {
+        let mut v = self.video.lock();
+        if conn_id.is_some_and(|id| id != v.owner_conn_id) {
+            return;
+        }
+        v.active = false;
+        v.owner_conn_id = 0;
+        v.width = 0;
+        v.height = 0;
+        v.rgba.clear();
+        v.fps = 0.0;
+        v.last_frame = None;
+        v.revision = v.revision.wrapping_add(1);
+    }
+
+    pub fn push_video_frame(
+        &self,
+        conn_id: u64,
+        width: u16,
+        height: u16,
+        rgba: &[u8],
+    ) -> bool {
+        let expected = width as usize * height as usize * 4;
+        if width == 0
+            || height == 0
+            || width > crate::protocol::MAX_VIDEO_DIMENSION
+            || height > crate::protocol::MAX_VIDEO_DIMENSION
+            || rgba.len() != expected
+        {
+            return false;
+        }
+        let mut v = self.video.lock();
+        if !v.active || v.owner_conn_id != conn_id {
+            return false;
+        }
+        let now = Instant::now();
+        if let Some(last) = v.last_frame {
+            let instant_fps = 1.0 / now.duration_since(last).as_secs_f32().max(0.001);
+            v.fps = if v.fps == 0.0 {
+                instant_fps
+            } else {
+                v.fps * 0.85 + instant_fps * 0.15
+            };
+        }
+        v.last_frame = Some(now);
+        v.width = width;
+        v.height = height;
+        v.rgba.clear();
+        v.rgba.extend_from_slice(rgba);
+        v.frames += 1;
+        v.revision = v.revision.wrapping_add(1);
+        true
     }
 }

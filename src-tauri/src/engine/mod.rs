@@ -9,7 +9,7 @@
 //! zero pipeline stalls.
 
 use crate::layers::{GpuDab, GpuEffect, GpuLayer, MAX_AUDIO_SOURCES, MAX_DABS, MAX_EFFECTS, MAX_LAYERS};
-use crate::protocol::ServerMsg;
+use crate::protocol::{ServerMsg, MAX_VIDEO_DIMENSION};
 use crate::sacn::SacnSender;
 use crate::state::{PreviewFrame, SharedState};
 use anyhow::{Context, Result};
@@ -33,9 +33,9 @@ pub struct Globals {
     pub shake: f32,
     pub yaw: f32,
     pub dab_count: u32,
-    pub _pad0: u32,
-    pub _pad1: u32,
-    pub _pad2: u32,
+    pub video_width: u32,
+    pub video_height: u32,
+    pub video_active: u32,
 }
 
 #[repr(C)]
@@ -66,6 +66,8 @@ pub struct FrameInputs {
     pub dabs: Vec<GpuDab>,
     /// Per-source waveform + spectrum, flattened (see `SCOPE_FLOATS`).
     pub scope: Vec<f32>,
+    /// Present only when a newer browser-decoded frame needs uploading.
+    pub video_upload: Option<Vec<u8>>,
 }
 
 pub struct Engine {
@@ -80,6 +82,7 @@ pub struct Engine {
     effects_buf: wgpu::Buffer,
     dabs_buf: wgpu::Buffer,
     scope_buf: wgpu::Buffer,
+    video_buf: wgpu::Buffer,
     out_buf: wgpu::Buffer,
     staging: [wgpu::Buffer; 2],
     /// Submission index of the copy targeting each staging buffer.
@@ -176,6 +179,12 @@ impl Engine {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let video_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("video-rgba"),
+            size: MAX_VIDEO_DIMENSION as u64 * MAX_VIDEO_DIMENSION as u64 * 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let (out_buf, staging) = Self::make_pixel_buffers(&device, npix);
 
@@ -189,6 +198,7 @@ impl Engine {
                 storage_entry(4, false),
                 storage_entry(5, true),
                 storage_entry(6, true),
+                storage_entry(7, true),
             ],
         });
 
@@ -203,6 +213,7 @@ impl Engine {
                 &out_buf,
                 &dabs_buf,
                 &scope_buf,
+                &video_buf,
             ),
             pipeline: Self::make_pipeline(&device, &bind_group_layout)?,
             device,
@@ -214,6 +225,7 @@ impl Engine {
             effects_buf,
             dabs_buf,
             scope_buf,
+            video_buf,
             out_buf,
             staging,
             staging_submission: [None, None],
@@ -294,6 +306,7 @@ impl Engine {
         out: &wgpu::Buffer,
         dabs: &wgpu::Buffer,
         scope: &wgpu::Buffer,
+        video: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("gate"),
@@ -306,6 +319,7 @@ impl Engine {
                 bind(4, out),
                 bind(5, dabs),
                 bind(6, scope),
+                bind(7, video),
             ],
         })
     }
@@ -332,6 +346,7 @@ impl Engine {
             &self.out_buf,
             &self.dabs_buf,
             &self.scope_buf,
+            &self.video_buf,
         );
     }
 
@@ -359,6 +374,11 @@ impl Engine {
         }
         self.queue
             .write_buffer(&self.scope_buf, 0, bytemuck::cast_slice(&inputs.scope));
+        if let Some(rgba) = inputs.video_upload.as_ref()
+            && !rgba.is_empty()
+        {
+            self.queue.write_buffer(&self.video_buf, 0, rgba);
+        }
 
         let mut encoder = self
             .device
@@ -624,6 +644,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut fps_ema = 0.0f32;
     let mut frame_ms_ema = 0.0f32;
     let mut frame_number: u64 = 0;
+    let mut video_revision: u64 = u64::MAX;
 
     // Per-second buckets for the UI history bars (frames rendered / packets sent).
     let mut sec_start = Instant::now();
@@ -653,12 +674,12 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
 
     while !state.shutdown.load(Ordering::Relaxed) {
         #[cfg(feature = "shader-hot-reload")]
-        if shader_dirty.swap(false, Ordering::Relaxed) {
-            if let Err(e) = engine.reload_shader() {
-                let msg = format!("shader reload failed: {e:#}");
-                log::error!("{msg}");
-                let _ = state.events.send(ServerMsg::Error { message: msg });
-            }
+        if shader_dirty.swap(false, Ordering::Relaxed)
+            && let Err(e) = engine.reload_shader()
+        {
+            let msg = format!("shader reload failed: {e:#}");
+            log::error!("{msg}");
+            let _ = state.events.send(ServerMsg::Error { message: msg });
         }
 
         // Reconfigure buffers + the sACN plan only when geometry/output change —
@@ -751,7 +772,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 bt.spin
             };
             tap_angle = (tap_angle + spin * std::f32::consts::TAU).rem_euclid(std::f32::consts::TAU);
-            if tap_beat_count % bt.every.max(1) as u64 == 0 {
+            if tap_beat_count.is_multiple_of(bt.every.max(1) as u64) {
                 state.trigger_effect(crate::layers::EffectCfg {
                     kind: crate::layers::EffectKind::Burst,
                     angle: tap_angle,
@@ -872,6 +893,22 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 .collect()
         };
 
+        let (video_width, video_height, video_active, video_upload) = {
+            let v = state.video.lock();
+            let upload = if v.revision != video_revision {
+                video_revision = v.revision;
+                Some(v.rgba.clone())
+            } else {
+                None
+            };
+            (
+                v.width as u32,
+                v.height as u32,
+                v.active && v.width > 0 && v.height > 0,
+                upload,
+            )
+        };
+
         let inputs = FrameInputs {
             globals: Globals {
                 spokes: cfg.geometry.spokes,
@@ -889,15 +926,16 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 shake: control.shake,
                 yaw: control.yaw,
                 dab_count: dabs.len() as u32,
-                _pad0: 0,
-                _pad1: 0,
-                _pad2: 0,
+                video_width,
+                video_height,
+                video_active: u32::from(video_active),
             },
             audio,
             layers,
             effects,
             dabs,
             scope: scope_data,
+            video_upload,
         };
 
         let t0 = Instant::now();
@@ -940,24 +978,24 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 }
             }
             was_sending = sending;
-            if sending {
-                if let Some(s) = sacn.as_mut() {
-                    let cap = cfg.output.fps.clamp(1.0, 120.0);
-                    let send = if cfg.output.sync_to_render && cap >= cfg.render.fps {
-                        // Cap doesn't bind: one sACN frame per rendered frame, always.
-                        true
-                    } else if now >= next_sacn {
-                        // Accumulator schedule: steady cap rate, no aliasing against
-                        // the render tick.
-                        let interval = Duration::from_secs_f32(1.0 / cap);
-                        next_sacn = (next_sacn + interval).max(now - interval);
-                        true
-                    } else {
-                        false
-                    };
-                    if send {
-                        pkts_this_sec += s.send_frame(rgb) as u32;
-                    }
+            if sending
+                && let Some(s) = sacn.as_mut()
+            {
+                let cap = cfg.output.fps.clamp(1.0, 120.0);
+                let send = if cfg.output.sync_to_render && cap >= cfg.render.fps {
+                    // Cap doesn't bind: one sACN frame per rendered frame, always.
+                    true
+                } else if now >= next_sacn {
+                    // Accumulator schedule: steady cap rate, no aliasing against
+                    // the render tick.
+                    let interval = Duration::from_secs_f32(1.0 / cap);
+                    next_sacn = (next_sacn + interval).max(now - interval);
+                    true
+                } else {
+                    false
+                };
+                if send {
+                    pkts_this_sec += s.send_frame(rgb) as u32;
                 }
             }
 
@@ -1003,6 +1041,26 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 st.pps_history = pps_hist.iter().copied().collect();
                 st.master_brightness = cfg.render.master_brightness;
                 st.master_speed = cfg.render.master_speed;
+                st.video = {
+                    let v = state.video.lock();
+                    let owner_name = cfg
+                        .clients
+                        .iter()
+                        .find(|c| c.id == v.owner_id)
+                        .map(|c| c.name.clone())
+                        .unwrap_or_else(|| v.owner_id.clone());
+                    crate::protocol::VideoSourceStatus {
+                        active: v.active && v.width > 0 && v.height > 0,
+                        owner_id: v.owner_id.clone(),
+                        owner_name,
+                        title: v.title.clone(),
+                        source_url: v.source_url.clone(),
+                        width: v.width,
+                        height: v.height,
+                        fps: v.fps,
+                        frames: v.frames,
+                    }
+                };
                 st.client_list = {
                     let connected = state.connected_clients.lock();
                     cfg.clients
@@ -1049,10 +1107,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     // Shutdown (app exit). Close the stream so the rig goes dark deliberately
     // instead of freezing on the last frame — but not after a handover, where the
     // successor is already driving the same CID.
-    if !state.leaving.load(Ordering::SeqCst) {
-        if let Some(s) = sacn.as_mut() {
-            s.send_terminate();
-        }
+    if !state.leaving.load(Ordering::SeqCst)
+        && let Some(s) = sacn.as_mut()
+    {
+        s.send_terminate();
     }
     state.sacn_terminated.store(true, Ordering::SeqCst);
 }

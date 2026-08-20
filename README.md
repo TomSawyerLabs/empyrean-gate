@@ -38,12 +38,13 @@ live meters.
   waves, spirals, plasma, spoke chases, sparkles, beat rings, breathing envelopes,
   rainbows, wedges, interference, fire, meteors, warp — plus MilkDrop-style raw-audio
   layers: **Waveform** (the PCM bent into a circular oscilloscope) and **Spectrum**
-  (spoke-per-bin circular analyzer) —
+  (spoke-per-bin circular analyzer), plus **Video** (live browser-decoded texture,
+  radial/kaleidoscope mapping and color treatment) —
   stacked with blend modes, each bound to an audio source. Effects (burst / strobe /
   swoosh / collapse) fire from keyboard (1–4), clicks/taps on the preview, or remote
   clients.
-- **Three UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Control
-  (touch-sized effect pads + master/layer faders), and Settings. In the desktop app,
+- **Four UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Video
+  (URL/file intake), Control (touch-sized effect pads + master/layer faders), and Settings. In the desktop app,
   "New window" pops the current tab out into its own window. Old `/#view` and `/#draw`
   links redirect to Live.
 - **Live drawing**: paint on the array from any client with Glow / Ripple / Sparkle
@@ -52,6 +53,14 @@ live meters.
 - **PWA**: open the web UI on an iPad/phone, "Add to Home Screen", and it runs
   standalone fullscreen — a touch control surface for the floor. Manifest shortcuts
   jump straight to Draw or Control.
+- **Video intake**: paste a direct MP4/WebM URL or a publisher page with standard
+  `og:video` / HTML video metadata, or choose a file on the iPad. The browser uses
+  its native hardware decoder and sends a bounded 64–128 px RGBA texture at 10–24
+  fps; the backend retains only the latest frame, so congestion drops frames instead
+  of adding latency. A Video layer maps it across the radial array with zoom,
+  kaleidoscope, contrast, rotation, color treatment, blend, audio, and autopilot
+  controls. If `yt-dlp` is installed on the Gate machine, provider pages get an
+  additional best-effort resolver. DRM/login-gated sources remain unsupported.
 - **Autopilot**: a slow mean-reverting random walk drifts layer parameters around
   wherever the sliders are set (per-layer "Walk" amount = wander radius), so an
   unattended show evolves for hours without repeating.
@@ -78,6 +87,8 @@ live meters.
   render fps or fix a rate, and optionally enable E1.31 universe synchronization
   (PixLite Mk4 latches all universes per sync packet, tear-free). Live packets/s in
   the status HUD tells you it's actually transmitting.
+  Multicast and controller unicast are exclusive destination modes, so a configured
+  receiver never gets duplicate sequence-identical packets.
 - **A well-behaved sACN source.** The CID (source identity) is generated once and
   persisted, as the spec requires — so restarts and handovers look like the *same*
   source instead of a second one fighting the first in every receiver's merge for
@@ -94,13 +105,15 @@ src-tauri/src/
   audio/            cpal capture (per-source channel select) + FFT features + beat tracker
   sacn.rs           allocation-free E1.31 sender (prebuilt per-universe packets)
   server.rs         axum HTTP + WS (serves UI, speaks the protocol)
+  media.rs          guarded URL resolver + ranged same-origin media proxy
   config.rs         geometry / output / audio / layers, persisted JSON
 ```
 
 ## Development
 
 Requirements: [Rust](https://rustup.rs), [Bun](https://bun.sh), a Vulkan-capable GPU +
-driver.
+driver. [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) is optional for resolving
+provider pages; direct media URLs, metadata pages, and local device files do not need it.
 
 ```sh
 bun install
@@ -127,6 +140,7 @@ Useful during pattern development:
   the development-only frame fixture viewer; it is omitted from production navigation
   and builds. Other testers can choose a clip from their own `Uprising-Data` checkout.
 - `bun scripts/e2e-test.ts` — protocol smoke test against a running backend.
+  It also sends a generated video texture and verifies live source status.
 
 ## Production build
 
@@ -168,9 +182,14 @@ updater and need one manual swap.)
   multicast.
 - Everything about the geometry (spoke count, pixels, radii, universe layout) is
   config, editable live in Settings and persisted to the user config dir.
+- Remote media fetching accepts only HTTP(S), rejects credentials and local/private/
+  reserved destinations, pins each connection to its validated DNS answers,
+  bypasses system proxies, revalidates redirects, caps inspected HTML and live proxy
+  sessions, and exposes streams through short-lived opaque URLs. This prevents the
+  feature becoming an unauthenticated proxy into the show/control network.
 
 ## Not yet
 
-- Auth tokens for remote clients (field exists in config/protocol, unenforced).
-- Video-file playback as a layer.
+- Bundled extraction for changing provider sites; optional `yt-dlp` is best-effort,
+  and DRM/login-gated video is intentionally out of scope.
 - Batched UDP I/O (`sendmmsg`/RIO) for 100k+ pixel scales.

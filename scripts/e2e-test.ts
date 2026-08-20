@@ -1,6 +1,6 @@
 // End-to-end test against a running backend (empyrean-gate --headless).
 // Verifies: HTTP serves the UI, WS speaks the protocol, preview frames stream,
-// effects trigger, and status updates arrive. Run: bun scripts/e2e-test.ts
+// effects trigger, video frames arrive, and status updates. Run: bun scripts/e2e-test.ts
 
 const BASE = process.env.E2E_BASE ?? "http://127.0.0.1:9520";
 
@@ -29,6 +29,7 @@ console.log("PWA assets OK");
 const ws = new WebSocket(`${BASE.replace("http", "ws")}/ws`);
 let gotState = false;
 let gotStatus = false;
+let gotVideo = false;
 let frames = 0;
 let previewBytes = 0;
 
@@ -37,6 +38,15 @@ const done = new Promise<void>((resolve, reject) => {
   ws.onopen = () => {
     ws.send(JSON.stringify({ type: "hello", name: "e2e", client_id: "e2e", token: "" }));
     ws.send(JSON.stringify({ type: "subscribe_preview", fps: 30, decimate: 2 }));
+    ws.send(JSON.stringify({ type: "start_video", title: "e2e color bars", source_url: "e2e://generated" }));
+    const video = new Uint8Array(12 + 2 * 2 * 4);
+    const vh = new DataView(video.buffer);
+    vh.setUint32(0, 0x45475646, true);
+    vh.setUint32(4, 1, true);
+    vh.setUint16(8, 2, true);
+    vh.setUint16(10, 2, true);
+    video.set([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255], 12);
+    ws.send(video);
     ws.send(JSON.stringify({ type: "trigger_effect", effect: { kind: "burst", angle: 1.0, radius: 0.5, intensity: 1, hue: -1, duration: 0 } }));
     ws.send(JSON.stringify({ type: "paint", pen: "glow", points: [{ angle: 0.5, radius: 0.7 }, { angle: 0.6, radius: 0.7 }], hue: 0.5, size: 0.15, intensity: 1 }));
     ws.send(JSON.stringify({ type: "paint", pen: "comet", points: [{ angle: 1.5, radius: 0.6, dir: 2.2 }], hue: -1, size: 0.2, intensity: 1 }));
@@ -59,12 +69,15 @@ const done = new Promise<void>((resolve, reject) => {
         if (!Array.isArray(msg.status.fps_history) || !Array.isArray(msg.status.pps_history)) {
           reject(new Error("status missing fps/pps history"));
         }
+        if (msg.status.video?.active && msg.status.video.title === "e2e color bars") {
+          gotVideo = true;
+        }
       }
     } else {
       frames++;
       previewBytes = (ev.data as ArrayBuffer).byteLength ?? (ev.data as Blob).size;
     }
-    if (gotState && gotStatus && frames >= 10) {
+    if (gotState && gotStatus && gotVideo && frames >= 10) {
       clearTimeout(timeout);
       resolve();
     }
@@ -74,7 +87,8 @@ const done = new Promise<void>((resolve, reject) => {
 
 ws.binaryType = "arraybuffer";
 await done.catch((e) => fail(String(e)));
-console.log(`WS OK: state received, status received, ${frames} preview frames (last ${previewBytes} bytes)`);
+console.log(`WS OK: state/status/video received, ${frames} preview frames (last ${previewBytes} bytes)`);
+ws.send(JSON.stringify({ type: "stop_video" }));
 ws.close();
 console.log("E2E PASS");
 process.exit(0);

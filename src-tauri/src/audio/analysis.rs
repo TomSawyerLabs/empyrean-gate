@@ -144,9 +144,9 @@ impl FeatureExtractor {
 
         let mut flux = 0.0f32;
         let mut mags = vec![0.0f32; FFT_SIZE / 2];
-        for i in 0..FFT_SIZE / 2 {
+        for (i, mag) in mags.iter_mut().enumerate() {
             let m = self.scratch[i].norm() / FFT_SIZE as f32;
-            mags[i] = m;
+            *mag = m;
             let d = m - self.prev_mag[i];
             if d > 0.0 {
                 flux += d;

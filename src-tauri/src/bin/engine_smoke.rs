@@ -13,6 +13,7 @@ use serde::Serialize;
 use std::time::Instant;
 
 const MAX_BENCH_PIXELS: u32 = 500_000;
+const BENCH_VIDEO_DIMENSION: u32 = 96;
 
 #[derive(Debug, Clone, PartialEq)]
 struct Options {
@@ -50,6 +51,7 @@ struct Scenario {
     layers: usize,
     effects: usize,
     dabs: usize,
+    video_only: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -202,12 +204,12 @@ fn run_scenario(
             .render(&inputs)
             .with_context(|| format!("{} measured frame {frame}", scenario.name))?;
         samples.push(started.elapsed().as_secs_f64() * 1000.0);
-        if frame + 1 == options.measured_frames {
-            if let Some(rgb) = rgb {
-                for &byte in rgb {
-                    checksum = checksum.wrapping_mul(31).wrapping_add(byte as u64);
-                    nonzero_bytes += usize::from(byte != 0);
-                }
+        if frame + 1 == options.measured_frames
+            && let Some(rgb) = rgb
+        {
+            for &byte in rgb {
+                checksum = checksum.wrapping_mul(31).wrapping_add(byte as u64);
+                nonzero_bytes += usize::from(byte != 0);
             }
         }
     }
@@ -257,20 +259,31 @@ fn scenarios(options: &Options) -> Result<Vec<Scenario>> {
                 layers: 4,
                 effects: 0,
                 dabs: 0,
+                video_only: false,
             },
             Scenario {
                 name: "installed-heavy".into(),
                 pixels: 24_192,
-                layers: 19,
+                layers: LayerKind::ALL.len(),
                 effects: 16,
                 dabs: 128,
+                video_only: false,
             },
             Scenario {
                 name: "headroom-70k-heavy".into(),
                 pixels: 70_000,
-                layers: 19,
+                layers: LayerKind::ALL.len(),
                 effects: 16,
                 dabs: 128,
+                video_only: false,
+            },
+            Scenario {
+                name: "video-only".into(),
+                pixels: 24_192,
+                layers: 1,
+                effects: 0,
+                dabs: 0,
+                video_only: true,
             },
         ])
     } else {
@@ -286,13 +299,27 @@ fn scenarios(options: &Options) -> Result<Vec<Scenario>> {
             layers: options.layers,
             effects: options.effects,
             dabs: options.dabs,
+            video_only: false,
         }])
     }
 }
 
 fn make_inputs(scenario: &Scenario, spokes: u32, pixels: u32) -> FrameInputs {
     let cfg = AppConfig::default();
-    let mut layers: Vec<_> = cfg.layers.iter().map(|layer| layer.to_gpu(0.0)).collect();
+    let mut layers: Vec<_> = if scenario.video_only {
+        vec![LayerCfg {
+            kind: LayerKind::Video,
+            hue_range: 1.0,
+            param_a: 1.0,
+            param_b: 0.0,
+            param_c: 0.5,
+            param_d: 0.5,
+            ..Default::default()
+        }
+        .to_gpu(0.0)]
+    } else {
+        cfg.layers.iter().map(|layer| layer.to_gpu(0.0)).collect()
+    };
     while layers.len() < scenario.layers {
         let kind = LayerKind::ALL[layers.len() % LayerKind::ALL.len()];
         layers.push(
@@ -304,6 +331,9 @@ fn make_inputs(scenario: &Scenario, spokes: u32, pixels: u32) -> FrameInputs {
         );
     }
     layers.truncate(scenario.layers);
+    let has_video = layers
+        .iter()
+        .any(|layer| layer.kind == LayerKind::Video.gpu_id());
 
     let effects: Vec<GpuEffect> = (0..scenario.effects)
         .map(|i| GpuEffect {
@@ -359,6 +389,9 @@ fn make_inputs(scenario: &Scenario, spokes: u32, pixels: u32) -> FrameInputs {
             master: 1.0,
             inner_over_outer: 8.0 / 25.0,
             dab_count: dabs.len() as u32,
+            video_width: if has_video { BENCH_VIDEO_DIMENSION } else { 0 },
+            video_height: if has_video { BENCH_VIDEO_DIMENSION } else { 0 },
+            video_active: u32::from(has_video),
             ..Default::default()
         },
         audio,
@@ -366,10 +399,31 @@ fn make_inputs(scenario: &Scenario, spokes: u32, pixels: u32) -> FrameInputs {
         effects,
         dabs,
         scope,
+        video_upload: has_video.then(benchmark_video_frame),
     }
 }
 
+fn benchmark_video_frame() -> Vec<u8> {
+    let mut rgba = Vec::with_capacity((BENCH_VIDEO_DIMENSION * BENCH_VIDEO_DIMENSION * 4) as usize);
+    for y in 0..BENCH_VIDEO_DIMENSION {
+        for x in 0..BENCH_VIDEO_DIMENSION {
+            rgba.extend_from_slice(&[
+                (x * 255 / (BENCH_VIDEO_DIMENSION - 1)) as u8,
+                (y * 255 / (BENCH_VIDEO_DIMENSION - 1)) as u8,
+                ((x ^ y) * 255 / (BENCH_VIDEO_DIMENSION - 1)) as u8,
+                255,
+            ]);
+        }
+    }
+    rgba
+}
+
 fn advance_inputs(inputs: &mut FrameInputs, frame: u32) {
+    // A live source uploads only on a new browser frame. Seed the GPU on the first
+    // warmup frame, then benchmark steady-state sampling rather than PCIe traffic.
+    if frame > 0 {
+        inputs.video_upload = None;
+    }
     let time = frame as f32 / 60.0;
     inputs.globals.time = time;
     for (i, layer) in inputs.layers.iter_mut().enumerate() {
@@ -390,7 +444,7 @@ fn geometry_for(total_pixels: u32) -> (u32, u32) {
     let max_spokes = total_pixels.min(64);
     let spokes = (1..=max_spokes)
         .rev()
-        .find(|candidate| total_pixels % candidate == 0)
+        .find(|candidate| total_pixels.is_multiple_of(*candidate))
         .unwrap_or(1);
     (spokes, total_pixels / spokes)
 }
@@ -536,7 +590,7 @@ Usage: engine-smoke [OPTIONS]\n\n\
   -h, --help           Print this help\n\n\
 Examples:\n\
   engine-smoke\n\
-  engine-smoke --pixels 70000 --layers 19 --effects 16 --dabs 128\n\
+  engine-smoke --pixels 70000 --layers 20 --effects 16 --dabs 128\n\
   engine-smoke --suite --warmup 120 --frames 600 --json"
     );
 }
@@ -583,6 +637,21 @@ mod tests {
     fn caps_pixel_workloads_at_500k() {
         let options = parse_options(&args(&["--pixels", "500001"])).unwrap();
         assert!(scenarios(&options).is_err());
+    }
+
+    #[test]
+    fn heavy_suite_exercises_the_video_layer() {
+        let options = Options {
+            suite: true,
+            ..Default::default()
+        };
+        let heavy = scenarios(&options).unwrap().remove(1);
+        assert_eq!(heavy.layers, LayerKind::ALL.len());
+
+        let inputs = make_inputs(&heavy, 64, 378);
+        assert_eq!(inputs.globals.video_active, 1);
+        assert_eq!(inputs.globals.video_width, BENCH_VIDEO_DIMENSION);
+        assert_eq!(inputs.video_upload.unwrap().len(), 96 * 96 * 4);
     }
 
     #[test]

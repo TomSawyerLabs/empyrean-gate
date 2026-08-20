@@ -2,11 +2,13 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import Control from "./Control";
 import { EFFECTS } from "./effects";
 import Live from "./Live";
+import Media from "./Media";
 import Settings from "./Settings";
 import { useGate } from "./state";
 
 const TABS = [
   { id: "live", label: "Live" },
+  { id: "media", label: "Video" },
   { id: "control", label: "Control" },
   { id: "settings", label: "Settings" },
 ] as const;
@@ -247,6 +249,16 @@ export default function App() {
 
       <main>
         {tab === "live" && <Live />}
+        {/* Keep the decoder mounted while the operator visits Live/Settings.
+            An offscreen composited video continues producing frames on iPadOS;
+            unmounting it would stop the Gate feed at every tab change. */}
+        <div
+          className={tab === "media" ? "media-tab-active" : "media-tab-background"}
+          aria-hidden={tab !== "media"}
+          inert={tab !== "media"}
+        >
+          <Media />
+        </div>
         {tab === "replay" && DevReplay && (
           <Suspense fallback={null}><DevReplay /></Suspense>
         )}

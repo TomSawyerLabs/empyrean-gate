@@ -51,10 +51,12 @@ pub enum LayerKind {
     Waveform,
     /// Spoke-per-bin circular spectrum analyzer.
     Spectrum,
+    /// Live video texture supplied by a browser client and mapped across the ring.
+    Video,
 }
 
 impl LayerKind {
-    pub const ALL: [LayerKind; 19] = [
+    pub const ALL: [LayerKind; 20] = [
         LayerKind::Solid,
         LayerKind::GradientRadial,
         LayerKind::NoiseField,
@@ -74,6 +76,7 @@ impl LayerKind {
         LayerKind::Warp,
         LayerKind::Waveform,
         LayerKind::Spectrum,
+        LayerKind::Video,
     ];
 
     pub fn gpu_id(self) -> u32 {

@@ -311,6 +311,7 @@ function LayerEditor({ layer, index }: { layer: LayerCfg; index: number }) {
         <Slider label={params[0] ?? "Param A"} value={local.param_a} onChange={(v) => up({ param_a: v })} />
         <Slider label={params[1] ?? "Param B"} value={local.param_b} onChange={(v) => up({ param_b: v })} />
         <Slider label={params[2] ?? "Param C"} value={local.param_c} onChange={(v) => up({ param_c: v })} />
+        <Slider label={params[3] ?? "Param D"} value={local.param_d} onChange={(v) => up({ param_d: v })} />
       </div>
     </div>
   );
@@ -687,15 +688,26 @@ function OutputPanel({ config }: { config: AppConfig }) {
         synchronization — PixLite Mk4 latches all universes on the sync packet (tear-free);
         receivers without support ignore it.
       </p>
-      <label className="toggle-row">
-        <input
-          type="checkbox"
-          checked={out.multicast}
-          onChange={(e) => commit({ multicast: e.target.checked })}
-        />
-        Multicast (239.255.x.x) — standard; needs IGMP-snooping switch to avoid flooding.
-        Unicast IPs below are optional.
-      </label>
+      <div className="output-mode" role="group" aria-label="sACN destination mode">
+        <button
+          className={out.multicast ? "active" : ""}
+          onClick={() => commit({ multicast: true })}
+        >
+          Multicast
+          <span>Standard 239.255.x.x groups</span>
+        </button>
+        <button
+          className={!out.multicast ? "active" : ""}
+          onClick={() => commit({ multicast: false })}
+        >
+          Unicast
+          <span>Only the controller IPs below</span>
+        </button>
+      </div>
+      <p className="hint">
+        Choose one destination mode. Multicast benefits from an IGMP-snooping switch;
+        unicast keeps lighting traffic off unrelated switch ports.
+      </p>
       <label className="field-col">
         <span>Controller IPs (one per line, in spoke order; controller N drives spokes N×4…N×4+3)</span>
         <textarea
@@ -712,6 +724,9 @@ function OutputPanel({ config }: { config: AppConfig }) {
           placeholder={"10.0.0.101\n10.0.0.102\n…"}
         />
       </label>
+      {!out.multicast && out.controllers.length === 0 && (
+        <p className="warn">Unicast is selected but no controller IPs are configured.</p>
+      )}
     </section>
   );
 }
