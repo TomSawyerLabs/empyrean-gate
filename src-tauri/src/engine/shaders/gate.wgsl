@@ -79,7 +79,7 @@ struct Dab {
     hue: f32,
     size: f32,
     intensity: f32,
-    _pad: f32,
+    dir: f32,     // stroke motion direction, for directional pens
 }
 
 @group(0) @binding(0) var<uniform> G: Globals;
@@ -549,6 +549,45 @@ fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
             let rnd = hash01(idx * 2654435761u + dab_index * 97u + cell * 40503u);
             let lit = step(0.86, rnd);
             return col * inside * lit * fade * D.intensity * 1.6;
+        }
+        // Comet — teardrop streak elongated along the stroke's motion direction
+        case 3u: {
+            let dirv = vec2f(cos(D.dir), sin(D.dir));
+            let off = ctx.pos - origin;
+            let along = dot(off, dirv);          // + ahead of motion, - behind
+            let across = off.x * dirv.y - off.y * dirv.x;
+            let w = D.size * 0.35 + 0.01;
+            let tail = D.size * 3.0;
+            // Sharp nose, long exponential tail behind the motion.
+            let head = select(exp(along / tail * 6.0), exp(-along / (w * 2.0)), along > 0.0);
+            let v = exp(-(across * across) / (w * w)) * head;
+            return col * v * fade * D.intensity * 1.6;
+        }
+        // Ring — a full hoop around the array at the dab's radius
+        case 4u: {
+            let w = D.size * 0.3 + 0.01;
+            let v = exp(-((ctx.rn - D.radius) * (ctx.rn - D.radius)) / (w * w));
+            return col * v * fade * D.intensity;
+        }
+        // Beam — the whole spoke ray at the dab's angle
+        case 5u: {
+            let a = ang_dist(ctx.theta, D.angle);
+            let w = D.size * 0.6 + 0.02;
+            let v = exp(-(a * a) / (w * w));
+            return col * v * fade * D.intensity * 1.4;
+        }
+        // Ember — glitter drifting inward toward the center as it fades
+        case 6u: {
+            let drift = D.radius * (1.0 - D.age * 0.5);
+            let center = drift * vec2f(cos(D.angle), sin(D.angle));
+            let dd = distance(ctx.pos, center);
+            let s = D.size * 1.2;
+            let inside = exp(-(dd * dd) / (s * s * 0.5));
+            let idx = ctx.spoke * G.pixels + ctx.i;
+            let cell = u32(D.age * 14.0);
+            let rnd = hash01(idx * 2654435761u + dab_index * 131u + cell * 40503u);
+            let lit = step(0.8, rnd);
+            return col * inside * lit * fade * D.intensity * 1.5;
         }
         default: {
             return vec3f(0.0);

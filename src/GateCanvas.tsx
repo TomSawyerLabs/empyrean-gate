@@ -104,11 +104,10 @@ export default function GateCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glRef = useRef<Gl | null>(null);
   const [meta, setMeta] = useState<PreviewMeta | null>(null);
-  const pending = useRef<{ angle: number; radius: number }[]>([]);
+  const pending = useRef<{ angle: number; radius: number; dir: number }[]>([]);
   // Per-pointer stroke state (multitouch: each finger tracked separately).
-  const pointers = useRef(
-    new Map<number, { x: number; y: number; moved: boolean }>(),
-  );
+  // Last cartesian position feeds the motion direction for directional pens.
+  const pointers = useRef(new Map<number, { px: number; py: number; dir: number }>());
   const penRef = useRef(drawPen);
   penRef.current = drawPen;
 
@@ -192,38 +191,51 @@ export default function GateCanvas({
     };
   };
 
-  // Tap vs. draw, unified: a press that never travels more than a few pixels is a
-  // tap (burst via onTap, even with a pen active — tapping on the beat must keep
-  // working); a drag is a stroke. Tracked per pointer so several fingers can draw
-  // while another taps.
-  const TAP_SLOP_PX = 8;
+  // Explicit tool modes — no gesture guessing. Tap mode (onTap set): every press
+  // fires immediately on pointer-DOWN (snappy for tapping on the beat) and drags
+  // never draw. Draw mode (drawPen set): the press paints from the first contact;
+  // taps are just one-dab strokes. Per pointer, so multitouch works in both.
+  const cart = (polar: { angle: number; radius: number }) => ({
+    x: polar.radius * Math.cos(polar.angle),
+    y: polar.radius * Math.sin(polar.angle),
+  });
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drawPen && !onTap) return;
+    if (onTap) {
+      const p = toPolar(e);
+      onTap(p.angle, Math.min(1, p.radius));
+      return;
+    }
+    if (!drawPen) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY, moved: false });
+    const polar = toPolar(e);
+    const c = cart(polar);
+    pointers.current.set(e.pointerId, { px: c.x, py: c.y, dir: 0 });
+    pending.current.push({ ...polar, dir: 0 });
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawPen) return;
     const p = pointers.current.get(e.pointerId);
     if (!p) return;
-    if (!p.moved && Math.hypot(e.clientX - p.x, e.clientY - p.y) < TAP_SLOP_PX) return;
-    if (!drawPen) return;
-    if (!p.moved) {
-      p.moved = true;
-      pending.current.push(toPolar({ clientX: p.x, clientY: p.y })); // stroke start
-    }
     const native = e.nativeEvent as PointerEvent;
     const events = native.getCoalescedEvents?.() ?? [native];
-    for (const ev of events) pending.current.push(toPolar(ev));
+    for (const ev of events) {
+      const polar = toPolar(ev);
+      const c = cart(polar);
+      const dx = c.x - p.px;
+      const dy = c.y - p.py;
+      if (Math.hypot(dx, dy) > 0.004) {
+        p.dir = Math.atan2(dy, dx);
+        p.px = c.x;
+        p.py = c.y;
+      }
+      pending.current.push({ ...polar, dir: p.dir });
+    }
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const p = pointers.current.get(e.pointerId);
     pointers.current.delete(e.pointerId);
-    if (!p || p.moved || !onTap) return;
-    const polar = toPolar(e);
-    onTap(polar.angle, Math.min(1, polar.radius));
   };
 
   return (

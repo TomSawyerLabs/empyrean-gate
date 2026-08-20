@@ -235,14 +235,117 @@ main {
   font-size: 12px;
 }
 
+.cluster.pens {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
 .pen-btn {
-  padding: 10px 8px;
-  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 6px;
+  font-size: 12px;
 }
 
 .pen-btn.active {
   background: var(--accent);
   border-color: var(--accent);
+}
+
+/* ---- Tool button glyph animations ---- */
+
+.tool-icon {
+  width: 26px;
+  height: 26px;
+  display: block;
+  color: var(--accent2);
+}
+
+.pen-btn.active .tool-icon {
+  color: #fff;
+}
+
+.ti-burst {
+  transform-origin: 14px 14px;
+  animation: ti-burst 1.6s ease-out infinite;
+}
+
+@keyframes ti-burst {
+  0% { transform: scale(0.4); opacity: 1; }
+  70% { transform: scale(2.4); opacity: 0; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+.ti-glow {
+  transform-origin: 14px 14px;
+  filter: blur(2px);
+  animation: ti-glow 2s ease-in-out infinite;
+}
+
+@keyframes ti-glow {
+  0%, 100% { transform: scale(0.7); opacity: 0.5; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+
+.ti-ripple {
+  transform-origin: 14px 14px;
+  animation: ti-burst 2s ease-out infinite;
+}
+
+.ti-late { animation-delay: 0.5s; }
+.ti-later { animation-delay: 1s; }
+.ti-latest { animation-delay: 1.5s; }
+
+.ti-twinkle {
+  animation: ti-twinkle 1.4s ease-in-out infinite;
+}
+
+@keyframes ti-twinkle {
+  0%, 100% { opacity: 0.1; }
+  50% { opacity: 1; }
+}
+
+.ti-comet {
+  animation: ti-comet 1.8s ease-in-out infinite;
+}
+
+@keyframes ti-comet {
+  0% { transform: translate(-8px, 8px); opacity: 0; }
+  25% { opacity: 1; }
+  70% { transform: translate(8px, -8px); opacity: 1; }
+  100% { transform: translate(10px, -10px); opacity: 0; }
+}
+
+.ti-ring {
+  transform-origin: 14px 14px;
+  animation: ti-ring 2s ease-in-out infinite;
+}
+
+@keyframes ti-ring {
+  0%, 100% { opacity: 0.25; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+
+.ti-beam {
+  transform-origin: 14px 14px;
+  animation: ti-beam 1.6s ease-in-out infinite;
+}
+
+@keyframes ti-beam {
+  0%, 100% { opacity: 0.15; }
+  40% { opacity: 1; }
+}
+
+.ti-ember {
+  animation: ti-ember 2.2s ease-in infinite;
+}
+
+@keyframes ti-ember {
+  0% { transform: translate(0, 0); opacity: 1; }
+  100% { transform: translate(calc((14px - var(--tx, 22px)) * 0.6), calc((14px - var(--ty, 6px)) * 0.6)); opacity: 0; }
 }
 
 .swatch {

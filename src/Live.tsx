@@ -9,12 +9,17 @@ import { EFFECTS } from "./effects";
 import GateCanvas from "./GateCanvas";
 import Sparkbars from "./Sparkbars";
 import { useGate } from "./state";
-import type { PenKind } from "./types";
+import ToolIcon, { type ToolKind } from "./ToolIcon";
 
-const PENS: { kind: PenKind; label: string }[] = [
+const TOOLS: { kind: ToolKind; label: string }[] = [
+  { kind: "tap", label: "Tap" },
   { kind: "glow", label: "Glow" },
   { kind: "ripple", label: "Ripple" },
   { kind: "sparkle", label: "Sparkle" },
+  { kind: "comet", label: "Comet" },
+  { kind: "ring", label: "Ring" },
+  { kind: "beam", label: "Beam" },
+  { kind: "ember", label: "Ember" },
 ];
 
 const SWATCHES: { hue: number; label: string }[] = [
@@ -37,7 +42,7 @@ type Mode = "wide" | "tall" | "square";
 
 export default function Live() {
   const { client, status, beatAt } = useGate();
-  const [pen, setPen] = useState<PenKind>("glow");
+  const [tool, setTool] = useState<ToolKind>("tap");
   const [hue, setHue] = useState(0.5);
   const [size, setSize] = useState(0.12);
   const [mode, setMode] = useState<Mode>("wide");
@@ -75,13 +80,14 @@ export default function Live() {
 
   const pens = (
     <div className="cluster pens">
-      {PENS.map((p) => (
+      {TOOLS.map((t) => (
         <button
-          key={p.kind}
-          className={`pen-btn ${pen === p.kind ? "active" : ""}`}
-          onClick={() => setPen(p.kind)}
+          key={t.kind}
+          className={`pen-btn ${tool === t.kind ? "active" : ""}`}
+          onClick={() => setTool(t.kind)}
         >
-          {p.label}
+          <ToolIcon kind={t.kind} />
+          {t.label}
         </button>
       ))}
     </div>
@@ -135,8 +141,12 @@ export default function Live() {
   const canvas = (
     <div className="live-canvas-wrap">
       <GateCanvas
-        drawPen={{ pen, hue, size, intensity: 1 }}
-        onTap={(angle, radius) => client.triggerEffect({ kind: "burst", angle, radius })}
+        drawPen={tool === "tap" ? undefined : { pen: tool, hue, size, intensity: 1 }}
+        onTap={
+          tool === "tap"
+            ? (angle, radius) => client.triggerEffect({ kind: "burst", angle, radius, hue })
+            : undefined
+        }
       />
       <div className="ring-center">
         <div className="ring-title">Empyrean Gate</div>

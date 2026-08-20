@@ -49,6 +49,7 @@ pub struct ActiveDab {
     pub hue: f32,
     pub size: f32,
     pub intensity: f32,
+    pub dir: f32,
     pub born: Instant,
 }
 
@@ -178,6 +179,7 @@ impl SharedState {
                 hue,
                 size: size.clamp(0.01, 1.0),
                 intensity: intensity.clamp(0.0, 2.0),
+                dir: p.dir,
                 born: Instant::now(),
             });
         }

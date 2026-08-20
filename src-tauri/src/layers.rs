@@ -234,6 +234,14 @@ pub enum PenKind {
     Ripple,
     /// Glitter spray around the dab.
     Sparkle,
+    /// Teardrop streak elongated along the stroke's motion direction.
+    Comet,
+    /// A full hoop around the array at the dab's radius.
+    Ring,
+    /// Lights the whole spoke ray at the dab's angle.
+    Beam,
+    /// Glitter that drifts inward toward the center as it fades.
+    Ember,
 }
 
 impl PenKind {
@@ -242,6 +250,10 @@ impl PenKind {
             PenKind::Glow => 0,
             PenKind::Ripple => 1,
             PenKind::Sparkle => 2,
+            PenKind::Comet => 3,
+            PenKind::Ring => 4,
+            PenKind::Beam => 5,
+            PenKind::Ember => 6,
         }
     }
 
@@ -250,6 +262,10 @@ impl PenKind {
             PenKind::Glow => 1.5,
             PenKind::Ripple => 1.2,
             PenKind::Sparkle => 2.0,
+            PenKind::Comet => 1.2,
+            PenKind::Ring => 1.8,
+            PenKind::Beam => 0.9,
+            PenKind::Ember => 2.5,
         }
     }
 }
@@ -261,6 +277,10 @@ pub struct DabPoint {
     pub angle: f32,
     /// 0 (center) .. 1 (outer edge).
     pub radius: f32,
+    /// Direction of stroke motion in the array's cartesian frame, radians.
+    /// Used by directional pens (Comet); 0 when unknown.
+    #[serde(default)]
+    pub dir: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +320,8 @@ pub struct GpuDab {
     pub hue: f32,
     pub size: f32,
     pub intensity: f32,
-    pub _pad: f32,
+    /// Stroke motion direction (radians) for directional pens.
+    pub dir: f32,
 }
 
 #[repr(C)]

@@ -23,7 +23,7 @@ export type BlendMode = "add" | "multiply" | "screen" | "alpha_over" | "max";
 
 export type EffectKind = "burst" | "strobe" | "swoosh" | "collapse";
 
-export type PenKind = "glow" | "ripple" | "sparkle";
+export type PenKind = "glow" | "ripple" | "sparkle" | "comet" | "ring" | "beam" | "ember";
 
 export interface LayerCfg {
   kind: LayerKind;

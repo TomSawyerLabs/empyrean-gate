@@ -827,7 +827,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     hue: d.hue,
                     size: d.size,
                     intensity: d.intensity,
-                    _pad: 0.0,
+                    dir: d.dir,
                 })
                 .collect()
         };

@@ -39,6 +39,8 @@ const done = new Promise<void>((resolve, reject) => {
     ws.send(JSON.stringify({ type: "subscribe_preview", fps: 30, decimate: 2 }));
     ws.send(JSON.stringify({ type: "trigger_effect", effect: { kind: "burst", angle: 1.0, radius: 0.5, intensity: 1, hue: -1, duration: 0 } }));
     ws.send(JSON.stringify({ type: "paint", pen: "glow", points: [{ angle: 0.5, radius: 0.7 }, { angle: 0.6, radius: 0.7 }], hue: 0.5, size: 0.15, intensity: 1 }));
+    ws.send(JSON.stringify({ type: "paint", pen: "comet", points: [{ angle: 1.5, radius: 0.6, dir: 2.2 }], hue: -1, size: 0.2, intensity: 1 }));
+    ws.send(JSON.stringify({ type: "paint", pen: "ring", points: [{ angle: 0, radius: 0.5 }], hue: 0.8, size: 0.1, intensity: 1 }));
   };
   ws.onmessage = (ev) => {
     if (typeof ev.data === "string") {
