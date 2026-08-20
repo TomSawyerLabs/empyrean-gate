@@ -273,6 +273,13 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
   harmless, but it doubles wire traffic — these want to be a radio choice, not two
   independent checkboxes.
 
+## Released
+
+- **v0.1.0** (2026-08-19): https://github.com/cinderblock/empyrean-gate/releases/tag/v0.1.0
+  Cut by the tag-triggered Release workflow (checks → 3-target build → publish);
+  assets: windows-x64.exe (19.4 MB), linux-x64 (23.8 MB), macos-arm64 (19.7 MB).
+  Future releases: `git tag vX.Y.Z && git push origin vX.Y.Z` — CI does the rest.
+
 ## Next session pickup
 
 - Run `bun tauri dev` and eyeball the actual patterns; tune defaults.
