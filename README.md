@@ -111,8 +111,14 @@ Useful during pattern development:
 
 - Edit `src-tauri/src/engine/shaders/gate.wgsl` while the app runs — the pipeline
   rebuilds on save.
-- `cargo run --bin engine-smoke` (in `src-tauri/`) — headless one-shot render +
-  timing, no window.
+- `cargo run --bin engine-smoke` (in `src-tauri/`) — quick headless correctness +
+  timing check, no window.
+- `cargo run --release --bin engine-smoke -- --suite --warmup 120 --frames 600`
+  — repeatable GPU regression suite at the 24,192-pixel installation size plus
+  a 70k heavy-load headroom case. Add
+  `--json` for a versioned machine-readable report, or use `--pixels`, `--layers`,
+  `--effects`, and `--dabs` to define one workload. Reports mean, p50/p95/p99/max,
+  standard deviation, throughput, and missed frames against `--fps-budget`.
 - `cargo run -- --headless` — full backend without the desktop window; open
   `http://localhost:9520` (or from a phone on the LAN).
 - `bun scripts/e2e-test.ts` — protocol smoke test against a running backend.
