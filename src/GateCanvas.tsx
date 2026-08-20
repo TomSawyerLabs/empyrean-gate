@@ -23,7 +23,10 @@ in vec3 v_color;
 out vec4 frag;
 void main() {
   vec2 d = gl_PointCoord - 0.5;
-  float a = smoothstep(0.5, 0.15, length(d));
+  float radius = length(d);
+  float core = 1.0 - smoothstep(0.22, 0.42, radius);
+  float halo = (1.0 - smoothstep(0.38, 0.5, radius)) * 0.32;
+  float a = max(core, halo);
   // Premultiplied output; alpha accumulates so bright light occludes the page.
   frag = vec4(v_color * a, a);
 }`;
@@ -152,16 +155,16 @@ export default function GateCanvas({
   penRef.current = drawPen;
 
   // Subscribe to the preview stream while mounted (resubscribe on reconnect).
-  // Phones get 20 fps at 1/6 pixels: ~1.4 Mbps each, so ~10 concurrent viewers
-  // stay comfortable on ordinary venue WiFi (see server.max_preview_clients).
+  // Phones use a moderate downsample: enough to protect venue WiFi while keeping
+  // the radial lines crisp on high-density mobile displays.
   useEffect(() => {
     if (previewSource) {
       setMeta(previewSource.meta);
       return;
     }
     const phone = window.innerWidth < 700;
-    const decimate = phone ? 6 : 1;
-    const sub = () => client.subscribePreview(phone ? 20 : 30, decimate);
+    const decimate = phone ? 3 : 1;
+    const sub = () => client.subscribePreview(phone ? 24 : 30, decimate);
     sub();
     const offStatus = client.onStatus((up) => up && sub());
     const offMsg = client.onMessage((m) => {
@@ -198,10 +201,11 @@ export default function GateCanvas({
       if (!g || !canvas) return;
       const { gl } = g;
       const size = Math.min(canvas.clientWidth, canvas.clientHeight);
-      const dpr = window.devicePixelRatio || 1;
-      if (canvas.width !== size * dpr) {
-        canvas.width = size * dpr;
-        canvas.height = size * dpr;
+      const dpr = Math.min(window.devicePixelRatio || 1, 3);
+      const backingSize = Math.max(1, Math.round(size * dpr));
+      if (canvas.width !== backingSize) {
+        canvas.width = backingSize;
+        canvas.height = backingSize;
         gl.viewport(0, 0, canvas.width, canvas.height);
       }
       const n = Math.min(g.count, frame.spokes * frame.pixels);
@@ -209,7 +213,7 @@ export default function GateCanvas({
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, frame.rgb.subarray(0, n * 3));
       // Points must overlap along a spoke (spacing ≈ 0.45·radius/pixels) or the
       // array reads as dim dotted lines instead of continuous light.
-      gl.uniform1f(g.pointSizeLoc, Math.max(2.5, (canvas.width / frame.pixels) * 1.1));
+      gl.uniform1f(g.pointSizeLoc, Math.max(2.5, (canvas.width / frame.pixels) * 0.82));
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.POINTS, 0, n);
     };

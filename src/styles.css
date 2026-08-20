@@ -27,6 +27,9 @@
 
 body {
   margin: 0;
+  min-width: 0;
+  min-height: 100%;
+  overflow: hidden;
   background-color: var(--bg);
   background-image:
     radial-gradient(ellipse at 20% 0%, var(--spot-1) 0%, transparent 55%),
@@ -43,6 +46,9 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .topbar {
@@ -126,7 +132,11 @@ body {
 
 main {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .visually-hidden {
@@ -167,6 +177,7 @@ main {
 }
 
 .gate-canvas {
+  display: block;
   width: min(100%, 100vh - 60px);
   max-height: 100%;
   aspect-ratio: 1;
@@ -780,11 +791,47 @@ button.ghost {
 }
 
 .client-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
   background-color: var(--panel);
   background-image: var(--surface-grad);
   border-radius: 8px;
   padding: 8px 12px;
   margin: 6px 0;
+}
+
+.client-identity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.client-identity input {
+  width: min(12em, 48%);
+  min-width: 9em;
+}
+
+.client-identity .hint {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.client-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.device-name-row {
+  max-width: 380px;
+}
+
+.device-name-row input {
+  flex: 1;
+  min-width: 0;
+  width: auto;
 }
 
 .conn-dot {
@@ -1613,31 +1660,244 @@ button:disabled {
 }
 
 @media (max-width: 700px) {
-  .gate-canvas {
-    width: min(100vw, 70vh);
-  }
   .topbar {
-    padding: 8px 10px calc(8px);
-    gap: 8px;
+    position: relative;
+    z-index: 20;
+    flex: 0 0 auto;
+    gap: 0;
+    padding: calc(6px + env(safe-area-inset-top)) 8px 6px;
   }
   .topbar h1 {
     display: none;
   }
-  .gpu-name {
-    display: none;
-  }
-}
-
-@media (max-width: 480px) {
-  .topbar .ghost,
-  .topbar .conn {
+  .topbar > .spacer,
+  .topbar > .saved-chip,
+  .topbar > .ghost,
+  .topbar > .gpu-name,
+  .topbar > .conn,
+  .topbar > .version-chip {
     display: none;
   }
   .topbar nav {
     width: 100%;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 3px;
   }
   .topbar nav button {
-    padding-inline: 10px;
+    min-width: 0;
+    min-height: 42px;
+    padding: 8px 3px;
+    font-size: 13px;
+    line-height: 1;
+  }
+
+  .live-page {
+    height: auto;
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 8px 8px calc(14px + env(safe-area-inset-bottom));
+    gap: 10px;
+  }
+
+  .live-canvas-wrap {
+    order: -1;
+    flex: none;
+    width: 100%;
+    aspect-ratio: 1;
+    min-height: 0;
+  }
+
+  .gate-canvas,
+  .live-canvas-wrap .gate-canvas {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+  }
+
+  .live-side {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .live-side .cluster {
+    padding: 8px;
+    border: 1px solid #2a2445;
+    border-radius: 10px;
+    background: rgba(20, 16, 36, 0.68);
+  }
+
+  .live-side .cluster.pens {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .pen-btn {
+    min-width: 0;
+    min-height: 54px;
+    padding: 5px 2px;
+    gap: 1px;
+    font-size: 11px;
+  }
+
+  .pen-btn .tool-icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .live-side .cluster.effects {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .live-side .effect-btn {
+    min-width: 0;
+    min-height: 44px;
+    padding: 9px 2px;
+    font-size: 12px;
+  }
+
+  .live-side .tempo-menu {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 6px;
+  }
+
+  .live-side .tempo-slider {
+    grid-column: 1 / -1;
+  }
+
+  .live-side .cluster.swatches {
+    grid-template-columns: repeat(9, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .live-side .swatch {
+    width: 100%;
+    min-width: 0;
+    height: 34px;
+  }
+
+  .ring-title {
+    font-size: 11px;
+  }
+
+  .ring-status {
+    font-size: 11px;
+  }
+
+  .settings-page,
+  .control-page {
+    width: 100%;
+    padding: 10px 10px calc(18px + env(safe-area-inset-bottom));
+    gap: 10px;
+  }
+
+  .panel {
+    min-width: 0;
+    padding: 13px;
+  }
+
+  .hint,
+  code {
+    overflow-wrap: anywhere;
+  }
+
+  .layer-card,
+  .source-card {
+    min-width: 0;
+    padding: 10px;
+  }
+
+  .layer-sliders,
+  .field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .toggle-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    line-height: 1.4;
+  }
+
+  .field-row {
+    min-width: 0;
+  }
+
+  .field-row:not(.slider-row) {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .field-row input,
+  .field-row select,
+  .device-name-row input {
+    width: 100%;
+    max-width: none;
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .add-row {
+    flex-wrap: wrap;
+  }
+
+  .add-row > button,
+  .add-row > select,
+  .client-actions button,
+  .toggle-row button {
+    min-height: 44px;
+  }
+
+  .client-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    padding: 11px;
+  }
+
+  .client-identity {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .client-identity input {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .client-actions {
+    grid-column: 2;
+    flex-wrap: wrap;
+  }
+
+  .this-device-panel .add-row > button {
+    flex: 1 1 160px;
+  }
+
+  .modal-backdrop {
+    align-items: flex-start;
+    overflow-y: auto;
+    padding: calc(12px + env(safe-area-inset-top)) 10px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .modal {
+    width: 100%;
+    max-width: 420px;
+    padding: 16px;
+  }
+
+  .qr {
+    width: min(280px, calc(100vw - 52px));
+    height: min(280px, calc(100vw - 52px));
   }
 }

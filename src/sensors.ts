@@ -81,13 +81,25 @@ export async function startMic(client: GateClient): Promise<() => void> {
 
 /** Stream device orientation + shake (~30 Hz). Returns a stop function. */
 export async function startImu(client: GateClient): Promise<() => void> {
+  if (!window.isSecureContext) {
+    throw new Error("Motion and orientation require HTTPS on mobile Safari.");
+  }
+
   // iOS requires an explicit permission request from a user gesture.
-  const doe = DeviceOrientationEvent as unknown as {
+  const doe = (globalThis as unknown as {
+    DeviceOrientationEvent?: {
+      requestPermission?: () => Promise<string>;
+    };
+  }).DeviceOrientationEvent;
+  if (!doe) {
+    throw new Error("Motion and orientation are not available in this browser.");
+  }
+  const permission = doe as {
     requestPermission?: () => Promise<string>;
   };
-  if (typeof doe.requestPermission === "function") {
-    const res = await doe.requestPermission();
-    if (res !== "granted") throw new Error("motion permission denied");
+  if (typeof permission.requestPermission === "function") {
+    const res = await permission.requestPermission();
+    if (res !== "granted") throw new Error("Motion permission was not granted.");
   }
 
   let yaw = 0;

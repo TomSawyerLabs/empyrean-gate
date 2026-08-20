@@ -120,41 +120,43 @@ function ClientsPanel() {
         />
       </label>
       <p className="hint">
-        Only this many clients stream the live view at once (~1.4 Mbps per phone);
+        Only this many clients stream the live view at once (a few Mbps per phone);
         extras queue for a slot but keep full control of taps, drawing, and effects.
       </p>
       {list.length === 0 && <p className="hint">No devices yet — use ⊕ Connect in the top bar.</p>}
       {list.map((c) => (
-        <div className="layer-head client-row" key={c.id}>
+        <div className="client-row" key={c.id}>
           <span className={c.connected ? "conn-dot on" : "conn-dot"} />
-          <input
-            defaultValue={c.name}
-            onBlur={(e) => {
-              if (e.target.value !== c.name) {
-                client.send({ type: "rename_client", id: c.id, name: e.target.value });
-              }
-            }}
-            style={{ width: "12em" }}
-          />
-          <span className="hint">{c.id === client.clientId ? "this device" : c.id}</span>
-          <span className="spacer" />
-          {c.revoked ? (
-            <button onClick={() => client.send({ type: "unrevoke_client", id: c.id })}>
-              Restore
-            </button>
-          ) : (
-            <button
-              className="danger"
-              onClick={() => client.send({ type: "revoke_client", id: c.id })}
-            >
-              Revoke
-            </button>
-          )}
-          {!c.connected && (
-            <button className="danger" onClick={() => client.send({ type: "forget_client", id: c.id })}>
-              Forget
-            </button>
-          )}
+          <div className="client-identity">
+            <input
+              defaultValue={c.name}
+              onBlur={(e) => {
+                if (e.target.value !== c.name) {
+                  client.send({ type: "rename_client", id: c.id, name: e.target.value });
+                }
+              }}
+            />
+            <span className="hint">{c.id === client.clientId ? "this device" : c.id}</span>
+          </div>
+          <div className="client-actions">
+            {c.revoked ? (
+              <button onClick={() => client.send({ type: "unrevoke_client", id: c.id })}>
+                Restore
+              </button>
+            ) : (
+              <button
+                className="danger"
+                onClick={() => client.send({ type: "revoke_client", id: c.id })}
+              >
+                Revoke
+              </button>
+            )}
+            {!c.connected && (
+              <button className="danger" onClick={() => client.send({ type: "forget_client", id: c.id })}>
+                Forget
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </section>
@@ -792,25 +794,25 @@ function ThisDevicePanel() {
   const [err, setErr] = useState("");
 
   return (
-    <section className="panel">
+    <section className="panel this-device-panel">
       <h2>This device</h2>
       <p className="hint">
         Contribute this device's inputs to the show. Client id: <code>{client.clientId}</code> — add
         a Remote audio source with this id to use the mic as a beat source.
       </p>
-      <label className="field-row" style={{ maxWidth: 380 }}>
+      <label className="field-row device-name-row">
         <span>Device name</span>
         <input
           defaultValue={client.deviceName}
           placeholder="e.g. DJ booth iPad"
           onBlur={(e) => client.setDeviceName(e.target.value)}
-          style={{ flex: 1 }}
         />
       </label>
       <div className="add-row">
         <button
           onClick={async () => {
             try {
+              setErr("");
               if (micStop) {
                 micStop();
                 setMicStop(null);
@@ -819,7 +821,7 @@ function ThisDevicePanel() {
                 setMicStop(() => stop);
               }
             } catch (e) {
-              setErr(String(e));
+              setErr(e instanceof Error ? e.message : String(e));
             }
           }}
         >
@@ -828,6 +830,7 @@ function ThisDevicePanel() {
         <button
           onClick={async () => {
             try {
+              setErr("");
               if (imuStop) {
                 imuStop();
                 setImuStop(null);
@@ -836,14 +839,14 @@ function ThisDevicePanel() {
                 setImuStop(() => stop);
               }
             } catch (e) {
-              setErr(String(e));
+              setErr(e instanceof Error ? e.message : String(e));
             }
           }}
         >
           {imuStop ? "Stop motion" : "Send motion / orientation"}
         </button>
       </div>
-      {err && <p className="warn">{err}</p>}
+      {err && <p className="warn" role="alert">{err}</p>}
     </section>
   );
 }
