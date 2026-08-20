@@ -292,7 +292,8 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
 - [x] Verified end-to-end against the real v0.1.0 release: download → spawn →
       handover → successor serving (scripts/update-test.ts).
 - [x] v0.2.0 bumped (separate commit, per user rule: bumps never mix with code) and
-      tagged; release run 32340746040.
+      tagged; released with all three assets:
+      https://github.com/cinderblock/empyrean-gate/releases/tag/v0.2.0
 - Note: v0.1.0 binaries predate the updater — first swap to 0.2.0 is manual.
 
 ## Next session pickup
