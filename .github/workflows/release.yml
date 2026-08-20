@@ -1,0 +1,96 @@
+name: Release
+
+# Push a version tag to cut a release:
+#   git tag v0.1.0 && git push origin v0.1.0
+# The full check suite runs first; the GitHub Release is created by CI only,
+# with standalone binaries for every target attached.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: empyrean-gate-windows-x64
+            binary: src-tauri/target/release/empyrean-gate.exe
+            asset: empyrean-gate-windows-x64.exe
+          - os: ubuntu-latest
+            artifact: empyrean-gate-linux-x64
+            binary: src-tauri/target/release/empyrean-gate
+            asset: empyrean-gate-linux-x64
+          - os: macos-latest
+            artifact: empyrean-gate-macos-arm64
+            binary: src-tauri/target/release/empyrean-gate
+            asset: empyrean-gate-macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system deps (webkit for the Tauri shell, ALSA for audio)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck frontend
+        run: bun run typecheck
+
+      - name: Build standalone binary
+        run: bun tauri build --no-bundle
+
+      - name: Rust unit tests
+        working-directory: src-tauri
+        run: cargo test --release --lib
+
+      - name: Stage release asset
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          cp "${{ matrix.binary }}" "release-assets/${{ matrix.asset }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: release-assets/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l assets
+          gh release create "$GITHUB_REF_NAME" assets/* \
+            --title "Empyrean Gate $GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
