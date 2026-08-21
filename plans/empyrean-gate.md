@@ -344,6 +344,9 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
 
 ## Next session pickup
 
+- **Node-graph patch paradigm designed** — see `plans/node-graph.md` (typed
+  dataflow shapes, WGSL codegen, React Flow editor, patch files, sub-patches).
+  Awaiting user sign-off on its open questions before implementation.
 - Run `bun tauri dev` and eyeball the actual patterns; tune defaults.
 - Get real geometry numbers from the user (px/spoke, radii, LED density) and
   controller IPs; test against a PixLite.

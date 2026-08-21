@@ -371,6 +371,10 @@ pub struct AppConfig {
     pub layers: Vec<LayerCfg>,
     /// Known client devices (see `ClientRecord`).
     pub clients: Vec<ClientRecord>,
+    /// Id of the node-graph patch the engine renders instead of the layer
+    /// stack; `None` renders the stack (a dev-time bridge until the stack is
+    /// retired — see `plans/node-graph.md`).
+    pub active_patch: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -386,6 +390,7 @@ impl Default for AppConfig {
             beat_taps: BeatTapConfig::default(),
             layers: default_layer_stack(),
             clients: Vec::new(),
+            active_patch: None,
         }
     }
 }

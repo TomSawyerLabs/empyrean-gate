@@ -4,6 +4,8 @@
 
 use crate::config::AppConfig;
 use crate::layers::{DabPoint, EffectCfg, LayerCfg, PenKind};
+use crate::patch::store::PatchSummary;
+use crate::patch::PatchDoc;
 use serde::{Deserialize, Serialize};
 
 /// Binary preview frame layout (little endian):
@@ -143,6 +145,28 @@ pub enum ClientMsg {
     SetRequireToken {
         require: bool,
     },
+    /// Node-graph patches (see `patch` module / plans/node-graph.md). Reads
+    /// are open to every client; mutations (`PatchSave`, `PatchDelete`,
+    /// `PatchActivate`) are accepted from loopback connections only — the
+    /// graph is edited on the Gate machine itself.
+    PatchList,
+    PatchGet {
+        id: String,
+    },
+    /// Save (create or overwrite) a patch. An empty `id` is assigned one; the
+    /// saved doc is echoed back as `ServerMsg::Patch`.
+    PatchSave {
+        patch: Box<PatchDoc>,
+    },
+    PatchDelete {
+        id: String,
+    },
+    /// Set (`Some`) or clear (`None`) the patch the engine renders. Activation
+    /// validates the graph and requires its Output node; invalid patches are
+    /// refused with `ServerMsg::Error` and the config is left unchanged.
+    PatchActivate {
+        id: Option<String>,
+    },
     /// Ask the updater to poll GitHub Releases now.
     CheckUpdate,
     /// Download + hot-swap to the staged update (two-phase takeover).
@@ -203,6 +227,14 @@ pub enum ServerMsg {
     /// when a slot is granted after queueing.
     PreviewQueue {
         position: u32,
+    },
+    /// The patch store's contents; broadcast to everyone after any mutation.
+    Patches {
+        patches: Vec<PatchSummary>,
+    },
+    /// One full patch document (reply to `PatchGet` / echo after `PatchSave`).
+    Patch {
+        patch: Box<PatchDoc>,
     },
 }
 

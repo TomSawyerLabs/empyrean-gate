@@ -18,6 +18,7 @@
 use crate::audio::RemoteChains;
 use crate::config::ClientRecord;
 use crate::media::{MediaResolver, ResolveRequest};
+use crate::patch;
 use crate::protocol::{
     BrowserAudioStream, ClientMsg, HandoverGrant, ServerMsg, PREVIEW_MAGIC, VIDEO_FRAME_MAGIC,
 };
@@ -514,6 +515,19 @@ async fn send_json(tx: &mut WsSink, msg: &ServerMsg) -> Result<(), axum::Error> 
     tx.send(Message::Text(text.into())).await
 }
 
+/// Refuse a patch mutation from a non-loopback client. Unlike [`deny`], the
+/// connection stays up — the client keeps its play/preview surfaces.
+async fn patch_edit_denied(tx: &mut WsSink) -> Result<(), ()> {
+    let _ = send_json(
+        tx,
+        &ServerMsg::Error {
+            message: "Patch editing is only available on the Gate machine.".into(),
+        },
+    )
+    .await;
+    Ok(())
+}
+
 async fn deny(tx: &mut WsSink, reason: &str) -> Result<(), ()> {
     let _ = send_json(
         tx,
@@ -637,15 +651,18 @@ async fn handle_msg(
                 cur.server.port != config.server.port || cur.server.bind != config.server.bind
             };
             state.update_config(|c| {
-                // Client management + tokens are edited via their dedicated
-                // messages; don't let a stale full-config write clobber them.
+                // Client management, tokens, and the active patch are edited
+                // via their dedicated messages; don't let a stale full-config
+                // write clobber them.
                 let clients = c.clients.clone();
                 let join_token = c.server.join_token.clone();
                 let require_token = c.server.require_token;
+                let active_patch = c.active_patch.clone();
                 *c = *config;
                 c.clients = clients;
                 c.server.join_token = join_token;
                 c.server.require_token = require_token;
+                c.active_patch = active_patch;
             });
             if port_changed {
                 let _ = send_json(
@@ -698,6 +715,84 @@ async fn handle_msg(
                     c.layers.insert(to, l);
                 }
             });
+        }
+        ClientMsg::PatchList => {
+            let msg = ServerMsg::Patches {
+                patches: patch::store::list(&patch::store::patches_dir()),
+            };
+            let _ = send_json(tx, &msg).await;
+        }
+        ClientMsg::PatchGet { id } => {
+            let msg = match patch::store::load(&patch::store::patches_dir(), &id) {
+                Ok(doc) => ServerMsg::Patch { patch: Box::new(doc) },
+                Err(e) => ServerMsg::Error { message: e },
+            };
+            let _ = send_json(tx, &msg).await;
+        }
+        ClientMsg::PatchSave { patch: doc } => {
+            if !addr.ip().is_loopback() {
+                return patch_edit_denied(tx).await;
+            }
+            let dir = patch::store::patches_dir();
+            let mut doc = *doc;
+            // Saving never gates on graph validity — a half-wired patch mid-edit
+            // is legitimate state to persist. Activation is where validity bites.
+            match patch::store::save(&dir, &mut doc) {
+                Ok(_) => {
+                    // Echo (the editor learns an assigned id), then refresh
+                    // everyone's palette.
+                    let _ = send_json(tx, &ServerMsg::Patch { patch: Box::new(doc) }).await;
+                    let _ = state.events.send(ServerMsg::Patches {
+                        patches: patch::store::list(&dir),
+                    });
+                }
+                Err(e) => {
+                    let _ = send_json(tx, &ServerMsg::Error { message: e }).await;
+                }
+            }
+        }
+        ClientMsg::PatchDelete { id } => {
+            if !addr.ip().is_loopback() {
+                return patch_edit_denied(tx).await;
+            }
+            let dir = patch::store::patches_dir();
+            match patch::store::delete(&dir, &id) {
+                Ok(()) => {
+                    if state.config.read().active_patch.as_deref() == Some(id.as_str()) {
+                        state.update_config(|c| c.active_patch = None);
+                    }
+                    let _ = state.events.send(ServerMsg::Patches {
+                        patches: patch::store::list(&dir),
+                    });
+                }
+                Err(e) => {
+                    let _ = send_json(tx, &ServerMsg::Error { message: e }).await;
+                }
+            }
+        }
+        ClientMsg::PatchActivate { id } => {
+            if !addr.ip().is_loopback() {
+                return patch_edit_denied(tx).await;
+            }
+            let refusal = match &id {
+                None => None,
+                Some(id) => match patch::store::load(&patch::store::patches_dir(), id) {
+                    Err(e) => Some(e),
+                    Ok(doc) => match patch::validate::validate(&doc) {
+                        Err(errors) => Some(patch::validate::errors_to_string(&errors)),
+                        Ok(v) if v.output.is_none() => {
+                            Some(format!("patch \"{}\" has no Output node", doc.name))
+                        }
+                        Ok(_) => None,
+                    },
+                },
+            };
+            match refusal {
+                Some(message) => {
+                    let _ = send_json(tx, &ServerMsg::Error { message }).await;
+                }
+                None => state.update_config(|c| c.active_patch = id),
+            }
         }
         ClientMsg::CheckUpdate => {
             state.update_check_requested.store(true, Ordering::SeqCst);
