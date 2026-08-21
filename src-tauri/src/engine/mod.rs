@@ -853,6 +853,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     size: 1.0,
                     hue: bt.hue,
                     duration: 0.0,
+                    ..Default::default()
                 });
             }
         }
@@ -944,6 +945,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     radius: e.cfg.radius,
                     intensity: e.cfg.intensity,
                     hue: e.cfg.hue,
+                    saturation: e.cfg.saturation.clamp(0.0, 1.0),
+                    brightness: e.cfg.brightness.clamp(0.0, 1.0),
+                    _pad: [0.0; 2],
                 })
                 .collect()
         };
@@ -962,6 +966,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     size: d.size,
                     intensity: d.intensity,
                     dir: d.dir,
+                    saturation: d.saturation,
+                    brightness: d.brightness,
+                    _pad: [0.0; 2],
                 })
                 .collect()
         };
