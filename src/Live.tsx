@@ -150,11 +150,18 @@ export default function Live() {
   const multiplier =
     config?.render.beat_time === "half" ? 0.5 : config?.render.beat_time === "double" ? 2 : 1;
   const activeSource = status?.audio.find((a) => a.active);
-  const inferredBpm = (activeSource?.bpm ?? 0) / multiplier;
+  const effectiveAutoBpm = status?.rhythm.bpm ?? activeSource?.bpm ?? 0;
+  const inferredBpm = effectiveAutoBpm / multiplier;
   const manualBpm = config?.render.manual_bpm ?? null;
-  const bpm = manualBpm !== null ? manualBpm * multiplier : inferredBpm * multiplier;
-  // A tempo estimate below this confidence is noise — showing it erodes trust.
-  const bpmTrusted = manualBpm !== null || (activeSource?.bpm_confidence ?? 0) >= 0.35;
+  const bpm = manualBpm !== null ? manualBpm * multiplier : effectiveAutoBpm;
+  const externalClockTrusted = Boolean(
+    status?.rhythm.active &&
+    !status.rhythm.using_fallback &&
+    (status.rhythm.source === "midi_clock" || status.rhythm.source === "pro_dj_link"),
+  );
+  // External clocks are authoritative. Audio-derived estimates still need enough
+  // confidence to avoid presenting noise as a real tempo.
+  const bpmTrusted = manualBpm !== null || externalClockTrusted || (activeSource?.bpm_confidence ?? 0) >= 0.35;
 
   const setTempo = (patch: Partial<Pick<RenderConfig, "beat_time" | "manual_bpm">>) => {
     if (!config) return;
@@ -292,7 +299,7 @@ export default function Live() {
         <button
           className={manualBpm !== null ? "active" : ""}
           onClick={() =>
-            setTempo({ manual_bpm: Math.round(Math.min(240, Math.max(40, inferredBpm || 120))) })
+            setTempo({ manual_bpm: Math.round(Math.min(240, Math.max(10, inferredBpm || 120))) })
           }
         >
           Manual
@@ -302,7 +309,7 @@ export default function Live() {
         <label className="tempo-slider">
           <input
             type="range"
-            min={40}
+            min={10}
             max={240}
             step={1}
             value={manualBpm}
@@ -351,12 +358,12 @@ export default function Live() {
         <div className="ring-status">
           <div ref={beatDotRef} className="beat-dot" />
           <span>
-          {bpm > 0 && bpmTrusted
-            ? `${bpm.toFixed(0)} BPM${manualBpm !== null ? " manual" : ""}`
-            : bpm > 0
-              ? "finding beat…"
-              : "no beat"}
-        </span>
+            {bpm > 0 && bpmTrusted
+              ? `${bpm.toFixed(0)} BPM${manualBpm !== null ? " manual" : status?.rhythm.using_fallback ? " fallback" : status?.rhythm.source === "midi_clock" ? " MIDI" : status?.rhythm.source === "pro_dj_link" ? " LINK" : ""}`
+              : bpm > 0
+                ? "finding beat…"
+                : "no beat"}
+          </span>
         </div>
         {status && (
           <Sparkbars
