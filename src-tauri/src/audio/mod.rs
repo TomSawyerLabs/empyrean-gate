@@ -227,8 +227,12 @@ fn maintain(state: &Arc<SharedState>, rt: &mut DeviceRuntime) {
     let now_ms = state.started.elapsed().as_millis() as u64;
 
     if rt.stream.is_some() {
-        let stalled = now_ms.saturating_sub(rt.last_data.load(Ordering::Relaxed))
-            > WATCHDOG_STALL.as_millis() as u64;
+        // Loopback streams are silent-by-design when nothing is playing — WASAPI
+        // delivers no callbacks then, which is indistinguishable from a stall. For
+        // them, only the explicit device-loss signal counts.
+        let stalled = !rt.loopback
+            && now_ms.saturating_sub(rt.last_data.load(Ordering::Relaxed))
+                > WATCHDOG_STALL.as_millis() as u64;
         let dead = rt.dead.load(Ordering::Relaxed);
         if dead || stalled {
             rt.stream = None; // drop = release the endpoint
