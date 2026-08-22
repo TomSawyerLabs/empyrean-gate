@@ -407,14 +407,18 @@ fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
 }
 
 /// Shared epilogue: effects + dabs composite, master, soft-clip, pack.
-fn finish(ctx: Ctx, idx: u32, patch_rgb: vec3f) {
+/// `auto_dabs` is false when the graph contains a Render points node — the
+/// node owns the dabs then, otherwise they'd draw twice.
+fn finish(ctx: Ctx, idx: u32, patch_rgb: vec3f, auto_dabs: bool) {
     var acc = patch_rgb;
 
     for (var e = 0u; e < G.effect_count; e++) {
         acc += effect_color(FX[e], ctx);
     }
-    for (var d = 0u; d < G.dab_count; d++) {
-        acc += dab_color(DABS[d], ctx, d);
+    if auto_dabs {
+        for (var d = 0u; d < G.dab_count; d++) {
+            acc += dab_color(DABS[d], ctx, d);
+        }
     }
 
     acc = acc * G.master;

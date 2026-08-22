@@ -198,9 +198,22 @@ CPU→uniform→GPU. We're generalizing "hardcoded uniforms + switch on kind" in
       against an isolated backend (registry/save/activate-renders/refusal/
       deactivate) — spawn it with EMPYREAN_CONFIG + a scratch port, NEVER
       against the default port (a live show instance would be taken over).
-- [ ] 4. Inputs & control rate: AudioFeatures, Time, LFO, EnvelopeAD, Smooth,
-      math, Slider (+ Control-tab surfacing), TouchDabs→Points→RenderPoints,
-      Tap Events, IMU.
+- [x] 4. Inputs & control rate (committed): Touch strokes → Points →
+      Render points on the GPU (dab loop with "as drawn" pen or per-node
+      override, size/intensity as multipliers; reverse-reachability decides
+      dab ownership so wired render_points suppresses the epilogue's
+      auto-composite and dangling ones don't). Tap node fires an Event off a
+      monotonic `effect_seq` (any triggered effect: preview taps, pads,
+      beat-taps — sentinel avoids a spurious first-frame fire).
+      **Exposed-param play surface**: `PatchParam` WS message open to EVERY
+      client (exposed params of the active patch only, registry-clamped),
+      persisted to the patch file, applied to the live Runtime through a
+      queue with zero pipeline rebuild, broadcast as `PatchParamChanged` so
+      Control tabs and the editor stay in sync. Control tab shows the active
+      patch's exposed params as faders (and hides the Layers section while a
+      patch renders). e2e extended: clamp+persist+broadcast verified,
+      non-exposed refused. (AudioFeatures/Time/LFO/Envelope/Smooth/math/
+      Slider/IMU landed with step 2's evaluator.)
 - [ ] 5. Remaining generators (parity with all 20 kinds) + one-time layer
       config → "Classic Stack" patch migration + **remove Layers tab and the
       stack render path**.

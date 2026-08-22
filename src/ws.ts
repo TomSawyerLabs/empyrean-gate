@@ -298,6 +298,10 @@ export class GateClient {
   patchActivate(id: string | null) {
     this.send({ type: "patch_activate", id });
   }
+  /** Play an exposed param of the active patch — allowed from any client. */
+  patchParam(node: string, param: string, value: number) {
+    this.send({ type: "patch_param", node, param, value });
+  }
 }
 
 function parsePreview(buf: ArrayBuffer): PreviewFrame | null {

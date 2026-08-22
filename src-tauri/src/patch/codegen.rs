@@ -54,7 +54,7 @@ pub struct SlabSlot {
 fn is_cpu_kind(kind: &str) -> bool {
     matches!(
         kind,
-        "time" | "slider" | "audio" | "imu" | "scalar_math" | "lfo" | "smooth" | "envelope"
+        "time" | "slider" | "audio" | "imu" | "tap" | "scalar_math" | "lfo" | "smooth" | "envelope"
     )
 }
 
@@ -69,6 +69,8 @@ fn is_gpu_kind(kind: &str) -> bool {
             | "transform"
             | "colorize"
             | "blend"
+            | "touch_dabs"
+            | "render_points"
             | "output"
     )
 }
@@ -174,6 +176,26 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         wires: &wires,
         slot_of: &slot_of,
     };
+    // Reverse reachability from the output: a Render points node wired into
+    // the result takes ownership of the dabs (the epilogue must not draw them
+    // a second time); a dangling one changes nothing.
+    let mut reachable = vec![false; doc.nodes.len()];
+    let mut stack = vec![output];
+    reachable[output] = true;
+    while let Some(i) = stack.pop() {
+        for ((to, _), (from, _)) in &wires {
+            if *to == i && !reachable[*from] {
+                reachable[*from] = true;
+                stack.push(*from);
+            }
+        }
+    }
+    let auto_dabs = !doc
+        .nodes
+        .iter()
+        .enumerate()
+        .any(|(i, n)| n.kind == "render_points" && reachable[i]);
+
     let mut code = String::new();
     code.push_str(PRELUDE);
     code.push_str("\n// ---- generated from the patch graph ----\n");
@@ -183,7 +205,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         }
         g.node_fn(&mut code, i)?;
     }
-    g.main_fn(&mut code, output)?;
+    g.main_fn(&mut code, output, auto_dabs)?;
 
     Ok(Program {
         wgsl: code,
@@ -369,6 +391,36 @@ impl Gen<'_> {
                     op = self.p(i, "opacity"),
                 )
             }
+            // No function of its own: it marks the live-draw dab stream as a
+            // Points source for Render points (which reads DABS directly).
+            "touch_dabs" => return Ok(()),
+            "render_points" => {
+                if self.upstream(i, "points").is_none() {
+                    "    return vec4f(0.0);".to_string()
+                } else {
+                    // Pen 0 = "as drawn" (keep each dab's own kind); size and
+                    // intensity act as multipliers either way.
+                    let pen = self.select(i, "pen");
+                    let override_kind = if pen == 0 {
+                        String::new()
+                    } else {
+                        format!("        D.kind = {}u;\n", pen - 1)
+                    };
+                    format!(
+                        "    var acc = vec3f(0.0);\n\
+                         \x20   for (var d = 0u; d < G.dab_count; d++) {{\n\
+                         \x20       var D = DABS[d];\n\
+                         {override_kind}\
+                         \x20       D.size = D.size * {size};\n\
+                         \x20       D.intensity = D.intensity * {intensity};\n\
+                         \x20       acc += dab_color(D, c, d);\n\
+                         \x20   }}\n\
+                         \x20   return vec4f(acc, clamp(max(acc.r, max(acc.g, acc.b)), 0.0, 1.0));",
+                        size = self.p(i, "size"),
+                        intensity = self.p(i, "intensity"),
+                    )
+                }
+            }
             other => return Err(format!("no GPU codegen for node kind \"{other}\"")),
         };
 
@@ -387,9 +439,10 @@ impl Gen<'_> {
         Ok(())
     }
 
-    fn main_fn(&self, code: &mut String, output: usize) -> Result<(), String> {
+    fn main_fn(&self, code: &mut String, output: usize, auto_dabs: bool) -> Result<(), String> {
         let root = self.color_input(output, "in", "ctx");
         let master = self.p(output, "master");
+        let auto_dabs = if auto_dabs { "true" } else { "false" };
         write!(
             code,
             "\n@compute @workgroup_size(256)\n\
@@ -412,7 +465,7 @@ impl Gen<'_> {
              \x20   ctx.rn = rn;\n\
              \x20   ctx.pos = rn * vec2f(cos(theta), sin(theta));\n\
              \x20   let root = {root};\n\
-             \x20   finish(ctx, idx, root.rgb * {master});\n\
+             \x20   finish(ctx, idx, root.rgb * {master}, {auto_dabs});\n\
              }}\n",
         )
         .unwrap();
@@ -561,6 +614,44 @@ mod tests {
         validator
             .validate(&module)
             .unwrap_or_else(|e| panic!("generated WGSL failed validation: {e:?}"));
+    }
+
+    #[test]
+    fn render_points_takes_dab_ownership_and_validates() {
+        let d = PatchDoc {
+            nodes: vec![
+                node("touch", "touch_dabs"),
+                node("rp", "render_points"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("touch", "points", "rp", "points"),
+                edge("rp", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let prog = compile(&d).expect("compiles");
+        assert!(
+            prog.wgsl.contains(", false);"),
+            "wired render_points disables the epilogue's auto-dab pass"
+        );
+        let module = naga::front::wgsl::parse_str(&prog.wgsl)
+            .unwrap_or_else(|e| panic!("parse: {e}\n{}", prog.wgsl));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .expect("validates");
+
+        // A DANGLING render_points changes nothing: dabs still auto-composite.
+        let mut dangling = d.clone();
+        dangling.edges.retain(|e| e.from.node != "rp");
+        let prog = compile(&dangling).expect("compiles");
+        assert!(
+            prog.wgsl.contains(", true);"),
+            "dangling node leaves auto-dabs on"
+        );
     }
 
     #[test]

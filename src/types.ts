@@ -247,7 +247,8 @@ export type ServerMsg =
   | { type: "denied"; reason: string }
   | { type: "preview_queue"; position: number }
   | { type: "patches"; patches: PatchSummary[] }
-  | { type: "patch"; patch: PatchDoc };
+  | { type: "patch"; patch: PatchDoc }
+  | { type: "patch_param_changed"; node: string; param: string; value: number };
 
 // --- node-graph patches (mirrors src-tauri/src/patch/) ---
 

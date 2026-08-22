@@ -370,6 +370,17 @@ function PatchEditor() {
           // Save echo for a brand-new patch: adopt the assigned id, keep edits.
           setDoc((d) => (d && d.id === "" ? { ...d, id: msg.patch.id } : d));
         }
+      } else if (msg.type === "patch_param_changed") {
+        // Someone played an exposed param (Control tab, possibly on a phone):
+        // reflect it in the open doc so the side panel doesn't go stale.
+        setDoc((d) => {
+          if (!d) return d;
+          const n = d.nodes.find((x) => x.id === msg.node);
+          if (!n || n.params[msg.param] === msg.value) return d;
+          const next = structuredClone(d);
+          next.nodes.find((x) => x.id === msg.node)!.params[msg.param] = msg.value;
+          return next;
+        });
       }
     });
   }, [client, openDoc]);

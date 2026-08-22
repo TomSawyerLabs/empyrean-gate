@@ -167,6 +167,14 @@ pub enum ClientMsg {
     PatchActivate {
         id: Option<String>,
     },
+    /// Play an EXPOSED param of the ACTIVE patch. Unlike the editing messages
+    /// this is open to every client — it's the phone-facing play surface —
+    /// and it never rebuilds the pipeline. Persisted to the patch file.
+    PatchParam {
+        node: String,
+        param: String,
+        value: f32,
+    },
     /// Ask the updater to poll GitHub Releases now.
     CheckUpdate,
     /// Download + hot-swap to the staged update (two-phase takeover).
@@ -235,6 +243,13 @@ pub enum ServerMsg {
     /// One full patch document (reply to `PatchGet` / echo after `PatchSave`).
     Patch {
         patch: Box<PatchDoc>,
+    },
+    /// An exposed param of the active patch changed (broadcast, so every play
+    /// surface and the editor stay in sync without re-shipping the graph).
+    PatchParamChanged {
+        node: String,
+        param: String,
+        value: f32,
     },
 }
 

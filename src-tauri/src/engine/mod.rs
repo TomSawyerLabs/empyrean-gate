@@ -1077,8 +1077,12 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         };
 
         // Control-rate evaluation of the active patch: scalar/event nodes run on
-        // the CPU and their results fill the GPU parameter slab.
+        // the CPU and their results fill the GPU parameter slab. Exposed-param
+        // plays queued by clients apply here, recompile-free.
         let patch_params = patch_rt.as_mut().map(|rt| {
+            for (node, param, value) in state.patch_params.lock().drain(..) {
+                rt.set_param(&node, &param, value);
+            }
             rt.eval(&crate::patch::eval::EvalInputs {
                 dt,
                 master_speed: cfg.render.master_speed,
@@ -1087,6 +1091,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 pitch: control.pitch,
                 roll: control.roll,
                 shake: control.shake,
+                effect_seq: state.effect_seq.load(Ordering::Relaxed),
             })
             .to_vec()
         });

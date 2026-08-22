@@ -75,7 +75,7 @@ const doc = {
     { id: "n2", kind: "output", name: "", params: {}, pos: [300, 0] },
   ],
   edges: [{ from: { node: "n1", port: "out" }, to: { node: "n2", port: "in" } }],
-  exposed: [],
+  exposed: [{ node: "n1", param: "brightness", label: "Bright" }],
 };
 send({ type: "patch_save", patch: doc });
 const echo = await waitFor((m) => m.type === "patch", "save echo");
@@ -100,7 +100,24 @@ await waitFor(
 );
 console.log("activate OK: engine reports patch_active with no error");
 
-// --- 5. unsupported kinds are refused ---------------------------------------
+// --- 5. exposed-param play surface ------------------------------------------
+
+// Exposed param: accepted, clamped to the registry range, broadcast, persisted.
+send({ type: "patch_param", node: "n1", param: "brightness", value: 99 });
+const changed = await waitFor((m) => m.type === "patch_param_changed", "param broadcast");
+if (changed.value !== 2.0) fail(`expected clamp to 2.0, got ${changed.value}`);
+send({ type: "patch_get", id });
+const persisted = await waitFor((m) => m.type === "patch" && m.patch.id === id, "reloaded patch");
+const n1 = persisted.patch.nodes.find((n: Msg) => n.id === "n1");
+if (n1.params.brightness !== 2.0) fail("param change not persisted to the file");
+
+// Non-exposed param: refused.
+send({ type: "patch_param", node: "n1", param: "hue", value: 0.1 });
+const refusedParam = await waitFor((m) => m.type === "error", "non-exposed refusal");
+if (!/not exposed/.test(refusedParam.message)) fail(`unexpected: ${refusedParam.message}`);
+console.log("param play OK: exposed clamped+persisted+broadcast, non-exposed refused");
+
+// --- 6. unsupported kinds are refused ---------------------------------------
 
 const badDoc = {
   ...doc,
@@ -111,6 +128,7 @@ const badDoc = {
     { id: "o", kind: "output", name: "", params: {}, pos: [300, 0] },
   ],
   edges: [],
+  exposed: [],
 };
 send({ type: "patch_save", patch: badDoc });
 const badEcho = await waitFor((m) => m.type === "patch" && m.patch.name === "Unrenderable", "bad save echo");
@@ -125,7 +143,7 @@ const after = await waitFor((m) => m.type === "state", "state after refusal");
 if (after.config.active_patch !== id) fail("refused activation clobbered active_patch");
 console.log("refusal OK: unrenderable patch rejected, active patch untouched");
 
-// --- 6. deactivate + cleanup ------------------------------------------------
+// --- 7. deactivate + cleanup ------------------------------------------------
 
 send({ type: "patch_activate", id: null });
 await waitFor(

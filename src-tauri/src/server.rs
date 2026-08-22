@@ -801,6 +801,59 @@ async fn handle_msg(
                 None => state.update_config(|c| c.active_patch = id),
             }
         }
+        ClientMsg::PatchParam { node, param, value } => {
+            // The play surface: open to every client, but strictly limited to
+            // params the patch author exposed, on the active patch only.
+            let active = state.config.read().active_patch.clone();
+            let Some(id) = active else {
+                let _ = send_json(tx, &ServerMsg::Error { message: "no active patch".into() })
+                    .await;
+                return Ok(());
+            };
+            let dir = patch::store::patches_dir();
+            let mut doc = match patch::store::load(&dir, &id) {
+                Ok(d) => d,
+                Err(e) => {
+                    let _ = send_json(tx, &ServerMsg::Error { message: e }).await;
+                    return Ok(());
+                }
+            };
+            if !doc.exposed.iter().any(|x| x.node == node && x.param == param) {
+                let _ = send_json(
+                    tx,
+                    &ServerMsg::Error {
+                        message: format!("param {node}.{param} is not exposed"),
+                    },
+                )
+                .await;
+                return Ok(());
+            }
+            let clamped = doc
+                .nodes
+                .iter()
+                .find(|n| n.id == node)
+                .and_then(|n| patch::registry::lookup(&n.kind))
+                .and_then(|t| t.param(&param))
+                .map(|p| value.clamp(p.min, p.max))
+                .unwrap_or(value);
+            if let Some(n) = doc.nodes.iter_mut().find(|n| n.id == node) {
+                n.params.insert(param.clone(), clamped);
+            }
+            // Persist, but WITHOUT a patch-epoch bump: the live value goes
+            // through the runtime queue, no pipeline rebuild.
+            if let Err(e) = patch::store::save(&dir, &mut doc) {
+                log::warn!("persisting patch param: {e}");
+            }
+            state
+                .patch_params
+                .lock()
+                .push((node.clone(), param.clone(), clamped));
+            let _ = state.events.send(ServerMsg::PatchParamChanged {
+                node,
+                param,
+                value: clamped,
+            });
+        }
         ClientMsg::CheckUpdate => {
             state.update_check_requested.store(true, Ordering::SeqCst);
         }

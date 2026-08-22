@@ -513,15 +513,16 @@ pub const TYPES: &[NodeType] = &[
         }],
         outputs: COLOR_OUT,
         params: &[
+            // "as drawn" keeps each stroke's own pen; the rest override it.
             sel(
                 "pen",
                 "Pen",
                 &[
-                    "glow", "ripple", "sparkle", "comet", "ring", "beam", "ember",
+                    "as drawn", "glow", "ripple", "sparkle", "comet", "ring", "beam", "ember",
                 ],
             ),
-            num("size", "Size", 0.01, 1.0, 0.12),
-            num("intensity", "Intensity", 0.0, 2.0, 1.0),
+            num("size", "Size ×", 0.1, 4.0, 1.0),
+            num("intensity", "Intensity ×", 0.0, 2.0, 1.0),
         ],
     },
     // -- Texture ------------------------------------------------------------

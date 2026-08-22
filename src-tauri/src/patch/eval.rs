@@ -20,6 +20,9 @@ pub struct EvalInputs<'a> {
     pub pitch: f32,
     pub roll: f32,
     pub shake: f32,
+    /// Monotonic count of triggered effects (taps, pads, beat-taps) — the Tap
+    /// node fires an event whenever it advances.
+    pub effect_seq: u64,
 }
 
 #[derive(Clone)]
@@ -32,6 +35,9 @@ struct NodeState {
     env_t: f32,
     /// Previous beat phase, for wrap detection (audio).
     prev_beat: f32,
+    /// Last seen effect_seq (tap); MAX = not yet initialized, so pre-existing
+    /// effects never fire a spurious tap on the first frame.
+    prev_seq: u64,
 }
 
 impl Default for NodeState {
@@ -41,6 +47,7 @@ impl Default for NodeState {
             y: 0.0,
             env_t: f32::INFINITY,
             prev_beat: 0.0,
+            prev_seq: u64::MAX,
         }
     }
 }
@@ -73,6 +80,14 @@ impl Runtime {
             slab,
             outputs: vec![HashMap::new(); n],
             events: vec![Vec::new(); n],
+        }
+    }
+
+    /// Apply a live param change (exposed-param play surface) without any
+    /// recompile — the next `eval` picks the value up from the doc.
+    pub fn set_param(&mut self, node_id: &str, param: &str, value: f32) {
+        if let Some(n) = self.doc.nodes.iter_mut().find(|n| n.id == node_id) {
+            n.params.insert(param.to_string(), value);
         }
     }
 
@@ -134,6 +149,13 @@ impl Runtime {
                     o.insert("pitch".into(), inp.pitch);
                     o.insert("roll".into(), inp.roll);
                     o.insert("shake".into(), inp.shake);
+                }
+                "tap" => {
+                    let st = &mut self.state[node];
+                    if st.prev_seq != u64::MAX && inp.effect_seq > st.prev_seq {
+                        self.events[node].push("tap");
+                    }
+                    st.prev_seq = inp.effect_seq;
                 }
                 "scalar_math" => {
                     let a = self.input(node, "a");
@@ -251,6 +273,7 @@ mod tests {
             pitch: 0.0,
             roll: 0.0,
             shake: 0.0,
+            effect_seq: 0,
         }
     }
 
@@ -377,6 +400,76 @@ mod tests {
         audio[0].beat_phase = 0.7;
         rt.eval(&inputs(&audio));
         assert!(rt.slab[env_slot] < risen, "decaying after the trigger");
+    }
+
+    #[test]
+    fn tap_event_fires_on_new_effects_only() {
+        let doc = PatchDoc {
+            nodes: vec![
+                node("tap", "tap"),
+                node("env", "envelope"),
+                node("tint", "colorize"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("tap", "tap", "env", "trigger"),
+                edge("env", "out", "tint", "in"),
+                edge("tint", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let mut rt = runtime(doc);
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let env_slot = rt
+            .prog
+            .slots
+            .iter()
+            .find(|s| s.param.is_none())
+            .unwrap()
+            .slot;
+
+        // Pre-existing effects (seq already 5) must not fire on the first frame.
+        let mut inp = inputs(&audio);
+        inp.effect_seq = 5;
+        rt.eval(&inp);
+        rt.eval(&inp);
+        assert_eq!(rt.slab[env_slot], 0.0, "no spurious tap at startup");
+
+        // A new effect advances the seq: envelope fires and rises.
+        inp.effect_seq = 6;
+        rt.eval(&inp);
+        rt.eval(&inp);
+        assert!(rt.slab[env_slot] > 0.0, "tap fired the envelope");
+    }
+
+    #[test]
+    fn set_param_applies_without_recompile() {
+        let doc = PatchDoc {
+            nodes: vec![
+                node("s", "slider"),
+                node("tint", "colorize"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("s", "out", "tint", "in"),
+                edge("tint", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let mut rt = runtime(doc);
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let slot = rt
+            .prog
+            .slots
+            .iter()
+            .find(|s| s.param.is_none())
+            .unwrap()
+            .slot;
+        rt.eval(&inputs(&audio));
+        assert_eq!(rt.slab[slot], 0.5, "slider default");
+        rt.set_param("s", "value", 0.9);
+        rt.eval(&inputs(&audio));
+        assert_eq!(rt.slab[slot], 0.9, "live param change reached the slab");
     }
 
     #[test]
