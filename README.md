@@ -43,10 +43,19 @@ live meters.
   stacked with blend modes, each bound to an audio source. Effects (burst / strobe /
   swoosh / collapse) fire from keyboard (1–4), clicks/taps on the preview, or remote
   clients.
-- **Four UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Video
-  (URL/file intake), Control (touch-sized effect pads + master/layer faders), and Settings. In the desktop app,
+- **Five UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Video
+  (URL/file intake), Patch (node-graph editor), Control (touch-sized effect pads +
+  master/layer faders), and Settings. In the desktop app,
   "New window" pops the current tab out into its own window. Old `/#view` and `/#draw`
   links redirect to Live.
+- **Patches (early)**: a node-graph alternative to the layer stack — wire
+  generators, transforms, blends, and inputs (audio features, beats, LFOs,
+  envelopes, IMU) into a typed dataflow whose sink is the array. Graphs compile
+  to a single WGSL dispatch; knob tweaks and scalar wires never recompile.
+  Patches save as JSON files under the config dir and activate live (the layer
+  stack renders when no patch is active). Editing works on the Gate machine
+  only; remote clients get a read-only view. Slated to replace the layer stack
+  once all pattern kinds are ported — see `plans/node-graph.md`.
 - **Live drawing**: paint on the array from any client with Glow / Ripple / Sparkle
   pens (color swatches + size). Strokes stream as polar dabs over WS and render on the
   GPU with ~2 s trails; multiple people can draw at once.

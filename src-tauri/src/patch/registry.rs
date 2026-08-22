@@ -98,6 +98,55 @@ pub fn lookup(id: &str) -> Option<&'static NodeType> {
     TYPES.iter().find(|t| t.id == id)
 }
 
+/// The palette serialized for the editor (`GET /patch/registry`). Shapes use
+/// the same snake_case names as patch JSON; `kind` is `"number"` or
+/// `{"select": [labels…]}`.
+pub fn palette_json() -> serde_json::Value {
+    use serde_json::json;
+    let shape = |s: Shape| serde_json::to_value(s).expect("shape serializes");
+    let category = |c: Category| match c {
+        Category::Input => "input",
+        Category::ScalarOp => "scalar",
+        Category::Generator => "generator",
+        Category::FieldOp => "field",
+        Category::Combine => "combine",
+        Category::Texture => "texture",
+        Category::Sink => "sink",
+    };
+    json!(
+        TYPES
+            .iter()
+            .map(|t| {
+                json!({
+                    "id": t.id,
+                    "label": t.label,
+                    "category": category(t.category),
+                    "inputs": t.inputs.iter().map(|p| json!({
+                        "name": p.name,
+                        "shape": shape(p.shape),
+                    })).collect::<Vec<_>>(),
+                    "outputs": t.outputs.iter().map(|p| json!({
+                        "name": p.name,
+                        "shape": shape(p.shape),
+                    })).collect::<Vec<_>>(),
+                    "params": t.params.iter().map(|p| json!({
+                        "name": p.name,
+                        "label": p.label,
+                        "min": p.min,
+                        "max": p.max,
+                        "default": p.default,
+                        "integrate": p.integrate,
+                        "kind": match p.kind {
+                            ParamKind::Number => json!("number"),
+                            ParamKind::Select(options) => json!({ "select": options }),
+                        },
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect::<Vec<_>>()
+    )
+}
+
 const fn num(
     name: &'static str,
     label: &'static str,

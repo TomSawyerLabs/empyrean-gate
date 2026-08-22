@@ -166,6 +166,8 @@ export interface AppConfig {
   beat_taps: BeatTapConfig;
   layers: LayerCfg[];
   clients: ClientRecord[];
+  /** Id of the node-graph patch the engine renders instead of the layer stack. */
+  active_patch: string | null;
 }
 
 export interface DeviceInfo {
@@ -211,6 +213,10 @@ export interface RuntimeStatus {
   update_available: string | null;
   update_state: string;
   video: VideoSourceStatus;
+  /** True while a compiled node-graph patch renders instead of the layer stack. */
+  patch_active: boolean;
+  /** Why the active patch is NOT rendering (engine fell back to the stack). */
+  patch_error: string | null;
 }
 
 export interface VideoSourceStatus {
@@ -239,7 +245,96 @@ export type ServerMsg =
     }
   | { type: "error"; message: string }
   | { type: "denied"; reason: string }
-  | { type: "preview_queue"; position: number };
+  | { type: "preview_queue"; position: number }
+  | { type: "patches"; patches: PatchSummary[] }
+  | { type: "patch"; patch: PatchDoc };
+
+// --- node-graph patches (mirrors src-tauri/src/patch/) ---
+
+export type PatchShape =
+  | "scalar"
+  | "event"
+  | "field_scalar"
+  | "field_color"
+  | "points"
+  | "texture"
+  | "pixels";
+
+export interface PatchPortDef {
+  name: string;
+  shape: PatchShape;
+}
+
+export interface PatchParamDef {
+  name: string;
+  label: string;
+  min: number;
+  max: number;
+  default: number;
+  integrate: boolean;
+  kind: "number" | { select: string[] };
+}
+
+/** One palette entry from GET /patch/registry — the backend's node registry. */
+export interface PatchNodeType {
+  id: string;
+  label: string;
+  category: "input" | "scalar" | "generator" | "field" | "combine" | "texture" | "sink";
+  inputs: PatchPortDef[];
+  outputs: PatchPortDef[];
+  params: PatchParamDef[];
+}
+
+export interface PatchNode {
+  id: string;
+  kind: string;
+  name: string;
+  params: Record<string, number>;
+  pos: [number, number];
+}
+
+export interface PatchPortRef {
+  node: string;
+  port: string;
+}
+
+export interface PatchEdge {
+  from: PatchPortRef;
+  to: PatchPortRef;
+}
+
+export interface PatchExposedParam {
+  node: string;
+  param: string;
+  label: string;
+}
+
+export interface PatchDoc {
+  format: number;
+  id: string;
+  name: string;
+  description: string;
+  nodes: PatchNode[];
+  edges: PatchEdge[];
+  exposed: PatchExposedParam[];
+}
+
+export interface PatchSummary {
+  id: string;
+  name: string;
+  description: string;
+  nodes: number;
+}
+
+/** Wire-compat rule — mirrors Shape::accepts in Rust: exact match plus the
+ * two blessed adapters (Scalar→Field<f32>, Field<f32>→Field<color>). */
+export function shapeAccepts(into: PatchShape, from: PatchShape): boolean {
+  return (
+    into === from ||
+    (from === "scalar" && into === "field_scalar") ||
+    (from === "field_scalar" && into === "field_color")
+  );
+}
 
 export interface PreviewMeta {
   spokes: number;

@@ -183,8 +183,21 @@ CPU→uniform→GPU. We're generalizing "hardcoded uniforms + switch on kind" in
         eval unit tests (wire-overrides-knob, integration × master speed,
         beat→envelope, LFO chain). `engine-smoke --patch` renders a 10-node
         demo on the real Vulkan device (verified: 71936 nonzero bytes).
-- [ ] 3. Editor MVP (React Flow): palette, place/connect/delete, typed ports,
-      param side panel, save/load/list, activate patch.
+- [x] 3. Editor MVP (committed): `src/Patch.tsx` on @xyflow/react 12 (lazy
+      chunk — phones never load it). Palette from `GET /patch/registry`
+      (generated from the Rust registry, so the editor can't drift from
+      codegen). Typed color-coded ports (Number params double as Scalar
+      handles), shape-checked connections (`shapeAccepts` mirrors
+      `Shape::accepts`, one wire per input), param side panel with expose
+      toggles, debounced autosave, 2-step delete, Activate/Deactivate with
+      live `patch_active`/`patch_error` chips. Editing gated by
+      loopback-httpBase (mirrors the server rule); remote = read-only.
+      Verified in real Chrome end-to-end: built LFO→noise-threshold patch by
+      clicking/dragging, activated, preview brightness pulses with the LFO
+      (mean 0→42, peak 238). `scripts/patch-test.ts` covers the protocol
+      against an isolated backend (registry/save/activate-renders/refusal/
+      deactivate) — spawn it with EMPYREAN_CONFIG + a scratch port, NEVER
+      against the default port (a live show instance would be taken over).
 - [ ] 4. Inputs & control rate: AudioFeatures, Time, LFO, EnvelopeAD, Smooth,
       math, Slider (+ Control-tab surfacing), TouchDabs→Points→RenderPoints,
       Tap Events, IMU.
@@ -233,6 +246,10 @@ CPU→uniform→GPU. We're generalizing "hardcoded uniforms + switch on kind" in
 - Codegen re-evaluates shared subgraphs per consumer (function call per
   wire). Correct semantics under transforms; if profiling ever shows waste,
   memoize per-`Ctx` at same-domain call sites.
+- **The t3-code Electron preview tab never fires requestAnimationFrame**, so
+  React Flow nodes stay `visibility: hidden` (unmeasured) there forever. Not
+  an app bug — verify the editor in real Chrome (claude-in-chrome). Wasted a
+  debugging session before `raf: 0` proved it.
 
 ## Things not to do
 

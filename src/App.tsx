@@ -6,9 +6,14 @@ import Media from "./Media";
 import Settings from "./Settings";
 import { useGate } from "./state";
 
+// The patch editor pulls in React Flow; lazy so phones on the play surfaces
+// never pay for it.
+const Patch = lazy(() => import("./Patch"));
+
 const TABS = [
   { id: "live", label: "Live" },
   { id: "media", label: "Video" },
+  { id: "patch", label: "Patch" },
   { id: "control", label: "Control" },
   { id: "settings", label: "Settings" },
 ] as const;
@@ -261,6 +266,11 @@ export default function App() {
         </div>
         {tab === "replay" && DevReplay && (
           <Suspense fallback={null}><DevReplay /></Suspense>
+        )}
+        {tab === "patch" && (
+          <Suspense fallback={<div className="patch-empty">Loading editor…</div>}>
+            <Patch />
+          </Suspense>
         )}
         {tab === "control" && <Control />}
         {tab === "settings" && <Settings />}

@@ -78,6 +78,7 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .route("/handover", post(handover))
         .route("/media/resolve", post(resolve_media))
         .route("/media/stream/{id}", get(stream_media))
+        .route("/patch/registry", get(patch_registry))
         .fallback(get(serve_asset))
         .layer(
             CorsLayer::new()
@@ -301,6 +302,12 @@ async fn handover(
     });
 
     axum::Json(grant).into_response()
+}
+
+/// The node-type palette for the patch editor — generated from the Rust
+/// registry so the frontend can never drift from what codegen understands.
+async fn patch_registry() -> Response {
+    axum::Json(patch::registry::palette_json()).into_response()
 }
 
 // ---------------------------------------------------------------------------

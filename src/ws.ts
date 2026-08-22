@@ -1,7 +1,14 @@
 // WebSocket client for the Gate backend. Used identically by the Tauri webview,
 // LAN browsers, and phones. Text = JSON protocol; binary = preview frames.
 
-import type { EffectCfg, LayerCfg, AppConfig, PreviewFrame, ServerMsg } from "./types";
+import type {
+  EffectCfg,
+  LayerCfg,
+  AppConfig,
+  PatchDoc,
+  PreviewFrame,
+  ServerMsg,
+} from "./types";
 
 const PREVIEW_MAGIC = 0x45475056;
 const VIDEO_FRAME_MAGIC = 0x45475646;
@@ -273,6 +280,23 @@ export class GateClient {
   }
   sendImu(f: { yaw: number; pitch: number; roll: number; shake: number }) {
     this.send({ type: "imu", ...f });
+  }
+
+  // --- node-graph patches (mutations are loopback-only, enforced server-side) ---
+  patchList() {
+    this.send({ type: "patch_list" });
+  }
+  patchGet(id: string) {
+    this.send({ type: "patch_get", id });
+  }
+  patchSave(patch: PatchDoc) {
+    this.send({ type: "patch_save", patch });
+  }
+  patchDelete(id: string) {
+    this.send({ type: "patch_delete", id });
+  }
+  patchActivate(id: string | null) {
+    this.send({ type: "patch_activate", id });
   }
 }
 
