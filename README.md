@@ -260,6 +260,14 @@ Bundles live in `<config dir>/EmpyreanGate/reports/<id>/` and are downloadable f
 client. Hand a whole folder to an agent to investigate. Format:
 [`docs/report-bundle.md`](docs/report-bundle.md).
 
+## Live-show guards
+
+The window's X sits a few pixels from the controls on a touch display, so while
+sACN is actually transmitting it is refused and asks first; confirming still goes
+through the normal shutdown, which sends E1.31 stream termination rather than
+leaving the rig on its last look. Switching output off asks the same way. With
+output off, neither asks.
+
 ## Touch screens
 
 The Gate machine's display is multi-touch, and several fingers can draw or trigger
