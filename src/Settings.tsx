@@ -456,7 +456,13 @@ function AudioPanel({ config }: { config: AppConfig }) {
                 <Meter label="Bass" v={st.bass} />
                 <Meter label="Mid" v={st.mid} />
                 <Meter label="Treble" v={st.treble} />
-                <span className="bpm">{st.bpm > 0 ? `${st.bpm.toFixed(0)} BPM` : "—"}</span>
+                <span className="bpm">
+                  {st.bpm > 0 && st.bpm_confidence >= 0.35
+                    ? `${st.bpm.toFixed(0)} BPM`
+                    : st.bpm > 0
+                      ? "finding beat…"
+                      : "—"}
+                </span>
                 <span className={st.active ? "ok" : "warn"}>
                   {st.active ? "active" : st.detail || "inactive"}
                 </span>

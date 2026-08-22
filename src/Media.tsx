@@ -428,7 +428,7 @@ export default function Media() {
             {audioMode === "video" && broadcasting && (
               <span className={soundtrackStatus?.active ? "ok" : "hint"}>
                 {soundtrackStatus?.active
-                  ? `Soundtrack live${soundtrackStatus.bpm > 0 ? ` · ${soundtrackStatus.bpm.toFixed(0)} BPM` : " · finding beat…"}`
+                  ? `Soundtrack live${soundtrackStatus.bpm > 0 && soundtrackStatus.bpm_confidence >= 0.35 ? ` · ${soundtrackStatus.bpm.toFixed(0)} BPM` : " · finding beat…"}`
                   : "Starting soundtrack analysis…"}
               </span>
             )}

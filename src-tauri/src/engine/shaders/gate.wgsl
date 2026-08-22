@@ -34,7 +34,7 @@ struct AudioU {
     onset: f32,
     beat_phase: f32,
     bpm: f32,
-    _pad: f32,
+    bpm_conf: f32, // 0..1 confidence in bpm; gate beat-driven motion on it
     // Smoothed (~0.25 s) twins: bass / bass_att > 1 means "hitting right now".
     bass_att: f32,
     mid_att: f32,

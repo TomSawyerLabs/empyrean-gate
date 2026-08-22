@@ -32,6 +32,8 @@ pub struct AudioFeatures {
     /// 0..1 phase within the current beat.
     pub beat_phase: f32,
     pub bpm: f32,
+    /// 0..1 confidence in `bpm` (see BeatTracker::confidence).
+    pub bpm_conf: f32,
 }
 
 #[cfg(test)]

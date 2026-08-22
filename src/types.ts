@@ -184,6 +184,8 @@ export interface AudioSourceStatus {
   mid: number;
   treble: number;
   bpm: number;
+  /** 0..1 confidence in bpm; hide or dim the number when low. */
+  bpm_confidence: number;
   beat_phase: number;
 }
 

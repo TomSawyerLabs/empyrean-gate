@@ -72,9 +72,12 @@ export default function Live() {
 
   const multiplier =
     config?.render.beat_time === "half" ? 0.5 : config?.render.beat_time === "double" ? 2 : 1;
-  const inferredBpm = (status?.audio.find((a) => a.active)?.bpm ?? 0) / multiplier;
+  const activeSource = status?.audio.find((a) => a.active);
+  const inferredBpm = (activeSource?.bpm ?? 0) / multiplier;
   const manualBpm = config?.render.manual_bpm ?? null;
   const bpm = manualBpm !== null ? manualBpm * multiplier : inferredBpm * multiplier;
+  // A tempo estimate below this confidence is noise — showing it erodes trust.
+  const bpmTrusted = manualBpm !== null || (activeSource?.bpm_confidence ?? 0) >= 0.35;
 
   const setTempo = (patch: Partial<Pick<RenderConfig, "beat_time" | "manual_bpm">>) => {
     if (!config) return;
@@ -242,7 +245,13 @@ export default function Live() {
         <div className="ring-title">Empyrean Gate</div>
         <div className="ring-status">
           <div ref={beatDotRef} className="beat-dot" />
-          <span>{bpm > 0 ? `${bpm.toFixed(0)} BPM${manualBpm !== null ? " manual" : ""}` : "no beat"}</span>
+          <span>
+          {bpm > 0 && bpmTrusted
+            ? `${bpm.toFixed(0)} BPM${manualBpm !== null ? " manual" : ""}`
+            : bpm > 0
+              ? "finding beat…"
+              : "no beat"}
+        </span>
         </div>
         {status && (
           <Sparkbars

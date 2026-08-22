@@ -81,6 +81,7 @@ fn publish(
     slot.onset = tracker.onset;
     slot.beat_phase = tracker.beat_phase;
     slot.bpm = tracker.bpm();
+    slot.bpm_conf = tracker.confidence;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -242,6 +242,8 @@ pub struct AudioSourceStatus {
     pub mid: f32,
     pub treble: f32,
     pub bpm: f32,
+    /// 0..1 confidence in `bpm`; UIs hide or dim the number when low.
+    pub bpm_confidence: f32,
     pub beat_phase: f32,
 }
 

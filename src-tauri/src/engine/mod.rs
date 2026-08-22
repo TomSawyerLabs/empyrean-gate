@@ -48,7 +48,8 @@ pub struct AudioUniform {
     pub onset: f32,
     pub beat_phase: f32,
     pub bpm: f32,
-    pub _pad: f32,
+    /// 0..1 confidence in `bpm`; shaders and automation gate on it.
+    pub bpm_conf: f32,
     pub bass_att: f32,
     pub mid_att: f32,
     pub treble_att: f32,
@@ -790,7 +791,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 onset: a.onset,
                 beat_phase: effective_beat_phase(base_phase, base_count, cfg.render.beat_time),
                 bpm: base_bpm * cfg.render.beat_time.multiplier(),
-                _pad: 0.0,
+                // Manually-set tempo is definitionally trusted.
+                bpm_conf: if cfg.render.manual_bpm.is_some() { 1.0 } else { a.bpm_conf },
                 bass_att: a.bass_att,
                 mid_att: a.mid_att,
                 treble_att: a.treble_att,
@@ -820,13 +822,16 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         for (i, a) in audio.iter().enumerate() {
             let wrapped = !beat_time_changed && a.beat_phase < prev_beat_phase[i] - 0.5;
             prev_beat_phase[i] = a.beat_phase;
-            if wrapped && a.bpm > 0.0 && i < cfg.audio.sources.len() {
+            // Unconfident beats are noise: no beat events (UI pulse), no beat taps.
+            let confident = a.bpm_conf >= 0.35;
+            if wrapped && a.bpm > 0.0 && confident && i < cfg.audio.sources.len() {
                 let _ = state.events.send(crate::protocol::ServerMsg::Beat {
                     source: i as u32,
                     bpm: a.bpm,
                 });
             }
-            if !bt.enabled || i != bt.audio_source as usize || !wrapped || a.bpm <= 0.0 {
+            if !bt.enabled || i != bt.audio_source as usize || !wrapped || a.bpm <= 0.0 || !confident
+            {
                 continue;
             }
             tap_beat_count += 1;
@@ -1160,6 +1165,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                             mid: a.mid,
                             treble: a.treble,
                             bpm: audio[i].bpm,
+                            bpm_confidence: audio[i].bpm_conf,
                             beat_phase: audio[i].beat_phase,
                         }
                     })
