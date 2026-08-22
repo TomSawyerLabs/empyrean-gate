@@ -284,6 +284,9 @@ pub struct SharedState {
     /// Full-resolution frames; each client task decimates/throttles for itself.
     pub preview: broadcast::Sender<Arc<PreviewFrame>>,
     pub video: Mutex<VideoInput>,
+    /// Set once the operator has confirmed closing a live show; the next window
+    /// close request is then allowed through instead of being refused again.
+    pub close_confirmed: AtomicBool,
     /// Always-on rolling capture of operator input + engine state, so the Report
     /// button can freeze the last seconds of a visual complaint.
     pub recorder: crate::report::Recorder,
@@ -329,9 +332,32 @@ impl SharedState {
             events,
             preview,
             video: Mutex::new(VideoInput::default()),
+            close_confirmed: AtomicBool::new(false),
             recorder: crate::report::Recorder::new(),
             started: Instant::now(),
         })
+    }
+
+    /// True when the rig is actually being driven — the test for "is a show
+    /// live" that gates destructive actions (closing the window, stopping
+    /// output). Deliberately the transmitting state rather than "is the engine
+    /// running": an app open with output off is not a show.
+    pub fn output_live(&self) -> bool {
+        self.config.read().output.enabled && !self.leaving.load(Ordering::SeqCst)
+    }
+
+    /// One-shot: the operator has confirmed a close, so the next CloseRequested
+    /// passes through. Cleared if they change their mind and keep working.
+    pub fn confirm_close(&self) {
+        self.close_confirmed.store(true, Ordering::SeqCst);
+    }
+
+    pub fn close_confirmed(&self) -> bool {
+        self.close_confirmed.load(Ordering::SeqCst)
+    }
+
+    pub fn cancel_close(&self) {
+        self.close_confirmed.store(false, Ordering::SeqCst);
     }
 
     pub fn bump_config(&self) {

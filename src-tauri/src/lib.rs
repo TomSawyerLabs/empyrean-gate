@@ -231,7 +231,12 @@ pub fn run(headless: bool) {
         // config dir. Combined with stable aux labels, a self-update handover
         // brings every window back where it was.
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .invoke_handler(tauri::generate_handler![backend_info, open_aux])
+        .invoke_handler(tauri::generate_handler![
+            backend_info,
+            open_aux,
+            confirm_close,
+            cancel_close
+        ])
         .setup(|app| {
             use tauri::Manager;
             // The show display is a touch screen: kill the OS contact visuals on
@@ -275,14 +280,31 @@ pub fn run(headless: bool) {
             // A user closing an aux window removes it from the restore list;
             // process teardown fires Destroyed (not CloseRequested), so app exit
             // keeps the list intact.
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                use tauri::Manager;
                 if let Some(tab) = window.label().strip_prefix("aux-") {
-                    use tauri::Manager;
                     let tab = tab.to_string();
                     let backend = window.app_handle().state::<Backend>();
                     backend.state.update_config(|c| {
                         c.windows.aux_open.retain(|t| *t != tab);
                     });
+                    return;
+                }
+                // Closing the main window kills the show: the engine stops, the
+                // rig goes dark, and on a touch display the X is a few pixels
+                // from the controls. While sACN is actually transmitting, the
+                // close is refused and handed to the UI to confirm.
+                use tauri::Emitter;
+                let backend = window.app_handle().state::<Backend>();
+                if backend.state.output_live() && !backend.state.close_confirmed() {
+                    api.prevent_close();
+                    if let Err(e) = window.emit("close-requested", ()) {
+                        // If the UI cannot be reached to ask, refusing forever
+                        // would trap the operator with no way to quit.
+                        log::warn!("close confirmation could not reach the UI ({e}); closing");
+                        backend.state.confirm_close();
+                        let _ = window.close();
+                    }
                 }
             }
         })
@@ -308,6 +330,24 @@ fn harden_touch_visuals(app: &tauri::AppHandle) {
 
 #[cfg(not(target_os = "windows"))]
 fn harden_touch_visuals(_app: &tauri::AppHandle) {}
+
+/// The operator confirmed closing a live show: let the next close through and
+/// ask for it. Goes through the normal close path so the engine still sends
+/// E1.31 stream termination rather than leaving the rig on its last look.
+#[tauri::command]
+fn confirm_close(app: tauri::AppHandle, state: tauri::State<'_, Backend>) {
+    use tauri::Manager;
+    state.state.confirm_close();
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.close();
+    }
+}
+
+/// They changed their mind — re-arm the guard for the next accidental tap.
+#[tauri::command]
+fn cancel_close(state: tauri::State<'_, Backend>) {
+    state.state.cancel_close();
+}
 
 /// Create (or focus) the popped-out window for a tab, with a stable label so the
 /// window-state plugin can restore its geometry. Records it for restore-on-start.

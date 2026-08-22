@@ -877,6 +877,7 @@ function Meter({ label, v }: { label: string; v: number }) {
 
 function OutputPanel({ config }: { config: AppConfig }) {
   const { client, status } = useGate();
+  const [confirmStop, setConfirmStop] = useState(false);
   const out = config.output;
   const commit = (patch: Partial<AppConfig["output"]>) =>
     client.setConfig({ ...config, output: { ...out, ...patch } });
@@ -888,11 +889,43 @@ function OutputPanel({ config }: { config: AppConfig }) {
   return (
     <section className="panel">
       <h2>sACN output</h2>
+      {confirmStop && (
+        <div className="modal-backdrop" onClick={() => setConfirmStop(false)}>
+          <div className="modal close-guard" onClick={(e) => e.stopPropagation()}>
+            <h2>Stop transmitting?</h2>
+            <p>
+              The rig is lit — {status?.sacn_universes ?? 0} universes at{" "}
+              {status?.sacn_pps ?? 0} pkt/s. Turning output off goes dark
+              immediately.
+            </p>
+            <button className="primary" autoFocus onClick={() => setConfirmStop(false)}>
+              Keep transmitting
+            </button>
+            <button
+              className="danger"
+              onClick={() => {
+                setConfirmStop(false);
+                client.setSacnEnabled(false);
+              }}
+            >
+              Go dark
+            </button>
+          </div>
+        </div>
+      )}
       <label className="toggle-row">
         <input
           type="checkbox"
           checked={out.enabled}
-          onChange={(e) => client.setSacnEnabled(e.target.checked)}
+          onChange={(e) => {
+            // Turning output OFF while the rig is lit is the other one-tap way to
+            // black out a live show, so it asks. Turning it ON never does.
+            if (!e.target.checked && status && status.sacn_pps > 0) {
+              setConfirmStop(true);
+              return;
+            }
+            client.setSacnEnabled(e.target.checked);
+          }}
         />
         Enable sACN output
         {status &&

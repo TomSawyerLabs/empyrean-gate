@@ -3822,3 +3822,23 @@ button:disabled {
     aspect-ratio: auto;
   }
 }
+
+/* Confirmation for the two one-tap ways to black out a live rig: closing the
+   window, and switching output off. Deliberately not dismissible by clicking
+   the backdrop when the app is closing — the choice has to be made. */
+.close-guard {
+  max-width: 380px;
+  text-align: center;
+  gap: 10px;
+}
+
+.close-guard p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.close-guard button {
+  width: 100%;
+}

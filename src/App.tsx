@@ -200,6 +200,57 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+/// The X on a touch display sits a few pixels from the controls, and hitting it
+/// mid-show kills the engine and blacks out the rig. The native side refuses the
+/// close while sACN is transmitting and asks here instead; anything else (output
+/// off, no show running) closes normally with no dialog in the way.
+function CloseGuard() {
+  const { status } = useGate();
+  const [asking, setAsking] = useState(false);
+
+  useEffect(() => {
+    if (!IN_TAURI) return;
+    let stop: (() => void) | undefined;
+    void (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      stop = await listen("close-requested", () => setAsking(true));
+    })();
+    return () => stop?.();
+  }, []);
+
+  if (!asking) return null;
+  const universes = status?.sacn_universes ?? 0;
+  const invokeCommand = async (command: string) => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke(command);
+  };
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal close-guard">
+        <h2>The show is live</h2>
+        <p>
+          sACN is transmitting{universes > 0 ? ` on ${universes} universes` : ""}.
+          Closing stops the engine and the lights go dark.
+        </p>
+        <button
+          className="primary"
+          autoFocus
+          onClick={() => {
+            setAsking(false);
+            void invokeCommand("cancel_close");
+          }}
+        >
+          Keep the show running
+        </button>
+        <button className="danger" onClick={() => void invokeCommand("confirm_close")}>
+          Stop the show and close
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { connected, status, errors, dismissError, client, denied, savedPulse } = useGate();
   const [tab, setTab] = useState<TabId>(tabFromHash);
@@ -371,6 +422,7 @@ export default function App() {
 
       {showConnect && <ConnectModal onClose={() => setShowConnect(false)} />}
       {showReport && <ReportModal onClose={() => setShowReport(false)} />}
+      <CloseGuard />
       <DisconnectedOverlay disabled={tab === "replay"} />
     </div>
   );
