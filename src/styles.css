@@ -2488,26 +2488,43 @@ button:disabled {
 .control-widget-colors .cluster.swatches {
   height: 100%;
   display: grid;
-  align-content: stretch;
+  align-content: start;
+  justify-content: start;
   gap: 6px;
 }
 
+.control-widget-tools {
+  --deck-button-width: 112px;
+  --deck-button-height: 60px;
+}
+
 .control-widget-tools .cluster.pens {
-  grid-template-columns: repeat(auto-fit, minmax(58px, 1fr));
+  grid-template-columns: repeat(auto-fill, var(--deck-button-width));
+  grid-auto-rows: var(--deck-button-height);
 }
 
 .control-widget-tools .pen-btn {
+  width: var(--deck-button-width);
+  height: var(--deck-button-height);
   min-width: 0;
-  min-height: 52px;
+  min-height: 0;
+}
+
+.control-widget-effects {
+  --deck-button-width: 128px;
+  --deck-button-height: 52px;
 }
 
 .control-widget-effects .cluster.effects {
-  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  grid-template-columns: repeat(auto-fill, var(--deck-button-width));
+  grid-auto-rows: var(--deck-button-height);
 }
 
 .control-widget-effects .effect-btn {
+  width: var(--deck-button-width);
+  height: var(--deck-button-height);
   min-width: 0;
-  min-height: 44px;
+  min-height: 0;
 }
 
 .control-widget-colors .cluster.swatches {
@@ -2720,16 +2737,23 @@ button:disabled {
 }
 
 .quick-settings-grid {
+  --deck-button-width: 176px;
+  --deck-button-height: 68px;
   height: 100%;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  grid-template-columns: repeat(auto-fill, var(--deck-button-width));
+  grid-auto-rows: var(--deck-button-height);
+  align-content: start;
+  justify-content: start;
   gap: 7px;
 }
 
 .quick-setting-button,
 .quick-setting-empty {
+  width: var(--deck-button-width);
+  height: var(--deck-button-height);
   min-width: 0;
-  min-height: 54px;
+  min-height: 0;
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
