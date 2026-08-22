@@ -237,6 +237,10 @@ pub struct RhythmConfig {
     /// 0 follows the reported tempo master. 1..6 pins one player number, useful
     /// with hardware that broadcasts beat packets but not full status to listeners.
     pub pro_dj_link_player: u8,
+    /// Unused player number used only as the dbserver query identity. Gate never
+    /// sends transport/master commands. XDJ-XZ decks occupy 1 and 2, so 3 is the
+    /// safe default; metadata queries are refused if that number is observed.
+    pub pro_dj_link_metadata_player: u8,
     /// Shift the lighting clock relative to the external input to compensate for LED/audio
     /// transport latency. Positive values make the visual beat happen later.
     pub latency_ms: f32,
@@ -251,6 +255,7 @@ impl Default for RhythmConfig {
             source: RhythmSource::LayerAudio,
             midi_port: None,
             pro_dj_link_player: 0,
+            pro_dj_link_metadata_player: 3,
             latency_ms: 0.0,
             fallback_to_audio: true,
             fallback_audio_source: 0,
@@ -656,7 +661,10 @@ pub fn load() -> AppConfig {
                 cfg
             }
             Err(e) => {
-                log::error!("config at {} is invalid ({e}); using defaults", path.display());
+                log::error!(
+                    "config at {} is invalid ({e}); using defaults",
+                    path.display()
+                );
                 AppConfig::default()
             }
         },
@@ -759,9 +767,13 @@ mod tests {
             current_index: 0,
         };
 
-        let restored: AppConfig = serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+        let restored: AppConfig =
+            serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
         assert!(restored.show_scheduler.enabled);
         assert_eq!(restored.saved_playlists[0].entries[0].stack.layers.len(), 4);
-        assert_eq!(restored.saved_playlists[0].entries[0].duration_secs, 2_100.0);
+        assert_eq!(
+            restored.saved_playlists[0].entries[0].duration_secs,
+            2_100.0
+        );
     }
 }

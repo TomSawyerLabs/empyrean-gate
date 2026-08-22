@@ -197,6 +197,9 @@ pub enum ServerMsg {
         source: u32,
         bpm: f32,
     },
+    ProDjLinkDebug {
+        entry: ProDjLinkDebugEntry,
+    },
     PreviewMeta {
         spokes: u32,
         pixels: u32,
@@ -279,6 +282,62 @@ pub struct RhythmStatus {
 pub struct ProDjLinkDeviceInfo {
     pub number: u8,
     pub name: String,
+    pub tempo_master: bool,
+    pub playing: bool,
+    pub cued: bool,
+    pub on_air: bool,
+    pub looping: bool,
+    pub beat_number: u64,
+}
+
+/// One structured line in the live PRO DJ LINK inspector. Values remain strings
+/// so packet sentinels, hex flags, and human labels can coexist without lossy JSON.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkDebugEntry {
+    pub sequence: u64,
+    pub elapsed_ms: u64,
+    pub category: String,
+    pub device: u8,
+    pub summary: String,
+    pub fields: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkCueInfo {
+    pub kind: String,
+    pub hot_cue_number: Option<u8>,
+    pub position_ms: u32,
+    pub loop_end_ms: Option<u32>,
+    pub comment: String,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkTrackInfo {
+    pub deck: u8,
+    pub source_player: u8,
+    pub source_slot: String,
+    pub rekordbox_id: u32,
+    pub loading: bool,
+    pub error: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub genre: String,
+    pub key: String,
+    pub label: String,
+    pub comment: String,
+    pub duration_seconds: u32,
+    pub bpm: f64,
+    pub rating: u8,
+    pub year: u16,
+    pub bit_rate: u32,
+    pub artwork_id: u32,
+    pub cues: Vec<ProDjLinkCueInfo>,
+    /// Normalized 0..255 heights, compact enough for the 2 Hz status stream.
+    pub waveform_preview: Vec<u8>,
+    /// Full waveform downsampled to at most 1200 normalized height samples.
+    pub waveform_detail: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -330,6 +389,8 @@ pub struct RuntimeStatus {
     /// Hot-plug refreshed MIDI input names.
     pub midi_ports: Vec<String>,
     pub pro_dj_link_devices: Vec<ProDjLinkDeviceInfo>,
+    pub pro_dj_link_debug: Vec<ProDjLinkDebugEntry>,
+    pub pro_dj_link_tracks: Vec<ProDjLinkTrackInfo>,
     /// Available local capture devices, for the settings UI dropdowns.
     pub input_devices: Vec<DeviceInfo>,
     /// Output devices (selectable as loopback beat sources).

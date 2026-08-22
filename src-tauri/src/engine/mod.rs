@@ -8,13 +8,15 @@
 //! the CPU maps and distributes frame N-1 (sACN + preview). One frame of latency,
 //! zero pipeline stalls.
 
-use crate::layers::{GpuDab, GpuEffect, GpuLayer, MAX_AUDIO_SOURCES, MAX_DABS, MAX_EFFECTS, MAX_LAYERS};
-use crate::protocol::{ScheduledShowStatus, ServerMsg, MAX_VIDEO_DIMENSION};
+use crate::layers::{
+    GpuDab, GpuEffect, GpuLayer, MAX_AUDIO_SOURCES, MAX_DABS, MAX_EFFECTS, MAX_LAYERS,
+};
+use crate::protocol::{MAX_VIDEO_DIMENSION, ScheduledShowStatus, ServerMsg};
 use crate::sacn::SacnSender;
 use crate::state::{PreviewFrame, SharedState};
 use anyhow::{Context, Result};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 /// A scene may use every operator-visible layer slot; a true crossfade needs room
@@ -47,6 +49,11 @@ pub struct Globals {
     /// Smoothed 0..1 mix from the outgoing scene to the incoming scene.
     pub transition_progress: f32,
     pub _pad_transition: f32,
+    /// PRO DJ LINK transport visuals. These only add overlays to the base scene.
+    pub dj_link_visual_active: u32,
+    pub dj_fade_position: f32,
+    pub dj_fade_activity: f32,
+    pub dj_looping: f32,
 }
 
 #[repr(C)]
@@ -145,14 +152,13 @@ impl Engine {
         log::info!("using adapter: {gpu_name}");
 
         log::debug!("requesting device");
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("empyrean"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                ..Default::default()
-            }))
-            .context("Vulkan device creation failed")?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("empyrean"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            ..Default::default()
+        }))
+        .context("Vulkan device creation failed")?;
         log::debug!("device created; allocating buffers");
 
         let globals_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -394,7 +400,9 @@ impl Engine {
 
         let mut encoder = self
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("frame"),
+            });
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("gate"),
@@ -635,7 +643,9 @@ fn spawn_shader_watcher(flag: Arc<std::sync::atomic::AtomicBool>) -> Option<impl
         }
     })
     .ok()?;
-    watcher.watch(dir, notify::RecursiveMode::NonRecursive).ok()?;
+    watcher
+        .watch(dir, notify::RecursiveMode::NonRecursive)
+        .ok()?;
     log::info!("shader hot-reload watching {}", dir.display());
     Some(watcher)
 }
@@ -651,6 +661,65 @@ fn effective_beat_phase(
         crate::config::BeatTime::Half => (base_beat_count % 2) as f32 * 0.5 + base_phase * 0.5,
         crate::config::BeatTime::Normal => base_phase,
         crate::config::BeatTime::Double => (base_phase * 2.0).fract(),
+    }
+}
+
+/// Detects only a sustained, dramatic collapse in master audio energy. The
+/// reference follows rises quickly and falls slowly, so ordinary groove dynamics
+/// do not look like a fader cut. Once latched, darkness holds until sound returns.
+struct MasterDropDetector {
+    reference: f32,
+    candidate_secs: f32,
+    latched: bool,
+    brightness: f32,
+}
+
+impl Default for MasterDropDetector {
+    fn default() -> Self {
+        Self {
+            reference: 0.0,
+            candidate_secs: 0.0,
+            latched: false,
+            brightness: 1.0,
+        }
+    }
+}
+
+impl MasterDropDetector {
+    fn step(&mut self, level: f32, enabled: bool, dt: f32) -> (f32, bool) {
+        let dt = dt.clamp(0.0, 0.1);
+        let level = level.clamp(0.0, 2.0);
+        if !enabled {
+            self.reference = level;
+            self.candidate_secs = 0.0;
+            self.latched = false;
+            self.brightness += (1.0 - self.brightness) * (1.0 - (-dt / 0.35).exp());
+            return (self.brightness, false);
+        }
+
+        let reference_tau = if level > self.reference { 0.12 } else { 3.0 };
+        self.reference += (level - self.reference) * (1.0 - (-dt / reference_tau).exp());
+        let large_drop =
+            self.reference > 0.25 && self.reference - level > 0.30 && level < self.reference * 0.22;
+        if large_drop {
+            self.candidate_secs += dt;
+        } else {
+            self.candidate_secs = 0.0;
+        }
+
+        let triggered = !self.latched && self.candidate_secs >= 0.075;
+        if triggered {
+            self.latched = true;
+        }
+        if self.latched && level > (self.reference * 0.48).max(0.16) {
+            self.latched = false;
+            self.candidate_secs = 0.0;
+        }
+
+        let target = if self.latched { 0.015 } else { 1.0 };
+        let tau = if self.latched { 0.085 } else { 0.48 };
+        self.brightness += (target - self.brightness) * (1.0 - (-dt / tau).exp());
+        (self.brightness, triggered)
     }
 }
 
@@ -696,8 +765,8 @@ fn transition_layers(
 #[cfg(test)]
 mod beat_time_tests {
     use super::{
-        apply_stack_to_config, effective_beat_phase, stack_from_config, transition_layers,
-        walked_speed,
+        MasterDropDetector, apply_stack_to_config, effective_beat_phase, stack_from_config,
+        transition_layers, walked_speed,
     };
     use crate::config::{AppConfig, BeatTime, SavedStack};
     use crate::layers::MAX_LAYERS;
@@ -713,6 +782,32 @@ mod beat_time_tests {
     fn double_time_wraps_halfway_through_a_base_beat() {
         assert_eq!(effective_beat_phase(0.25, 0, BeatTime::Double), 0.5);
         assert_eq!(effective_beat_phase(0.75, 0, BeatTime::Double), 0.5);
+    }
+
+    #[test]
+    fn master_drop_requires_a_large_sustained_collapse_and_recovers() {
+        let mut detector = MasterDropDetector::default();
+        for _ in 0..120 {
+            detector.step(0.8, true, 1.0 / 60.0);
+        }
+        // A single quiet frame is normal musical dynamics, not a blackout.
+        assert!(!detector.step(0.02, true, 1.0 / 60.0).1);
+        detector.step(0.8, true, 1.0 / 60.0);
+
+        let mut triggered = false;
+        let mut brightness = 1.0;
+        for _ in 0..36 {
+            let result = detector.step(0.01, true, 1.0 / 60.0);
+            brightness = result.0;
+            triggered |= result.1;
+        }
+        assert!(triggered);
+        assert!(brightness < 0.05, "brightness={brightness}");
+
+        for _ in 0..90 {
+            brightness = detector.step(0.8, true, 1.0 / 60.0).0;
+        }
+        assert!(brightness > 0.9, "brightness={brightness}");
     }
 
     #[test]
@@ -842,6 +937,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut tap_angle: f32 = 0.0;
     let mut tap_beat_count: u64 = 0;
     let mut tap_spin_walk = LayerWalk::default();
+    let mut dj_fade_position = 0.5f32;
+    let mut dj_fade_activity = 0.0f32;
+    let mut master_drop = MasterDropDetector::default();
 
     #[cfg(feature = "shader-hot-reload")]
     let shader_dirty = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -902,7 +1000,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 .iter()
                 .find(|p| p.id == cfg.show_scheduler.active_playlist_id && !p.entries.is_empty())
                 .map(|p| {
-                    let index = (cfg.show_scheduler.current_index as usize).min(p.entries.len() - 1);
+                    let index =
+                        (cfg.show_scheduler.current_index as usize).min(p.entries.len() - 1);
                     (p, index, &p.entries[index])
                 })
         } else {
@@ -926,7 +1025,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             let key = format!("{}:{index}:{}", playlist.id, entry.id);
             let scene_changed = key != show_key;
             if scene_changed {
-                let previous = current_stack.take().unwrap_or_else(|| stack_from_config(&cfg));
+                let previous = current_stack
+                    .take()
+                    .unwrap_or_else(|| stack_from_config(&cfg));
                 transition_from = Some(previous);
                 current_stack = Some(entry.stack.clone());
                 show_key = key;
@@ -962,7 +1063,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             let fade = linear * linear * (3.0 - 2.0 * linear);
 
             if linear >= 1.0 && transition_from.is_some() {
-                let old_len = transition_from.as_ref().map_or(0, |s| s.layers.len().min(MAX_LAYERS));
+                let old_len = transition_from
+                    .as_ref()
+                    .map_or(0, |s| s.layers.len().min(MAX_LAYERS));
                 for i in 0..target.layers.len().min(MAX_LAYERS) {
                     if old_len + i < layer_phases.len() {
                         layer_phases[i] = layer_phases[old_len + i];
@@ -1046,17 +1149,36 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let clock_now = Instant::now();
         let clock_latency = cfg.rhythm.latency_ms.clamp(-500.0, 500.0);
         let midi_clock = state.midi_clock.lock().snapshot(clock_now, clock_latency);
-        let (pioneer_clock, pioneer_label, pioneer_error, pioneer_devices) = {
+        let (pioneer_clock, pioneer_label, pioneer_error, pioneer_devices, pioneer_visual) = {
             let link = state.pioneer_clock.lock();
             (
                 link.snapshot(clock_now, clock_latency),
                 link.player_label(),
                 link.listen_error().to_owned(),
                 link.devices(clock_now),
+                link.visual_snapshot(clock_now),
             )
         };
         let midi_selected = cfg.rhythm.source == crate::config::RhythmSource::MidiClock;
         let pioneer_selected = cfg.rhythm.source == crate::config::RhythmSource::ProDjLink;
+        let dj_visual_active = pioneer_selected && pioneer_visual.active;
+        let dj_fade_target = match (pioneer_visual.deck_1_on_air, pioneer_visual.deck_2_on_air) {
+            (true, false) => 0.0,
+            (false, true) => 1.0,
+            // Both decks on-air represents the middle of a blend. If neither
+            // flag is available, keep the last visual position stationary.
+            (true, true) => 0.5,
+            (false, false) => dj_fade_position,
+        };
+        // The on-air flags are discrete, so ease their transitions into a moving
+        // additive ribbon. Activity follows motion and then decays; it never
+        // controls the base composition's brightness.
+        let previous_dj_fade_position = dj_fade_position;
+        dj_fade_position += (dj_fade_target - dj_fade_position) * (dt / 0.9).min(1.0);
+        let dj_fade_motion = ((dj_fade_position - previous_dj_fade_position) / dt.max(0.001))
+            .abs()
+            .clamp(0.0, 1.0);
+        dj_fade_activity = (dj_fade_activity * (-dt / 0.55).exp()).max(dj_fade_motion);
         let external_selected = midi_selected || pioneer_selected;
         let external_clock = if pioneer_selected {
             pioneer_clock
@@ -1065,6 +1187,40 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         };
         let fallback_index =
             (cfg.rhythm.fallback_audio_source as usize).min(MAX_AUDIO_SOURCES.saturating_sub(1));
+        let master_audio = &audio_inputs[fallback_index];
+        let (master_drop_brightness, master_drop_triggered) = master_drop.step(
+            master_audio.level,
+            pioneer_selected && external_clock.usable && master_audio.active,
+            dt,
+        );
+        if master_drop_triggered {
+            // A short inward edge makes the cut legible before the global envelope
+            // reaches near-black. The envelope itself is applied to every output.
+            state.trigger_effect(crate::layers::EffectCfg {
+                kind: crate::layers::EffectKind::Collapse,
+                intensity: 1.35,
+                size: 1.4,
+                radius: 0.5,
+                hue: -1.0,
+                duration: 0.45,
+                ..Default::default()
+            });
+            state.push_pioneer_debug(
+                "visual",
+                0,
+                "large master-audio drop → collapse + blackout",
+                std::collections::BTreeMap::from([
+                    ("event".into(), "master audio drop".into()),
+                    (
+                        "effects".into(),
+                        "collapse + global brightness envelope".into(),
+                    ),
+                    ("audio_source".into(), fallback_index.to_string()),
+                    ("level".into(), format!("{:.4}", master_audio.level)),
+                    ("target_brightness".into(), "0.015".into()),
+                ]),
+            );
+        }
 
         let mut audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
         for (i, a) in audio_inputs.iter().enumerate() {
@@ -1094,8 +1250,17 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 onset: a.onset,
                 beat_phase: effective_beat_phase(base_phase, base_count, cfg.render.beat_time),
                 bpm: base_bpm * cfg.render.beat_time.multiplier(),
-                // Manually-set tempo is definitionally trusted.
-                bpm_conf: if cfg.render.manual_bpm.is_some() { 1.0 } else { a.bpm_conf },
+                // Manual and transport clocks are authoritative. In particular,
+                // DJ LINK must not depend on an unrelated audio input's confidence.
+                bpm_conf: if cfg.render.manual_bpm.is_some()
+                    || (external_selected && external_clock.usable)
+                {
+                    1.0
+                } else if external_selected && cfg.rhythm.fallback_to_audio {
+                    audio_inputs[fallback_index].bpm_conf
+                } else {
+                    a.bpm_conf
+                },
                 bass_att: a.bass_att,
                 mid_att: a.mid_att,
                 treble_att: a.treble_att,
@@ -1143,7 +1308,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     bpm: a.bpm,
                 });
             }
-            if !bt.enabled || i != bt.audio_source as usize || !wrapped || a.bpm <= 0.0 || !confident
+            if !bt.enabled
+                || i != bt.audio_source as usize
+                || !wrapped
+                || a.bpm <= 0.0
+                || !confident
             {
                 continue;
             }
@@ -1156,7 +1325,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             } else {
                 bt.spin
             };
-            tap_angle = (tap_angle + spin * std::f32::consts::TAU).rem_euclid(std::f32::consts::TAU);
+            tap_angle =
+                (tap_angle + spin * std::f32::consts::TAU).rem_euclid(std::f32::consts::TAU);
             if tap_beat_count.is_multiple_of(bt.every.max(1) as u64) {
                 state.trigger_effect(crate::layers::EffectCfg {
                     kind: crate::layers::EffectKind::Burst,
@@ -1168,6 +1338,75 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     duration: 0.0,
                     ..Default::default()
                 });
+            }
+
+            // DJ LINK always contributes restrained musical structure from its
+            // authoritative master clock. This cannot depend on local input level:
+            // in headphone-only sets the default Mac microphone measures the room,
+            // not the DJ master mix. All of these transients remain additive.
+            if pioneer_selected {
+                let phrase_angle = if (tap_beat_count / 8).is_multiple_of(2) {
+                    -std::f32::consts::FRAC_PI_2
+                } else {
+                    std::f32::consts::FRAC_PI_2
+                };
+                let clock_effect = |kind, angle, intensity, size, radius, hue, duration| {
+                    state.trigger_effect(crate::layers::EffectCfg {
+                        kind,
+                        angle,
+                        intensity,
+                        size,
+                        radius,
+                        hue,
+                        saturation: 0.85,
+                        brightness: 1.0,
+                        duration,
+                    });
+                };
+                if tap_beat_count.is_multiple_of(4) {
+                    clock_effect(
+                        crate::layers::EffectKind::Swoosh,
+                        phrase_angle,
+                        0.38,
+                        1.5,
+                        0.82,
+                        0.52,
+                        0.9,
+                    );
+                }
+                if tap_beat_count.is_multiple_of(8) {
+                    clock_effect(
+                        crate::layers::EffectKind::Burst,
+                        -phrase_angle,
+                        0.82,
+                        1.2,
+                        0.9,
+                        0.88,
+                        1.15,
+                    );
+                }
+                if tap_beat_count.is_multiple_of(16) {
+                    clock_effect(
+                        crate::layers::EffectKind::Collapse,
+                        0.0,
+                        0.68,
+                        1.15,
+                        0.5,
+                        0.72,
+                        1.35,
+                    );
+                }
+                if tap_beat_count.is_multiple_of(32) {
+                    clock_effect(
+                        crate::layers::EffectKind::Strobe,
+                        0.0,
+                        0.25,
+                        1.0,
+                        0.5,
+                        -1.0,
+                        0.16,
+                    );
+                }
             }
         }
 
@@ -1213,7 +1452,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let mut gpu_transition_split = 0u32;
         for (i, l) in render_layers.iter().take(render_layer_limit).enumerate() {
             // Envelope eases layers in/out of the mix over a few seconds.
-            let target = if walk_layers_on { layer_target[i] } else { true };
+            let target = if walk_layers_on {
+                layer_target[i]
+            } else {
+                true
+            };
             let goal = if target { 1.0 } else { 0.0 };
             layer_env[i] += (goal - layer_env[i]) * (dt / 4.0).min(1.0);
             if !l.enabled {
@@ -1318,7 +1561,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 effect_count: effects.len() as u32,
                 time: state.started.elapsed().as_secs_f32(),
                 dt,
-                master: cfg.render.master_brightness,
+                master: cfg.render.master_brightness * master_drop_brightness,
                 inner_over_outer: (cfg.geometry.inner_radius_ft
                     / cfg.geometry.outer_radius_ft.max(0.001))
                 .clamp(0.0, 1.0),
@@ -1334,6 +1577,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 transition_active: u32::from(render_transition_active),
                 transition_progress: render_transition_progress,
                 _pad_transition: 0.0,
+                dj_link_visual_active: u32::from(dj_visual_active),
+                dj_fade_position,
+                dj_fade_activity,
+                dj_looping: if pioneer_visual.looping { 1.0 } else { 0.0 },
             },
             audio,
             layers,
@@ -1383,9 +1630,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 }
             }
             was_sending = sending;
-            if sending
-                && let Some(s) = sacn.as_mut()
-            {
+            if sending && let Some(s) = sacn.as_mut() {
                 let cap = cfg.output.fps.clamp(1.0, 120.0);
                 let send = if cfg.output.sync_to_render && cap >= cfg.render.fps {
                     // Cap doesn't bind: one sACN frame per rendered frame, always.
@@ -1452,8 +1697,17 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     .map(|device| crate::protocol::ProDjLinkDeviceInfo {
                         number: device.number,
                         name: device.name.clone(),
+                        tempo_master: device.tempo_master,
+                        playing: device.playing,
+                        cued: device.cued,
+                        on_air: device.on_air,
+                        looping: device.looping,
+                        beat_number: device.beat_number,
                     })
                     .collect();
+                st.pro_dj_link_debug = state.pioneer_debug.lock().iter().cloned().collect();
+                st.pro_dj_link_tracks = state.pioneer_tracks.lock().values().cloned().collect();
+                st.pro_dj_link_tracks.sort_by_key(|track| track.deck);
                 st.video = {
                     let v = state.video.lock();
                     let owner_name = cfg
