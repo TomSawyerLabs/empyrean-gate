@@ -327,6 +327,43 @@ impl Default for BeatTapConfig {
     }
 }
 
+/// Where a playlist entry's media lives.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaylistKind {
+    /// A web URL — downloaded into the local media cache so playback never
+    /// depends on venue internet.
+    Url,
+    /// A file on the Gate machine (added directly or found in a watched folder).
+    LocalFile,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaylistEntry {
+    /// Stable id; also names the cache file and the /media/file/{id} route.
+    pub id: String,
+    pub title: String,
+    /// URL or absolute local path.
+    pub source: String,
+    pub kind: PlaylistKind,
+    /// Set when this entry was auto-discovered in a watched folder (its value is
+    /// that folder), so folder rescans can reconcile without touching manual adds.
+    #[serde(default)]
+    pub from_dir: String,
+}
+
+/// Video playlist: URLs added by any client plus files discovered in watched
+/// folders on the Gate machine. URL entries are cached to disk in the background.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VideoConfig {
+    pub playlist: Vec<PlaylistEntry>,
+    /// Folders on the Gate machine scanned (recursively) for video files.
+    pub dirs: Vec<String>,
+    /// Advance to the next playlist entry when one finishes playing.
+    pub auto_advance: bool,
+}
+
 /// Self-update behavior (see `updater.rs`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -367,6 +404,7 @@ pub struct AppConfig {
     pub render: RenderConfig,
     pub update: UpdateConfig,
     pub windows: WindowsConfig,
+    pub video: VideoConfig,
     pub beat_taps: BeatTapConfig,
     pub layers: Vec<LayerCfg>,
     /// Known client devices (see `ClientRecord`).
@@ -383,6 +421,7 @@ impl Default for AppConfig {
             render: RenderConfig::default(),
             update: UpdateConfig::default(),
             windows: WindowsConfig::default(),
+            video: VideoConfig::default(),
             beat_taps: BeatTapConfig::default(),
             layers: default_layer_stack(),
             clients: Vec::new(),

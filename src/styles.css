@@ -834,6 +834,10 @@ button.ghost {
   width: auto;
 }
 
+.client-row.playing {
+  border: 1px solid var(--accent2);
+}
+
 .conn-dot {
   width: 10px;
   height: 10px;

@@ -14,6 +14,7 @@ pub mod sacn;
 pub mod server;
 pub mod state;
 pub mod updater;
+pub mod videocache;
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;

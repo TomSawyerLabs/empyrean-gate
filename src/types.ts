@@ -144,6 +144,32 @@ export interface WindowsConfig {
   aux_open: string[];
 }
 
+export type PlaylistKind = "url" | "local_file";
+
+export interface PlaylistEntry {
+  id: string;
+  title: string;
+  /** URL or absolute path on the Gate machine. */
+  source: string;
+  kind: PlaylistKind;
+  /** Watched folder this entry was discovered in ("" for manual adds). */
+  from_dir: string;
+}
+
+export interface VideoConfig {
+  playlist: PlaylistEntry[];
+  dirs: string[];
+  auto_advance: boolean;
+}
+
+export interface VideoCacheStatus {
+  id: string;
+  state: "cached" | "downloading" | "pending" | "error" | "local";
+  progress: number;
+  bytes: number;
+  error: string;
+}
+
 export interface BeatTapConfig {
   enabled: boolean;
   audio_source: number;
@@ -163,6 +189,7 @@ export interface AppConfig {
   render: RenderConfig;
   update: UpdateConfig;
   windows: WindowsConfig;
+  video: VideoConfig;
   beat_taps: BeatTapConfig;
   layers: LayerCfg[];
   clients: ClientRecord[];
@@ -206,6 +233,7 @@ export interface RuntimeStatus {
   default_input_channels: number;
   default_output_channels: number;
   interfaces: string[];
+  video_cache: VideoCacheStatus[];
   client_list: ClientInfo[];
   master_brightness: number;
   master_speed: number;

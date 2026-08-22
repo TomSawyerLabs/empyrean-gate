@@ -288,6 +288,8 @@ pub struct RuntimeStatus {
     pub default_output_channels: u16,
     /// Local IPv4 interfaces as "name — ip", for the sACN interface picker.
     pub interfaces: Vec<String>,
+    /// Cache/download state per video playlist entry.
+    pub video_cache: Vec<crate::videocache::VideoCacheStatus>,
     /// Known + connected client devices.
     pub client_list: Vec<ClientInfo>,
     pub master_brightness: f32,

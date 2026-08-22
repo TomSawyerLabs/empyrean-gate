@@ -244,6 +244,8 @@ pub struct SharedState {
     pub update_install_requested: AtomicBool,
     /// Whether this instance runs headless (the updater passes it to a successor).
     pub headless: AtomicBool,
+    /// Per-playlist-entry cache state, written by the videocache task.
+    pub video_cache: Mutex<HashMap<String, crate::videocache::VideoCacheStatus>>,
     /// Preview-stream slot rationing (see `PreviewGate`).
     pub preview_gate: Mutex<PreviewGate>,
     /// Currently-connected WS clients: connection serial -> client id.
@@ -281,6 +283,7 @@ impl SharedState {
             update_check_requested: AtomicBool::new(false),
             update_install_requested: AtomicBool::new(false),
             headless: AtomicBool::new(false),
+            video_cache: Mutex::new(HashMap::new()),
             preview_gate: Mutex::new(PreviewGate::default()),
             connected_clients: Mutex::new(HashMap::new()),
             conn_seq: AtomicU64::new(1),

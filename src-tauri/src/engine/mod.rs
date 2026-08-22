@@ -1134,6 +1134,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         frames: v.frames,
                     }
                 };
+                st.video_cache = {
+                    let mut list: Vec<_> = state.video_cache.lock().values().cloned().collect();
+                    list.sort_by(|a, b| a.id.cmp(&b.id));
+                    list
+                };
                 st.client_list = {
                     let connected = state.connected_clients.lock();
                     cfg.clients

@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { startAudioFeatures } from "./sensors";
-import { defaultLayer } from "./types";
+import { defaultLayer, type PlaylistEntry } from "./types";
 import { useGate } from "./state";
 import type { ResolvedMedia } from "./ws";
+
+function newEntryId(): string {
+  return (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).replace(/-/g, "");
+}
 
 const FRAME_RATES = [10, 15, 24];
 const TEXTURE_SIZES = [64, 96, 128];
@@ -130,12 +134,73 @@ export default function Media() {
     setMedia(next);
   };
 
+  const [currentEntryId, setCurrentEntryId] = useState<string | null>(null);
+  const playlist = config?.video.playlist ?? [];
+  const cacheOf = (id: string) => status?.video_cache.find((c) => c.id === id);
+
+  /// Adding a URL also appends it to the persistent playlist, which starts the
+  /// background download into the Gate's media cache.
+  const addToPlaylist = (source: string, title: string): string => {
+    if (!config) return "";
+    const existing = config.video.playlist.find((e) => e.source === source);
+    if (existing) return existing.id;
+    const entry: PlaylistEntry = {
+      id: newEntryId(),
+      title,
+      source,
+      kind: "url",
+      from_dir: "",
+    };
+    client.setConfig({
+      ...config,
+      video: { ...config.video, playlist: [...config.video.playlist, entry] },
+    });
+    return entry.id;
+  };
+
+  const playEntry = async (entry: PlaylistEntry) => {
+    setCurrentEntryId(entry.id);
+    const cache = cacheOf(entry.id);
+    const cachedOrLocal = entry.kind === "local_file" || cache?.state === "cached";
+    if (cachedOrLocal) {
+      // Served by the Gate itself — no internet involved.
+      replaceMedia({
+        playbackUrl: `${client.httpBase}/media/file/${entry.id}`,
+        title: entry.title,
+        sourceUrl: entry.source,
+        resolvedBy: entry.kind === "local_file" ? "Gate machine file" : "Gate media cache",
+      });
+      return;
+    }
+    // Not cached yet: stream through the live resolver proxy (needs internet).
+    setResolving(true);
+    setError(null);
+    try {
+      replaceMedia(await client.resolveMedia(entry.source));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  const stepPlaylist = (dir: 1 | -1) => {
+    if (playlist.length === 0) return;
+    const i = playlist.findIndex((e) => e.id === currentEntryId);
+    const next = playlist[(i + dir + playlist.length) % playlist.length];
+    void playEntry(next);
+  };
+
   const resolveUrl = async () => {
     if (!url.trim() || !connected) return;
     setResolving(true);
     setError(null);
     try {
-      replaceMedia(await client.resolveMedia(url.trim()));
+      const resolved = await client.resolveMedia(url.trim());
+      const id = addToPlaylist(url.trim(), resolved.title);
+      setCurrentEntryId(id || null);
+      replaceMedia(resolved);
+      setUrl("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -344,6 +409,121 @@ export default function Media() {
         {error && <p className="media-error">{error}</p>}
       </section>
 
+      <section className="panel">
+        <h2>Playlist</h2>
+        <p className="hint">
+          URLs you load are added here and downloaded into the Gate's media cache — once
+          cached (or from a watched folder), playback needs no internet at all.
+        </p>
+        {playlist.length === 0 && <p className="hint">Nothing yet — load a URL above or watch a folder below.</p>}
+        {playlist.map((entry) => {
+          const cache = cacheOf(entry.id);
+          const chip =
+            entry.kind === "local_file"
+              ? cache?.state === "error"
+                ? "file missing"
+                : "local"
+              : cache?.state === "cached"
+                ? `cached ✓ ${(cache.bytes / 1e6).toFixed(0)} MB`
+                : cache?.state === "downloading"
+                  ? `⬇ ${(cache.progress * 100).toFixed(0)}%`
+                  : cache?.state === "error"
+                    ? "cache failed — will retry"
+                    : "waiting to cache";
+          return (
+            <div
+              key={entry.id}
+              className={`layer-head client-row ${entry.id === currentEntryId ? "playing" : ""}`}
+            >
+              <button onClick={() => void playEntry(entry)}>
+                {entry.id === currentEntryId ? "▶ " : ""}
+                {entry.title || entry.source}
+              </button>
+              <span className={cache?.state === "error" ? "warn" : "hint"}>{chip}</span>
+              <span className="spacer" />
+              {entry.from_dir === "" && (
+                <button
+                  className="danger"
+                  onClick={() => {
+                    if (!config) return;
+                    client.setConfig({
+                      ...config,
+                      video: {
+                        ...config.video,
+                        playlist: config.video.playlist.filter((e) => e.id !== entry.id),
+                      },
+                    });
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          );
+        })}
+        <div className="add-row">
+          <button onClick={() => stepPlaylist(-1)} disabled={playlist.length === 0}>
+            ⏮ Previous
+          </button>
+          <button onClick={() => stepPlaylist(1)} disabled={playlist.length === 0}>
+            Next ⏭
+          </button>
+          <label className="toggle-row" style={{ margin: 0 }}>
+            <input
+              type="checkbox"
+              checked={config?.video.auto_advance ?? false}
+              onChange={(e) => {
+                if (config) {
+                  client.setConfig({
+                    ...config,
+                    video: { ...config.video, auto_advance: e.target.checked },
+                  });
+                }
+              }}
+            />
+            Auto-advance when a video ends
+          </label>
+        </div>
+        <h2 style={{ marginTop: 16 }}>Watched folders on the Gate machine</h2>
+        <p className="hint">
+          Every video file found in these folders (3 levels deep) joins the playlist
+          automatically. Paths are on the machine running the Gate backend.
+        </p>
+        {(config?.video.dirs ?? []).map((dir) => (
+          <div key={dir} className="layer-head client-row">
+            <span>{dir}</span>
+            <span className="spacer" />
+            <button
+              className="danger"
+              onClick={() => {
+                if (!config) return;
+                client.setConfig({
+                  ...config,
+                  video: { ...config.video, dirs: config.video.dirs.filter((d) => d !== dir) },
+                });
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+        <form
+          className="add-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const input = e.currentTarget.elements.namedItem("dir") as HTMLInputElement;
+            const dir = input.value.trim();
+            if (dir && config && !config.video.dirs.includes(dir)) {
+              client.setConfig({ ...config, video: { ...config.video, dirs: [...config.video.dirs, dir] } });
+              input.value = "";
+            }
+          }}
+        >
+          <input name="dir" placeholder="e.g. D:\show-videos" style={{ flex: 1 }} />
+          <button type="submit">Watch folder</button>
+        </form>
+      </section>
+
       {media && (
         <section className="panel media-player-panel">
           <div className="media-stage">
@@ -354,9 +534,14 @@ export default function Media() {
               controls
               playsInline
               muted={audioMode !== "video" || !broadcasting}
-              loop
+              loop={!(config?.video.auto_advance && currentEntryId && playlist.length > 1)}
               preload="metadata"
               crossOrigin="anonymous"
+              onEnded={() => {
+                if (config?.video.auto_advance && currentEntryId && playlist.length > 1) {
+                  stepPlaylist(1);
+                }
+              }}
             />
             <canvas ref={canvasRef} className="media-texture-preview" aria-label="Texture sent to the Gate" />
           </div>
