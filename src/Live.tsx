@@ -53,6 +53,13 @@ const TOOLS: { kind: ToolKind; label: string }[] = [
   { kind: "ember", label: "Ember" },
 ];
 
+function editorWidgetLabel(kind: ControlWidgetKind): string {
+  if (kind === "tools") return "Tools";
+  if (kind === "quick_settings") return "Quick";
+  if (kind === "size") return "Size";
+  return widgetLabel(kind);
+}
+
 export default function Live() {
   const { client, config, status, beatAt } = useGate();
   const [tool, setTool] = useState<ToolKind>("tap");
@@ -596,7 +603,7 @@ export default function Live() {
                 {editing && (
                   <div className="deck-drag-handle">
                     <span aria-hidden="true">⠿</span>
-                    <strong>{widgetLabel(widget.kind)}</strong>
+                    <strong title={widgetLabel(widget.kind)}>{editorWidgetLabel(widget.kind)}</strong>
                     {widget.kind === "quick_settings" && (
                       <button
                         aria-label="Customize quick settings"

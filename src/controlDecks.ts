@@ -32,7 +32,7 @@ export interface ControlDeck {
 // Quick settings change the default widget set on top of the latest responsive
 // deck layout, so advance the schema instead of choosing either branch's older
 // version. Existing custom decks remain intact; the default deck is upgraded.
-const DECK_SCHEMA_VERSION = 9;
+const DECK_SCHEMA_VERSION = 10;
 
 export const DECK_BREAKPOINTS: Record<DeckBreakpoint, number> = {
   desktop: 1180,
@@ -119,14 +119,14 @@ export function defaultControlDeck(): ControlDeck {
         item("quick_settings", 0, 13, 8, 2, 2, 2),
       ],
       desktop: [
-        item("tools", 0, 4, 2, 5, 2, 2),
-        item("effects", 0, 9, 2, 2, 2, 1),
+        item("tools", 0, 4, 2, 5, 1, 2),
+        item("effects", 0, 9, 2, 2, 1, 1),
         item("preview", 2, 0, 8, 16, 6, 8),
-        item("colors", 10, 3, 2, 3, 2, 1),
-        item("size", 10, 6, 2, 1, 2, 1),
-        item("tempo", 10, 7, 2, 3, 2, 2),
-        item("master", 10, 10, 2, 2, 2, 2),
-        item("quick_settings", 0, 0, 2, 2, 2, 2),
+        item("colors", 10, 3, 2, 3, 1, 1),
+        item("size", 10, 6, 2, 1, 1, 1),
+        item("tempo", 10, 7, 2, 3, 1, 2),
+        item("master", 10, 10, 2, 2, 1, 2),
+        item("quick_settings", 0, 0, 2, 2, 1, 2),
       ],
     },
   };
@@ -152,15 +152,34 @@ export function loadControlDecks(): ControlDeck[] {
       if (decks.length > 0) {
         const freshDefault = defaultControlDeck();
         return decks.map((deck) => {
-          if (deck.id !== "default" || deck.schemaVersion === DECK_SCHEMA_VERSION) return deck;
-          const upgraded = {
-            ...deck,
+          let upgraded = deck;
+          if (deck.id === "default" && deck.schemaVersion !== DECK_SCHEMA_VERSION) {
+            upgraded = {
+              ...deck,
+              schemaVersion: DECK_SCHEMA_VERSION,
+              layouts: { ...deck.layouts, desktop: freshDefault.layouts.desktop },
+            };
+            if (!upgraded.widgets.some((widget) => widget.kind === "quick_settings")) {
+              upgraded = addWidgetToDeck(upgraded, "quick_settings");
+            }
+          }
+
+          // Older custom decks inherited a two-column desktop minimum from the
+          // original editor. Keep their positions and sizes, but unlock a
+          // one-column minimum for every compact control widget.
+          const widgetKinds = new Map(upgraded.widgets.map((widget) => [widget.id, widget.kind]));
+          return {
+            ...upgraded,
             schemaVersion: DECK_SCHEMA_VERSION,
-            layouts: { ...deck.layouts, desktop: freshDefault.layouts.desktop },
+            layouts: {
+              ...upgraded.layouts,
+              desktop: (upgraded.layouts.desktop ?? []).map((entry) =>
+                widgetKinds.get(entry.i) === "preview"
+                  ? entry
+                  : { ...entry, minW: 1 },
+              ),
+            },
           };
-          return upgraded.widgets.some((widget) => widget.kind === "quick_settings")
-            ? upgraded
-            : addWidgetToDeck(upgraded, "quick_settings");
         });
       }
     }

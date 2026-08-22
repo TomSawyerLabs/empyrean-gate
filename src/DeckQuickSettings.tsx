@@ -11,8 +11,6 @@ import {
 } from "./quickSettings";
 import { useGate } from "./state";
 
-const LONG_PRESS_MS = 650;
-
 function valueLabel(shortcut: QuickSettingShortcut): string {
   const definition = targetDefinition(shortcut.target);
   if (definition.kind === "boolean") return shortcut.value ? "On" : "Off";
@@ -42,8 +40,6 @@ export function QuickSettingsPanel({
   const active = useRef(new Map<string, { shortcut: QuickSettingShortcut; order: number }>());
   const baselines = useRef(new Map<QuickSettingTarget, QuickSettingValue>());
   const actionOrder = useRef(0);
-  const longPressTimer = useRef<number | null>(null);
-  const longPressed = useRef(false);
 
   useEffect(() => {
     configRef.current = config;
@@ -98,7 +94,6 @@ export function QuickSettingsPanel({
   };
 
   useEffect(() => () => {
-    if (longPressTimer.current !== null) window.clearTimeout(longPressTimer.current);
     for (const timer of timers.current.values()) window.clearTimeout(timer);
     for (const [target, baseline] of baselines.current) write(target, baseline);
     timers.current.clear();
@@ -108,18 +103,10 @@ export function QuickSettingsPanel({
 
   const pointerDown = (event: ReactPointerEvent<HTMLButtonElement>, shortcut: QuickSettingShortcut) => {
     event.currentTarget.setPointerCapture(event.pointerId);
-    longPressed.current = false;
-    longPressTimer.current = window.setTimeout(() => {
-      longPressed.current = true;
-      if (shortcut.mode === "hold") restore(shortcut);
-      onEdit(shortcut.id);
-    }, LONG_PRESS_MS);
     if (shortcut.mode === "hold") start(shortcut);
   };
 
   const pointerEnd = (shortcut: QuickSettingShortcut) => {
-    if (longPressTimer.current !== null) window.clearTimeout(longPressTimer.current);
-    longPressTimer.current = null;
     if (shortcut.mode === "hold") restore(shortcut);
   };
 
@@ -139,10 +126,6 @@ export function QuickSettingsPanel({
           onLostPointerCapture={() => pointerEnd(shortcut)}
           onContextMenu={(event) => event.preventDefault()}
           onClick={() => {
-            if (longPressed.current) {
-              longPressed.current = false;
-              return;
-            }
             if (shortcut.mode !== "hold") start(shortcut);
           }}
           aria-label={`${shortcut.label}: ${targetDefinition(shortcut.target).label} ${valueLabel(shortcut)}`}

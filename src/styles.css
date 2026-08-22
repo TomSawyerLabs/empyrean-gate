@@ -2403,17 +2403,24 @@ button:disabled {
 }
 
 .deck-editing .control-widget-body {
-  height: calc(100% - 38px);
+  height: calc(100% - 34px);
   pointer-events: none;
   opacity: 0.72;
 }
 
+/* The editor header costs vertical room. Scale the live contents uniformly so
+   their proportions stay intact instead of squeezing only one axis. */
+.deck-editing .control-widget-body > * {
+  transform: scale(0.94);
+  transform-origin: center;
+}
+
 .deck-drag-handle {
-  height: 38px;
+  height: 34px;
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 5px 6px 5px 10px;
+  gap: 4px;
+  padding: 4px 5px 4px 7px;
   color: #c9c1f7;
   background: rgba(45, 35, 78, 0.94);
   cursor: grab;
@@ -2427,7 +2434,7 @@ button:disabled {
 
 .deck-drag-handle > span {
   color: var(--accent2);
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .deck-drag-handle strong {
@@ -2442,11 +2449,35 @@ button:disabled {
 }
 
 .deck-drag-handle button {
-  width: 30px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  font-size: 20px;
+  font-size: 17px;
   line-height: 1;
+}
+
+.control-widget-size .deck-drag-handle {
+  height: 22px;
+  padding-block: 2px;
+}
+
+.control-widget-size .deck-drag-handle button {
+  width: 18px;
+  height: 18px;
+  font-size: 14px;
+}
+
+.deck-editing .control-widget-size .control-widget-body {
+  height: calc(100% - 22px);
+  padding-block: 2px;
+}
+
+.deck-editing .control-widget-size .size-ctl {
+  justify-content: center;
+}
+
+.deck-editing .control-widget-size .slider-row > span {
+  display: none;
 }
 
 .control-deck-shell .react-grid-item.react-grid-placeholder {
@@ -2499,13 +2530,15 @@ button:disabled {
 }
 
 .control-widget-tools .cluster.pens {
-  grid-template-columns: repeat(auto-fill, var(--deck-button-width));
+  grid-template-columns: repeat(2, minmax(0, var(--deck-button-width)));
   grid-auto-rows: var(--deck-button-height);
 }
 
 .control-widget-tools .pen-btn {
-  width: var(--deck-button-width);
-  height: var(--deck-button-height);
+  width: 100%;
+  height: 100%;
+  max-width: var(--deck-button-width);
+  max-height: var(--deck-button-height);
   min-width: 0;
   min-height: 0;
 }
@@ -2516,13 +2549,15 @@ button:disabled {
 }
 
 .control-widget-effects .cluster.effects {
-  grid-template-columns: repeat(auto-fill, var(--deck-button-width));
+  grid-template-columns: repeat(2, minmax(0, var(--deck-button-width)));
   grid-auto-rows: var(--deck-button-height);
 }
 
 .control-widget-effects .effect-btn {
-  width: var(--deck-button-width);
-  height: var(--deck-button-height);
+  width: 100%;
+  height: 100%;
+  max-width: var(--deck-button-width);
+  max-height: var(--deck-button-height);
   min-width: 0;
   min-height: 0;
 }
@@ -2741,7 +2776,7 @@ button:disabled {
   --deck-button-height: 68px;
   height: 100%;
   display: grid;
-  grid-template-columns: repeat(auto-fill, var(--deck-button-width));
+  grid-template-columns: repeat(auto-fit, minmax(min(112px, 100%), var(--deck-button-width)));
   grid-auto-rows: var(--deck-button-height);
   align-content: start;
   justify-content: start;
@@ -2750,8 +2785,10 @@ button:disabled {
 
 .quick-setting-button,
 .quick-setting-empty {
-  width: var(--deck-button-width);
-  height: var(--deck-button-height);
+  width: 100%;
+  height: 100%;
+  max-width: var(--deck-button-width);
+  max-height: var(--deck-button-height);
   min-width: 0;
   min-height: 0;
   touch-action: manipulation;
