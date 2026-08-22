@@ -530,12 +530,23 @@ fn walk_step(walk: &mut LayerWalk, rng: &mut WalkRng, dt: f32, tau: f32) {
     }
 }
 
+/// Wander around the authored speed without cancelling it or flipping direction.
+/// Slow ambient layers previously used an additive offset large enough to stall;
+/// exponential scaling keeps the same sign and a useful fraction of base motion.
+fn walked_speed(base: f32, offset: f32, amount: f32) -> f32 {
+    if base == 0.0 {
+        return 0.0;
+    }
+    let exponent = (offset * 0.45 * amount).clamp(-1.0, 1.0);
+    base * exponent.exp()
+}
+
 /// Apply a layer's walk offsets around its configured values. The user's slider
 /// value is the center; `walk_amount` scales the wander radius per parameter.
 fn walked_layer(l: &crate::layers::LayerCfg, w: &LayerWalk) -> crate::layers::LayerCfg {
     let a = l.walk_amount;
     let mut out = l.clone();
-    out.speed = l.speed + w.offsets[0] * 0.6 * a;
+    out.speed = walked_speed(l.speed, w.offsets[0], a);
     out.scale = (l.scale * (1.0 + w.offsets[1] * 0.4 * a)).clamp(0.05, 6.0);
     out.hue = l.hue + w.offsets[2] * 0.12 * a; // hue wraps in the shader
     out.hue_range = (l.hue_range + w.offsets[3] * 0.08 * a).clamp(0.0, 1.0);
@@ -684,7 +695,10 @@ fn transition_layers(
 
 #[cfg(test)]
 mod beat_time_tests {
-    use super::{apply_stack_to_config, effective_beat_phase, stack_from_config, transition_layers};
+    use super::{
+        apply_stack_to_config, effective_beat_phase, stack_from_config, transition_layers,
+        walked_speed,
+    };
     use crate::config::{AppConfig, BeatTime, SavedStack};
     use crate::layers::MAX_LAYERS;
 
@@ -750,6 +764,16 @@ mod beat_time_tests {
         assert_eq!(mirrored.walk_enabled, stack.walk_enabled);
         assert_eq!(mirrored.walk_depth, stack.walk_depth);
         assert_eq!(mirrored.layers[0].opacity, stack.layers[0].opacity);
+    }
+
+    #[test]
+    fn speed_walk_preserves_motion_and_direction() {
+        let slow_forward = walked_speed(0.03, -2.5, 3.0);
+        let slow_reverse = walked_speed(-0.03, -2.5, 3.0);
+
+        assert!(slow_forward >= 0.03 / std::f32::consts::E);
+        assert!(slow_reverse <= -0.03 / std::f32::consts::E);
+        assert_eq!(walked_speed(0.0, 2.5, 3.0), 0.0);
     }
 }
 
