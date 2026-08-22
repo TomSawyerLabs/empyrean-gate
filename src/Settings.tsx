@@ -23,12 +23,310 @@ export default function Settings() {
     <div className="settings-page">
       <LayersPanel config={config} />
       <AudioPanel config={config} />
+      <RhythmPanel config={config} />
+      {config.rhythm.source === "pro_dj_link" && <DjLinkTracksPanel />}
+      {config.rhythm.source === "pro_dj_link" && <DjLinkDebugPanel />}
       <OutputPanel config={config} />
       <GeometryPanel config={config} />
       <ClientsPanel />
       <UpdatesPanel config={config} />
       <ThisDevicePanel />
     </div>
+  );
+}
+
+function DjWaveform({ samples, detail = false }: { samples: number[]; detail?: boolean }) {
+  if (samples.length === 0) return <div className="dj-track-waveform-empty">No waveform received</div>;
+  const width = 900;
+  const height = detail ? 76 : 42;
+  const points = samples
+    .map((sample, index) => {
+      const x = samples.length === 1 ? 0 : (index / (samples.length - 1)) * width;
+      const y = height - (sample / 255) * (height - 2) - 1;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  return (
+    <svg className={`dj-track-waveform ${detail ? "detail" : "preview"}`} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-label={detail ? "Detailed waveform" : "Waveform overview"}>
+      <polyline points={points} />
+    </svg>
+  );
+}
+
+function formatTrackTime(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
+}
+
+function DjLinkTracksPanel() {
+  const { status } = useGate();
+  const tracks = status?.pro_dj_link_tracks ?? [];
+  return (
+    <section className="panel dj-link-tracks-panel">
+      <h2>Live rekordbox tracks</h2>
+      <p className="hint">
+        Resolved from the XDJ metadata server: track details, cues, loops, and analyzed waveforms.
+      </p>
+      {tracks.length === 0 ? (
+        <div className="dj-link-debug-empty">Load a rekordbox-analyzed track on either deck…</div>
+      ) : (
+        <div className="dj-track-grid">
+          {tracks.map((track) => (
+            <article className="dj-track-card" key={track.deck}>
+              <div className="dj-track-head">
+                <span className="dj-track-deck">DECK {track.deck}</span>
+                <div>
+                  <h3>{track.loading ? "Reading track…" : track.title || `Track ${track.rekordbox_id}`}</h3>
+                  <p>{track.artist || track.error || `${track.source_slot} · rekordbox ID ${track.rekordbox_id}`}</p>
+                </div>
+              </div>
+              {track.error ? (
+                <p className="warn">{track.error}</p>
+              ) : !track.loading && (
+                <>
+                  <div className="dj-track-facts">
+                    {track.album && <span>{track.album}</span>}
+                    {track.genre && <span>{track.genre}</span>}
+                    {track.key && <span>{track.key}</span>}
+                    {track.bpm > 0 && <span>{track.bpm.toFixed(2)} BPM</span>}
+                    {track.duration_seconds > 0 && <span>{formatTrackTime(track.duration_seconds)}</span>}
+                    {track.year > 0 && <span>{track.year}</span>}
+                    {track.bit_rate > 0 && <span>{track.bit_rate} kbps</span>}
+                    <span>{track.source_slot} on player {track.source_player}</span>
+                  </div>
+                  <DjWaveform samples={track.waveform_preview} />
+                  <DjWaveform samples={track.waveform_detail} detail />
+                  <div className="dj-track-cues">
+                    {track.cues.length === 0 ? <span className="hint">No cues returned</span> : track.cues.map((cue, index) => (
+                      <span className={`dj-track-cue ${cue.kind}`} style={cue.color ? { borderColor: cue.color } : undefined} key={`${cue.kind}-${cue.position_ms}-${index}`}>
+                        {cue.kind === "hot_cue" ? `HOT ${cue.hot_cue_number ?? ""}` : cue.kind.toUpperCase()}
+                        {" · "}{formatTrackTime(cue.position_ms / 1000)}
+                        {cue.loop_end_ms !== null && `–${formatTrackTime(cue.loop_end_ms / 1000)}`}
+                        {cue.comment && ` · ${cue.comment}`}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DjLinkDebugPanel() {
+  const { djLinkLog, clearDjLinkLog } = useGate();
+  const [showBeats, setShowBeats] = useState(false);
+  const streamRef = useRef<HTMLDivElement>(null);
+  const visible = showBeats ? djLinkLog : djLinkLog.filter((entry) => entry.category !== "beat");
+
+  useEffect(() => {
+    const stream = streamRef.current;
+    if (stream) stream.scrollTop = stream.scrollHeight;
+  }, [visible.length]);
+
+  return (
+    <section className="panel dj-link-debug-panel">
+      <div className="dj-link-debug-head">
+        <div>
+          <h2>DJ LINK live inspector</h2>
+          <p className="hint">
+            Structured packet data and the visual decisions Gate derives from it. Latest 400 entries
+            are retained in memory.
+          </p>
+        </div>
+        <div className="dj-link-debug-actions">
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={showBeats}
+              onChange={(event) => setShowBeats(event.target.checked)}
+            />
+            Show every beat
+          </label>
+          <button type="button" onClick={clearDjLinkLog}>Clear view</button>
+        </div>
+      </div>
+      <div className="dj-link-debug-stream" ref={streamRef}>
+        {visible.length === 0 ? (
+          <div className="dj-link-debug-empty">Waiting for DJ LINK packet changes…</div>
+        ) : (
+          visible.map((entry) => (
+            <details className={`dj-link-debug-entry cat-${entry.category}`} key={entry.sequence}>
+              <summary>
+                <span className="dj-link-debug-time">{(entry.elapsed_ms / 1000).toFixed(3)}s</span>
+                <span className="dj-link-debug-category">{entry.category}</span>
+                <span className="dj-link-debug-device">
+                  {entry.device > 0 ? `device ${entry.device}` : "link"}
+                </span>
+                <span>{entry.summary}</span>
+              </summary>
+              <dl>
+                {Object.entries(entry.fields).map(([name, value]) => (
+                  <div key={name}>
+                    <dt>{name}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
+function RhythmPanel({ config }: { config: AppConfig }) {
+  const { client, status } = useGate();
+  const rhythm = config.rhythm;
+  const commit = (patch: Partial<AppConfig["rhythm"]>) =>
+    client.setConfig({ ...config, rhythm: { ...rhythm, ...patch } });
+  const clock = status?.rhythm;
+
+  return (
+    <section className="panel">
+      <h2>Lighting clock</h2>
+      <p className="hint">
+        Timing is independent from audio energy. An external DJ clock can lock every layer while
+        each layer still gets level, bands, waveform, and spectrum from its selected audio source.
+      </p>
+      <label className="field-row">
+        <span>Timing source</span>
+        <select
+          value={rhythm.source}
+          onChange={(e) => commit({ source: e.target.value as AppConfig["rhythm"]["source"] })}
+        >
+          <option value="layer_audio">Each layer's audio detector</option>
+          <option value="midi_clock">MIDI Clock (global)</option>
+          <option value="pro_dj_link">Pioneer PRO DJ LINK (global)</option>
+        </select>
+      </label>
+      {rhythm.source === "midi_clock" && (
+        <>
+          <label className="field-row">
+            <span>MIDI input</span>
+            <select
+              value={rhythm.midi_port ?? ""}
+              onChange={(e) => commit({ midi_port: e.target.value || null })}
+            >
+              <option value="">Select a MIDI input…</option>
+              {rhythm.midi_port && !status?.midi_ports.includes(rhythm.midi_port) && (
+                <option value={rhythm.midi_port}>{rhythm.midi_port} (missing)</option>
+              )}
+              {(status?.midi_ports ?? []).map((port) => (
+                <option key={port} value={port}>{port}</option>
+              ))}
+            </select>
+          </label>
+        </>
+      )}
+      {rhythm.source === "pro_dj_link" && (
+        <>
+          <label className="field-row">
+            <span>Deck</span>
+            <select
+              value={rhythm.pro_dj_link_player}
+              onChange={(e) => commit({ pro_dj_link_player: Number(e.target.value) })}
+            >
+              <option value={0}>Auto — follow tempo master</option>
+              {rhythm.pro_dj_link_player > 0 &&
+                !status?.pro_dj_link_devices.some((d) => d.number === rhythm.pro_dj_link_player) && (
+                  <option value={rhythm.pro_dj_link_player}>
+                    Player {rhythm.pro_dj_link_player} (not detected)
+                  </option>
+                )}
+              {(status?.pro_dj_link_devices ?? []).map((deck) => (
+                <option key={deck.number} value={deck.number}>
+                  Player {deck.number} — {deck.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field-row">
+            <span>Metadata identity</span>
+            <select
+              value={rhythm.pro_dj_link_metadata_player}
+              onChange={(e) => commit({ pro_dj_link_metadata_player: Number(e.target.value) })}
+            >
+              {[3, 4, 5, 6].map((player) => (
+                <option key={player} value={player}>
+                  Player {player}{status?.pro_dj_link_devices.some((deck) => deck.number === player) ? " — IN USE" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          {(status?.pro_dj_link_devices ?? []).length > 0 && (
+            <p className="hint">
+              {(status?.pro_dj_link_devices ?? []).map((deck) => (
+                <span key={deck.number}>
+                  Deck {deck.number}: {deck.playing ? "playing" : "stopped"}
+                  {deck.tempo_master ? " · MASTER" : ""}
+                  {deck.cued ? " · CUE" : ""}
+                  {deck.on_air ? " · on air" : " · off air"}
+                  {deck.looping ? " · LOOP" : ""}
+                  {"  "}
+                </span>
+              ))}
+            </p>
+          )}
+          <p className="hint">
+            Gate passively listens on UDP 50001/50002 and uses the unused metadata identity above
+            only for read-only XDJ database queries; it never sends sync, transport, load, or master
+            commands, and refuses queries if that player number is detected. Auto follows the DJ LINK tempo master, including a mixer master,
+            for global timing. Deck handoffs sweep an additive ribbon across the Gate; cue, play,
+            loop, on-air, and inferred Hot Cue/seek changes fire localized additive effects. If Auto
+            cannot see full status, select the playing deck number.
+          </p>
+        </>
+      )}
+      {rhythm.source !== "layer_audio" && (
+        <>
+          <label className="slider-row">
+            <span>Latency offset</span>
+            <input
+              type="range"
+              min={-250}
+              max={250}
+              step={1}
+              value={rhythm.latency_ms}
+              onChange={(e) => commit({ latency_ms: Number(e.target.value) })}
+            />
+            <span className="slider-val">{rhythm.latency_ms.toFixed(0)} ms</span>
+          </label>
+          <p className="hint">Positive values delay the visual beat; negative values lead it.</p>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={rhythm.fallback_to_audio}
+              onChange={(e) => commit({ fallback_to_audio: e.target.checked })}
+            />
+            Fall back to audio if the external clock disappears
+            {rhythm.fallback_to_audio && (
+              <select
+                value={rhythm.fallback_audio_source}
+                onChange={(e) => commit({ fallback_audio_source: Number(e.target.value) })}
+              >
+                {config.audio.sources.map((source, i) => (
+                  <option key={i} value={i}>{source.id}</option>
+                ))}
+              </select>
+            )}
+          </label>
+        </>
+      )}
+      {clock && (
+        <div className="meters">
+          <span className={clock.active ? "ok" : "warn"}>
+            {clock.active ? (clock.using_fallback ? "AUDIO FALLBACK" : "LOCKED") : "WAITING"}
+          </span>
+          <span className="bpm">{clock.bpm > 0 ? `${clock.bpm.toFixed(1)} BPM` : "—"}</span>
+          <span className="hint">{clock.detail}</span>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -72,6 +370,14 @@ function UpdatesPanel({ config }: { config: AppConfig }) {
           onChange={(e) => commit({ auto_install: e.target.checked })}
         />
         Install automatically when found
+      </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={config.autostart}
+          onChange={(e) => client.setConfig({ ...config, autostart: e.target.checked })}
+        />
+        Launch at login (survives self-updates; venue power-cycle recovery)
       </label>
     </section>
   );
@@ -378,7 +684,7 @@ function AudioPanel({ config }: { config: AppConfig }) {
       <p className="hint">
         Up to 4 analyzed in parallel — e.g. main stage feed + a local mic. Channels lets one
         multichannel interface feed several sources (blank = mix all). Remote sources take
-        features from a browser client's mic; Video soundtrack follows the current Video-tab source.
+        features from a browser client's mic; Video soundtrack follows the current Media-tab source.
       </p>
       {sources.map((s, i) => {
         const st = status?.audio[i];
@@ -456,7 +762,13 @@ function AudioPanel({ config }: { config: AppConfig }) {
                 <Meter label="Bass" v={st.bass} />
                 <Meter label="Mid" v={st.mid} />
                 <Meter label="Treble" v={st.treble} />
-                <span className="bpm">{st.bpm > 0 ? `${st.bpm.toFixed(0)} BPM` : "—"}</span>
+                <span className="bpm">
+                  {st.bpm > 0 && st.bpm_confidence >= 0.35
+                    ? `${st.bpm.toFixed(0)} BPM`
+                    : st.bpm > 0
+                      ? "finding beat…"
+                      : "—"}
+                </span>
                 <span className={st.active ? "ok" : "warn"}>
                   {st.active ? "active" : st.detail || "inactive"}
                 </span>

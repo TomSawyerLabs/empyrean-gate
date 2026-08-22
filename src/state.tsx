@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { GateClient } from "./ws";
-import type { AppConfig, RuntimeStatus, ServerMsg } from "./types";
+import type { AppConfig, ProDjLinkDebugEntry, RuntimeStatus, ServerMsg } from "./types";
 
 interface Gate {
   client: GateClient;
@@ -26,6 +26,8 @@ interface Gate {
   dismissError: (i: number) => void;
   /** Timestamp (performance.now()) of the last beat per source index. */
   beatAt: React.RefObject<number[]>;
+  djLinkLog: ProDjLinkDebugEntry[];
+  clearDjLinkLog: () => void;
 }
 
 const GateContext = createContext<Gate | null>(null);
@@ -39,6 +41,7 @@ export function GateProvider({ children }: { children: ReactNode }) {
   const [savedPulse, setSavedPulse] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
   const beatAt = useRef<number[]>([0, 0, 0, 0]);
+  const [djLinkLog, setDjLinkLog] = useState<ProDjLinkDebugEntry[]>([]);
 
   useEffect(() => {
     const offMsg = client.onMessage((msg: ServerMsg) => {
@@ -50,12 +53,19 @@ export function GateProvider({ children }: { children: ReactNode }) {
             return msg.config;
           });
           setStatus(msg.status);
+          setDjLinkLog(msg.status.pro_dj_link_debug ?? []);
           break;
         case "status":
           setStatus(msg.status);
           break;
         case "beat":
           beatAt.current[msg.source] = performance.now();
+          break;
+        case "pro_dj_link_debug":
+          setDjLinkLog((entries) => {
+            if (entries.at(-1)?.sequence === msg.entry.sequence) return entries;
+            return [...entries.slice(-399), msg.entry];
+          });
           break;
         case "error":
           setErrors((e) => [...e.slice(-4), msg.message]);
@@ -83,6 +93,8 @@ export function GateProvider({ children }: { children: ReactNode }) {
     errors,
     dismissError: (i) => setErrors((e) => e.filter((_, j) => j !== i)),
     beatAt,
+    djLinkLog,
+    clearDjLinkLog: () => setDjLinkLog([]),
   };
   return <GateContext.Provider value={value}>{children}</GateContext.Provider>;
 }

@@ -24,6 +24,48 @@ type Listener = (msg: ServerMsg) => void;
 type FrameListener = (frame: PreviewFrame) => void;
 type StatusListener = (connected: boolean) => void;
 
+const DEV_BACKEND_KEY = "empyrean-dev-backend-port";
+const DEV_BACKEND_PORTS = Array.from({ length: 10 }, (_, index) => 9520 + index);
+
+function validPort(value: string | null): number | null {
+  if (!value || !/^\d+$/.test(value)) return null;
+  const port = Number(value);
+  return port >= 1 && port <= 65535 ? port : null;
+}
+
+async function backendIsAvailable(hostname: string, port: number): Promise<boolean> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 350);
+  try {
+    const response = await fetch(`http://${hostname}:${port}/handover/state`, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function resolveDevBackendPort(): Promise<number> {
+  const queryPort = validPort(new URLSearchParams(location.search).get("backend"));
+  if (queryPort !== null) return queryPort;
+
+  const remembered = validPort(localStorage.getItem(DEV_BACKEND_KEY));
+  if (remembered !== null && await backendIsAvailable(location.hostname, remembered)) {
+    return remembered;
+  }
+
+  const candidates = DEV_BACKEND_PORTS.filter((port) => port !== remembered);
+  const availability = await Promise.all(
+    candidates.map((port) => backendIsAvailable(location.hostname, port)),
+  );
+  const found = candidates.find((_port, index) => availability[index]);
+  return found ?? remembered ?? 9520;
+}
+
 async function resolveBase(): Promise<{ http: string; ws: string }> {
   // Inside the Tauri webview, ask the shell which port the backend bound.
   const w = window as unknown as { __TAURI_INTERNALS__?: unknown };
@@ -32,10 +74,11 @@ async function resolveBase(): Promise<{ http: string; ws: string }> {
     const info = (await invoke("backend_info")) as { wsPort: number };
     return { http: `http://127.0.0.1:${info.wsPort}`, ws: `ws://127.0.0.1:${info.wsPort}/ws` };
   }
-  // Vite dev server (Empyrean's project-unique dev port — see vite.config.ts):
-  // the backend runs on its default port on the same host.
-  if (location.port === "28149") {
-    return { http: `http://${location.hostname}:9520`, ws: `ws://${location.hostname}:9520/ws` };
+  // Independent Vite worktrees may each use a different backend. An explicit
+  // ?backend=9521 wins; otherwise discover a live local Gate and remember it.
+  if (import.meta.env.DEV) {
+    const port = await resolveDevBackendPort();
+    return { http: `http://${location.hostname}:${port}`, ws: `ws://${location.hostname}:${port}/ws` };
   }
   // Served by the backend itself.
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -81,10 +124,13 @@ export class GateClient {
   constructor() {
     this.clientId = localStorage.getItem("empyrean-client-id") ?? this.newClientId();
     // Arriving via a scanned connect QR: stash the join token, clean the URL.
-    const join = new URLSearchParams(location.search).get("join");
+    const params = new URLSearchParams(location.search);
+    const join = params.get("join");
     if (join) {
       localStorage.setItem("empyrean-join-token", join);
-      history.replaceState(null, "", location.pathname + location.hash);
+      params.delete("join");
+      const query = params.size > 0 ? `?${params.toString()}` : "";
+      history.replaceState(null, "", location.pathname + query + location.hash);
     }
   }
 
@@ -112,6 +158,10 @@ export class GateClient {
     this.ws = ws;
 
     ws.onopen = () => {
+      if (import.meta.env.DEV) {
+        const port = validPort(new URL(base.http).port);
+        if (port !== null) localStorage.setItem(DEV_BACKEND_KEY, String(port));
+      }
       this.retryMs = 500;
       void reloadIfStale();
       this.send({
@@ -244,6 +294,9 @@ export class GateClient {
   setSacnEnabled(enabled: boolean) {
     this.send({ type: "set_sacn_enabled", enabled });
   }
+  authorizeFirewall() {
+    this.send({ type: "authorize_firewall" });
+  }
   addLayer(layer: LayerCfg) {
     this.send({ type: "add_layer", layer });
   }
@@ -265,6 +318,8 @@ export class GateClient {
         intensity: 1,
         size: 1,
         hue: -1,
+        saturation: 0.85,
+        brightness: 1,
         duration: 0,
         ...effect,
       },

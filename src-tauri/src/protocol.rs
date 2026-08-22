@@ -78,6 +78,10 @@ pub enum ClientMsg {
         /// Hue in turns; negative = white.
         #[serde(default)]
         hue: f32,
+        #[serde(default = "default_saturation")]
+        saturation: f32,
+        #[serde(default = "default_brightness")]
+        brightness: f32,
         /// Dab radius as a fraction of the array radius.
         #[serde(default = "default_dab_size")]
         size: f32,
@@ -175,6 +179,8 @@ pub enum ClientMsg {
         param: String,
         value: f32,
     },
+    /// Create the Windows Firewall port rule (one UAC prompt on the Gate machine).
+    AuthorizeFirewall,
     /// Ask the updater to poll GitHub Releases now.
     CheckUpdate,
     /// Download + hot-swap to the staged update (two-phase takeover).
@@ -201,6 +207,14 @@ fn default_intensity() -> f32 {
     1.0
 }
 
+fn default_saturation() -> f32 {
+    0.85
+}
+
+fn default_brightness() -> f32 {
+    1.0
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMsg {
@@ -214,6 +228,9 @@ pub enum ServerMsg {
     Beat {
         source: u32,
         bpm: f32,
+    },
+    ProDjLinkDebug {
+        entry: ProDjLinkDebugEntry,
     },
     PreviewMeta {
         spokes: u32,
@@ -260,6 +277,18 @@ pub struct HandoverGrant {
     pub config: AppConfig,
     /// Per-layer animation phases, so patterns continue instead of jumping.
     pub layer_phases: Vec<f64>,
+    /// The sACN sequence number this instance last put on the wire. Because the
+    /// CID is persistent, the receiver carries its per-source sequence state
+    /// across the handover — a successor restarting at 0 would land inside the
+    /// window E1.31 discards as an out-of-order repeat (a delta in [-20, 0]) and
+    /// freeze the rig on its last look for up to ~20 frames.
+    ///
+    /// `Option` + `default` is load-bearing: during a real upgrade the grant is
+    /// produced by the OLD binary, which may predate this field. `None` means
+    /// "not reported" — distinct from a genuine 0, and the successor then starts
+    /// fresh rather than continuing from a number it invented.
+    #[serde(default)]
+    pub sacn_sequence: Option<u8>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -289,7 +318,85 @@ pub struct AudioSourceStatus {
     pub mid: f32,
     pub treble: f32,
     pub bpm: f32,
+    /// 0..1 confidence in `bpm`; UIs hide or dim the number when low.
+    pub bpm_confidence: f32,
     pub beat_phase: f32,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RhythmStatus {
+    /// True when the configured clock is driving the lights. For MIDI this means
+    /// recent clock pulses, a valid tempo, and no explicit transport Stop.
+    pub active: bool,
+    pub using_fallback: bool,
+    pub source: String,
+    pub detail: String,
+    pub bpm: f32,
+    pub beat_phase: f32,
+    pub running: bool,
+    pub age_ms: f32,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkDeviceInfo {
+    pub number: u8,
+    pub name: String,
+    pub tempo_master: bool,
+    pub playing: bool,
+    pub cued: bool,
+    pub on_air: bool,
+    pub looping: bool,
+    pub beat_number: u64,
+}
+
+/// One structured line in the live PRO DJ LINK inspector. Values remain strings
+/// so packet sentinels, hex flags, and human labels can coexist without lossy JSON.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkDebugEntry {
+    pub sequence: u64,
+    pub elapsed_ms: u64,
+    pub category: String,
+    pub device: u8,
+    pub summary: String,
+    pub fields: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkCueInfo {
+    pub kind: String,
+    pub hot_cue_number: Option<u8>,
+    pub position_ms: u32,
+    pub loop_end_ms: Option<u32>,
+    pub comment: String,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkTrackInfo {
+    pub deck: u8,
+    pub source_player: u8,
+    pub source_slot: String,
+    pub rekordbox_id: u32,
+    pub loading: bool,
+    pub error: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub genre: String,
+    pub key: String,
+    pub label: String,
+    pub comment: String,
+    pub duration_seconds: u32,
+    pub bpm: f64,
+    pub rating: u8,
+    pub year: u16,
+    pub bit_rate: u32,
+    pub artwork_id: u32,
+    pub cues: Vec<ProDjLinkCueInfo>,
+    /// Normalized 0..255 heights, compact enough for the 2 Hz status stream.
+    pub waveform_preview: Vec<u8>,
+    /// Full waveform downsampled to at most 1200 normalized height samples.
+    pub waveform_detail: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -306,6 +413,20 @@ pub struct VideoSourceStatus {
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
+pub struct ScheduledShowStatus {
+    pub enabled: bool,
+    pub playlist_id: String,
+    pub playlist_name: String,
+    pub scene_name: String,
+    /// Zero-based active entry.
+    pub index: u32,
+    pub total: u32,
+    pub remaining_secs: f32,
+    /// 0 outside a transition; otherwise 0..1 as the incoming scene arrives.
+    pub transition_progress: f32,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeStatus {
     /// Set when Vulkan init failed — the UI shows this prominently. No fallbacks.
     pub gpu_error: Option<String>,
@@ -317,12 +438,21 @@ pub struct RuntimeStatus {
     /// sACN packets actually sent per second — the "is it transmitting" truth.
     /// (Last full one-second bucket.)
     pub sacn_pps: u32,
+    /// Output-path problem the operator must see (interface bind failed, socket
+    /// unavailable). Packets may still flow — via the WRONG network interface.
+    pub sacn_error: Option<String>,
     /// Frames rendered in each of the last ~30 one-second buckets (oldest first).
     pub fps_history: Vec<u32>,
     /// sACN packets sent in each of the last ~30 one-second buckets (oldest first).
     pub pps_history: Vec<u32>,
     pub clients: u32,
     pub audio: Vec<AudioSourceStatus>,
+    pub rhythm: RhythmStatus,
+    /// Hot-plug refreshed MIDI input names.
+    pub midi_ports: Vec<String>,
+    pub pro_dj_link_devices: Vec<ProDjLinkDeviceInfo>,
+    pub pro_dj_link_debug: Vec<ProDjLinkDebugEntry>,
+    pub pro_dj_link_tracks: Vec<ProDjLinkTrackInfo>,
     /// Available local capture devices, for the settings UI dropdowns.
     pub input_devices: Vec<DeviceInfo>,
     /// Output devices (selectable as loopback beat sources).
@@ -333,6 +463,12 @@ pub struct RuntimeStatus {
     pub default_output_channels: u16,
     /// Local IPv4 interfaces as "name — ip", for the sACN interface picker.
     pub interfaces: Vec<String>,
+    /// Windows only: the firewall allow rule for our port is missing, so LAN
+    /// clients may be blocked (and every new binary re-triggers the security
+    /// prompt). The UI offers one-click authorization.
+    pub firewall_pending: bool,
+    /// Cache/download state per video playlist entry.
+    pub video_cache: Vec<crate::videocache::VideoCacheStatus>,
     /// Known + connected client devices.
     pub client_list: Vec<ClientInfo>,
     pub master_brightness: f32,
@@ -350,6 +486,7 @@ pub struct RuntimeStatus {
     /// Why the active patch is NOT rendering (compile/pipeline failure); the
     /// engine falls back to the layer stack when this is set.
     pub patch_error: Option<String>,
+    pub show: ScheduledShowStatus,
 }
 
 #[cfg(test)]
@@ -372,6 +509,22 @@ mod tests {
             message,
             ClientMsg::AudioFrame {
                 stream: BrowserAudioStream::Microphone,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn legacy_paint_defaults_to_the_original_color_profile() {
+        let message: ClientMsg = serde_json::from_str(
+            r#"{"type":"paint","pen":"glow","points":[],"hue":0.5,"size":0.12,"intensity":1.0}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            message,
+            ClientMsg::Paint {
+                saturation: 0.85,
+                brightness: 1.0,
                 ..
             }
         ));

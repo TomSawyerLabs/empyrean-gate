@@ -70,6 +70,9 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         (cfg.server.bind.clone(), cfg.server.port)
     };
     let media = MediaResolver::new().expect("media resolver HTTP client");
+    // Background playlist upkeep: watched-folder scans + URL downloads to the
+    // local media cache, so playback survives venue internet.
+    tokio::spawn(crate::videocache::run(state.clone(), media.clone()));
     let ctx = Ctx { state: state.clone(), remote, media };
     let app = Router::new()
         .route("/ws", get(ws_upgrade))
@@ -80,6 +83,7 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .route("/media/stream/{id}", get(stream_media))
         .route("/patch/registry", get(patch_registry))
         .route("/patch/presets", get(patch_presets))
+        .route("/media/file/{id}", get(serve_media_file))
         .fallback(get(serve_asset))
         .layer(
             CorsLayer::new()
@@ -187,6 +191,107 @@ async fn stream_media(
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
+/// Serve a playlist entry's media from disk: the cached download for URL entries
+/// or the file itself for local ones. Single-range requests are honored — the
+/// browser <video> element requires them for seeking.
+async fn serve_media_file(
+    State(ctx): State<Ctx>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    serve_media_file_ranged(ctx, id, range).await
+}
+
+async fn serve_media_file_ranged_entry(
+    ctx: &Ctx,
+    id: &str,
+) -> Option<(std::path::PathBuf, String)> {
+    if let Some(hit) = crate::videocache::cached_file(id) {
+        return Some(hit);
+    }
+    // Local-file entries stream straight from their configured path.
+    let cfg = ctx.state.config.read();
+    let entry = cfg.video.playlist.iter().find(|e| e.id == id)?;
+    if entry.kind != crate::config::PlaylistKind::LocalFile {
+        return None;
+    }
+    let path = std::path::PathBuf::from(&entry.source);
+    path.is_file().then(|| {
+        let content_type = match path.extension().and_then(|e| e.to_str()) {
+            Some("webm") => "video/webm",
+            Some("ogv") => "video/ogg",
+            Some("mov") => "video/quicktime",
+            _ => "video/mp4",
+        };
+        (path, content_type.to_string())
+    })
+}
+
+async fn serve_media_file_ranged(ctx: Ctx, id: String, range: Option<String>) -> Response {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let Some((path, content_type)) = serve_media_file_ranged_entry(&ctx, &id).await else {
+        return (StatusCode::NOT_FOUND, "not cached or not a local file").into_response();
+    };
+    let Ok(mut file) = tokio::fs::File::open(&path).await else {
+        return (StatusCode::NOT_FOUND, "media file unreadable").into_response();
+    };
+    let total = match file.metadata().await {
+        Ok(m) => m.len(),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "stat failed").into_response(),
+    };
+
+    let (start, end) = match range.as_deref().and_then(|r| parse_range(r, total)) {
+        Some(r) => r,
+        None if range.is_some() => {
+            return (StatusCode::RANGE_NOT_SATISFIABLE, "bad range").into_response()
+        }
+        None => (0, total.saturating_sub(1)),
+    };
+    let len = end - start + 1;
+    if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "seek failed").into_response();
+    }
+    let mut data = vec![0u8; len as usize];
+    if file.read_exact(&mut data).await.is_err() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "read failed").into_response();
+    }
+
+    let mut builder = Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header(header::CONTENT_LENGTH, len);
+    if range.is_some() {
+        builder = builder
+            .status(StatusCode::PARTIAL_CONTENT)
+            .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{total}"));
+    }
+    builder
+        .body(Body::from(data))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+fn parse_range(range: &str, total: u64) -> Option<(u64, u64)> {
+    let spec = range.strip_prefix("bytes=")?.split(',').next()?.trim();
+    let (start_s, end_s) = spec.split_once('-')?;
+    if start_s.is_empty() {
+        // Suffix range: last N bytes.
+        let n: u64 = end_s.parse().ok()?;
+        let start = total.saturating_sub(n);
+        return (total > 0).then_some((start, total - 1));
+    }
+    let start: u64 = start_s.parse().ok()?;
+    let end = if end_s.is_empty() {
+        total.checked_sub(1)?
+    } else {
+        end_s.parse::<u64>().ok()?.min(total.saturating_sub(1))
+    };
+    (start <= end && start < total).then_some((start, end))
+}
+
 // ---------------------------------------------------------------------------
 // Static assets, QR, handover
 // ---------------------------------------------------------------------------
@@ -257,6 +362,7 @@ async fn handover_state(
     let grant = HandoverGrant {
         config: ctx.state.config.read().clone(),
         layer_phases: ctx.state.layer_phases.lock().clone(),
+        sacn_sequence: Some(ctx.state.sacn_sequence.load(Ordering::Relaxed)),
     };
     axum::Json(grant).into_response()
 }
@@ -289,6 +395,9 @@ async fn handover(
     let grant = HandoverGrant {
         config: state.config.read().clone(),
         layer_phases: state.layer_phases.lock().clone(),
+        // Read after the quiesce ack above, so this is provably the last sequence
+        // number this instance will ever send.
+        sacn_sequence: Some(state.sacn_sequence.load(Ordering::Relaxed)),
     };
 
     // Exit from a plain thread, not the tokio runtime: setting `shutdown` tears the
@@ -860,6 +969,26 @@ async fn handle_msg(
                 value: clamped,
             });
         }
+        ClientMsg::AuthorizeFirewall => {
+            // Elevation blocks on the UAC dialog; run it off the async path.
+            let state2 = state.clone();
+            tokio::task::spawn_blocking(move || {
+                let port = state2.config.read().server.port;
+                match crate::firewall::authorize(port) {
+                    Ok(()) => {
+                        state2.status.lock().firewall_pending = false;
+                        log::info!("firewall rule created for port {port}");
+                    }
+                    Err(e) => {
+                        log::warn!("firewall authorization failed: {e:#}");
+                        let _ = state2.events.send(ServerMsg::Error {
+                            message: format!("Firewall authorization failed: {e}"),
+                        });
+                    }
+                }
+                state2.broadcast_state();
+            });
+        }
         ClientMsg::CheckUpdate => {
             state.update_check_requested.store(true, Ordering::SeqCst);
         }
@@ -873,10 +1002,12 @@ async fn handle_msg(
             pen,
             points,
             hue,
+            saturation,
+            brightness,
             size,
             intensity,
         } => {
-            state.paint(pen, &points, hue, size, intensity);
+            state.paint(pen, &points, hue, saturation, brightness, size, intensity);
         }
         ClientMsg::SubscribePreview { fps, decimate } => {
             *preview = Some(PreviewSub {

@@ -24,6 +24,14 @@ struct Globals {
     video_width: u32,
     video_height: u32,
     video_active: u32,
+    transition_split: u32,
+    transition_active: u32,
+    transition_progress: f32,
+    _pad_transition: f32,
+    dj_link_visual_active: u32,
+    dj_fade_position: f32,
+    dj_fade_activity: f32,
+    dj_looping: f32,
 }
 
 struct AudioU {
@@ -34,7 +42,7 @@ struct AudioU {
     onset: f32,
     beat_phase: f32,
     bpm: f32,
-    _pad: f32,
+    bpm_conf: f32, // 0..1 confidence in bpm; gate beat-driven motion on it
     // Smoothed (~0.25 s) twins: bass / bass_att > 1 means "hitting right now".
     bass_att: f32,
     mid_att: f32,
@@ -74,6 +82,10 @@ struct Effect {
     radius: f32,
     intensity: f32,
     hue: f32,
+    saturation: f32,
+    brightness: f32,
+    _pad0: f32,
+    _pad1: f32,
 }
 
 struct Dab {
@@ -85,6 +97,10 @@ struct Dab {
     size: f32,
     intensity: f32,
     dir: f32,     // stroke motion direction, for directional pens
+    saturation: f32,
+    brightness: f32,
+    _pad0: f32,
+    _pad1: f32,
 }
 
 @group(0) @binding(0) var<uniform> G: Globals;
@@ -275,6 +291,22 @@ struct Ctx {
     pos: vec2f,   // cartesian, outer edge at |pos| = 1
 }
 
+/// One meteor epoch. Callers also render the previous epoch's fading tail so an
+/// epoch boundary never replaces the whole random field in a single frame.
+fn meteor_event(L: Layer, ctx: Ctx, epoch: u32, progress: f32) -> vec4f {
+    let alive = step(
+        1.0 - (0.1 + L.param_a * 0.5),
+        hash01(ctx.spoke * 31337u + epoch * 269u)
+    );
+    let dir_r = select(ctx.r01, 1.0 - ctx.r01, L.param_c > 0.5);
+    let head = progress * 1.3;
+    let d = head - dir_r;
+    let tail = 0.08 + L.param_b * 0.15;
+    let v = alive * exp(-d / tail) * step(0.0, d) * step(dir_r, head);
+    let hue = L.hue + hash01(ctx.spoke * 911u + epoch) * L.hue_range;
+    return vec4f(hsv2rgb(hue, L.saturation, v * L.brightness), v);
+}
+
 // ---------------------------------------------------------------------------
 // Layers. Each returns premultiplied-ish (rgb, alpha) to be blended.
 // ---------------------------------------------------------------------------
@@ -376,13 +408,18 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
         // Sparkle — hash twinkles; density rides the treble
         case 8u: {
             let idx = ctx.spoke * G.pixels + ctx.i;
-            let cell = u32(L.phase * (4.0 + L.param_b * 20.0));
-            let rnd = hash01(idx * 2654435761u + cell * 40503u);
+            let clock = max(L.phase * (4.0 + L.param_b * 20.0), 0.0);
+            let cell = u32(clock);
+            let f = fract(clock);
+            let rnd0 = hash01(idx * 2654435761u + cell * 40503u);
+            let rnd1 = hash01(idx * 2654435761u + (cell + 1u) * 40503u);
             let density = L.param_a * (0.3 + aud * A.treble * 1.5);
-            let lit = step(1.0 - density * 0.2, rnd);
-            let tw = fract(L.phase * (4.0 + L.param_b * 20.0));
-            let v = lit * (1.0 - tw) * (1.0 - tw);
-            let hue = L.hue + rnd * L.hue_range;
+            let lit0 = step(1.0 - density * 0.2, rnd0);
+            let lit1 = step(1.0 - density * 0.2, rnd1);
+            let v0 = lit0 * (1.0 - f) * (1.0 - f);
+            let v1 = lit1 * f * f;
+            let v = max(v0, v1);
+            let hue = L.hue + mix(rnd0, rnd1, f) * L.hue_range;
             return vec4f(hsv2rgb(hue, L.saturation, v * L.brightness), v);
         }
         // BeatRings — a ring expands outward (or inward) on every beat
@@ -462,17 +499,15 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
         case 15u: {
             let rate = 0.15 + L.param_b * 1.2;
             let h0 = hash01(ctx.spoke * 4099u);
-            let t = L.phase * rate + h0 * 7.0;
+            let t = max(L.phase * rate + h0 * 7.0, 0.0);
             let epoch = u32(t);
             let t_ep = fract(t);
-            let alive = step(1.0 - (0.1 + L.param_a * 0.5), hash01(ctx.spoke * 31337u + epoch * 269u));
-            let dir_r = select(ctx.r01, 1.0 - ctx.r01, L.param_c > 0.5); // inward / outward
-            let head = t_ep * 1.3;
-            let d = head - dir_r;
-            let tail = 0.08 + L.param_b * 0.15;
-            let v = alive * exp(-d / tail) * step(0.0, d) * step(dir_r, head);
-            let hue = L.hue + hash01(ctx.spoke * 911u + epoch) * L.hue_range;
-            return vec4f(hsv2rgb(hue, L.saturation, v * L.brightness), v);
+            let current = meteor_event(L, ctx, epoch, t_ep);
+            var previous = vec4f(0.0);
+            if epoch > 0u {
+                previous = meteor_event(L, ctx, epoch - 1u, t_ep + 1.0);
+            }
+            return vec4f(current.rgb + previous.rgb, clamp(current.a + previous.a, 0.0, 1.0));
         }
         // Warp — starfield streaming outward with streaks
         case 16u: {
@@ -482,11 +517,13 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
             let flow = u + L.phase * spd; // r01 grows inward, so +phase streams outward
             let cell = u32(flow);
             let f = fract(flow);
-            let star = step(1.0 - (0.15 + L.param_a * 0.2), hash01(cell * 6151u + ctx.spoke * 389u));
-            let streak = (1.0 - f) * (1.0 - f);
+            let threshold = 1.0 - (0.15 + L.param_a * 0.2);
+            let star0 = step(threshold, hash01(cell * 6151u + ctx.spoke * 389u));
+            let star1 = step(threshold, hash01((cell + 1u) * 6151u + ctx.spoke * 389u));
+            let streak = max(star0 * (1.0 - f) * (1.0 - f), star1 * f * f);
             // Stars brighten toward the rim (perspective).
             let persp = 0.35 + (1.0 - ctx.r01) * 0.65;
-            let v = star * streak * persp;
+            let v = streak * persp;
             let hue = L.hue + hash01(cell * 127u) * L.hue_range;
             return vec4f(hsv2rgb(hue, L.saturation * 0.6, v * L.brightness), v);
         }
@@ -584,7 +621,7 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
     if E.hue < 0.0 {
         col = vec3f(1.0);
     } else {
-        col = hsv2rgb(E.hue, 0.85, 1.0);
+        col = hsv2rgb(E.hue, E.saturation, E.brightness);
     }
 
     switch E.kind {
@@ -634,7 +671,7 @@ fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
     if D.hue < 0.0 {
         col = vec3f(1.0);
     } else {
-        col = hsv2rgb(D.hue, 0.85, 1.0);
+        col = hsv2rgb(D.hue, D.saturation, D.brightness);
     }
 
     switch D.kind {
@@ -732,10 +769,55 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     ctx.pos = rn * vec2f(cos(theta), sin(theta));
 
     var acc = vec3f(0.0);
-    for (var l = 0u; l < G.layer_count; l++) {
-        let L = LAYERS[l];
-        let c = layer_color(L, ctx);
-        acc = apply_blend(acc, c, L.opacity, L.blend);
+    if G.transition_active != 0u {
+        var outgoing = vec3f(0.0);
+        var incoming = vec3f(0.0);
+        for (var l = 0u; l < G.layer_count; l++) {
+            let L = LAYERS[l];
+            let c = layer_color(L, ctx);
+            if l < G.transition_split {
+                outgoing = apply_blend(outgoing, c, L.opacity, L.blend);
+            } else {
+                incoming = apply_blend(incoming, c, L.opacity, L.blend);
+            }
+        }
+        acc = mix(outgoing, incoming, clamp(G.transition_progress, 0.0, 1.0));
+    } else {
+        for (var l = 0u; l < G.layer_count; l++) {
+            let L = LAYERS[l];
+            let c = layer_color(L, ctx);
+            acc = apply_blend(acc, c, L.opacity, L.blend);
+        }
+    }
+
+    if G.dj_link_visual_active != 0u {
+        // Master-clock geometry remains expressive even when the DJ is
+        // monitoring entirely in headphones and no audio energy reaches Gate.
+        // A four-lobed fan snaps outward on each beat and slowly rotates.
+        let master_hit = exp(-AUDIO[0].beat_phase * 11.0);
+        let master_fan = pow(max(0.0, cos(ctx.theta * 4.0 - G.time * 0.32)), 10.0);
+        let master_ring = 0.45 + 0.55 * cos(TAU * (ctx.rn * 1.35 - AUDIO[0].beat_phase));
+        let master_col = hsv2rgb(fract(0.52 + G.time * 0.006 + ctx.rn * 0.08), 0.78, 1.0);
+        acc += master_col * master_hit * master_fan * max(master_ring, 0.0) * 0.26;
+
+        // A deck handoff is an additive ribbon travelling across the Gate. It
+        // deliberately never masks or scales the composition underneath it.
+        if G.dj_fade_activity > 0.005 {
+            let fade_y = mix(-0.92, 0.92, clamp(G.dj_fade_position, 0.0, 1.0));
+            let width = 0.10 + 0.10 * G.dj_fade_activity;
+            let ribbon = exp(-pow(ctx.pos.y - fade_y, 2.0) / (width * width));
+            let shimmer = 0.65 + 0.35 * sin(TAU * (ctx.rn * 1.8 - AUDIO[0].beat_phase));
+            let ribbon_col = hsv2rgb(mix(0.58, 0.08, G.dj_fade_position), 0.82, 1.0);
+            acc += ribbon_col * ribbon * shimmer * G.dj_fade_activity * 0.75;
+        }
+
+        // Loops add concentric, beat-locked bands. Loop entry, wrap, and exit
+        // also fire stronger transient effects in the link receiver.
+        if G.dj_looping > 0.5 {
+            let loop_wave = 0.5 + 0.5 * cos(TAU * (AUDIO[0].beat_phase - ctx.rn * 1.5));
+            let loop_col = hsv2rgb(0.78, 0.72, 1.0);
+            acc += loop_col * loop_wave * 0.24;
+        }
     }
 
     for (var e = 0u; e < G.effect_count; e++) {

@@ -43,26 +43,33 @@ live meters.
   stacked with blend modes, each bound to an audio source. Effects (burst / strobe /
   swoosh / collapse) fire from keyboard (1–4), clicks/taps on the preview, or remote
   clients.
-- **Five UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Video
-  (URL/file intake), Patch (node-graph editor), Control (touch-sized effect pads +
-  master/layer faders), and Settings. In the desktop app,
-  "New window" pops the current tab out into its own window. Old `/#view` and `/#draw`
-  links redirect to Live.
+- **Six UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Media
+  (image/video intake), Patch (node-graph editor), Archive (recorded-show replay),
+  Control (touch-sized effect pads + master/layer faders), and Settings. In the
+  desktop app, "New window" pops the current tab out into its own window. Old
+  `/#view` and `/#draw` links redirect to Live.
 - **Patches (early)**: a node-graph alternative to the layer stack — wire
   generators, transforms, blends, and inputs (audio features, beats, LFOs,
   envelopes, IMU) into a typed dataflow whose sink is the array. Graphs compile
   to a single WGSL dispatch; knob tweaks and scalar wires never recompile.
   Patches save as JSON files under the config dir and activate live (the layer
-  stack renders when no patch is active). Editing works on the Gate machine
-  only; remote clients get a read-only view. Slated to replace the layer stack
-  once all pattern kinds are ported — see `plans/node-graph.md`.
+  stack renders when no patch is active); six built-in presets seed the palette.
+  Editing works on the Gate machine only; remote clients get a read-only view.
+  Slated to replace the layer stack once all pattern kinds are ported — see
+  `plans/node-graph.md`.
+- **Archived-show replay**: open individual Uprising `.eg.data` RGB recordings or
+  index an entire `Uprising-Data` checkout. Playback streams one 64×378 frame at a
+  time from disk, supports seeking, looping, and variable playback speed, and keeps
+  recent filesystem references without copying the recordings. Archive is available
+  in production desktop, headless web, and PWA builds.
 - **Live drawing**: paint on the array from any client with Glow / Ripple / Sparkle
   pens (color swatches + size). Strokes stream as polar dabs over WS and render on the
   GPU with ~2 s trails; multiple people can draw at once.
 - **PWA**: open the web UI on an iPad/phone, "Add to Home Screen", and it runs
   standalone fullscreen — a touch control surface for the floor. Manifest shortcuts
   jump straight to Draw or Control.
-- **Video intake**: paste a direct MP4/WebM URL or a publisher page with standard
+- **Video intake**: paste a public Instagram post/Reel URL, a direct MP4/WebM URL,
+  or a publisher page with standard
   `og:video` / HTML video metadata, or choose a file on the iPad. The browser uses
   its native hardware decoder and sends a bounded 64–128 px RGBA texture at 10–24
   fps; the backend retains only the latest frame, so congestion drops frames instead
@@ -72,13 +79,30 @@ live meters.
   configured live Gate input; soundtrack analysis sends only compact features and
   can stay silent on the control device. If current `yt-dlp` plus a supported
   JavaScript runtime is installed on the Gate machine, provider pages such as public
-  YouTube videos get an additional best-effort resolver. DRM/login-gated sources
-  remain unsupported.
+  YouTube and Instagram videos get an additional best-effort resolver.
+  DRM/login-gated sources remain unsupported.
 - **Autopilot**: a slow mean-reverting random walk drifts layer parameters around
   wherever the sliders are set (per-layer "Walk" amount = wander radius), so an
   unattended show evolves for hours without repeating.
+- **Set-and-forget shows**: saved playlists embed complete scene snapshots with a
+  dwell time and smooth crossfade per cue. The backend advances them without an
+  open browser, loops indefinitely when requested, persists the active cue across
+  restarts, and exposes skip/hold controls plus a live countdown. The built-in
+  all-night journey rotates through nine restrained compositions instead of
+  leaving one look on the installation for hours.
 - **Audio loopback**: pick a system *output* device as a source (WASAPI loopback) —
   music played on the show machine drives the beat with no cabling.
+- **External lighting clock**: timing and audio energy are separate. By default each
+  layer follows its selected audio detector, preserving the original behavior. A
+  MIDI Timing Clock input can instead lock every layer to one DJ/mixer/bridge clock
+  while level, bands, waveform, and spectrum still come from each layer's selected
+  audio source. MIDI Start/Continue/Stop and Song Position are understood; input
+  hot-plug, a ±250 ms visual latency offset, and an optional audio fallback are
+  built in. The selected port is exact and is never silently substituted. Pioneer/
+  AlphaTheta decks can also drive the clock directly over PRO DJ LINK: Gate is a
+  passive UDP listener (never a virtual deck and never a sync-command sender),
+  follows the reported tempo master or an explicitly selected player, and retains
+  audio fallback through a deck/network outage.
 - **Audio hardware can come and go.** A missing or unplugged device never crashes or
   degrades the show: the source goes quiet (visuals decay calmly), reports "waiting
   for device", and is retried every 2 s until *that* device returns — a selected
@@ -90,11 +114,23 @@ live meters.
   ids and friendly names; Settings → Clients lets you rename, revoke (kicks live,
   blocks rejoin), and optionally require the join token so only QR-scanned devices
   can connect (rotate the token to lock everyone new out).
+- **Show-machine hardening**: the backend blocks system sleep while running (and
+  display sleep while output is enabled — display sleep can take HDMI/DP
+  display-audio loopback sources with it); config saves are crash-safe (temp +
+  fsync + `.bak` fallback, protecting the persistent sACN CID from a power cut
+  mid-save); a one-click banner authorizes a port-scoped Windows Firewall rule
+  and pins Windows Update restarts to 9am–3pm, away from show hours (one UAC
+  prompt ever — survives self-update binary swaps); and Settings →
+  Updates has a "Launch at login" toggle that re-registers itself across updates,
+  so a venue power cycle brings the show back without a keyboard.
 - **Seamless takeover**: start a new backend while one is running and it warms its
-  GPU first, asks the old instance to stop and hand over its running state (config +
-  layer animation phases), then continues the output — the structure sees a sub-second
-  hold, no blackout, and patterns don't jump. Deploying a new build mid-show is just
-  "start the new binary".
+  GPU first, asks the old instance to stop and hand over its running state (config,
+  layer animation phases, and the sACN sequence number), then continues the output —
+  the structure sees a sub-second hold, no blackout, and patterns don't jump.
+  Continuing the sequence numbering matters because the CID is shared: a successor
+  restarting at zero would land in the window receivers discard as out-of-order and
+  freeze the rig on its last look. Deploying a new build mid-show is just "start the
+  new binary".
 - **sACN**: pick the egress interface explicitly (multi-homed machines otherwise send
   multicast out the default route — invisible on the lighting NIC), sync sACN to
   render fps or fix a rate, and optionally enable E1.31 universe synchronization
@@ -116,6 +152,7 @@ src/                React UI (preview + settings), WebGL2 preview, sensors
 src-tauri/src/
   engine/           wgpu Vulkan engine + WGSL layer shader (hot-reloads in dev)
   audio/            cpal capture (per-source channel select) + FFT features + beat tracker
+  rhythm.rs         external musical clocks (MIDI Clock first; deck/link adapters next)
   sacn.rs           allocation-free E1.31 sender (prebuilt per-universe packets)
   server.rs         axum HTTP + WS (serves UI, speaks the protocol)
   media.rs          guarded URL resolver + ranged same-origin media proxy
@@ -150,9 +187,12 @@ Useful during pattern development:
   `http://localhost:9520` (or from a phone on the LAN).
 - `bun run demo:uprising` — optional convenience: use authenticated GitHub access to
   fetch the small **Warm Windstorm** clip referenced by the saved 2024 show state. It
-  lands in ignored `demo-data/uprising/`. While Vite is running, open `/#replay` to use
-  the development-only frame fixture viewer; it is omitted from production navigation
-  and builds. Other testers can choose a clip from their own `Uprising-Data` checkout.
+  lands in the shared per-user cache at
+  `${XDG_DATA_HOME:-~/.local/share}/empyrean-gate/uprising/`, so every Git worktree sees
+  the same archive. While Vite is running, that cache appears automatically in the
+  production-grade **Archive** tab; production builds can always open files or index
+  an `Uprising-Data` folder directly. Override the cache location with
+  `EMPYREAN_UPRISING_DIR` when needed.
 - `bun scripts/e2e-test.ts` — protocol smoke test against a running backend.
   It also sends a generated video texture and verifies live source status.
 
@@ -207,3 +247,5 @@ updater and need one manual swap.)
 - Bundled extraction for changing provider sites; optional `yt-dlp` is best-effort,
   and DRM/login-gated video is intentionally out of scope.
 - Batched UDP I/O (`sendmmsg`/RIO) for 100k+ pixel scales.
+- PRO DJ LINK/TCNet track, cue, and phrase metadata. Direct beat/master timing is
+  implemented; richer metadata follows validation with the production deck model.

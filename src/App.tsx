@@ -2,7 +2,9 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import Control from "./Control";
 import { EFFECTS } from "./effects";
 import Live from "./Live";
+import { loadSelectedLiveColor } from "./liveColors";
 import Media from "./Media";
+import Replay from "./Replay";
 import Settings from "./Settings";
 import { useGate } from "./state";
 
@@ -12,21 +14,21 @@ const Patch = lazy(() => import("./Patch"));
 
 const TABS = [
   { id: "live", label: "Live" },
-  { id: "media", label: "Video" },
+  { id: "media", label: "Media" },
   { id: "patch", label: "Patch" },
+  { id: "replay", label: "Archive" },
   { id: "control", label: "Control" },
   { id: "settings", label: "Settings" },
 ] as const;
 
-type TabId = (typeof TABS)[number]["id"] | "replay";
+const NAV_TABS: ReadonlyArray<{ id: TabId; label: string }> = TABS;
 
-const DevReplay = import.meta.env.DEV ? lazy(() => import("./Replay")) : null;
+type TabId = (typeof TABS)[number]["id"];
 
 function tabFromHash(): TabId {
   const h = location.hash.replace("#", "");
   // Old bookmarks / PWA shortcuts used #view and #draw; both merged into Live.
   if (h === "view" || h === "draw") return "live";
-  if (import.meta.env.DEV && h === "replay") return "replay";
   return (TABS.find((t) => t.id === h)?.id ?? "live") as TabId;
 }
 
@@ -190,7 +192,14 @@ export default function App() {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       const fx = EFFECTS.find((f) => f.key === e.key);
       if (fx) {
-        client.triggerEffect({ kind: fx.kind, angle: Math.random() * Math.PI * 2 });
+        const color = loadSelectedLiveColor();
+        client.triggerEffect({
+          kind: fx.kind,
+          angle: Math.random() * Math.PI * 2,
+          hue: color.hue,
+          saturation: color.saturation,
+          brightness: color.brightness,
+        });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -214,7 +223,7 @@ export default function App() {
       <header className="topbar">
         <h1>Empyrean Gate</h1>
         <nav>
-          {TABS.map((t) => (
+          {NAV_TABS.map((t) => (
             <button
               key={t.id}
               className={tab === t.id ? "active" : ""}
@@ -251,6 +260,24 @@ export default function App() {
           {e} <span className="hint">(click to dismiss)</span>
         </div>
       ))}
+      {status?.sacn_error && (
+        <div className="banner warn">
+          <strong>sACN output:</strong> {status.sacn_error}
+        </div>
+      )}
+      {status?.firewall_pending && (
+        <div className="banner warn">
+          Windows Firewall hasn't been authorized — phones and iPads on the LAN
+          may not be able to connect.{" "}
+          <button className="ghost" onClick={() => client.authorizeFirewall()}>
+            Authorize
+          </button>{" "}
+          <span className="hint">
+            (one admin prompt on the Gate machine; never asks again, even after
+            updates — also confines Windows Update restarts to 9am–3pm)
+          </span>
+        </div>
+      )}
 
       <main>
         {tab === "live" && <Live />}
@@ -264,9 +291,7 @@ export default function App() {
         >
           <Media />
         </div>
-        {tab === "replay" && DevReplay && (
-          <Suspense fallback={null}><DevReplay /></Suspense>
-        )}
+        {tab === "replay" && <Replay />}
         {tab === "patch" && (
           <Suspense fallback={<div className="patch-empty">Loading editor…</div>}>
             <Patch />

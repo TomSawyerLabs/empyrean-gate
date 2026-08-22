@@ -4,17 +4,22 @@
 //! WebSocket client of the local server.
 
 pub mod audio;
+pub mod autostart;
 pub mod config;
 pub mod engine;
 pub mod geometry;
 pub mod layers;
 pub mod media;
 pub mod patch;
+pub mod power;
 pub mod protocol;
+pub mod rhythm;
 pub mod sacn;
 pub mod server;
 pub mod state;
 pub mod updater;
+pub mod videocache;
+pub mod firewall;
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -32,6 +37,9 @@ pub struct Backend {
 /// at most a few frames of hold, and patterns continue without a visual jump.
 pub fn start_backend() -> Backend {
     let cfg = config::load();
+    // Re-register at every launch so the Run key follows the current exe across
+    // self-update binary swaps.
+    autostart::sync(cfg.autostart);
     let port = cfg.server.port;
     let takeover = port_in_use(port);
     let state = SharedState::new(cfg);
@@ -39,13 +47,16 @@ pub fn start_backend() -> Backend {
         let mut st = state.status.lock();
         st.interfaces = list_interfaces();
         st.version = updater::CURRENT_VERSION.to_string();
+        st.firewall_pending = firewall::rule_missing(port);
     }
     if takeover {
         log::info!("port {port} is busy — attempting takeover of the running instance");
         state.sacn_hold.store(true, Ordering::SeqCst);
     }
     let remote_chains = audio::spawn(state.clone());
+    rhythm::spawn(state.clone());
     engine::spawn(state.clone());
+    power::spawn(state.clone());
 
     if takeover {
         // Two-phase takeover. Phase 1 (old instance keeps sending): fetch its
@@ -77,6 +88,15 @@ pub fn start_backend() -> Backend {
                 state.phases_transplanted.store(true, Ordering::SeqCst);
                 if !prepared {
                     state.update_config(|c| *c = grant.config);
+                }
+                // Only the COMMIT grant's sequence number is authoritative: it is
+                // read after the old instance acked its final send, whereas the
+                // phase-1 value goes stale while that instance keeps transmitting
+                // through our warm-up. Set before `sacn_hold` is lifted below, and
+                // consumed by the engine immediately before its first send.
+                if let Some(seq) = grant.sacn_sequence {
+                    state.sacn_resume_sequence.store(seq, Ordering::SeqCst);
+                    state.sacn_resume_pending.store(true, Ordering::SeqCst);
                 }
                 log::info!(
                     "takeover committed in {:.0} ms total; resuming sACN",

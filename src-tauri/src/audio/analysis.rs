@@ -202,8 +202,15 @@ pub struct BeatTracker {
     next_beat: f64,
     since_retempo: f32,
     recent_onsets: Vec<f64>,
+    /// Last few accepted tempo estimates, for the stability term of confidence.
+    recent_bpms: VecDeque<f32>,
     pub onset: f32,
     pub beat_phase: f32,
+    /// 0..1: how much the current `bpm` deserves to be believed. Combines
+    /// autocorrelation peak dominance, estimate stability over ~10 s, and signal
+    /// presence (silence decays it). UIs hide/dim the number when this is low and
+    /// automation (beat taps) does not fire on an unconfident beat.
+    pub confidence: f32,
 }
 
 const MIN_BPM: f32 = 60.0;
@@ -223,8 +230,10 @@ impl BeatTracker {
             next_beat: f64::MAX,
             since_retempo: 0.0,
             recent_onsets: Vec::with_capacity(64),
+            recent_bpms: VecDeque::with_capacity(10),
             onset: 0.0,
             beat_phase: 0.0,
+            confidence: 0.0,
         }
     }
 
@@ -310,28 +319,97 @@ impl BeatTracker {
         if lag_max <= lag_min {
             return;
         }
+        // Quiet gating: without rhythmic energy in the envelope there is no tempo
+        // to find — autocorrelating noise produces garbage with a straight face.
+        // Freeze the current estimate and decay confidence instead.
+        let variance = env.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / n as f32;
+        if mean < 0.02 || variance < 1e-4 {
+            self.confidence *= 0.85;
+            return;
+        }
+
+        let mut scores = vec![0.0f32; lag_max + 1];
         let mut best_lag = 0usize;
         let mut best = 0.0f32;
+        let mut score_sum = 0.0f32;
         for lag in lag_min..=lag_max {
             let mut acc = 0.0f32;
             for i in lag..n {
                 acc += (env[i] - mean) * (env[i - lag] - mean);
             }
             // Slight preference for faster tempos (shorter lags) to avoid half-time locks.
-            let score = acc / (n - lag) as f32 * (1.0 + 0.1 * (lag_min as f32 / lag as f32));
+            let score = (acc / (n - lag) as f32 * (1.0 + 0.1 * (lag_min as f32 / lag as f32)))
+                .max(0.0);
+            scores[lag] = score;
+            score_sum += score;
             if score > best {
                 best = score;
                 best_lag = lag;
             }
         }
-        if best_lag > 0 && best > 0.0 {
-            let new_bpm = 60.0 / (best_lag as f32 * self.dt);
-            // Smooth tempo changes unless it's the first estimate.
-            self.bpm = if self.bpm == 0.0 {
-                new_bpm
-            } else {
-                self.bpm * 0.8 + new_bpm * 0.2
-            };
+        if best_lag == 0 || best <= 0.0 {
+            self.confidence *= 0.85;
+            return;
         }
+
+        // Peak dominance: how much the winner stands above the best UNRELATED lag
+        // (excluding its own ±12% neighborhood). A flat correlation landscape means
+        // the "tempo" is a coin flip.
+        let guard = (best_lag as f32 * 0.12) as usize + 1;
+        let second = scores
+            .iter()
+            .enumerate()
+            .skip(lag_min)
+            .filter(|(lag, _)| lag.abs_diff(best_lag) > guard)
+            .map(|(_, s)| *s)
+            .fold(0.0f32, f32::max);
+        let dominance = (1.0 - second / best).clamp(0.0, 1.0);
+        let clarity = (best / (score_sum / (lag_max - lag_min + 1) as f32).max(1e-6) / 6.0)
+            .clamp(0.0, 1.0);
+
+        // Hysteresis: if the current tempo's lag still scores close to the best,
+        // keep it — this kills octave flip-flopping and jitter between re-estimates.
+        let mut chosen_lag = best_lag;
+        if self.bpm > 0.0 {
+            let current_lag = (60.0 / self.bpm / self.dt).round() as usize;
+            let near_current = scores
+                .iter()
+                .enumerate()
+                .skip(lag_min)
+                .take(lag_max - lag_min + 1)
+                .filter(|(lag, _)| lag.abs_diff(current_lag) <= guard)
+                .max_by(|a, b| a.1.total_cmp(b.1));
+            if let Some((lag, score)) = near_current {
+                if *score >= best * 0.8 {
+                    chosen_lag = lag;
+                }
+            }
+        }
+
+        let new_bpm = 60.0 / (chosen_lag as f32 * self.dt);
+        self.bpm = if self.bpm == 0.0 {
+            new_bpm
+        } else {
+            self.bpm * 0.8 + new_bpm * 0.2
+        };
+
+        // Stability: how consistent recent estimates are (octave flips and noise
+        // wander destroy it; a steady groove pins it near 1).
+        if self.recent_bpms.len() >= 10 {
+            self.recent_bpms.pop_front();
+        }
+        self.recent_bpms.push_back(new_bpm);
+        let stability = if self.recent_bpms.len() >= 4 {
+            let m = self.recent_bpms.iter().sum::<f32>() / self.recent_bpms.len() as f32;
+            let sd = (self.recent_bpms.iter().map(|b| (b - m) * (b - m)).sum::<f32>()
+                / self.recent_bpms.len() as f32)
+                .sqrt();
+            (1.0 - (sd / m.max(1.0)) * 8.0).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        let raw = (dominance * 0.45 + clarity * 0.2 + stability * 0.35).clamp(0.0, 1.0);
+        self.confidence = self.confidence * 0.7 + raw * 0.3;
     }
 }

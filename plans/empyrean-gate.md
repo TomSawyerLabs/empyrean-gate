@@ -342,6 +342,130 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
       WS E2E video-frame test; real in-app browser test at desktop, iPad portrait, and
       narrow phone viewports.
 
+## Round 11 (2026-08-20/21): BPM trust, video playlist/cache, firewall, Live speed
+
+- [x] **BPM confidence** (d8472e3): BeatTracker scores peak dominance + clarity +
+      stability with quiet gating and octave hysteresis; confidence 0..1 flows
+      through AudioUniform/status. Displays show "finding beat…" below 0.35; beat
+      events and beat taps are gated too. Manual BPM = confidence 1.0.
+- [x] **Video playlist + offline cache** (36aac88): watched folders (scanned every
+      10 s, 3 levels deep) and URL adds both land in a persistent playlist; URL
+      entries download in the background into `<config>/EmpyreanGate/media-cache/`
+      via the MediaResolver (same SSRF defenses), served back at
+      `/media/file/{id}` with Range support so playback needs no internet.
+      Auto-advance cycles the playlist; prev/next buttons. Verified end-to-end
+      with `scripts/playlist-test.ts` (real download, 206 range serve).
+- [x] **Windows Firewall one-click authorization** (8e4936e): startup `netsh` check
+      sets `firewall_pending` in status; App banner offers Authorize →
+      `AuthorizeFirewall` WS msg → elevated (single UAC) port-scoped allow rule
+      (TCP <port>, any profile). Port-scoped means it survives every self-update
+      binary swap — the per-exe Windows prompt never fires again. Rule name
+      "Empyrean Gate". Non-Windows: no-op. First live click failed — nested
+      `-Command` strings stripped the quotes in `name="Empyrean Gate"` so the
+      elevated netsh got garbage; fixed (d7f23db) by writing a temp .ps1 and
+      elevating with `-File`. Full RunAs chain exercised end-to-end from an
+      elevated shell (no UAC dialog when already elevated): exit 0, rule
+      created. Rule is now live on the dev machine — no banner, no prompts.
+- [x] **Master Speed on Live tab** (9460737): master_speed (existing, Control →
+      Master) surfaced in the Live size cluster; throttled `set_master`, synced
+      from config. Independent of tempo controls (those only retime beat-driven
+      values).
+- [x] Verification: cargo check --all-targets, cargo test (all pass), tsc + vite
+      build. Collaborator branch `codex/production-show-control` appeared on
+      origin (not yet reviewed/merged).
+
+## Round 12 (2026-08-21): field-gotcha hardening (user asked "what else is like the firewall issue?")
+
+- [x] **Keep-awake** (a2a848b): `power.rs` calls SetThreadExecutionState every 30 s.
+      System sleep blocked while running; display sleep blocked only while sACN
+      output is enabled (display sleep kills HDMI/DP display-audio loopback devices
+      — observed live). Verified via `powercfg /requests`.
+- [x] **Crash-safe config saves** (57e5b09): write+fsync temp → keep `.bak` → rename.
+      `load()` falls back to `.bak` and rewrites a good main. Before this, a power
+      cut mid-save reset the show AND regenerated the sACN CID. Verified end-to-end
+      (corrupted main config; CID survived).
+- [x] **sACN bind failures surfaced** (a500fa6): `status.sacn_error` + App warning
+      banner. Saved interface is an IP; on a different network the bind failed
+      silently and multicast left the default-route NIC while pps looked healthy.
+- [x] Already resilient (checked, no change needed): GPU device-loss/render errors
+      drop back to engine re-init with 5 s retry; updater downloads are atomic
+      (tmp + rename); audio devices wait-don't-switch; firewall rule is port-scoped.
+
+**Ops checklist for the show machine (not fixable in code):**
+- Windows Update: set Active Hours / pause updates for the event window (forced
+  reboot mid-show is the failure mode).
+- Put the exe in a user-writable folder (NOT Program Files) or self-update writes
+  will fail; failures do surface in update_state, but only at update time.
+- First manual download of the exe trips SmartScreen once ("More info → Run
+  anyway") — unsigned binary. Self-updates do NOT retrigger it.
+- NIC power management: untick "allow the computer to turn off this device" on
+  the show NIC (mostly matters for USB/WiFi adapters).
+- Validate Vulkan on the show machine's GPU early (the wgpu-29 pin exists because
+  of THIS dev machine's 2022 Intel driver; other hardware may differ).
+- ~~No autostart-on-boot yet~~ → BUILT (85e09e6): Settings → Updates → "Launch at
+  login". Per-user Run registry key; the exe re-registers itself at startup so
+  the entry follows self-update binary swaps. EMPYREAN_CONFIG instances skip it.
+- Windows Update active hours: restarts land 09:00–15:00 only (people are STILL
+  at the gate at 5am — user call, 2026-08-21). Active hours 15:00→09:00 (the
+  18 h max), SmartActiveHoursState=0 so Windows can't auto-adjust them.
+  **Conferred onto the show machine automatically**: the in-app Authorize click
+  (firewall banner) applies them in the same elevated script as the firewall
+  rule. Manual fallback for machines already authorized:
+  HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings →
+  ActiveHoursStart=15, ActiveHoursEnd=9, SmartActiveHoursState=0 (DWORDs).
+  Dev machine already set both ways (manually + by the tested script).
+- Intel driver on THIS dev machine (i7-10710U, Comet Lake, 10th gen): on the
+  legacy 7th–10th gen branch. Latest is 31.0.101.2141 (security-mostly since
+  2023); machine has 30.0.101.1660 (2022-03). Updating is low-risk and MIGHT fix
+  the wgpu-30 vkCreateDevice crash (not guaranteed — legacy branch got few
+  functional fixes). We are NOT stuck on old Vulkan — driver speaks Vulkan 1.3,
+  ample for our compute shader; the pin is wgpu-the-library 29 vs 30, which
+  costs nothing functionally today. After any driver update: try wgpu 30, keep
+  the pin if it still crashes.
+
+## Round 13 (2026-08-22): handover continues the sACN sequence numbering
+
+Prompted by "when we do the realtime handoff to a new version, does it also sync
+the frame/sequence numbers?" — it did not, and the persistent CID from round 7 is
+exactly what made that matter.
+
+- **The bug.** `HandoverGrant` carried only config + layer phases. The successor
+  built a fresh `SacnSender` whose universes all start at sequence 0. Because both
+  instances now present the SAME CID, the receiver carries its per-source sequence
+  state across the handover, and E1.31 6.7.2 discards a packet whose delta from the
+  last one is in [-20, 0]. So if the outgoing instance happened to stop on a low
+  sequence value, the successor's frames were discarded until its counter climbed
+  past it — the rig freezing on its last look for up to ~20 frames (~0.33 s at
+  60 fps). The counter wraps every ~4.3 s, so the stop value was effectively
+  uniform: **~8% of handovers** (20 of 256 values). All universes advance in
+  lockstep, so it was all-or-nothing across the whole array.
+  Note this was a NEW window opened by round 7: with a per-launch CID the successor
+  looked like a different source and got fresh sequence tracking — at the cost of a
+  *guaranteed* 2.5 s ghost-merge, which is strictly worse. Round 7 was still right.
+- **The fix.** Engine publishes its current sequence to `state.sacn_sequence` after
+  each send (one relaxed atomic store); the grant carries it; the successor seeds
+  every universe (and the sync counter) at `last + 32` before its first frame.
+  Jumping FORWARD is always accepted, so this needs headroom, not precision — 32 is
+  comfortably past the 20-wide window and survives universes drifting out of
+  lockstep.
+- **Only the phase-2 (commit) grant's number is used.** Phase 1 is a prepare: the
+  old instance keeps transmitting through our warm-up, so its value is stale by the
+  time we send. The commit value is read after the quiesce ack, so it is provably
+  the last number that instance will ever put on the wire.
+- **`Option<u8>`, not `u8`.** During a real upgrade the grant is produced by the OLD
+  binary, which predates the field. `None` = not reported → start fresh, exactly as
+  before. A bare `u8` with serde default would have been indistinguishable from a
+  genuine 0 and would have had us "resume" from an invented number.
+- **Applied immediately before the first send**, not when the grant lands. That is
+  the only point that cannot race a re-plan (`configure` resets sequences) or
+  `sacn_hold` being lifted. An earlier draft made the resume value sticky inside the
+  sender to survive that race; applying it at the send point made the stickiness
+  unnecessary and was deleted.
+- Tests: all 256 possible stop values resumed and checked against a direct
+  implementation of the E1.31 discard rule, sync counter included; plus a test that
+  pins the premise (restarting at 0 IS discarded for exactly 20 of them), so the
+  fix cannot be quietly regressed into a no-op.
+
 ## Next session pickup
 
 - **Node-graph patch paradigm designed** — see `plans/node-graph.md` (typed
@@ -354,6 +478,67 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
 - Next performance ceiling: batched UDP I/O (`sendmmsg`/RIO) for 100k+ pixel scales.
 - Media follow-ups: resilient provider-specific extraction and authenticated/DRM
   sources only if a deployment actually requires them.
+
+## Round 12: unattended show scheduler
+
+- [x] Durable saved playlists with embedded scene snapshots, per-cue dwell and
+      crossfade times, reordering, add/remove, naming, repeat, skip, and stop/hold.
+- [x] Backend-owned show clock: advances headlessly, persists the active cue, and
+      resumes the enabled playlist after a process restart without a controller.
+- [x] Smoothstep layer-stack crossfades with incoming phase preservation, so the
+      end of a transition does not reset the new scene's motion.
+- [x] Nine built-in long-play compositions and a one-click all-night journey
+      (35 minutes each, 20 second transitions, repeat forever).
+- [x] Accelerated two-scene integration run: transition observed, auto-advance
+      confirmed, no GPU error, and active cue restored after restart.
+- [ ] Real PixLite/sACN and production Mac mini validation is deliberately deferred
+      until the installation hardware is unpacked on playa next week.
+
+## Round 13: restore Replay as a production workflow
+
+- [x] Reversed the product-level intent of `8a8325e`: Archive is again a normal
+      production tab and `/#replay` works in desktop, headless web, and PWA builds.
+- [x] Restored single-file playback, whole `Uprising-Data` folder indexing,
+      metadata titles, recent filesystem references, seeking, looping, and variable
+      playback speed. Recordings remain local and stream one frame at a time.
+- [x] Kept the shared per-user Vite fixture cache as an optional development
+      convenience without making Replay depend on that endpoint.
+
+## Round 11: external rhythm sources
+
+- [x] Split lighting timing from per-layer audio energy without changing the default
+      behavior: Layer Audio still gives every layer the beat belonging to its own
+      level/bands/waveform/spectrum source.
+- [x] Add a global MIDI Timing Clock adapter (24 PPQN) with tempo/phase extrapolation,
+      Start/Continue/Stop, Song Position, exact-port hot-plug recovery, ±250 ms visual
+      latency calibration, live health, and optional fallback to a chosen audio source.
+- [x] Manual BPM remains the explicit highest-priority override; half/normal/double
+      time and beat taps operate on the selected effective lighting clock.
+- [x] Add receive-only native PRO DJ LINK beat/status input. It listens on the
+      standard UDP 50001/50002 ports, follows tempo-master status or a pinned player,
+      handles master handoff, and deliberately never claims a virtual deck identity
+      or emits a control packet onto the DJ network.
+- [x] Add a real published Boiler Room track-list excerpt plus synthetic deck/BPM/
+      cue annotations and a UDP+WebSocket E2E replay (`scripts/pioneer-link-test.ts`).
+      No copyrighted audio is stored. Source facts are explicitly distinguished
+      from test-only annotations in the fixture.
+- [ ] Validate against the actual production deck/mixer models before enabling at a
+      show. Add rekordbox track/cue/phrase metadata only after the beat/master path is
+      proven on that hardware; official Bridge/TCNet remains an alternate adapter.
+
+### Production performance baseline
+
+- The production show machine is an older Mac mini than the development Mac; exact
+  model/specs are not yet recorded. Treat its release-build benchmark as the real
+  performance baseline before increasing layer/pixel load or doing speculative
+  optimization.
+- On that Mac mini, run
+  `cargo run --release --bin engine-smoke -- --suite --warmup 120 --frames 600 --json`
+  with the real geometry. Keep the report with the machine model, macOS version, GPU,
+  and release version. The existing Intel-iGPU 1.74 ms development result is useful
+  headroom evidence, not a production guarantee.
+- Continue prioritizing deadline misses/p95-p99 frame time over mean frame time. The
+  next known scaling optimization remains batched UDP I/O at 100k+ pixels.
 
 ## Findings / gotchas
 
