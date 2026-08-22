@@ -406,6 +406,9 @@ pub struct AppConfig {
     pub windows: WindowsConfig,
     pub video: VideoConfig,
     pub beat_taps: BeatTapConfig,
+    /// Register the app to launch at login (per-user Run key; survives
+    /// self-updates because the running exe re-registers itself at startup).
+    pub autostart: bool,
     pub layers: Vec<LayerCfg>,
     /// Known client devices (see `ClientRecord`).
     pub clients: Vec<ClientRecord>,
@@ -423,6 +426,7 @@ impl Default for AppConfig {
             windows: WindowsConfig::default(),
             video: VideoConfig::default(),
             beat_taps: BeatTapConfig::default(),
+            autostart: false,
             layers: default_layer_stack(),
             clients: Vec::new(),
         }
@@ -564,6 +568,7 @@ fn load_backup(bak: &std::path::Path) -> AppConfig {
 }
 
 pub fn save(cfg: &AppConfig) {
+    crate::autostart::sync(cfg.autostart);
     let path = config_path();
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);

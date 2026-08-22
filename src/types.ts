@@ -191,6 +191,7 @@ export interface AppConfig {
   windows: WindowsConfig;
   video: VideoConfig;
   beat_taps: BeatTapConfig;
+  autostart: boolean;
   layers: LayerCfg[];
   clients: ClientRecord[];
 }

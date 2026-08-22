@@ -73,6 +73,14 @@ function UpdatesPanel({ config }: { config: AppConfig }) {
         />
         Install automatically when found
       </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={config.autostart}
+          onChange={(e) => client.setConfig({ ...config, autostart: e.target.checked })}
+        />
+        Launch at login (survives self-updates; venue power-cycle recovery)
+      </label>
     </section>
   );
 }

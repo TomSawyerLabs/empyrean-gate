@@ -4,6 +4,7 @@
 //! WebSocket client of the local server.
 
 pub mod audio;
+pub mod autostart;
 pub mod config;
 pub mod engine;
 pub mod geometry;
@@ -34,6 +35,9 @@ pub struct Backend {
 /// at most a few frames of hold, and patterns continue without a visual jump.
 pub fn start_backend() -> Backend {
     let cfg = config::load();
+    // Re-register at every launch so the Run key follows the current exe across
+    // self-update binary swaps.
+    autostart::sync(cfg.autostart);
     let port = cfg.server.port;
     let takeover = port_in_use(port);
     let state = SharedState::new(cfg);
