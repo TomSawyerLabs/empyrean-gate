@@ -1329,7 +1329,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     s.configure(&cfg.geometry, &cfg.output);
                     let mut st = state.status.lock();
                     st.sacn_universes = s.universe_count();
-                    st.sacn_error = s.bind_error.clone();
+                    st.sacn_error = s.error_message();
                 }
             }
         }
@@ -2504,6 +2504,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 st.sacn_enabled = cfg.output.enabled;
                 // Last full-second bucket: steady, unlike a fractional-window ratio.
                 st.sacn_pps = pps_hist.back().copied().unwrap_or(0);
+                if let Some(sender) = sacn.as_ref() {
+                    st.sacn_error = sender.error_message();
+                }
                 st.fps_history = fps_hist.iter().copied().collect();
                 st.pps_history = pps_hist.iter().copied().collect();
                 st.master_brightness = cfg.render.master_brightness;

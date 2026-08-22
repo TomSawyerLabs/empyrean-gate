@@ -603,6 +603,11 @@ pub struct RuntimeStatus {
     /// Why the watcher can see less than it wants to (bind refused, membership
     /// limit reached).
     pub sacn_watch_error: Option<String>,
+    /// A durable-save failure. The in-memory show continues, but a restart could
+    /// lose recent changes.
+    pub config_error: Option<String>,
+    /// Windows keep-awake failure; the machine may follow its normal sleep policy.
+    pub power_error: Option<String>,
     /// Frames rendered in each of the last ~30 one-second buckets (oldest first).
     pub fps_history: Vec<u32>,
     /// sACN packets sent in each of the last ~30 one-second buckets (oldest first).

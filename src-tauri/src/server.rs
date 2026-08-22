@@ -70,11 +70,10 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         (cfg.server.bind.clone(), cfg.server.port)
     };
     let media = MediaResolver::new().expect("media resolver HTTP client");
-    // Background playlist upkeep: watched-folder scans + URL downloads to the
-    // local media cache, so playback survives venue internet.
-    tokio::spawn(crate::videocache::run(state.clone(), media.clone()));
+    let cache_media = media.clone();
     let ctx = Ctx { state: state.clone(), remote, media };
     let app = Router::new()
+        .route("/health", get(health))
         .route("/ws", get(ws_upgrade))
         .route("/qr.svg", get(qr_svg))
         .route("/handover/state", get(handover_state))
@@ -99,23 +98,34 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .with_state(ctx);
 
     let addr = format!("{bind}:{port}");
-    // Retry: after a takeover the previous instance needs a moment to exit and
-    // release the port.
-    let mut listener = None;
-    for attempt in 0..40 {
+    // Retry until shutdown: after a takeover the previous instance may need a
+    // moment to exit. Giving up would leave the renderer/output alive but the
+    // operator UI permanently unreachable.
+    let mut attempt = 0u32;
+    let listener = loop {
         match tokio::net::TcpListener::bind(&addr).await {
-            Ok(l) => {
-                listener = Some(l);
-                break;
+            Ok(listener) => break listener,
+            Err(e) => {
+                attempt = attempt.saturating_add(1);
+                if attempt == 1 || attempt.is_power_of_two() {
+                    log::error!("cannot bind web server on {addr}: {e}; retrying");
+                }
+                if state.shutdown.load(Ordering::Relaxed) {
+                    return;
+                }
+                tokio::time::sleep(if attempt < 40 {
+                    Duration::from_millis(250)
+                } else {
+                    Duration::from_secs(1)
+                })
+                .await;
             }
-            Err(e) if attempt == 39 => {
-                log::error!("cannot bind web server on {addr}: {e}");
-                return;
-            }
-            Err(_) => tokio::time::sleep(Duration::from_millis(250)).await,
         }
-    }
-    let listener = listener.unwrap();
+    };
+    state.server_bound.store(true, Ordering::SeqCst);
+    // Only the process that owns the control port may mutate the shared media
+    // cache/config. During hot takeover the old and new binaries overlap briefly.
+    tokio::spawn(crate::videocache::run(state.clone(), cache_media));
     log::info!("web UI + control server on http://{addr}");
     let shutdown_state = state.clone();
     let server = axum::serve(
@@ -132,24 +142,45 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
     }
 }
 
+async fn health() -> StatusCode {
+    StatusCode::NO_CONTENT
+}
+
 // ---------------------------------------------------------------------------
 // Browser-decodable media proxy
 // ---------------------------------------------------------------------------
 
-fn media_authorized(state: &SharedState, addr: SocketAddr, req: &ResolveRequest) -> bool {
+fn client_authorized(
+    state: &SharedState,
+    addr: SocketAddr,
+    client_id: &str,
+    token: &str,
+) -> bool {
     let cfg = state.config.read();
     if cfg
         .clients
         .iter()
-        .any(|c| c.id == req.client_id && c.revoked)
+        .any(|c| c.id == client_id && c.revoked)
     {
         return false;
     }
     if addr.ip().is_loopback() || !cfg.server.require_token {
         return true;
     }
-    cfg.clients.iter().any(|c| c.id == req.client_id)
-        || (!req.token.is_empty() && req.token == cfg.server.join_token)
+    cfg.clients.iter().any(|c| c.id == client_id)
+        || (!token.is_empty() && token == cfg.server.join_token)
+}
+
+fn media_authorized(state: &SharedState, addr: SocketAddr, req: &ResolveRequest) -> bool {
+    client_authorized(state, addr, &req.client_id, &req.token)
+}
+
+#[derive(Default, serde::Deserialize)]
+struct MediaAccessQuery {
+    #[serde(default)]
+    client_id: String,
+    #[serde(default)]
+    token: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -212,9 +243,14 @@ async fn resolve_media(
 
 async fn stream_media(
     State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(id): Path<String>,
+    Query(access): Query<MediaAccessQuery>,
     headers: HeaderMap,
 ) -> Response {
+    if !client_authorized(&ctx.state, addr, &access.client_id, &access.token) {
+        return (StatusCode::FORBIDDEN, "media access denied").into_response();
+    }
     let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
     let upstream = match ctx.media.stream(&id, range).await {
         Ok(response) => response,
@@ -245,9 +281,14 @@ async fn stream_media(
 /// browser <video> element requires them for seeking.
 async fn serve_media_file(
     State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(id): Path<String>,
+    Query(access): Query<MediaAccessQuery>,
     headers: HeaderMap,
 ) -> Response {
+    if !client_authorized(&ctx.state, addr, &access.client_id, &access.token) {
+        return (StatusCode::FORBIDDEN, "media access denied").into_response();
+    }
     let range = headers
         .get(header::RANGE)
         .and_then(|v| v.to_str().ok())
@@ -455,9 +496,10 @@ async fn qr_svg(Query(q): Query<QrQuery>) -> Response {
 async fn handover_state(
     State(ctx): State<Ctx>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
 ) -> Response {
-    if !addr.ip().is_loopback() {
-        return (StatusCode::FORBIDDEN, "handover is local-only").into_response();
+    if !handover_authorized(&ctx.state, addr, &headers) {
+        return (StatusCode::FORBIDDEN, "handover authorization failed").into_response();
     }
     log::info!("handover state requested — a successor instance is preparing");
     let grant = HandoverGrant {
@@ -474,9 +516,10 @@ async fn handover_state(
 async fn handover(
     State(ctx): State<Ctx>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
 ) -> Response {
-    if !addr.ip().is_loopback() {
-        return (StatusCode::FORBIDDEN, "handover is local-only").into_response();
+    if !handover_authorized(&ctx.state, addr, &headers) {
+        return (StatusCode::FORBIDDEN, "handover authorization failed").into_response();
     }
     let state = ctx.state.clone();
     log::info!("handover commit — stopping sACN output");
@@ -535,7 +578,9 @@ async fn ws_upgrade(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    ws.on_upgrade(move |socket| client_task(ctx, socket, addr))
+    ws.max_message_size(4 * 1024 * 1024)
+        .max_frame_size(4 * 1024 * 1024)
+        .on_upgrade(move |socket| client_task(ctx, socket, addr))
 }
 
 struct PreviewSub {
@@ -553,6 +598,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
     let conn_id = state.conn_seq.fetch_add(1, Ordering::SeqCst);
     state.status.lock().clients += 1;
     let mut client_id = String::new();
+    let mut authenticated = false;
     let mut preview: Option<PreviewSub> = None;
     let mut announced_meta = (0u32, 0u32, 0u32);
     let mut queued_notified: Option<u32> = None;
@@ -563,13 +609,6 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
         state.config.read().server.max_preview_clients.max(1) as usize
     };
 
-    // Greet with full state immediately.
-    let hello = ServerMsg::State {
-        config: Box::new(state.config.read().clone()),
-        status: state.status.lock().clone(),
-    };
-    let _ = send_json(&mut tx, &hello).await;
-
     loop {
         tokio::select! {
             msg = rx.next() => {
@@ -578,9 +617,28 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                     Message::Text(text) => {
                         match serde_json::from_str::<ClientMsg>(&text) {
                             Ok(m) => {
+                                let is_hello = matches!(&m, ClientMsg::Hello { .. });
+                                if !authenticated && !is_hello {
+                                    let _ = deny(&mut tx, "Authenticate with hello before sending controls.").await;
+                                    break;
+                                }
+                                if authenticated && is_hello {
+                                    let _ = deny(&mut tx, "This connection is already authenticated.").await;
+                                    break;
+                                }
                                 let mut reset_meta = false;
                                 if handle_msg(&ctx, m, &mut client_id, conn_id, addr, &mut preview, &mut reset_meta, &mut tx).await.is_err() {
                                     break;
+                                }
+                                if is_hello {
+                                    authenticated = true;
+                                    let hello = ServerMsg::State {
+                                        config: Box::new(state.config.read().clone()),
+                                        status: state.status.lock().clone(),
+                                    };
+                                    if send_json(&mut tx, &hello).await.is_err() {
+                                        break;
+                                    }
                                 }
                                 if reset_meta {
                                     announced_meta = (0, 0, 0);
@@ -594,7 +652,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                         }
                     }
                     Message::Binary(bytes) => {
-                        if !client_id.is_empty() {
+                        if authenticated {
                             handle_video_frame(&state, conn_id, &bytes);
                         }
                     }
@@ -603,6 +661,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                 }
             }
             ev = events_rx.recv() => {
+                if !authenticated { continue; }
                 // Live revocation: kicked within one event tick (status @2 Hz).
                 if !client_id.is_empty() && is_revoked(&state, &client_id) {
                     let _ = send_json(&mut tx, &ServerMsg::Denied {
@@ -626,6 +685,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                 }
             }
             frame = preview_rx.recv() => {
+                if !authenticated { continue; }
                 let frame = match frame {
                     Ok(f) => f,
                     Err(RecvError::Lagged(_)) => continue,
@@ -911,14 +971,23 @@ async fn handle_msg(
             client_id: id,
             token,
         } => {
+            if id.is_empty()
+                || id.len() > 128
+                || !id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            {
+                return deny(tx, "Invalid client identity.").await;
+            }
             let is_local = addr.ip().is_loopback();
-            let (known, revoked, token_ok) = {
+            let (known, revoked, token_ok, client_capacity_reached) = {
                 let cfg = state.config.read();
                 let rec = cfg.clients.iter().find(|c| c.id == id);
                 (
                     rec.is_some(),
                     rec.is_some_and(|r| r.revoked),
                     token == cfg.server.join_token,
+                    cfg.clients.len() >= crate::config::MAX_CLIENT_RECORDS,
                 )
             };
             if revoked {
@@ -931,13 +1000,20 @@ async fn handle_msg(
                 )
                 .await;
             }
+            if !known && client_capacity_reached {
+                return deny(
+                    tx,
+                    "The remembered-client list is full; forget an old device on the Gate machine.",
+                )
+                .await;
+            }
             if !id.is_empty() {
                 state.connected_clients.lock().insert(conn_id, id.clone());
                 if !known {
                     let display_name = if name.is_empty() {
                         format!("device-{}", &id[id.len().saturating_sub(4)..])
                     } else {
-                        name
+                        name.chars().take(80).collect()
                     };
                     state.update_config(|c| {
                         c.clients.push(ClientRecord {
@@ -953,6 +1029,7 @@ async fn handle_msg(
         ClientMsg::SetClientName { name } => {
             let id = client_id.clone();
             if !id.is_empty() && !name.is_empty() {
+                let name: String = name.chars().take(80).collect();
                 state.update_config(|c| {
                     if let Some(r) = c.clients.iter_mut().find(|r| r.id == id) {
                         r.name = name;
@@ -961,6 +1038,10 @@ async fn handle_msg(
             }
         }
         ClientMsg::RenameClient { id, name } => {
+            if !require_local_operator(tx, addr, "Client administration").await {
+                return Ok(());
+            }
+            let name: String = name.chars().take(80).collect();
             state.update_config(|c| {
                 if let Some(r) = c.clients.iter_mut().find(|r| r.id == id) {
                     r.name = name;
@@ -968,6 +1049,9 @@ async fn handle_msg(
             });
         }
         ClientMsg::RevokeClient { id } => {
+            if !require_local_operator(tx, addr, "Client administration").await {
+                return Ok(());
+            }
             state.update_config(|c| {
                 if let Some(r) = c.clients.iter_mut().find(|r| r.id == id) {
                     r.revoked = true;
@@ -975,6 +1059,9 @@ async fn handle_msg(
             });
         }
         ClientMsg::UnrevokeClient { id } => {
+            if !require_local_operator(tx, addr, "Client administration").await {
+                return Ok(());
+            }
             state.update_config(|c| {
                 if let Some(r) = c.clients.iter_mut().find(|r| r.id == id) {
                     r.revoked = false;
@@ -982,16 +1069,25 @@ async fn handle_msg(
             });
         }
         ClientMsg::ForgetClient { id } => {
+            if !require_local_operator(tx, addr, "Client administration").await {
+                return Ok(());
+            }
             state.update_config(|c| {
                 c.clients.retain(|r| r.id != id);
             });
         }
         ClientMsg::RotateJoinToken => {
+            if !require_local_operator(tx, addr, "Join-token rotation").await {
+                return Ok(());
+            }
             state.update_config(|c| {
                 c.server.join_token = crate::config::generate_token();
             });
         }
         ClientMsg::SetRequireToken { require } => {
+            if !require_local_operator(tx, addr, "Access-policy changes").await {
+                return Ok(());
+            }
             state.update_config(|c| {
                 c.server.require_token = require;
             });
@@ -1015,7 +1111,17 @@ async fn handle_msg(
             }
         }
         ClientMsg::SetConfig { config } => {
-            let port_changed = {
+            if let Err(e) = config.validate() {
+                let _ = send_json(
+                    tx,
+                    &ServerMsg::Error {
+                        message: format!("Settings rejected: {e}"),
+                    },
+                )
+                .await;
+                return Ok(());
+            }
+            let port_changed = addr.ip().is_loopback() && {
                 let cur = state.config.read();
                 cur.server.port != config.server.port || cur.server.bind != config.server.bind
             };
@@ -1322,6 +1428,9 @@ async fn handle_msg(
             }
         }
         ClientMsg::AuthorizeFirewall => {
+            if !require_local_operator(tx, addr, "Firewall authorization").await {
+                return Ok(());
+            }
             // Elevation blocks on the UAC dialog; run it off the async path.
             let state2 = state.clone();
             tokio::task::spawn_blocking(move || {
@@ -1367,7 +1476,9 @@ async fn handle_msg(
             state.update_check_requested.store(true, Ordering::SeqCst);
         }
         ClientMsg::InstallUpdate => {
-            state.update_install_requested.store(true, Ordering::SeqCst);
+            if require_local_operator(tx, addr, "Updates").await {
+                state.update_install_requested.store(true, Ordering::SeqCst);
+            }
         }
         ClientMsg::SetLaunchAtStartup { enabled } => {
             let state2 = state.clone();

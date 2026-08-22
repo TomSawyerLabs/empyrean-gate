@@ -386,6 +386,8 @@ export interface RuntimeStatus {
   sacn_watched_universes: number;
   /** Why the watcher sees less than it wants to. */
   sacn_watch_error: string | null;
+  config_error: string | null;
+  power_error: string | null;
   fps_history: number[];
   pps_history: number[];
   clients: number;

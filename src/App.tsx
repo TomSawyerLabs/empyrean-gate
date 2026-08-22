@@ -41,6 +41,7 @@ function tabFromHash(): TabId {
 }
 
 const IN_TAURI = "__TAURI_INTERNALS__" in window;
+const IS_LOCAL_UI = IN_TAURI || ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
 
 const SHOW_MODE_KEY = "empyrean-show-mode";
 /// Date (local) that the scheduled show-mode exit last fired, so it fires once a day.
@@ -704,13 +705,30 @@ export default function App() {
           <strong>sACN output:</strong> {status.sacn_error}
         </div>
       )}
+      {status?.config_error && (
+        <div className="banner error">
+          <strong>Settings are not being saved:</strong> {status.config_error}. Keep
+          the app running and free disk space or restore write access before
+          restarting.
+        </div>
+      )}
+      {status?.power_error && (
+        <div className="banner warn">
+          <strong>Keep-awake failed:</strong> {status.power_error}. Verify the Gate
+          machine's sleep settings before a show.
+        </div>
+      )}
       {status?.firewall_pending && (
         <div className="banner warn">
           Windows Firewall hasn't been authorized — phones and iPads on the LAN
           may not be able to connect.{" "}
-          <button className="ghost" onClick={() => client.authorizeFirewall()}>
-            Authorize
-          </button>{" "}
+          {IS_LOCAL_UI ? (
+            <button className="ghost" onClick={() => client.authorizeFirewall()}>
+              Authorize
+            </button>
+          ) : (
+            <strong>Open the desktop app on the Gate machine to authorize it.</strong>
+          )}{" "}
           <span className="hint">
             (one admin prompt on the Gate machine; never asks again, even after
             updates — also confines Windows Update restarts to 9am–3pm)
