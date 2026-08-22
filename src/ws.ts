@@ -32,8 +32,9 @@ async function resolveBase(): Promise<{ http: string; ws: string }> {
     const info = (await invoke("backend_info")) as { wsPort: number };
     return { http: `http://127.0.0.1:${info.wsPort}`, ws: `ws://127.0.0.1:${info.wsPort}/ws` };
   }
-  // Vite dev server: backend runs on its default port on the same host.
-  if (location.port === "1420") {
+  // Vite dev server (Empyrean's project-unique dev port — see vite.config.ts):
+  // the backend runs on its default port on the same host.
+  if (location.port === "28149") {
     return { http: `http://${location.hostname}:9520`, ws: `ws://${location.hostname}:9520/ws` };
   }
   // Served by the backend itself.
