@@ -7,7 +7,7 @@ use crate::layers::{EffectCfg, MAX_AUDIO_SOURCES};
 use crate::protocol::{RuntimeStatus, ServerMsg};
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::broadcast;
@@ -236,6 +236,13 @@ pub struct SharedState {
     /// termination on shutdown. Process exit waits briefly on this, otherwise the
     /// terminate packets never make it out of the socket.
     pub sacn_terminated: AtomicBool,
+    /// The sACN sequence number last put on the wire, published for the handover
+    /// grant so a successor can continue the stream instead of restarting it.
+    pub sacn_sequence: AtomicU8,
+    /// A grant's sequence number, waiting for the engine to hand it to the sender
+    /// (the engine owns the `SacnSender`). Mirrors `phases_transplanted`.
+    pub sacn_resume_pending: AtomicBool,
+    pub sacn_resume_sequence: AtomicU8,
     /// Total frames rendered; the takeover waits for its adopted config to have
     /// flowed through the render+readback pipeline before committing.
     pub frames_rendered: AtomicU64,
@@ -279,6 +286,9 @@ impl SharedState {
             leaving: AtomicBool::new(false),
             sacn_quiesced: AtomicBool::new(false),
             sacn_terminated: AtomicBool::new(false),
+            sacn_sequence: AtomicU8::new(0),
+            sacn_resume_pending: AtomicBool::new(false),
+            sacn_resume_sequence: AtomicU8::new(0),
             frames_rendered: AtomicU64::new(0),
             update_check_requested: AtomicBool::new(false),
             update_install_requested: AtomicBool::new(false),

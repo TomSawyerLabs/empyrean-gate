@@ -215,6 +215,18 @@ pub struct HandoverGrant {
     pub config: AppConfig,
     /// Per-layer animation phases, so patterns continue instead of jumping.
     pub layer_phases: Vec<f64>,
+    /// The sACN sequence number this instance last put on the wire. Because the
+    /// CID is persistent, the receiver carries its per-source sequence state
+    /// across the handover — a successor restarting at 0 would land inside the
+    /// window E1.31 discards as an out-of-order repeat (a delta in [-20, 0]) and
+    /// freeze the rig on its last look for up to ~20 frames.
+    ///
+    /// `Option` + `default` is load-bearing: during a real upgrade the grant is
+    /// produced by the OLD binary, which may predate this field. `None` means
+    /// "not reported" — distinct from a genuine 0, and the successor then starts
+    /// fresh rather than continuing from a number it invented.
+    #[serde(default)]
+    pub sacn_sequence: Option<u8>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

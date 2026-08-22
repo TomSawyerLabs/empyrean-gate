@@ -423,6 +423,49 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
   costs nothing functionally today. After any driver update: try wgpu 30, keep
   the pin if it still crashes.
 
+## Round 13 (2026-08-22): handover continues the sACN sequence numbering
+
+Prompted by "when we do the realtime handoff to a new version, does it also sync
+the frame/sequence numbers?" — it did not, and the persistent CID from round 7 is
+exactly what made that matter.
+
+- **The bug.** `HandoverGrant` carried only config + layer phases. The successor
+  built a fresh `SacnSender` whose universes all start at sequence 0. Because both
+  instances now present the SAME CID, the receiver carries its per-source sequence
+  state across the handover, and E1.31 6.7.2 discards a packet whose delta from the
+  last one is in [-20, 0]. So if the outgoing instance happened to stop on a low
+  sequence value, the successor's frames were discarded until its counter climbed
+  past it — the rig freezing on its last look for up to ~20 frames (~0.33 s at
+  60 fps). The counter wraps every ~4.3 s, so the stop value was effectively
+  uniform: **~8% of handovers** (20 of 256 values). All universes advance in
+  lockstep, so it was all-or-nothing across the whole array.
+  Note this was a NEW window opened by round 7: with a per-launch CID the successor
+  looked like a different source and got fresh sequence tracking — at the cost of a
+  *guaranteed* 2.5 s ghost-merge, which is strictly worse. Round 7 was still right.
+- **The fix.** Engine publishes its current sequence to `state.sacn_sequence` after
+  each send (one relaxed atomic store); the grant carries it; the successor seeds
+  every universe (and the sync counter) at `last + 32` before its first frame.
+  Jumping FORWARD is always accepted, so this needs headroom, not precision — 32 is
+  comfortably past the 20-wide window and survives universes drifting out of
+  lockstep.
+- **Only the phase-2 (commit) grant's number is used.** Phase 1 is a prepare: the
+  old instance keeps transmitting through our warm-up, so its value is stale by the
+  time we send. The commit value is read after the quiesce ack, so it is provably
+  the last number that instance will ever put on the wire.
+- **`Option<u8>`, not `u8`.** During a real upgrade the grant is produced by the OLD
+  binary, which predates the field. `None` = not reported → start fresh, exactly as
+  before. A bare `u8` with serde default would have been indistinguishable from a
+  genuine 0 and would have had us "resume" from an invented number.
+- **Applied immediately before the first send**, not when the grant lands. That is
+  the only point that cannot race a re-plan (`configure` resets sequences) or
+  `sacn_hold` being lifted. An earlier draft made the resume value sticky inside the
+  sender to survive that race; applying it at the send point made the stickiness
+  unnecessary and was deleted.
+- Tests: all 256 possible stop values resumed and checked against a direct
+  implementation of the E1.31 discard rule, sync counter included; plus a test that
+  pins the premise (restarting at 0 IS discarded for exactly 20 of them), so the
+  fix cannot be quietly regressed into a no-op.
+
 ## Next session pickup
 
 - Run `bun tauri dev` and eyeball the actual patterns; tune defaults.

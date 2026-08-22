@@ -52,6 +52,11 @@ const SYNC_PKT_SEQ_OFFSET: usize = 44;
 const OPT_STREAM_TERMINATED: u8 = 0x40;
 /// E1.31 spec: a terminating source sends three such packets per universe.
 const TERMINATE_REPEATS: usize = 3;
+/// How far ahead of the outgoing instance a successor restarts its sequence
+/// numbering. E1.31 discards a delta in [-20, 0] as an out-of-order repeat, so
+/// anything comfortably past 20 is accepted immediately; jumping FORWARD is always
+/// legal, which is why this needs no precision — only headroom.
+const HANDOVER_SEQUENCE_MARGIN: u8 = 32;
 /// Reserved universe for universe-discovery packets (239.255.250.214).
 const DISCOVERY_UNIVERSE: u16 = 64214;
 /// E131_UNIVERSE_DISCOVERY_INTERVAL.
@@ -354,6 +359,31 @@ impl SacnSender {
 
     pub fn universe_count(&self) -> u16 {
         self.plan.len() as u16
+    }
+
+    /// The sequence number last sent, for a successor to continue from. Universes
+    /// advance in lockstep, so this is normally one value; `max` is defensive
+    /// against the rare skip (a universe whose slice was missing mid-reconfigure).
+    pub fn sequence(&self) -> u8 {
+        self.plan
+            .iter()
+            .map(|p| p.sequence)
+            .chain(std::iter::once(self.sync_sequence))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Continue a handed-over stream: number the next frame safely past whatever
+    /// the outgoing instance last sent, so receivers holding sequence state for
+    /// our (shared) CID accept it immediately instead of discarding it as a repeat.
+    /// Called immediately before the first send, so no re-plan can intervene.
+    pub fn resume_after(&mut self, last_sent: u8) {
+        let base = last_sent.wrapping_add(HANDOVER_SEQUENCE_MARGIN);
+        for p in self.plan.iter_mut() {
+            p.sequence = base;
+        }
+        self.sync_sequence = base;
+        log::info!("sACN: resuming handed-over stream at sequence {}", base.wrapping_add(1));
     }
 }
 
@@ -696,6 +726,45 @@ mod tests {
             "a surviving universe must not restart its sequence — a receiver would \
              discard the next packets as out-of-order"
         );
+    }
+
+    /// E1.31 6.7.2: a receiver discards a packet when `new - last`, in signed
+    /// 8-bit arithmetic, is <= 0 and > -20.
+    fn receiver_would_discard(last: u8, new: u8) -> bool {
+        let diff = (new.wrapping_sub(last)) as i8;
+        diff <= 0 && diff > -20
+    }
+
+    #[test]
+    fn a_successor_resumes_outside_the_receiver_discard_window() {
+        // Every possible sequence value the outgoing instance could stop on.
+        for last_sent in 0..=255u8 {
+            let mut s = SacnSender::new().unwrap();
+            let (geo, mut out) = offline(2);
+            out.sync_universe = 100; // exercise the sync counter too (no destinations)
+            s.configure(&geo, &out);
+            s.resume_after(last_sent);
+            s.send_frame(&vec![0u8; 2 * 4 * 3]);
+
+            let first = s.plan[0].sequence;
+            assert!(
+                !receiver_would_discard(last_sent, first),
+                "resuming after {last_sent} sent {first}, which a receiver discards"
+            );
+            assert_eq!(s.sync_sequence, first, "sync packets resume in step");
+        }
+    }
+
+    #[test]
+    fn without_a_resume_the_handover_window_is_real() {
+        // Guards the premise: a successor that restarts at 0 IS discarded for the
+        // low sequence values, which is exactly what resume_after exists to avoid.
+        let discarded: Vec<u8> = (0..=255u8)
+            .filter(|&last| receiver_would_discard(last, 1))
+            .collect();
+        assert_eq!(discarded.len(), 20);
+        assert_eq!(discarded[0], 1);
+        assert_eq!(discarded[19], 20);
     }
 
     #[test]

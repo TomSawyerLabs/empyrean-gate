@@ -359,6 +359,7 @@ async fn handover_state(
     let grant = HandoverGrant {
         config: ctx.state.config.read().clone(),
         layer_phases: ctx.state.layer_phases.lock().clone(),
+        sacn_sequence: Some(ctx.state.sacn_sequence.load(Ordering::Relaxed)),
     };
     axum::Json(grant).into_response()
 }
@@ -391,6 +392,9 @@ async fn handover(
     let grant = HandoverGrant {
         config: state.config.read().clone(),
         layer_phases: state.layer_phases.lock().clone(),
+        // Read after the quiesce ack above, so this is provably the last sequence
+        // number this instance will ever send.
+        sacn_sequence: Some(state.sacn_sequence.load(Ordering::Relaxed)),
     };
 
     // Exit from a plain thread, not the tokio runtime: setting `shutdown` tears the

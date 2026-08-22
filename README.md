@@ -91,10 +91,13 @@ live meters.
   Updates has a "Launch at login" toggle that re-registers itself across updates,
   so a venue power cycle brings the show back without a keyboard.
 - **Seamless takeover**: start a new backend while one is running and it warms its
-  GPU first, asks the old instance to stop and hand over its running state (config +
-  layer animation phases), then continues the output — the structure sees a sub-second
-  hold, no blackout, and patterns don't jump. Deploying a new build mid-show is just
-  "start the new binary".
+  GPU first, asks the old instance to stop and hand over its running state (config,
+  layer animation phases, and the sACN sequence number), then continues the output —
+  the structure sees a sub-second hold, no blackout, and patterns don't jump.
+  Continuing the sequence numbering matters because the CID is shared: a successor
+  restarting at zero would land in the window receivers discard as out-of-order and
+  freeze the rig on its last look. Deploying a new build mid-show is just "start the
+  new binary".
 - **sACN**: pick the egress interface explicitly (multi-homed machines otherwise send
   multicast out the default route — invisible on the lighting NIC), sync sACN to
   render fps or fix a rate, and optionally enable E1.31 universe synchronization

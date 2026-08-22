@@ -1071,7 +1071,16 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     false
                 };
                 if send {
+                    // Adopt a handover's sequence numbering here rather than when
+                    // the grant lands: immediately before the send is the only
+                    // point that cannot race a re-plan or the hold being lifted.
+                    if state.sacn_resume_pending.swap(false, Ordering::SeqCst) {
+                        s.resume_after(state.sacn_resume_sequence.load(Ordering::SeqCst));
+                    }
                     pkts_this_sec += s.send_frame(rgb) as u32;
+                    // Published for the handover grant: a successor continues this
+                    // numbering instead of restarting it (see HandoverGrant).
+                    state.sacn_sequence.store(s.sequence(), Ordering::Relaxed);
                 }
             }
 

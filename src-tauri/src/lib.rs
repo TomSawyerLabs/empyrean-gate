@@ -86,6 +86,15 @@ pub fn start_backend() -> Backend {
                 if !prepared {
                     state.update_config(|c| *c = grant.config);
                 }
+                // Only the COMMIT grant's sequence number is authoritative: it is
+                // read after the old instance acked its final send, whereas the
+                // phase-1 value goes stale while that instance keeps transmitting
+                // through our warm-up. Set before `sacn_hold` is lifted below, and
+                // consumed by the engine immediately before its first send.
+                if let Some(seq) = grant.sacn_sequence {
+                    state.sacn_resume_sequence.store(seq, Ordering::SeqCst);
+                    state.sacn_resume_pending.store(true, Ordering::SeqCst);
+                }
                 log::info!(
                     "takeover committed in {:.0} ms total; resuming sACN",
                     t0.elapsed().as_secs_f32() * 1000.0
