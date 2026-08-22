@@ -143,6 +143,8 @@ pub enum ClientMsg {
     SetRequireToken {
         require: bool,
     },
+    /// Create the Windows Firewall port rule (one UAC prompt on the Gate machine).
+    AuthorizeFirewall,
     /// Ask the updater to poll GitHub Releases now.
     CheckUpdate,
     /// Download + hot-swap to the staged update (two-phase takeover).
@@ -288,6 +290,10 @@ pub struct RuntimeStatus {
     pub default_output_channels: u16,
     /// Local IPv4 interfaces as "name — ip", for the sACN interface picker.
     pub interfaces: Vec<String>,
+    /// Windows only: the firewall allow rule for our port is missing, so LAN
+    /// clients may be blocked (and every new binary re-triggers the security
+    /// prompt). The UI offers one-click authorization.
+    pub firewall_pending: bool,
     /// Cache/download state per video playlist entry.
     pub video_cache: Vec<crate::videocache::VideoCacheStatus>,
     /// Known + connected client devices.

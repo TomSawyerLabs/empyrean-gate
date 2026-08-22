@@ -246,6 +246,19 @@ export default function App() {
           {e} <span className="hint">(click to dismiss)</span>
         </div>
       ))}
+      {status?.firewall_pending && (
+        <div className="banner warn">
+          Windows Firewall hasn't been authorized — phones and iPads on the LAN
+          may not be able to connect.{" "}
+          <button className="ghost" onClick={() => client.authorizeFirewall()}>
+            Authorize
+          </button>{" "}
+          <span className="hint">
+            (one admin prompt on the Gate machine; never asks again, even after
+            updates)
+          </span>
+        </div>
+      )}
 
       <main>
         {tab === "live" && <Live />}

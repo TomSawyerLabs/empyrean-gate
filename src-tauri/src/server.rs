@@ -804,6 +804,26 @@ async fn handle_msg(
                 }
             });
         }
+        ClientMsg::AuthorizeFirewall => {
+            // Elevation blocks on the UAC dialog; run it off the async path.
+            let state2 = state.clone();
+            tokio::task::spawn_blocking(move || {
+                let port = state2.config.read().server.port;
+                match crate::firewall::authorize(port) {
+                    Ok(()) => {
+                        state2.status.lock().firewall_pending = false;
+                        log::info!("firewall rule created for port {port}");
+                    }
+                    Err(e) => {
+                        log::warn!("firewall authorization failed: {e:#}");
+                        let _ = state2.events.send(ServerMsg::Error {
+                            message: format!("Firewall authorization failed: {e}"),
+                        });
+                    }
+                }
+                state2.broadcast_state();
+            });
+        }
         ClientMsg::CheckUpdate => {
             state.update_check_requested.store(true, Ordering::SeqCst);
         }
