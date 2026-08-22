@@ -54,25 +54,36 @@ fn rule_exists_windows(port: u16) -> Option<bool> {
 pub fn authorize(port: u16) -> anyhow::Result<()> {
     #[cfg(windows)]
     {
-        // Delete any stale rule (old port) first, then add — both inside ONE
-        // elevated shell so UAC appears once.
+        // The netsh commands go through a temp .ps1 run with -File. Passing them
+        // inline via nested `-Command` strips the embedded quotes at the native
+        // command-line level (netsh saw `name=Empyrean` + a stray `Gate` and
+        // failed inside the hidden elevated window). A script file parses its
+        // own contents, so quoting survives. Delete any stale rule (old port)
+        // first, then add — both inside ONE elevated shell so UAC appears once.
         let script = format!(
-            "netsh advfirewall firewall delete rule name=\"{name}\" >$null 2>&1; \
+            "netsh advfirewall firewall delete rule name=\"{name}\" | Out-Null\r\n\
              netsh advfirewall firewall add rule name=\"{name}\" dir=in action=allow \
-             protocol=TCP localport={port} profile=any",
+             protocol=TCP localport={port} profile=any\r\n\
+             exit $LASTEXITCODE\r\n",
             name = rule_name(),
         );
+        let path = std::env::temp_dir().join("empyrean-gate-firewall.ps1");
+        std::fs::write(&path, script)?;
         let status = std::process::Command::new("powershell")
             .args([
                 "-NoProfile",
                 "-Command",
                 &format!(
-                    "Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden \
-                     -ArgumentList '-NoProfile','-Command','{}'",
-                    script.replace('\'', "''")
+                    "$ErrorActionPreference='Stop'; \
+                     $p = Start-Process powershell -Verb RunAs -Wait -PassThru \
+                     -WindowStyle Hidden -ArgumentList \
+                     '-NoProfile','-ExecutionPolicy','Bypass','-File','\"{}\"'; \
+                     exit $p.ExitCode",
+                    path.display()
                 ),
             ])
             .status()?;
+        let _ = std::fs::remove_file(&path);
         anyhow::ensure!(status.success(), "elevation was declined or failed");
         anyhow::ensure!(
             rule_exists_windows(port) == Some(true),
