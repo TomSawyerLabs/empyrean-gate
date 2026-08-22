@@ -50,6 +50,39 @@ export interface LayerCfg {
   param_d: number;
 }
 
+export interface SavedStack {
+  id: string;
+  name: string;
+  layers: LayerCfg[];
+  master_speed: number;
+  walk_enabled: boolean;
+  walk_layers: boolean;
+  walk_min_layers: number;
+  walk_speed: number;
+  walk_depth: number;
+}
+
+export interface ShowPlaylistEntry {
+  id: string;
+  name: string;
+  stack: SavedStack;
+  duration_secs: number;
+  transition_secs: number;
+}
+
+export interface SavedPlaylist {
+  id: string;
+  name: string;
+  entries: ShowPlaylistEntry[];
+  repeat: boolean;
+}
+
+export interface ShowSchedulerConfig {
+  enabled: boolean;
+  active_playlist_id: string;
+  current_index: number;
+}
+
 export interface EffectCfg {
   kind: EffectKind;
   angle: number;
@@ -57,6 +90,8 @@ export interface EffectCfg {
   intensity: number;
   size: number;
   hue: number;
+  saturation: number;
+  brightness: number;
   duration: number;
 }
 
@@ -120,6 +155,17 @@ export type AudioSourceConfig = {
 
 export interface AudioConfig {
   sources: AudioSourceConfig[];
+}
+
+export type RhythmSource = "layer_audio" | "midi_clock" | "pro_dj_link";
+
+export interface RhythmConfig {
+  source: RhythmSource;
+  midi_port: string | null;
+  pro_dj_link_player: number;
+  latency_ms: number;
+  fallback_to_audio: boolean;
+  fallback_audio_source: number;
 }
 
 export interface RenderConfig {
@@ -186,6 +232,7 @@ export interface AppConfig {
   output: OutputConfig;
   server: ServerConfig;
   audio: AudioConfig;
+  rhythm: RhythmConfig;
   render: RenderConfig;
   update: UpdateConfig;
   windows: WindowsConfig;
@@ -193,6 +240,9 @@ export interface AppConfig {
   beat_taps: BeatTapConfig;
   autostart: boolean;
   layers: LayerCfg[];
+  saved_stacks: SavedStack[];
+  saved_playlists: SavedPlaylist[];
+  show_scheduler: ShowSchedulerConfig;
   clients: ClientRecord[];
 }
 
@@ -217,6 +267,22 @@ export interface AudioSourceStatus {
   beat_phase: number;
 }
 
+export interface RhythmStatus {
+  active: boolean;
+  using_fallback: boolean;
+  source: string;
+  detail: string;
+  bpm: number;
+  beat_phase: number;
+  running: boolean;
+  age_ms: number;
+}
+
+export interface ProDjLinkDeviceInfo {
+  number: number;
+  name: string;
+}
+
 export interface RuntimeStatus {
   gpu_error: string | null;
   gpu_name: string;
@@ -230,6 +296,9 @@ export interface RuntimeStatus {
   pps_history: number[];
   clients: number;
   audio: AudioSourceStatus[];
+  rhythm: RhythmStatus;
+  midi_ports: string[];
+  pro_dj_link_devices: ProDjLinkDeviceInfo[];
   input_devices: DeviceInfo[];
   output_devices: DeviceInfo[];
   default_input_channels: number;
@@ -244,6 +313,18 @@ export interface RuntimeStatus {
   update_available: string | null;
   update_state: string;
   video: VideoSourceStatus;
+  show: ScheduledShowStatus;
+}
+
+export interface ScheduledShowStatus {
+  enabled: boolean;
+  playlist_id: string;
+  playlist_name: string;
+  scene_name: string;
+  index: number;
+  total: number;
+  remaining_secs: number;
+  transition_progress: number;
 }
 
 export interface VideoSourceStatus {

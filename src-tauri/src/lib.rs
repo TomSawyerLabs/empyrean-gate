@@ -12,6 +12,7 @@ pub mod layers;
 pub mod media;
 pub mod power;
 pub mod protocol;
+pub mod rhythm;
 pub mod sacn;
 pub mod server;
 pub mod state;
@@ -52,6 +53,7 @@ pub fn start_backend() -> Backend {
         state.sacn_hold.store(true, Ordering::SeqCst);
     }
     let remote_chains = audio::spawn(state.clone());
+    rhythm::spawn(state.clone());
     engine::spawn(state.clone());
     power::spawn(state.clone());
 
