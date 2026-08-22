@@ -229,7 +229,12 @@ CPU→uniform→GPU. We're generalizing "hardcoded uniforms + switch on kind" in
       pipeline current shows run on — not an autonomous call).
 - [ ] 6. Sub-patches: exposed ports, palette integration, uuid refs, cycle
       guard.
-- [ ] 7. Texture tier: VideoIn node, Feedback node, TextureSample.
+- [~] 7. Texture tier: **VideoIn + TextureSample DONE** (committed) — the
+      live browser video frame flows into the graph (video_in marker node →
+      texture_sample with zoom/rotate/kaleido/saturation/brightness through
+      the shared ctx_transform; VIDEO binding + sampler were already in the
+      prelude, so no engine changes). Feedback (ping-pong buffers = a second
+      pass + real engine surgery) still to do.
 - [ ] 8. Polish: wire meters, node thumbnails, co-edit ops, patch crossfade,
       Walk nodes / autopilot integration.
 

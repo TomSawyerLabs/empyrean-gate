@@ -86,6 +86,8 @@ fn is_gpu_kind(kind: &str) -> bool {
             | "blend"
             | "touch_dabs"
             | "render_points"
+            | "video_in"
+            | "texture_sample"
             | "output"
     )
 }
@@ -688,6 +690,30 @@ impl Gen<'_> {
             // No function of its own: it marks the live-draw dab stream as a
             // Points source for Render points (which reads DABS directly).
             "touch_dabs" => return Ok(()),
+            // Likewise: marks the live video frame as a Texture source.
+            "video_in" => return Ok(()),
+            "texture_sample" => {
+                if self.upstream(i, "tex").is_none() {
+                    "    return vec4f(0.0);".to_string()
+                } else {
+                    format!(
+                        "    let c = ctx_transform(c0, {rot} * TAU, {zoom}, {kal}, 0.0);
+                             let uv = vec2f(0.5 + c.pos.x * 0.5, 0.5 - c.pos.y * 0.5);
+                             let s = video_at(uv);
+                             if s.a == 0.0 {{
+                                 return s;
+                             }}
+                             let lum = dot(s.rgb, vec3f(0.2126, 0.7152, 0.0722));
+                             let col = mix(vec3f(lum), s.rgb, clamp({sat}, 0.0, 2.0)) * {bright};
+                             return vec4f(col, s.a);",
+                        rot = self.p(i, "rotate"),
+                        zoom = self.p(i, "zoom"),
+                        kal = self.p(i, "kaleido"),
+                        sat = self.p(i, "saturation"),
+                        bright = self.p(i, "brightness"),
+                    )
+                }
+            }
             "render_points" => {
                 if self.upstream(i, "points").is_none() {
                     "    return vec4f(0.0);".to_string()
@@ -722,8 +748,13 @@ impl Gen<'_> {
             "gradient" => "f32",
             _ => "vec4f",
         };
-        // Transform renames its ctx arg (it derives a transformed copy).
-        let arg = if kind == "transform" { "c0" } else { "c" };
+        // Transform/texture_sample rename their ctx arg (they derive a
+        // transformed copy).
+        let arg = if kind == "transform" || kind == "texture_sample" {
+            "c0"
+        } else {
+            "c"
+        };
         writeln!(code, "\nfn n{i}_f({arg}: Ctx) -> {ret} {{").unwrap();
         // A node with no ctx-dependent body (e.g. solid) leaves `c` unused;
         // keep naga quiet about it.
@@ -956,6 +987,32 @@ mod tests {
     }
 
     #[test]
+    fn video_texture_chain_compiles_and_validates() {
+        let d = PatchDoc {
+            nodes: vec![
+                node("v", "video_in"),
+                node("ts", "texture_sample"),
+                node("o", "output"),
+            ],
+            edges: vec![edge("v", "tex", "ts", "tex"), edge("ts", "out", "o", "in")],
+            ..Default::default()
+        };
+        let prog = compile(&d).expect("compiles");
+        assert!(
+            prog.wgsl.contains("video_at"),
+            "samples the live video frame"
+        );
+        let module = naga::front::wgsl::parse_str(&prog.wgsl)
+            .unwrap_or_else(|e| panic!("parse: {e}\n{}", prog.wgsl));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .expect("validates");
+    }
+
+    #[test]
     fn render_points_takes_dab_ownership_and_validates() {
         let d = PatchDoc {
             nodes: vec![
@@ -991,17 +1048,6 @@ mod tests {
             prog.wgsl.contains(", true);"),
             "dangling node leaves auto-dabs on"
         );
-    }
-
-    #[test]
-    fn unsupported_kinds_are_refused_with_a_clear_error() {
-        let d = PatchDoc {
-            nodes: vec![node("v", "video_in"), node("o", "output")],
-            ..Default::default()
-        };
-        let err = compile(&d).unwrap_err();
-        assert!(err.contains("video_in"), "{err}");
-        assert!(err.contains("not renderable yet"), "{err}");
     }
 
     #[test]
