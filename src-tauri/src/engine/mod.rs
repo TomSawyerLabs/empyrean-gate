@@ -17,6 +17,10 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// A scene may use every operator-visible layer slot; a true crossfade needs room
+/// for one complete outgoing stack and one complete incoming stack at once.
+const MAX_RENDER_LAYERS: usize = MAX_LAYERS * 2;
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Globals {
@@ -36,6 +40,13 @@ pub struct Globals {
     pub video_width: u32,
     pub video_height: u32,
     pub video_active: u32,
+    /// Number of leading GPU layers that belong to the outgoing scene.
+    pub transition_split: u32,
+    /// Non-zero while the shader should compose two independent scene stacks.
+    pub transition_active: u32,
+    /// Smoothed 0..1 mix from the outgoing scene to the incoming scene.
+    pub transition_progress: f32,
+    pub _pad_transition: f32,
 }
 
 #[repr(C)]
@@ -158,7 +169,7 @@ impl Engine {
         });
         let layers_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("layers"),
-            size: (std::mem::size_of::<GpuLayer>() * MAX_LAYERS) as u64,
+            size: (std::mem::size_of::<GpuLayer>() * MAX_RENDER_LAYERS) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -632,10 +643,50 @@ fn effective_beat_phase(
     }
 }
 
+fn stack_from_config(cfg: &crate::config::AppConfig) -> crate::config::SavedStack {
+    crate::config::SavedStack {
+        id: "live-stack".into(),
+        name: "Current look".into(),
+        layers: cfg.layers.clone(),
+        master_speed: cfg.render.master_speed,
+        walk_enabled: cfg.render.walk_enabled,
+        walk_layers: cfg.render.walk_layers,
+        walk_min_layers: cfg.render.walk_min_layers,
+        walk_speed: cfg.render.walk_speed,
+        walk_depth: cfg.render.walk_depth,
+    }
+}
+
+fn apply_stack_to_config(cfg: &mut crate::config::AppConfig, stack: &crate::config::SavedStack) {
+    cfg.layers = stack.layers.clone();
+    cfg.render.master_speed = stack.master_speed;
+    cfg.render.walk_enabled = stack.walk_enabled;
+    cfg.render.walk_layers = stack.walk_layers;
+    cfg.render.walk_min_layers = stack.walk_min_layers;
+    cfg.render.walk_speed = stack.walk_speed;
+    cfg.render.walk_depth = stack.walk_depth;
+}
+
+/// Keep scene blend math intact by arranging complete outgoing and incoming stacks.
+/// The shader composes each side independently and mixes only their finished colors.
+fn transition_layers(
+    outgoing: Option<&crate::config::SavedStack>,
+    incoming: &crate::config::SavedStack,
+) -> (Vec<crate::layers::LayerCfg>, usize) {
+    let mut layers = Vec::with_capacity(MAX_RENDER_LAYERS);
+    let split = outgoing.map_or(0, |stack| {
+        layers.extend(stack.layers.iter().take(MAX_LAYERS).cloned());
+        stack.layers.len().min(MAX_LAYERS)
+    });
+    layers.extend(incoming.layers.iter().take(MAX_LAYERS).cloned());
+    (layers, split)
+}
+
 #[cfg(test)]
 mod beat_time_tests {
-    use super::effective_beat_phase;
-    use crate::config::BeatTime;
+    use super::{apply_stack_to_config, effective_beat_phase, stack_from_config, transition_layers};
+    use crate::config::{AppConfig, BeatTime, SavedStack};
+    use crate::layers::MAX_LAYERS;
 
     #[test]
     fn half_time_spans_two_base_beats() {
@@ -648,6 +699,57 @@ mod beat_time_tests {
     fn double_time_wraps_halfway_through_a_base_beat() {
         assert_eq!(effective_beat_phase(0.25, 0, BeatTime::Double), 0.5);
         assert_eq!(effective_beat_phase(0.75, 0, BeatTime::Double), 0.5);
+    }
+
+    #[test]
+    fn transition_keeps_each_scenes_layer_opacity_intact() {
+        let mut outgoing = SavedStack::default();
+        outgoing.layers = AppConfig::default().layers;
+        outgoing.layers[0].opacity = 0.73;
+        let mut incoming = outgoing.clone();
+        incoming.layers[0].opacity = 0.41;
+
+        let (layers, split) = transition_layers(Some(&outgoing), &incoming);
+
+        assert_eq!(split, outgoing.layers.len());
+        assert_eq!(layers[0].opacity, 0.73);
+        assert_eq!(layers[split].opacity, 0.41);
+    }
+
+    #[test]
+    fn transition_has_capacity_for_two_complete_maximum_scenes() {
+        let layer = AppConfig::default().layers[0].clone();
+        let outgoing = SavedStack {
+            layers: vec![layer.clone(); MAX_LAYERS],
+            ..Default::default()
+        };
+        let incoming = SavedStack {
+            layers: vec![layer; MAX_LAYERS],
+            ..Default::default()
+        };
+
+        let (layers, split) = transition_layers(Some(&outgoing), &incoming);
+
+        assert_eq!(split, MAX_LAYERS);
+        assert_eq!(layers.len(), MAX_LAYERS * 2);
+    }
+
+    #[test]
+    fn scheduled_stack_round_trips_through_live_config() {
+        let mut cfg = AppConfig::default();
+        let mut stack = stack_from_config(&cfg);
+        stack.master_speed = 0.42;
+        stack.walk_enabled = true;
+        stack.walk_depth = 2.25;
+        stack.layers[0].opacity = 0.37;
+
+        apply_stack_to_config(&mut cfg, &stack);
+        let mirrored = stack_from_config(&cfg);
+
+        assert_eq!(mirrored.master_speed, stack.master_speed);
+        assert_eq!(mirrored.walk_enabled, stack.walk_enabled);
+        assert_eq!(mirrored.walk_depth, stack.walk_depth);
+        assert_eq!(mirrored.layers[0].opacity, stack.layers[0].opacity);
     }
 }
 
@@ -767,10 +869,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let dt = (now - last_frame).as_secs_f32();
         last_frame = now;
 
-        // Resolve the active timed show and build a temporary layer stack. Both
-        // scenes are rendered during a transition, with a smoothstep opacity
-        // envelope; after the fade, incoming animation phases are shifted down so
-        // finishing a transition never causes a visible motion jump.
+        // Resolve the active timed show and build a temporary layer stack. During
+        // a transition the shader composes both scenes independently, then mixes
+        // their completed colors. After the fade, incoming animation phases are
+        // shifted down so finishing a transition never causes a motion jump.
         let scheduled = if cfg.show_scheduler.enabled {
             cfg.saved_playlists
                 .iter()
@@ -790,28 +892,32 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let mut render_walk_min_layers = cfg.render.walk_min_layers;
         let mut render_walk_speed = cfg.render.walk_speed;
         let mut render_walk_depth = cfg.render.walk_depth;
+        let mut render_transition_split = 0usize;
+        let mut render_transition_active = false;
+        let mut render_transition_progress = 0.0f32;
 
         if let Some((playlist, index, entry)) = scheduled {
             // Timing edits should take effect without restarting the current cue;
             // identity/index changes are the actual transition boundary.
             let key = format!("{}:{index}:{}", playlist.id, entry.id);
-            if key != show_key {
-                let previous = current_stack.take().unwrap_or_else(|| crate::config::SavedStack {
-                    id: "live-stack".into(),
-                    name: "Current look".into(),
-                    layers: cfg.layers.clone(),
-                    master_speed: cfg.render.master_speed,
-                    walk_enabled: cfg.render.walk_enabled,
-                    walk_layers: cfg.render.walk_layers,
-                    walk_min_layers: cfg.render.walk_min_layers,
-                    walk_speed: cfg.render.walk_speed,
-                    walk_depth: cfg.render.walk_depth,
-                });
+            let scene_changed = key != show_key;
+            if scene_changed {
+                let previous = current_stack.take().unwrap_or_else(|| stack_from_config(&cfg));
                 transition_from = Some(previous);
                 current_stack = Some(entry.stack.clone());
                 show_key = key;
                 scene_started = now;
                 advance_requested = false;
+
+                // Make the scheduled target the actual live config too. Controllers
+                // now show (and edit) the scene that the renderer is using instead
+                // of a stale stack left over from before the journey started.
+                let target = entry.stack.clone();
+                state.update_config(move |c| apply_stack_to_config(c, &target));
+            } else {
+                // Config edits made while a cue is running are edits to that cue's
+                // effective live stack. The embedded playlist snapshot stays intact.
+                current_stack = Some(stack_from_config(&cfg));
             }
 
             let target = current_stack.as_ref().expect("scheduled stack");
@@ -844,18 +950,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 transition_from = None;
             }
 
-            render_layers.clear();
-            if let Some(old) = transition_from.as_ref() {
-                render_layers.extend(old.layers.iter().cloned().map(|mut layer| {
-                    layer.opacity *= 1.0 - fade;
-                    layer
-                }));
-            }
-            render_layers.extend(target.layers.iter().cloned().map(|mut layer| {
-                layer.opacity *= fade;
-                layer
-            }));
-            render_layers.truncate(MAX_LAYERS);
+            (render_layers, render_transition_split) =
+                transition_layers(transition_from.as_ref(), target);
+            render_transition_active = transition_from.is_some();
+            render_transition_progress = fade;
 
             let duration = entry.duration_secs.clamp(10.0, 86_400.0);
             show_status = ScheduledShowStatus {
@@ -1055,12 +1153,17 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // Gray-code walk across which layers play: flip exactly one layer per step
         // among the user-enabled pool, keeping at least `walk_min_layers` on.
         let walk_layers_on = render_walk_enabled && render_walk_layers;
+        let render_layer_limit = if render_transition_active {
+            MAX_RENDER_LAYERS
+        } else {
+            MAX_LAYERS
+        };
         if walk_layers_on && now >= next_flip {
             next_flip = now + Duration::from_secs_f32(walk_tau);
             let eligible: Vec<usize> = render_layers
                 .iter()
                 .enumerate()
-                .take(MAX_LAYERS)
+                .take(render_layer_limit)
                 .filter(|(_, l)| l.enabled)
                 .map(|(i, _)| i)
                 .collect();
@@ -1082,8 +1185,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             }
         }
 
-        let mut layers = Vec::with_capacity(render_layers.len().min(MAX_LAYERS));
-        for (i, l) in render_layers.iter().take(MAX_LAYERS).enumerate() {
+        let mut layers = Vec::with_capacity(render_layers.len().min(render_layer_limit));
+        let mut gpu_transition_split = 0u32;
+        for (i, l) in render_layers.iter().take(render_layer_limit).enumerate() {
             // Envelope eases layers in/out of the mix over a few seconds.
             let target = if walk_layers_on { layer_target[i] } else { true };
             let goal = if target { 1.0 } else { 0.0 };
@@ -1107,6 +1211,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             };
             l.opacity *= layer_env[i];
             layer_phases[i] += (l.speed * render_master_speed * dt) as f64;
+            if render_transition_active && i < render_transition_split {
+                gpu_transition_split += 1;
+            }
             layers.push(l.to_gpu(layer_phases[i] as f32));
         }
         *state.layer_phases.lock() = layer_phases.clone();
@@ -1199,6 +1306,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 video_width,
                 video_height,
                 video_active: u32::from(video_active),
+                transition_split: gpu_transition_split,
+                transition_active: u32::from(render_transition_active),
+                transition_progress: render_transition_progress,
+                _pad_transition: 0.0,
             },
             audio,
             layers,

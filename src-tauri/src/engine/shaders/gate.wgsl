@@ -24,6 +24,10 @@ struct Globals {
     video_width: u32,
     video_height: u32,
     video_active: u32,
+    transition_split: u32,
+    transition_active: u32,
+    transition_progress: f32,
+    _pad_transition: f32,
 }
 
 struct AudioU {
@@ -740,10 +744,25 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     ctx.pos = rn * vec2f(cos(theta), sin(theta));
 
     var acc = vec3f(0.0);
-    for (var l = 0u; l < G.layer_count; l++) {
-        let L = LAYERS[l];
-        let c = layer_color(L, ctx);
-        acc = apply_blend(acc, c, L.opacity, L.blend);
+    if G.transition_active != 0u {
+        var outgoing = vec3f(0.0);
+        var incoming = vec3f(0.0);
+        for (var l = 0u; l < G.layer_count; l++) {
+            let L = LAYERS[l];
+            let c = layer_color(L, ctx);
+            if l < G.transition_split {
+                outgoing = apply_blend(outgoing, c, L.opacity, L.blend);
+            } else {
+                incoming = apply_blend(incoming, c, L.opacity, L.blend);
+            }
+        }
+        acc = mix(outgoing, incoming, clamp(G.transition_progress, 0.0, 1.0));
+    } else {
+        for (var l = 0u; l < G.layer_count; l++) {
+            let L = LAYERS[l];
+            let c = layer_color(L, ctx);
+            acc = apply_blend(acc, c, L.opacity, L.blend);
+        }
     }
 
     for (var e = 0u; e < G.effect_count; e++) {
