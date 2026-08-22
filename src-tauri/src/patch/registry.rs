@@ -33,6 +33,10 @@ pub struct ParamDef {
     pub min: f32,
     pub max: f32,
     pub default: f32,
+    /// The engine integrates this param over time (× master speed) and the GPU
+    /// sees the accumulated phase, so live speed changes never cause visual
+    /// discontinuities — the same invariant the layer stack keeps per-layer.
+    pub integrate: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,6 +112,26 @@ const fn num(
         min,
         max,
         default,
+        integrate: false,
+    }
+}
+
+/// A `num` whose value is a rate: the engine integrates it into a phase.
+const fn rate(
+    name: &'static str,
+    label: &'static str,
+    min: f32,
+    max: f32,
+    default: f32,
+) -> ParamDef {
+    ParamDef {
+        name,
+        label,
+        kind: ParamKind::Number,
+        min,
+        max,
+        default,
+        integrate: true,
     }
 }
 
@@ -123,6 +147,7 @@ const fn sel(
         min: 0.0,
         max: options.len() as f32 - 1.0,
         default: 0.0,
+        integrate: false,
     }
 }
 
@@ -333,7 +358,8 @@ pub const TYPES: &[NodeType] = &[
         outputs: COLOR_OUT,
         params: &[
             num("scale", "Scale", 0.1, 8.0, 1.0),
-            num("speed", "Speed", 0.0, 4.0, 1.0),
+            rate("speed", "Speed", 0.0, 4.0, 1.0),
+            num("threshold", "Threshold", 0.0, 1.0, 0.5),
             HUE,
             HUE_RANGE,
             SATURATION,
@@ -348,7 +374,8 @@ pub const TYPES: &[NodeType] = &[
         outputs: COLOR_OUT,
         params: &[
             num("waves", "Waves", 1.0, 8.0, 3.0),
-            num("speed", "Speed", 0.0, 4.0, 1.0),
+            num("scale", "Scale", 0.1, 8.0, 1.0),
+            rate("speed", "Speed", 0.0, 4.0, 1.0),
             num("sharpness", "Sharpness", 0.0, 1.0, 0.5),
             HUE,
             HUE_RANGE,
@@ -365,7 +392,8 @@ pub const TYPES: &[NodeType] = &[
         params: &[
             num("arms", "Arms", 1.0, 12.0, 3.0),
             num("twist", "Twist", -4.0, 4.0, 1.0),
-            num("speed", "Speed", -4.0, 4.0, 1.0),
+            rate("speed", "Speed", -4.0, 4.0, 1.0),
+            num("sharpness", "Sharpness", 0.0, 1.0, 0.5),
             HUE,
             SATURATION,
             BRIGHTNESS,
@@ -383,7 +411,7 @@ pub const TYPES: &[NodeType] = &[
         outputs: COLOR_OUT,
         params: &[
             num("rotate", "Rotate (turns)", -1.0, 1.0, 0.0),
-            num("spin", "Spin (turns/s)", -2.0, 2.0, 0.0),
+            rate("spin", "Spin (turns/s)", -2.0, 2.0, 0.0),
             num("zoom", "Zoom", 0.1, 8.0, 1.0),
             num("kaleido", "Kaleidoscope", 0.0, 10.0, 0.0),
             sel("mirror", "Mirror", &["off", "on"]),

@@ -68,12 +68,19 @@ pub struct FrameInputs {
     pub scope: Vec<f32>,
     /// Present only when a newer browser-decoded frame needs uploading.
     pub video_upload: Option<Vec<u8>>,
+    /// The patch parameter slab (see `patch::eval`). `Some` renders with the
+    /// compiled patch pipeline instead of the layer stack — the transition
+    /// bridge from plans/node-graph.md.
+    pub patch_params: Option<Vec<f32>>,
 }
 
 pub struct Engine {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
+    /// Compiled from a patch's generated WGSL; used instead of `pipeline`
+    /// whenever the frame carries `patch_params`.
+    patch_pipeline: Option<wgpu::ComputePipeline>,
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
     globals_buf: wgpu::Buffer,
@@ -83,6 +90,7 @@ pub struct Engine {
     dabs_buf: wgpu::Buffer,
     scope_buf: wgpu::Buffer,
     video_buf: wgpu::Buffer,
+    params_buf: wgpu::Buffer,
     out_buf: wgpu::Buffer,
     staging: [wgpu::Buffer; 2],
     /// Submission index of the copy targeting each staging buffer.
@@ -185,6 +193,12 @@ impl Engine {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("patch-params"),
+            size: (crate::patch::codegen::MAX_SLAB_FLOATS * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let (out_buf, staging) = Self::make_pixel_buffers(&device, npix);
 
@@ -199,6 +213,7 @@ impl Engine {
                 storage_entry(5, true),
                 storage_entry(6, true),
                 storage_entry(7, true),
+                storage_entry(8, true),
             ],
         });
 
@@ -214,8 +229,10 @@ impl Engine {
                 &dabs_buf,
                 &scope_buf,
                 &video_buf,
+                &params_buf,
             ),
             pipeline: Self::make_pipeline(&device, &bind_group_layout)?,
+            patch_pipeline: None,
             device,
             queue,
             bind_group_layout,
@@ -226,6 +243,7 @@ impl Engine {
             dabs_buf,
             scope_buf,
             video_buf,
+            params_buf,
             out_buf,
             staging,
             staging_submission: [None, None],
@@ -242,21 +260,30 @@ impl Engine {
         device: &wgpu::Device,
         bgl: &wgpu::BindGroupLayout,
     ) -> Result<wgpu::ComputePipeline> {
+        Self::build_pipeline(device, bgl, "gate", &shader_source())
+    }
+
+    fn build_pipeline(
+        device: &wgpu::Device,
+        bgl: &wgpu::BindGroupLayout,
+        label: &str,
+        source: &str,
+    ) -> Result<wgpu::ComputePipeline> {
         // Error scope instead of wgpu's default panic-on-validation-error: a broken
-        // shader (live editing with hot-reload!) must surface as a UI error, not
-        // kill the engine thread.
+        // shader (live editing with hot-reload, or a generated patch) must surface
+        // as a UI error, not kill the engine thread.
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("gate.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(shader_source().into()),
+            label: Some(label),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("gate"),
+            label: Some(label),
             bind_group_layouts: &[Some(bgl)],
             immediate_size: 0,
         });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("gate"),
+            label: Some(label),
             layout: Some(&layout),
             module: &shader,
             entry_point: Some("main"),
@@ -274,6 +301,24 @@ impl Engine {
         self.pipeline = Self::make_pipeline(&self.device, &self.bind_group_layout)?;
         log::info!("shader reloaded");
         Ok(())
+    }
+
+    /// Install (or clear) the compiled patch pipeline from generated WGSL.
+    /// Failure leaves the previous patch pipeline untouched, so a bad edit
+    /// keeps the last good patch rendering — same contract as hot-reload.
+    pub fn set_patch_shader(&mut self, source: Option<&str>) -> Result<()> {
+        match source {
+            None => {
+                self.patch_pipeline = None;
+                Ok(())
+            }
+            Some(src) => {
+                let pipeline =
+                    Self::build_pipeline(&self.device, &self.bind_group_layout, "patch", src)?;
+                self.patch_pipeline = Some(pipeline);
+                Ok(())
+            }
+        }
     }
 
     fn make_pixel_buffers(device: &wgpu::Device, npix: u32) -> (wgpu::Buffer, [wgpu::Buffer; 2]) {
@@ -307,6 +352,7 @@ impl Engine {
         dabs: &wgpu::Buffer,
         scope: &wgpu::Buffer,
         video: &wgpu::Buffer,
+        params: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("gate"),
@@ -320,6 +366,7 @@ impl Engine {
                 bind(5, dabs),
                 bind(6, scope),
                 bind(7, video),
+                bind(8, params),
             ],
         })
     }
@@ -347,6 +394,7 @@ impl Engine {
             &self.dabs_buf,
             &self.scope_buf,
             &self.video_buf,
+            &self.params_buf,
         );
     }
 
@@ -379,6 +427,16 @@ impl Engine {
         {
             self.queue.write_buffer(&self.video_buf, 0, rgba);
         }
+        let patch = match (&inputs.patch_params, &self.patch_pipeline) {
+            (Some(params), Some(pipeline)) => {
+                if !params.is_empty() {
+                    self.queue
+                        .write_buffer(&self.params_buf, 0, bytemuck::cast_slice(params));
+                }
+                Some(pipeline)
+            }
+            _ => None,
+        };
 
         let mut encoder = self
             .device
@@ -388,7 +446,7 @@ impl Engine {
                 label: Some("gate"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipeline);
+            pass.set_pipeline(patch.unwrap_or(&self.pipeline));
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.dispatch_workgroups(self.npix.div_ceil(256), 1, 1);
         }
@@ -694,6 +752,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut layer_env: Vec<f32> = Vec::new();
     let mut next_flip = Instant::now();
 
+    // The active node-graph patch, compiled: (patch id, patch epoch) keys the
+    // rebuild. See plans/node-graph.md.
+    let mut patch_rt: Option<crate::patch::eval::Runtime> = None;
+    let mut patch_key: Option<(String, u32)> = None;
+
     // Beat taps and the operator beat pulse follow the lighting-time clock, which
     // can run at half/normal/double the detector's inferred tempo.
     let mut prev_raw_beat_phase = [0.0f32; MAX_AUDIO_SOURCES];
@@ -738,6 +801,42 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 }
             }
         }
+        // Compile (or drop) the active node-graph patch when it changes — either
+        // a different id, or a patch-file edit (patch_epoch bump). Errors surface
+        // to the UI and the loop falls back to the layer stack.
+        let patch_epoch = state.patch_epoch.load(Ordering::Relaxed);
+        let wanted = cfg.active_patch.clone().map(|id| (id, patch_epoch));
+        if wanted != patch_key {
+            patch_key = wanted.clone();
+            patch_rt = None;
+            let mut patch_error = None;
+            match &wanted {
+                None => {
+                    let _ = engine.set_patch_shader(None);
+                }
+                Some((id, _)) => {
+                    let result = crate::patch::store::load(&crate::patch::store::patches_dir(), id)
+                        .and_then(|doc| {
+                            crate::patch::codegen::compile(&doc).map(|prog| (doc, prog))
+                        });
+                    match result {
+                        Ok((doc, prog)) => match engine.set_patch_shader(Some(&prog.wgsl)) {
+                            Ok(()) => patch_rt = Some(crate::patch::eval::Runtime::new(doc, prog)),
+                            Err(e) => patch_error = Some(format!("patch pipeline failed: {e:#}")),
+                        },
+                        Err(e) => patch_error = Some(format!("patch compile failed: {e}")),
+                    }
+                }
+            }
+            if let Some(msg) = &patch_error {
+                log::error!("{msg}");
+                let _ = state.events.send(ServerMsg::Error {
+                    message: msg.clone(),
+                });
+            }
+            state.status.lock().patch_error = patch_error;
+        }
+
         if state.phases_transplanted.swap(false, Ordering::SeqCst) {
             layer_phases = state.layer_phases.lock().clone();
         }
@@ -977,6 +1076,21 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             )
         };
 
+        // Control-rate evaluation of the active patch: scalar/event nodes run on
+        // the CPU and their results fill the GPU parameter slab.
+        let patch_params = patch_rt.as_mut().map(|rt| {
+            rt.eval(&crate::patch::eval::EvalInputs {
+                dt,
+                master_speed: cfg.render.master_speed,
+                audio: &audio,
+                yaw: control.yaw,
+                pitch: control.pitch,
+                roll: control.roll,
+                shake: control.shake,
+            })
+            .to_vec()
+        });
+
         let inputs = FrameInputs {
             globals: Globals {
                 spokes: cfg.geometry.spokes,
@@ -1004,6 +1118,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             dabs,
             scope: scope_data,
             video_upload,
+            patch_params,
         };
 
         let t0 = Instant::now();
@@ -1109,6 +1224,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 st.pps_history = pps_hist.iter().copied().collect();
                 st.master_brightness = cfg.render.master_brightness;
                 st.master_speed = cfg.render.master_speed;
+                st.patch_active = patch_rt.is_some();
                 st.video = {
                     let v = state.video.lock();
                     let owner_name = cfg

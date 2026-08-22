@@ -208,6 +208,9 @@ pub struct SharedState {
     pub config: RwLock<AppConfig>,
     /// Bumped on every config change; threads compare to notice reconfiguration.
     pub config_epoch: AtomicU32,
+    /// Bumped when any patch file changes (save/delete), so the engine rebuilds
+    /// the active patch's pipeline even though the config didn't change.
+    pub patch_epoch: AtomicU32,
     pub effects: Mutex<Vec<ActiveEffect>>,
     pub dabs: Mutex<Vec<ActiveDab>>,
     pub audio: [Mutex<AudioFeatures>; MAX_AUDIO_SOURCES],
@@ -262,6 +265,7 @@ impl SharedState {
         Arc::new(Self {
             config: RwLock::new(config),
             config_epoch: AtomicU32::new(0),
+            patch_epoch: AtomicU32::new(0),
             effects: Mutex::new(Vec::new()),
             dabs: Mutex::new(Vec::new()),
             audio: Default::default(),

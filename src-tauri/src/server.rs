@@ -739,6 +739,8 @@ async fn handle_msg(
             // is legitimate state to persist. Activation is where validity bites.
             match patch::store::save(&dir, &mut doc) {
                 Ok(_) => {
+                    // The engine rebuilds the active patch's pipeline off this.
+                    state.patch_epoch.fetch_add(1, Ordering::SeqCst);
                     // Echo (the editor learns an assigned id), then refresh
                     // everyone's palette.
                     let _ = send_json(tx, &ServerMsg::Patch { patch: Box::new(doc) }).await;
@@ -758,6 +760,7 @@ async fn handle_msg(
             let dir = patch::store::patches_dir();
             match patch::store::delete(&dir, &id) {
                 Ok(()) => {
+                    state.patch_epoch.fetch_add(1, Ordering::SeqCst);
                     if state.config.read().active_patch.as_deref() == Some(id.as_str()) {
                         state.update_config(|c| c.active_patch = None);
                     }
@@ -774,17 +777,14 @@ async fn handle_msg(
             if !addr.ip().is_loopback() {
                 return patch_edit_denied(tx).await;
             }
+            // The full codegen check (validation + renderable node kinds +
+            // Output node), so activation can never leave the engine unable to
+            // build what the config points at.
             let refusal = match &id {
                 None => None,
                 Some(id) => match patch::store::load(&patch::store::patches_dir(), id) {
                     Err(e) => Some(e),
-                    Ok(doc) => match patch::validate::validate(&doc) {
-                        Err(errors) => Some(patch::validate::errors_to_string(&errors)),
-                        Ok(v) if v.output.is_none() => {
-                            Some(format!("patch \"{}\" has no Output node", doc.name))
-                        }
-                        Ok(_) => None,
-                    },
+                    Ok(doc) => patch::codegen::compile(&doc).err(),
                 },
             };
             match refusal {

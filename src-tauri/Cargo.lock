@@ -1223,6 +1223,7 @@ dependencies = [
  "futures-util",
  "local-ip-address",
  "log",
+ "naga",
  "notify",
  "parking_lot",
  "pollster",

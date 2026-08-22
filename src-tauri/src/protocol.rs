@@ -329,6 +329,12 @@ pub struct RuntimeStatus {
     /// Updater progress / result note ("up to date", "downloading…", errors).
     pub update_state: String,
     pub video: VideoSourceStatus,
+    /// True while a compiled node-graph patch is rendering instead of the
+    /// layer stack.
+    pub patch_active: bool,
+    /// Why the active patch is NOT rendering (compile/pipeline failure); the
+    /// engine falls back to the layer stack when this is set.
+    pub patch_error: Option<String>,
 }
 
 #[cfg(test)]

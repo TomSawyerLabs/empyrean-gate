@@ -157,11 +157,32 @@ CPU→uniform→GPU. We're generalizing "hardcoded uniforms + switch on kind" in
       alive), `config.active_patch` (preserved across stale `SetConfig`
       writes like tokens/clients). 22 unit tests; `cargo check --all-targets`
       clean.
-- [ ] 2. WGSL codegen: field-graph → composite function + uniform slab;
-      generator nodes ported from existing layer bodies (start with ~6:
-      Solid, NoiseField, RadialWaves, Spiral, Blend, Transform, Colorize,
-      Output); engine renders active patch when set, layer stack otherwise;
-      engine-smoke patch workload + golden-frame test.
+- [x] 2. WGSL codegen + engine integration (committed):
+      - `patch/codegen.rs`: graph → WGSL. Field nodes become per-node WGSL
+        functions over `Ctx`, composed by calls (symbolic — single dispatch
+        preserved). Prelude `engine/shaders/patch_lib.wgsl` (noise/hsv/
+        effects/dabs/`ctx_transform` domain transform/`finish` epilogue);
+        gate.wgsl untouched. GPU kinds: solid, gradient, noise_field,
+        radial_waves, spiral, transform, colorize, blend, output.
+      - Parameter slab (binding 8, 2048 f32): every Number param + every
+        Scalar→field adapter wire gets a slot; knob edits and scalar wiring
+        never recompile. Select params bake as constants (recompile on
+        change). `rate()` params (speed/spin) are CPU-integrated phases ×
+        master speed — no discontinuities on live speed changes.
+      - `patch/eval.rs`: control-rate Runtime (time/slider/audio+beat event/
+        imu/scalar_math/lfo/smooth/envelope) fills the slab per frame.
+      - Engine: shared bind group grew binding 8; `set_patch_shader` builds
+        the patch pipeline through the same error-scope path as hot-reload
+        (bad patch → UI error, stack keeps rendering); `run_frames` rebuilds
+        on (active_patch id, patch_epoch) change; `patch_params` per frame
+        switches the dispatch. Effects + dabs composite in patch mode too.
+      - Status: `patch_active` + `patch_error` in RuntimeStatus;
+        `SharedState.patch_epoch` bumped by PatchSave/Delete; PatchActivate
+        now runs full codegen as its gate.
+      - Tests: naga (dev-dep, =wgpu's compiler) validates generated WGSL;
+        eval unit tests (wire-overrides-knob, integration × master speed,
+        beat→envelope, LFO chain). `engine-smoke --patch` renders a 10-node
+        demo on the real Vulkan device (verified: 71936 nonzero bytes).
 - [ ] 3. Editor MVP (React Flow): palette, place/connect/delete, typed ports,
       param side panel, save/load/list, activate patch.
 - [ ] 4. Inputs & control rate: AudioFeatures, Time, LFO, EnvelopeAD, Smooth,
@@ -198,12 +219,20 @@ CPU→uniform→GPU. We're generalizing "hardcoded uniforms + switch on kind" in
 ## Findings / gotchas
 
 - Existing per-layer `phase` integration (speed changes without discontinuity)
-  must be reproduced as engine-side state per generator node (node-id-keyed
-  phase map, transplanted on handover like layer_phases today).
+  is reproduced as `rate()` params: CPU-integrated into the slab (step 2).
+  **Not yet transplanted on handover** — a mid-show update resets patch
+  phases/LFOs (layer stack phases still transplant). TODO alongside step 8.
 - Handover: patch state must ride the same GET /handover/state payload or
-  mid-show updates would blink the patch away.
+  mid-show updates would blink the patch away. (Same TODO as above.)
 - WGSL reserved words bit us before (`active`); codegen must mangle all
-  identifiers (`n<id>_...`), never emit user strings into code.
+  identifiers (`n<id>_...`), never emit user strings into code. Confirmed
+  live in step 2: `gen` is a Rust 2024 reserved keyword and `patch` is a
+  WGSL reserved keyword — both bit during implementation.
+- The engine's `patch_epoch` rebuild key means saving ANY patch rebuilds the
+  active one; harmless (rebuild ≈ ms, saves are user actions).
+- Codegen re-evaluates shared subgraphs per consumer (function call per
+  wire). Correct semantics under transforms; if profiling ever shows waste,
+  memoize per-`Ctx` at same-domain call sites.
 
 ## Things not to do
 

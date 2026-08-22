@@ -9,6 +9,7 @@ use empyrean_gate_lib::engine::{AudioUniform, Engine, FrameInputs, Globals, SCOP
 use empyrean_gate_lib::layers::{
     GpuDab, GpuEffect, LayerCfg, LayerKind, MAX_AUDIO_SOURCES, MAX_DABS, MAX_EFFECTS, MAX_LAYERS,
 };
+use empyrean_gate_lib::patch;
 use serde::Serialize;
 use std::time::Instant;
 
@@ -22,6 +23,7 @@ struct Options {
     fps_budget: f64,
     json: bool,
     suite: bool,
+    patch: bool,
     pixels: u32,
     layers: usize,
     effects: usize,
@@ -36,6 +38,7 @@ impl Default for Options {
             fps_budget: 60.0,
             json: false,
             suite: false,
+            patch: false,
             pixels: 24_192,
             layers: AppConfig::default().layers.len(),
             effects: 0,
@@ -141,6 +144,10 @@ fn run() -> Result<()> {
         println!("adapter: {}", engine.gpu_name);
     }
 
+    if options.patch {
+        return run_patch_demo(&mut engine, &options);
+    }
+
     let mut results = Vec::with_capacity(scenarios.len());
     for scenario in scenarios {
         engine.ensure_capacity(scenario.pixels);
@@ -241,6 +248,102 @@ fn run_scenario(
         checksum: format!("{checksum:#018x}"),
         nonzero_bytes,
     })
+}
+
+/// A demo node-graph: noise + spinning radial waves blended with bass-driven
+/// opacity, an LFO on the noise threshold, colorized gradient underneath.
+/// End-to-end proof that codegen → pipeline → slab → dispatch works on a real
+/// Vulkan device.
+fn patch_demo_doc() -> patch::PatchDoc {
+    use patch::{Edge, NodeInst, PortRef};
+    let node = |id: &str, kind: &str| NodeInst {
+        id: id.into(),
+        kind: kind.into(),
+        ..Default::default()
+    };
+    let edge = |fnode: &str, fport: &str, tnode: &str, tport: &str| Edge {
+        from: PortRef { node: fnode.into(), port: fport.into() },
+        to: PortRef { node: tnode.into(), port: tport.into() },
+    };
+    patch::PatchDoc {
+        name: "Smoke demo".into(),
+        nodes: vec![
+            node("aud", "audio"),
+            node("lfo", "lfo"),
+            node("ramp", "gradient"),
+            node("tint", "colorize"),
+            node("noise", "noise_field"),
+            node("waves", "radial_waves"),
+            node("spin", "transform"),
+            node("mix", "blend"),
+            node("mix2", "blend"),
+            node("out", "output"),
+        ],
+        edges: vec![
+            edge("lfo", "out", "noise", "threshold"),
+            edge("ramp", "out", "tint", "in"),
+            edge("tint", "out", "mix2", "base"),
+            edge("noise", "out", "mix", "base"),
+            edge("waves", "out", "spin", "in"),
+            edge("spin", "out", "mix", "over"),
+            edge("aud", "bass", "mix", "opacity"),
+            edge("mix", "out", "mix2", "over"),
+            edge("mix2", "out", "out", "in"),
+        ],
+        ..Default::default()
+    }
+}
+
+fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
+    let doc = patch_demo_doc();
+    let prog = patch::codegen::compile(&doc).map_err(|e| anyhow::anyhow!(e))?;
+    engine
+        .set_patch_shader(Some(&prog.wgsl))
+        .context("patch pipeline build")?;
+    let mut rt = patch::eval::Runtime::new(doc, prog);
+
+    let pixels = 24_192;
+    let (spokes, pixels_per_spoke) = geometry_for(pixels);
+    engine.ensure_capacity(pixels);
+    let scenario = Scenario {
+        name: "patch-demo".into(),
+        pixels,
+        layers: 0,
+        effects: 0,
+        dabs: 0,
+        video_only: false,
+    };
+    let mut inputs = make_inputs(&scenario, spokes, pixels_per_spoke);
+
+    let mut nonzero = 0usize;
+    let mut checksum = 0u64;
+    for frame in 0..(options.warmup_frames + options.measured_frames) {
+        advance_inputs(&mut inputs, frame);
+        let slab = rt.eval(&patch::eval::EvalInputs {
+            dt: 1.0 / 60.0,
+            master_speed: 1.0,
+            audio: &inputs.audio,
+            yaw: 0.0,
+            pitch: 0.0,
+            roll: 0.0,
+            shake: 0.0,
+        });
+        inputs.patch_params = Some(slab.to_vec());
+        if let Some(rgb) = engine
+            .render(&inputs)
+            .with_context(|| format!("patch demo frame {frame}"))?
+        {
+            nonzero = rgb.iter().filter(|byte| **byte != 0).count();
+            checksum = rgb
+                .iter()
+                .fold(0u64, |acc, byte| acc.wrapping_mul(31).wrapping_add(*byte as u64));
+        }
+    }
+    if nonzero == 0 {
+        bail!("patch demo rendered an entirely black final frame");
+    }
+    println!("patch demo OK: {nonzero} nonzero bytes, checksum {checksum:#018x}");
+    Ok(())
 }
 
 fn scenarios(options: &Options) -> Result<Vec<Scenario>> {
@@ -400,6 +503,7 @@ fn make_inputs(scenario: &Scenario, spokes: u32, pixels: u32) -> FrameInputs {
         dabs,
         scope,
         video_upload: has_video.then(benchmark_video_frame),
+        patch_params: None,
     }
 }
 
@@ -479,6 +583,7 @@ fn parse_options(args: &[String]) -> Result<Options> {
         match args[i].as_str() {
             "--json" => options.json = true,
             "--suite" => options.suite = true,
+            "--patch" => options.patch = true,
             "--warmup" => options.warmup_frames = parse_next(args, &mut i, "--warmup")?,
             "--frames" => options.measured_frames = parse_next(args, &mut i, "--frames")?,
             "--fps-budget" => options.fps_budget = parse_next(args, &mut i, "--fps-budget")?,
@@ -579,6 +684,7 @@ fn print_help() {
         "Engine correctness smoke test and GPU benchmark.\n\n\
 Usage: engine-smoke [OPTIONS]\n\n\
   --suite              Run 24,192-pixel installed and 70k headroom scenarios\n\
+  --patch              Render the node-graph patch demo (codegen end-to-end)\n\
   --pixels N           Total pixels for a custom scenario (max 500000)\n\
   --layers N           Active layers (1..24)\n\
   --effects N          Concurrent effects (0..32)\n\

@@ -4,6 +4,8 @@
 //! The WGSL codegen (engine side) consumes [`validate::Validated`].
 //! Design doc: `plans/node-graph.md`.
 
+pub mod codegen;
+pub mod eval;
 pub mod registry;
 pub mod store;
 pub mod validate;
