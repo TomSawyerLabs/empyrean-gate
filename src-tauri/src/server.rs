@@ -79,6 +79,7 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .route("/media/resolve", post(resolve_media))
         .route("/media/stream/{id}", get(stream_media))
         .route("/patch/registry", get(patch_registry))
+        .route("/patch/presets", get(patch_presets))
         .fallback(get(serve_asset))
         .layer(
             CorsLayer::new()
@@ -308,6 +309,11 @@ async fn handover(
 /// registry so the frontend can never drift from what codegen understands.
 async fn patch_registry() -> Response {
     axum::Json(patch::registry::palette_json()).into_response()
+}
+
+/// Built-in starter patches (immutable templates; the editor copies them).
+async fn patch_presets() -> Response {
+    axum::Json(patch::presets::presets()).into_response()
 }
 
 // ---------------------------------------------------------------------------

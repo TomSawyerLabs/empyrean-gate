@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "id": "builtin-lava-breathing",
+  "name": "Lava Breathing",
+  "description": "Fire climbing the spokes, reach swelling on a slow LFO, whole field slowly rotating.",
+  "nodes": [
+    { "id": "lfo", "kind": "lfo", "name": "breath", "params": { "rate": 0.08, "min": 0.35, "max": 0.85 }, "pos": [40, 220] },
+    { "id": "fire", "kind": "fire", "name": "", "params": { "stretch": 0.5, "speed": 0.8, "hue": 0.02, "saturation": 1.0, "brightness": 1.0 }, "pos": [280, 100] },
+    { "id": "spin", "kind": "transform", "name": "", "params": { "spin": 0.02 }, "pos": [520, 100] },
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [760, 100] }
+  ],
+  "edges": [
+    { "from": { "node": "lfo", "port": "out" }, "to": { "node": "fire", "port": "reach" } },
+    { "from": { "node": "fire", "port": "out" }, "to": { "node": "spin", "port": "in" } },
+    { "from": { "node": "spin", "port": "out" }, "to": { "node": "out", "port": "in" } }
+  ],
+  "exposed": [
+    { "node": "fire", "param": "brightness", "label": "Brightness" },
+    { "node": "lfo", "param": "rate", "label": "Breath rate" },
+    { "node": "spin", "param": "spin", "label": "Rotation" }
+  ]
+}

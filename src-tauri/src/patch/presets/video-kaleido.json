@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "id": "builtin-video-kaleido",
+  "name": "Video Kaleido",
+  "description": "The live video feed (Video tab) folded through a six-way kaleidoscope. Dark until a video source is running.",
+  "nodes": [
+    { "id": "v", "kind": "video_in", "name": "", "params": {}, "pos": [40, 100] },
+    { "id": "ts", "kind": "texture_sample", "name": "", "params": { "kaleido": 6, "zoom": 1.2, "saturation": 1.2 }, "pos": [300, 100] },
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [560, 100] }
+  ],
+  "edges": [
+    { "from": { "node": "v", "port": "tex" }, "to": { "node": "ts", "port": "tex" } },
+    { "from": { "node": "ts", "port": "out" }, "to": { "node": "out", "port": "in" } }
+  ],
+  "exposed": [
+    { "node": "ts", "param": "kaleido", "label": "Kaleidoscope" },
+    { "node": "ts", "param": "zoom", "label": "Zoom" }
+  ]
+}

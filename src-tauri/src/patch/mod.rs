@@ -6,6 +6,7 @@
 
 pub mod codegen;
 pub mod eval;
+pub mod presets;
 pub mod registry;
 pub mod store;
 pub mod validate;

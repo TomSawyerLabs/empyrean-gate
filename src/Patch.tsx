@@ -312,6 +312,7 @@ function PatchEditor() {
   const flow = useReactFlow();
   const [registry, setRegistry] = useState<Registry | null>(null);
   const [patches, setPatches] = useState<PatchSummary[]>([]);
+  const [presets, setPresets] = useState<PatchDoc[]>([]);
   const [doc, setDoc] = useState<PatchDoc | null>(null);
   const [nodes, setNodes] = useState<PatchFlowNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
@@ -338,6 +339,12 @@ function PatchEditor() {
       .then((r) => r.json())
       .then((types: PatchNodeType[]) => {
         if (!stale) setRegistry(new Map(types.map((t) => [t.id, t])));
+      })
+      .catch(() => {});
+    void fetch(`${client.httpBase}/patch/presets`)
+      .then((r) => r.json())
+      .then((docs: PatchDoc[]) => {
+        if (!stale) setPresets(docs);
       })
       .catch(() => {});
     return () => {
@@ -575,6 +582,30 @@ function PatchEditor() {
           ))}
         </select>
         {canEdit && <button onClick={() => openDoc(emptyPatch())}>＋ New</button>}
+        {canEdit && presets.length > 0 && (
+          <select
+            value=""
+            onChange={(e) => {
+              const preset = presets.find((p) => p.id === e.target.value);
+              if (!preset) return;
+              // Instantiate a COPY: blank id makes the autosave mint a fresh
+              // patch, so the built-in template is never overwritten.
+              const copy = structuredClone(preset);
+              copy.id = "";
+              openDoc(copy);
+              scheduleSave(copy);
+            }}
+          >
+            <option value="" disabled>
+              New from preset…
+            </option>
+            {presets.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        )}
         {doc && (
           <>
             <input
