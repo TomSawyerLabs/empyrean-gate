@@ -278,6 +278,18 @@ CPU→uniform→GPU. We're generalizing "hardcoded uniforms + switch on kind" in
   React Flow nodes stay `visibility: hidden` (unmeasured) there forever. Not
   an app bug — verify the editor in real Chrome (claude-in-chrome). Wasted a
   debugging session before `raf: 0` proved it.
+- **A debug-profile exe launched directly shows ERR_CONNECTION_REFUSED in its
+  window**: debug Tauri builds point the webview at `devUrl` (now 28149) and
+  expect `bun tauri dev`'s vite to be serving. The backend + web UI still
+  work; only the desktop window is dead. Launch dev builds via
+  `bun tauri dev`, or use a `tauri build --no-bundle` release exe.
+- Dev server moved off Tauri's shared default 1420 → project-unique **28149**
+  (committed; port set documented in vite.config.ts).
+- **Queued fix**: the server binds `0.0.0.0` (IPv4-only), so browsers that
+  resolve `localhost` → `::1` get connection-refused. Dual-stack listener via
+  socket2 (already a dep) in server.rs — waiting until the user's play
+  session ends (Rust edits trigger the tauri-dev watcher and restart the app
+  under them).
 
 ## Things not to do
 
