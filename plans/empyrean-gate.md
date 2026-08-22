@@ -360,8 +360,12 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
       `AuthorizeFirewall` WS msg → elevated (single UAC) port-scoped allow rule
       (TCP <port>, any profile). Port-scoped means it survives every self-update
       binary swap — the per-exe Windows prompt never fires again. Rule name
-      "Empyrean Gate". Non-Windows: no-op. NOT yet clicked on the dev machine —
-      the user should click Authorize in the app (UAC = their approval).
+      "Empyrean Gate". Non-Windows: no-op. First live click failed — nested
+      `-Command` strings stripped the quotes in `name="Empyrean Gate"` so the
+      elevated netsh got garbage; fixed (d7f23db) by writing a temp .ps1 and
+      elevating with `-File`. Full RunAs chain exercised end-to-end from an
+      elevated shell (no UAC dialog when already elevated): exit 0, rule
+      created. Rule is now live on the dev machine — no banner, no prompts.
 - [x] **Master Speed on Live tab** (9460737): master_speed (existing, Control →
       Master) surfaced in the Live size cluster; throttled `set_master`, synced
       from config. Independent of tempo controls (those only retime beat-driven
