@@ -342,6 +342,34 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
       WS E2E video-frame test; real in-app browser test at desktop, iPad portrait, and
       narrow phone viewports.
 
+## Round 11 (2026-08-20/21): BPM trust, video playlist/cache, firewall, Live speed
+
+- [x] **BPM confidence** (d8472e3): BeatTracker scores peak dominance + clarity +
+      stability with quiet gating and octave hysteresis; confidence 0..1 flows
+      through AudioUniform/status. Displays show "finding beat…" below 0.35; beat
+      events and beat taps are gated too. Manual BPM = confidence 1.0.
+- [x] **Video playlist + offline cache** (36aac88): watched folders (scanned every
+      10 s, 3 levels deep) and URL adds both land in a persistent playlist; URL
+      entries download in the background into `<config>/EmpyreanGate/media-cache/`
+      via the MediaResolver (same SSRF defenses), served back at
+      `/media/file/{id}` with Range support so playback needs no internet.
+      Auto-advance cycles the playlist; prev/next buttons. Verified end-to-end
+      with `scripts/playlist-test.ts` (real download, 206 range serve).
+- [x] **Windows Firewall one-click authorization** (8e4936e): startup `netsh` check
+      sets `firewall_pending` in status; App banner offers Authorize →
+      `AuthorizeFirewall` WS msg → elevated (single UAC) port-scoped allow rule
+      (TCP <port>, any profile). Port-scoped means it survives every self-update
+      binary swap — the per-exe Windows prompt never fires again. Rule name
+      "Empyrean Gate". Non-Windows: no-op. NOT yet clicked on the dev machine —
+      the user should click Authorize in the app (UAC = their approval).
+- [x] **Master Speed on Live tab** (9460737): master_speed (existing, Control →
+      Master) surfaced in the Live size cluster; throttled `set_master`, synced
+      from config. Independent of tempo controls (those only retime beat-driven
+      values).
+- [x] Verification: cargo check --all-targets, cargo test (all pass), tsc + vite
+      build. Collaborator branch `codex/production-show-control` appeared on
+      origin (not yet reviewed/merged).
+
 ## Next session pickup
 
 - Run `bun tauri dev` and eyeball the actual patterns; tune defaults.
