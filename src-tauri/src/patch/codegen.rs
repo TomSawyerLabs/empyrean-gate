@@ -63,9 +63,24 @@ fn is_gpu_kind(kind: &str) -> bool {
         kind,
         "solid"
             | "gradient"
+            | "gradient_radial"
             | "noise_field"
+            | "noise_color"
             | "radial_waves"
             | "spiral"
+            | "plasma"
+            | "spoke_chase"
+            | "sparkle"
+            | "beat_rings"
+            | "breathe"
+            | "rainbow"
+            | "wedges"
+            | "interference"
+            | "fire"
+            | "meteors"
+            | "warp"
+            | "waveform"
+            | "spectrum"
             | "transform"
             | "colorize"
             | "blend"
@@ -391,6 +406,285 @@ impl Gen<'_> {
                     op = self.p(i, "opacity"),
                 )
             }
+            // -- ported layer-stack generators (gate.wgsl bodies, audio
+            // couplings replaced by wireable params) ------------------------
+            "gradient_radial" => format!(
+                "    let t = c.rn + {phase} * 0.1;\n\
+                 \x20   let hue = {h} + t * {hr};\n\
+                 \x20   return vec4f(hsv2rgb(hue, {s}, max({b}, 0.0)), 1.0);",
+                phase = self.p(i, "drift"),
+                h = self.p(i, "hue"),
+                hr = self.p(i, "hue_range"),
+                s = self.p(i, "saturation"),
+                b = self.p(i, "brightness"),
+            ),
+            "noise_color" => format!(
+                "    let s = 2.0 * {scale};\n\
+                 \x20   let p = vec3f(c.pos * s, {phase} * 0.25);\n\
+                 \x20   let r = 0.5 + 0.5 * snoise3(p);\n\
+                 \x20   let g = 0.5 + 0.5 * snoise3(p + vec3f(31.4, 47.2, 12.9));\n\
+                 \x20   let b = 0.5 + 0.5 * snoise3(p + vec3f(-17.7, 8.3, 91.1));\n\
+                 \x20   let base = hsv2rgb({h}, {sat}, 1.0);\n\
+                 \x20   let col = mix(vec3f(r, g, b), vec3f(r, g, b) * base, 0.6);\n\
+                 \x20   return vec4f(col * {bright}, 1.0);",
+                scale = self.p(i, "scale"),
+                phase = self.p(i, "speed"),
+                h = self.p(i, "hue"),
+                sat = self.p(i, "saturation"),
+                bright = self.p(i, "brightness"),
+            ),
+            "plasma" => format!(
+                "    let s = 3.0 * {scale};\n\
+                 \x20   let t = {phase};\n\
+                 \x20   var v = sin(c.pos.x * s + t);\n\
+                 \x20   v += sin((c.pos.y * s + t) * 0.7);\n\
+                 \x20   v += sin((c.pos.x + c.pos.y) * s * 0.6 + t * 1.3);\n\
+                 \x20   v += sin(c.rn * s * 2.0 - t);\n\
+                 \x20   v = v * 0.25 + 0.5;\n\
+                 \x20   let hue = {h} + v * {hr};\n\
+                 \x20   return vec4f(hsv2rgb(hue, {sat}, {bright} * v), 1.0);",
+                scale = self.p(i, "scale"),
+                phase = self.p(i, "speed"),
+                h = self.p(i, "hue"),
+                hr = self.p(i, "hue_range"),
+                sat = self.p(i, "saturation"),
+                bright = self.p(i, "brightness"),
+            ),
+            "spoke_chase" => {
+                let dir = if self.select(i, "direction") == 1 {
+                    "-1.0"
+                } else {
+                    "1.0"
+                };
+                format!(
+                    "    let h = hash01(c.spoke * 7919u);\n\
+                     \x20   let head = fract(h + {phase} * 0.2 * {dir});\n\
+                     \x20   let d = fract(c.r01 - head);\n\
+                     \x20   let v = exp(-d / {tail}) * step(0.0, d);\n\
+                     \x20   let hue = {hh} + h * {hr};\n\
+                     \x20   return vec4f(hsv2rgb(hue, {sat}, v * {bright}), v);",
+                    phase = self.p(i, "speed"),
+                    tail = self.p(i, "tail"),
+                    hh = self.p(i, "hue"),
+                    hr = self.p(i, "hue_range"),
+                    sat = self.p(i, "saturation"),
+                    bright = self.p(i, "brightness"),
+                )
+            }
+            "sparkle" => format!(
+                "    let idx = c.spoke * G.pixels + c.i;\n\
+                 \x20   let tw_rate = 4.0 + {twinkle} * 20.0;\n\
+                 \x20   let cell = u32({phase} * tw_rate);\n\
+                 \x20   let rnd = hash01(idx * 2654435761u + cell * 40503u);\n\
+                 \x20   let lit = step(1.0 - {density} * 0.2, rnd);\n\
+                 \x20   let tw = fract({phase} * tw_rate);\n\
+                 \x20   let v = lit * (1.0 - tw) * (1.0 - tw);\n\
+                 \x20   let hue = {h} + rnd * {hr};\n\
+                 \x20   return vec4f(hsv2rgb(hue, {sat}, v * {bright}), v);",
+                twinkle = self.p(i, "twinkle"),
+                phase = self.p(i, "speed"),
+                density = self.p(i, "density"),
+                h = self.p(i, "hue"),
+                hr = self.p(i, "hue_range"),
+                sat = self.p(i, "saturation"),
+                bright = self.p(i, "brightness"),
+            ),
+            "beat_rings" => {
+                let dir = if self.select(i, "direction") == 1 {
+                    "c.r01"
+                } else {
+                    "1.0 - c.r01"
+                };
+                format!(
+                    "    let front = clamp({front}, 0.0, 1.0);\n\
+                     \x20   let d = abs(({dir}) - front);\n\
+                     \x20   let w = {width};\n\
+                     \x20   let v = exp(-(d * d) / (w * w)) * (1.0 - front * 0.5);\n\
+                     \x20   let hue = {h} + front * {hr};\n\
+                     \x20   return vec4f(hsv2rgb(hue, {sat}, v * {bright}), v);",
+                    front = self.p(i, "front"),
+                    width = self.p(i, "width"),
+                    h = self.p(i, "hue"),
+                    hr = self.p(i, "hue_range"),
+                    sat = self.p(i, "saturation"),
+                    bright = self.p(i, "brightness"),
+                )
+            }
+            "breathe" => format!(
+                "    let env = 0.5 + 0.5 * sin({phase});\n\
+                 \x20   let v = mix({floor_v}, 1.0, env) * {bright};\n\
+                 \x20   return vec4f(vec3f(v), 1.0);",
+                phase = self.p(i, "speed"),
+                floor_v = self.p(i, "floor"),
+                bright = self.p(i, "brightness"),
+            ),
+            "rainbow" => format!(
+                "    let turns = max(1.0, floor({turns} + 0.5));\n\
+                 \x20   let hue = {h} + (c.theta / TAU) * turns + c.rn * {hr} + {phase} * 0.03;\n\
+                 \x20   return vec4f(hsv2rgb(hue, {sat}, max({bright}, 0.0)), 1.0);",
+                turns = self.p(i, "turns"),
+                h = self.p(i, "hue"),
+                hr = self.p(i, "hue_range"),
+                phase = self.p(i, "speed"),
+                sat = self.p(i, "saturation"),
+                bright = self.p(i, "brightness"),
+            ),
+            "wedges" => format!(
+                "    let n = max(2.0, floor({slices} + 0.5));\n\
+                 \x20   let w = fract((c.theta / TAU + {phase} * 0.03) * n + c.rn * {twist});\n\
+                 \x20   let d = abs(w - 0.5) * 2.0;\n\
+                 \x20   var v = smoothstep(0.5 - {soft}, 0.5 + {soft}, d);\n\
+                 \x20   v = max(v, clamp({flash}, 0.0, 1.0));\n\
+                 \x20   let hue = {h} + step(0.5, w) * {hr};\n\
+                 \x20   return vec4f(hsv2rgb(hue, {sat}, v * {bright}), v);",
+                slices = self.p(i, "slices"),
+                phase = self.p(i, "speed"),
+                twist = self.p(i, "twist"),
+                soft = self.p(i, "softness"),
+                flash = self.p(i, "flash"),
+                h = self.p(i, "hue"),
+                hr = self.p(i, "hue_range"),
+                sat = self.p(i, "saturation"),
+                bright = self.p(i, "brightness"),
+            ),
+            "interference" => format!(
+                "    let orbit = 0.45 + {orbit} * 0.3;\n\
+                 \x20   let p1 = orbit * vec2f(cos({phase} * 0.31), sin({phase} * 0.31));\n\
+                 \x20   let p2 = -orbit * vec2f(cos({phase} * 0.23), sin({phase} * 0.23));\n\
+                 \x20   let freq = (4.0 + {frequency} * 20.0) * {scale};\n\
+                 \x20   var v = sin(distance(c.pos, p1) * freq * TAU - {phase})\n\
+                 \x20       + sin(distance(c.pos, p2) * freq * TAU + {phase} * 0.8);\n\
+                 \x20   v = v * 0.25 + 0.5;\n\
+                 \x20   v = pow(v, 1.0 + {sharp} * 4.0);\n\
+                 \x20   let hue = {h} + v * {hr};\n\
+                 \x20   return vec4f(hsv2rgb(hue, {sat}, v * {bright} * 0.6), v);",
+                orbit = self.p(i, "orbit"),
+                phase = self.p(i, "speed"),
+                frequency = self.p(i, "frequency"),
+                scale = self.p(i, "scale"),
+                sharp = self.p(i, "sharpness"),
+                h = self.p(i, "hue"),
+                hr = self.p(i, "hue_range"),
+                sat = self.p(i, "saturation"),
+                bright = self.p(i, "brightness"),
+            ),
+            "fire" => format!(
+                "    let stretch = 2.0 + {stretch} * 4.0;\n\
+                 \x20   let p = vec3f(cos(c.theta) * 3.0 * {scale}, sin(c.theta) * 3.0 * {scale}, 0.0)\n\
+                 \x20       + vec3f(0.0, 0.0, c.r01 * stretch - {phase});\n\
+                 \x20   let n = fbm3(p, 4u) * 0.5 + 0.5;\n\
+                 \x20   let reach = 0.4 + {reach} * 0.6;\n\
+                 \x20   var heat = (1.0 - c.r01 / max(reach, 0.05)) * 1.3 - n * 0.9;\n\
+                 \x20   heat = clamp(heat, 0.0, 1.0);\n\
+                 \x20   let hue = {h} + heat * 0.12;\n\
+                 \x20   let sat2 = clamp(1.3 - heat * 0.7, 0.0, 1.0) * {sat};\n\
+                 \x20   let v = pow(heat, 1.4) * {bright};\n\
+                 \x20   return vec4f(hsv2rgb(hue, sat2, v), heat);",
+                stretch = self.p(i, "stretch"),
+                scale = self.p(i, "scale"),
+                phase = self.p(i, "speed"),
+                reach = self.p(i, "reach"),
+                h = self.p(i, "hue"),
+                sat = self.p(i, "saturation"),
+                bright = self.p(i, "brightness"),
+            ),
+            "meteors" => {
+                let dir = if self.select(i, "direction") == 1 {
+                    "1.0 - c.r01"
+                } else {
+                    "c.r01"
+                };
+                format!(
+                    "    let rate = 0.15 + {tail} * 1.2;\n\
+                     \x20   let h0 = hash01(c.spoke * 4099u);\n\
+                     \x20   let t = {phase} * rate + h0 * 7.0;\n\
+                     \x20   let epoch = u32(t);\n\
+                     \x20   let t_ep = fract(t);\n\
+                     \x20   let alive = step(1.0 - (0.1 + {density} * 0.5), hash01(c.spoke * 31337u + epoch * 269u));\n\
+                     \x20   let dir_r = {dir};\n\
+                     \x20   let head = t_ep * 1.3;\n\
+                     \x20   let d = head - dir_r;\n\
+                     \x20   let tail_len = 0.08 + {tail} * 0.15;\n\
+                     \x20   let v = alive * exp(-d / tail_len) * step(0.0, d) * step(dir_r, head);\n\
+                     \x20   let hue = {hh} + hash01(c.spoke * 911u + epoch) * {hr};\n\
+                     \x20   return vec4f(hsv2rgb(hue, {sat}, v * {bright}), v);",
+                    tail = self.p(i, "tail"),
+                    phase = self.p(i, "speed"),
+                    density = self.p(i, "density"),
+                    dir = dir,
+                    hh = self.p(i, "hue"),
+                    hr = self.p(i, "hue_range"),
+                    sat = self.p(i, "saturation"),
+                    bright = self.p(i, "brightness"),
+                )
+            }
+            "warp" => format!(
+                "    let cells = 6.0 + {density} * 20.0;\n\
+                 \x20   let u = c.r01 * cells + hash01(c.spoke * 7919u) * 13.0;\n\
+                 \x20   let flow = u + {phase};\n\
+                 \x20   let cell = u32(flow);\n\
+                 \x20   let f = fract(flow);\n\
+                 \x20   let star = step(1.0 - (0.15 + {density} * 0.2), hash01(cell * 6151u + c.spoke * 389u));\n\
+                 \x20   let streak = (1.0 - f) * (1.0 - f);\n\
+                 \x20   let persp = 0.35 + (1.0 - c.r01) * 0.65;\n\
+                 \x20   let v = star * streak * persp;\n\
+                 \x20   let hue = {h} + hash01(cell * 127u) * {hr};\n\
+                 \x20   return vec4f(hsv2rgb(hue, {sat} * 0.6, v * {bright}), v);",
+                density = self.p(i, "density"),
+                phase = self.p(i, "speed"),
+                h = self.p(i, "hue"),
+                hr = self.p(i, "hue_range"),
+                sat = self.p(i, "saturation"),
+                bright = self.p(i, "brightness"),
+            ),
+            "waveform" => {
+                let src = self.select(i, "source");
+                format!(
+                    "    let t = fract(c.theta / TAU + {phase} * 0.03);\n\
+                     \x20   let w = wave_at({src}u, t);\n\
+                     \x20   let depth = 0.08 + {depth} * 0.3;\n\
+                     \x20   let ring_r = mix(0.35, 0.95, {ring}) + w * depth;\n\
+                     \x20   let d = abs(c.rn - ring_r);\n\
+                     \x20   let width = 0.012 + {thick} * 0.06;\n\
+                     \x20   let v = exp(-(d * d) / (width * width));\n\
+                     \x20   let hue = {h} + w * {hr};\n\
+                     \x20   return vec4f(hsv2rgb(hue, {sat}, v * {bright}), v);",
+                    phase = self.p(i, "drift"),
+                    src = src,
+                    depth = self.p(i, "depth"),
+                    ring = self.p(i, "ring"),
+                    thick = self.p(i, "thickness"),
+                    h = self.p(i, "hue"),
+                    hr = self.p(i, "hue_range"),
+                    sat = self.p(i, "saturation"),
+                    bright = self.p(i, "brightness"),
+                )
+            }
+            "spectrum" => {
+                let src = self.select(i, "source");
+                let pos = if self.select(i, "from") == 1 {
+                    "1.0 - c.r01"
+                } else {
+                    "c.r01"
+                };
+                format!(
+                    "    let t = fract(c.theta / TAU + {phase} * 0.02);\n\
+                     \x20   let e = spec_at({src}u, u32(t * f32(SPEC_N)));\n\
+                     \x20   let extent = clamp(e * (0.35 + {len} * 0.9), 0.0, 1.0);\n\
+                     \x20   let pos = {pos};\n\
+                     \x20   let v = smoothstep(extent, extent - 0.2, pos) * (0.35 + e * 0.65);\n\
+                     \x20   let hue = {h} + t * {hr};\n\
+                     \x20   return vec4f(hsv2rgb(hue, {sat}, v * {bright}), v);",
+                    phase = self.p(i, "drift"),
+                    src = src,
+                    len = self.p(i, "length"),
+                    pos = pos,
+                    h = self.p(i, "hue"),
+                    hr = self.p(i, "hue_range"),
+                    sat = self.p(i, "saturation"),
+                    bright = self.p(i, "brightness"),
+                )
+            }
             // No function of its own: it marks the live-draw dab stream as a
             // Points source for Render points (which reads DABS directly).
             "touch_dabs" => return Ok(()),
@@ -614,6 +908,51 @@ mod tests {
         validator
             .validate(&module)
             .unwrap_or_else(|e| panic!("generated WGSL failed validation: {e:?}"));
+    }
+
+    #[test]
+    fn every_generator_kind_compiles_into_one_validated_shader() {
+        use crate::patch::registry::{Category, TYPES};
+        // One node of every Generator kind, folded through a blend chain.
+        let gens: Vec<&str> = TYPES
+            .iter()
+            .filter(|t| t.category == Category::Generator)
+            .map(|t| t.id)
+            .collect();
+        assert!(
+            gens.len() >= 17,
+            "expected full generator parity, got {}",
+            gens.len()
+        );
+
+        let mut d = PatchDoc::default();
+        let mut prev: Option<String> = None;
+        for (k, kind) in gens.iter().enumerate() {
+            let gid = format!("g{k}");
+            d.nodes.push(node(&gid, kind));
+            prev = Some(match prev {
+                None => gid,
+                Some(prev_id) => {
+                    let bid = format!("b{k}");
+                    d.nodes.push(node(&bid, "blend"));
+                    d.edges.push(edge(&prev_id, "out", &bid, "base"));
+                    d.edges.push(edge(&gid, "out", &bid, "over"));
+                    bid
+                }
+            });
+        }
+        d.nodes.push(node("o", "output"));
+        d.edges.push(edge(&prev.unwrap(), "out", "o", "in"));
+
+        let prog = compile(&d).expect("all generators compile");
+        let module = naga::front::wgsl::parse_str(&prog.wgsl)
+            .unwrap_or_else(|e| panic!("parse: {e}\n{}", prog.wgsl));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .expect("full-parity shader validates");
     }
 
     #[test]

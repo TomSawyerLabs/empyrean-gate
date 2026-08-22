@@ -327,6 +327,7 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
             pitch: 0.0,
             roll: 0.0,
             shake: 0.0,
+            effect_seq: 0,
         });
         inputs.patch_params = Some(slab.to_vec());
         if let Some(rgb) = engine

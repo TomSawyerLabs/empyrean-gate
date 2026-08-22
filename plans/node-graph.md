@@ -214,9 +214,19 @@ CPU→uniform→GPU. We're generalizing "hardcoded uniforms + switch on kind" in
       patch renders). e2e extended: clamp+persist+broadcast verified,
       non-exposed refused. (AudioFeatures/Time/LFO/Envelope/Smooth/math/
       Slider/IMU landed with step 2's evaluator.)
-- [ ] 5. Remaining generators (parity with all 20 kinds) + one-time layer
-      config → "Classic Stack" patch migration + **remove Layers tab and the
-      stack render path**.
+- [~] 5. **Generator parity DONE** (committed): all 20 layer kinds now exist
+      as generator nodes (gradient_radial, noise_color, plasma, spoke_chase,
+      sparkle, beat_rings, breathe, rainbow, wedges, interference, fire,
+      meteors, warp, waveform, spectrum joined the step-2 set). Ported PURE:
+      the stack's baked `audio_amount × band` couplings became wireable
+      params instead (beat_rings.front ← audio.beat_phase, wedges.flash ←
+      audio.onset, etc.) — explicit wiring is the paradigm. Waveform/Spectrum
+      keep their SCOPE source as a Select. Parity test compiles ALL
+      generators into one naga-validated shader; GPU smoke passes.
+      **Remaining, deliberately deferred for user sign-off after real-show
+      validation**: one-time layer config → "Classic Stack" patch migration,
+      then removing the Layers tab + stack render path (that deletes the
+      pipeline current shows run on — not an autonomous call).
 - [ ] 6. Sub-patches: exposed ports, palette integration, uuid refs, cycle
       guard.
 - [ ] 7. Texture tier: VideoIn node, Feedback node, TextureSample.
