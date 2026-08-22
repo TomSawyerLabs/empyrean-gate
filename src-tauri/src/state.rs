@@ -4,11 +4,11 @@
 
 use crate::config::AppConfig;
 use crate::layers::{EffectCfg, MAX_AUDIO_SOURCES};
-use crate::protocol::{RuntimeStatus, ServerMsg};
+use crate::protocol::{ProDjLinkDebugEntry, ProDjLinkTrackInfo, RuntimeStatus, ServerMsg};
 use parking_lot::{Mutex, RwLock};
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::time::Instant;
 use tokio::sync::broadcast;
 
@@ -43,12 +43,20 @@ mod tests {
     #[test]
     fn video_frames_are_bounded_and_owned_by_one_connection() {
         let state = SharedState::new(AppConfig::default());
-        state.start_video(7, "ipad", "clip".into(), "https://example.com/clip.mp4".into());
+        state.start_video(
+            7,
+            "ipad",
+            "clip".into(),
+            "https://example.com/clip.mp4".into(),
+        );
         let rgba = vec![42u8; 4 * 3 * 4];
 
         assert!(!state.push_video_frame(8, 4, 3, &rgba), "wrong connection");
         assert!(!state.push_video_frame(7, 0, 3, &[]), "zero width");
-        assert!(!state.push_video_frame(7, 4, 3, &rgba[..rgba.len() - 1]), "bad payload size");
+        assert!(
+            !state.push_video_frame(7, 4, 3, &rgba[..rgba.len() - 1]),
+            "bad payload size"
+        );
         assert!(state.push_video_frame(7, 4, 3, &rgba));
 
         {
@@ -60,7 +68,10 @@ mod tests {
         }
 
         state.stop_video(Some(8));
-        assert!(state.video.lock().active, "a stale connection cannot stop the owner");
+        assert!(
+            state.video.lock().active,
+            "a stale connection cannot stop the owner"
+        );
         state.stop_video(Some(7));
         assert!(!state.video.lock().active);
         assert!(state.video.lock().rgba.is_empty());
@@ -103,6 +114,8 @@ pub struct ActiveDab {
     pub angle: f32,
     pub radius: f32,
     pub hue: f32,
+    pub saturation: f32,
+    pub brightness: f32,
     pub size: f32,
     pub intensity: f32,
     pub dir: f32,
@@ -152,7 +165,10 @@ impl PreviewGate {
 
     /// 1-based queue position, if waiting.
     pub fn position(&self, conn: u64) -> Option<u32> {
-        self.waiting.iter().position(|c| *c == conn).map(|p| p as u32 + 1)
+        self.waiting
+            .iter()
+            .position(|c| *c == conn)
+            .map(|p| p as u32 + 1)
     }
 
     fn promote(&mut self, max: usize) {
@@ -214,6 +230,11 @@ pub struct SharedState {
     pub dabs: Mutex<Vec<ActiveDab>>,
     pub audio: [Mutex<AudioFeatures>; MAX_AUDIO_SOURCES],
     pub scope: [Mutex<ScopeData>; MAX_AUDIO_SOURCES],
+    pub midi_clock: Mutex<crate::rhythm::MidiClockState>,
+    pub pioneer_clock: Mutex<crate::rhythm::PioneerClockState>,
+    pub pioneer_debug: Mutex<VecDeque<ProDjLinkDebugEntry>>,
+    pub pioneer_debug_seq: AtomicU64,
+    pub pioneer_tracks: Mutex<HashMap<u8, ProDjLinkTrackInfo>>,
     pub control: Mutex<ControlInputs>,
     pub status: Mutex<RuntimeStatus>,
     pub shutdown: AtomicBool,
@@ -280,6 +301,11 @@ impl SharedState {
             dabs: Mutex::new(Vec::new()),
             audio: Default::default(),
             scope: Default::default(),
+            midi_clock: Mutex::new(crate::rhythm::MidiClockState::default()),
+            pioneer_clock: Mutex::new(crate::rhythm::PioneerClockState::default()),
+            pioneer_debug: Mutex::new(VecDeque::new()),
+            pioneer_debug_seq: AtomicU64::new(1),
+            pioneer_tracks: Mutex::new(HashMap::new()),
             control: Mutex::new(ControlInputs::default()),
             status: Mutex::new(RuntimeStatus::default()),
             shutdown: AtomicBool::new(false),
@@ -316,6 +342,31 @@ impl SharedState {
         self.config_epoch.load(Ordering::SeqCst)
     }
 
+    pub fn push_pioneer_debug(
+        &self,
+        category: impl Into<String>,
+        device: u8,
+        summary: impl Into<String>,
+        fields: BTreeMap<String, String>,
+    ) {
+        let entry = ProDjLinkDebugEntry {
+            sequence: self.pioneer_debug_seq.fetch_add(1, Ordering::Relaxed),
+            elapsed_ms: self.started.elapsed().as_millis() as u64,
+            category: category.into(),
+            device,
+            summary: summary.into(),
+            fields,
+        };
+        {
+            let mut debug = self.pioneer_debug.lock();
+            debug.push_back(entry.clone());
+            while debug.len() > 400 {
+                debug.pop_front();
+            }
+        }
+        let _ = self.events.send(ServerMsg::ProDjLinkDebug { entry });
+    }
+
     /// Mutate the config, persist it, and notify all clients with fresh state.
     pub fn update_config(&self, f: impl FnOnce(&mut AppConfig)) {
         let snapshot = {
@@ -341,6 +392,8 @@ impl SharedState {
         kind: crate::layers::PenKind,
         points: &[crate::layers::DabPoint],
         hue: f32,
+        saturation: f32,
+        brightness: f32,
         size: f32,
         intensity: f32,
     ) {
@@ -354,6 +407,8 @@ impl SharedState {
                 angle: p.angle,
                 radius: p.radius.clamp(0.0, 1.2),
                 hue,
+                saturation: saturation.clamp(0.0, 1.0),
+                brightness: brightness.clamp(0.0, 1.0),
                 size: size.clamp(0.01, 1.0),
                 intensity: intensity.clamp(0.0, 2.0),
                 dir: p.dir,
@@ -409,13 +464,7 @@ impl SharedState {
         true
     }
 
-    pub fn push_video_frame(
-        &self,
-        conn_id: u64,
-        width: u16,
-        height: u16,
-        rgba: &[u8],
-    ) -> bool {
+    pub fn push_video_frame(&self, conn_id: u64, width: u16, height: u16, rgba: &[u8]) -> bool {
         let expected = width as usize * height as usize * 4;
         if width == 0
             || height == 0

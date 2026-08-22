@@ -586,6 +586,67 @@ multi-touch display. Five asks, all in this round.
 - Media follow-ups: resilient provider-specific extraction and authenticated/DRM
   sources only if a deployment actually requires them.
 
+## Round 12: unattended show scheduler
+
+- [x] Durable saved playlists with embedded scene snapshots, per-cue dwell and
+      crossfade times, reordering, add/remove, naming, repeat, skip, and stop/hold.
+- [x] Backend-owned show clock: advances headlessly, persists the active cue, and
+      resumes the enabled playlist after a process restart without a controller.
+- [x] Smoothstep layer-stack crossfades with incoming phase preservation, so the
+      end of a transition does not reset the new scene's motion.
+- [x] Nine built-in long-play compositions and a one-click all-night journey
+      (35 minutes each, 20 second transitions, repeat forever).
+- [x] Accelerated two-scene integration run: transition observed, auto-advance
+      confirmed, no GPU error, and active cue restored after restart.
+- [ ] Real PixLite/sACN and production Mac mini validation is deliberately deferred
+      until the installation hardware is unpacked on playa next week.
+
+## Round 13: restore Replay as a production workflow
+
+- [x] Reversed the product-level intent of `8a8325e`: Archive is again a normal
+      production tab and `/#replay` works in desktop, headless web, and PWA builds.
+- [x] Restored single-file playback, whole `Uprising-Data` folder indexing,
+      metadata titles, recent filesystem references, seeking, looping, and variable
+      playback speed. Recordings remain local and stream one frame at a time.
+- [x] Kept the shared per-user Vite fixture cache as an optional development
+      convenience without making Replay depend on that endpoint.
+
+## Round 11: external rhythm sources
+
+- [x] Split lighting timing from per-layer audio energy without changing the default
+      behavior: Layer Audio still gives every layer the beat belonging to its own
+      level/bands/waveform/spectrum source.
+- [x] Add a global MIDI Timing Clock adapter (24 PPQN) with tempo/phase extrapolation,
+      Start/Continue/Stop, Song Position, exact-port hot-plug recovery, ±250 ms visual
+      latency calibration, live health, and optional fallback to a chosen audio source.
+- [x] Manual BPM remains the explicit highest-priority override; half/normal/double
+      time and beat taps operate on the selected effective lighting clock.
+- [x] Add receive-only native PRO DJ LINK beat/status input. It listens on the
+      standard UDP 50001/50002 ports, follows tempo-master status or a pinned player,
+      handles master handoff, and deliberately never claims a virtual deck identity
+      or emits a control packet onto the DJ network.
+- [x] Add a real published Boiler Room track-list excerpt plus synthetic deck/BPM/
+      cue annotations and a UDP+WebSocket E2E replay (`scripts/pioneer-link-test.ts`).
+      No copyrighted audio is stored. Source facts are explicitly distinguished
+      from test-only annotations in the fixture.
+- [ ] Validate against the actual production deck/mixer models before enabling at a
+      show. Add rekordbox track/cue/phrase metadata only after the beat/master path is
+      proven on that hardware; official Bridge/TCNet remains an alternate adapter.
+
+### Production performance baseline
+
+- The production show machine is an older Mac mini than the development Mac; exact
+  model/specs are not yet recorded. Treat its release-build benchmark as the real
+  performance baseline before increasing layer/pixel load or doing speculative
+  optimization.
+- On that Mac mini, run
+  `cargo run --release --bin engine-smoke -- --suite --warmup 120 --frames 600 --json`
+  with the real geometry. Keep the report with the machine model, macOS version, GPU,
+  and release version. The existing Intel-iGPU 1.74 ms development result is useful
+  headroom evidence, not a production guarantee.
+- Continue prioritizing deadline misses/p95-p99 frame time over mean frame time. The
+  next known scaling optimization remains batched UDP I/O at 100k+ pixels.
+
 ## Findings / gotchas
 
 - **wgpu 30 crashes (STATUS_ACCESS_VIOLATION) inside `vkCreateDevice` on this dev

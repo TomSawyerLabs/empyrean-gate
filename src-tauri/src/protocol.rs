@@ -76,6 +76,10 @@ pub enum ClientMsg {
         /// Hue in turns; negative = white.
         #[serde(default)]
         hue: f32,
+        #[serde(default = "default_saturation")]
+        saturation: f32,
+        #[serde(default = "default_brightness")]
+        brightness: f32,
         /// Dab radius as a fraction of the array radius.
         #[serde(default = "default_dab_size")]
         size: f32,
@@ -184,6 +188,14 @@ fn default_intensity() -> f32 {
     1.0
 }
 
+fn default_saturation() -> f32 {
+    0.85
+}
+
+fn default_brightness() -> f32 {
+    1.0
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMsg {
@@ -197,6 +209,9 @@ pub enum ServerMsg {
     Beat {
         source: u32,
         bpm: f32,
+    },
+    ProDjLinkDebug {
+        entry: ProDjLinkDebugEntry,
     },
     PreviewMeta {
         spokes: u32,
@@ -280,6 +295,82 @@ pub struct AudioSourceStatus {
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
+pub struct RhythmStatus {
+    /// True when the configured clock is driving the lights. For MIDI this means
+    /// recent clock pulses, a valid tempo, and no explicit transport Stop.
+    pub active: bool,
+    pub using_fallback: bool,
+    pub source: String,
+    pub detail: String,
+    pub bpm: f32,
+    pub beat_phase: f32,
+    pub running: bool,
+    pub age_ms: f32,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkDeviceInfo {
+    pub number: u8,
+    pub name: String,
+    pub tempo_master: bool,
+    pub playing: bool,
+    pub cued: bool,
+    pub on_air: bool,
+    pub looping: bool,
+    pub beat_number: u64,
+}
+
+/// One structured line in the live PRO DJ LINK inspector. Values remain strings
+/// so packet sentinels, hex flags, and human labels can coexist without lossy JSON.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkDebugEntry {
+    pub sequence: u64,
+    pub elapsed_ms: u64,
+    pub category: String,
+    pub device: u8,
+    pub summary: String,
+    pub fields: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkCueInfo {
+    pub kind: String,
+    pub hot_cue_number: Option<u8>,
+    pub position_ms: u32,
+    pub loop_end_ms: Option<u32>,
+    pub comment: String,
+    pub color: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkTrackInfo {
+    pub deck: u8,
+    pub source_player: u8,
+    pub source_slot: String,
+    pub rekordbox_id: u32,
+    pub loading: bool,
+    pub error: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub genre: String,
+    pub key: String,
+    pub label: String,
+    pub comment: String,
+    pub duration_seconds: u32,
+    pub bpm: f64,
+    pub rating: u8,
+    pub year: u16,
+    pub bit_rate: u32,
+    pub artwork_id: u32,
+    pub cues: Vec<ProDjLinkCueInfo>,
+    /// Normalized 0..255 heights, compact enough for the 2 Hz status stream.
+    pub waveform_preview: Vec<u8>,
+    /// Full waveform downsampled to at most 1200 normalized height samples.
+    pub waveform_detail: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct VideoSourceStatus {
     pub active: bool,
     pub owner_id: String,
@@ -290,6 +381,20 @@ pub struct VideoSourceStatus {
     pub height: u16,
     pub fps: f32,
     pub frames: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ScheduledShowStatus {
+    pub enabled: bool,
+    pub playlist_id: String,
+    pub playlist_name: String,
+    pub scene_name: String,
+    /// Zero-based active entry.
+    pub index: u32,
+    pub total: u32,
+    pub remaining_secs: f32,
+    /// 0 outside a transition; otherwise 0..1 as the incoming scene arrives.
+    pub transition_progress: f32,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -313,6 +418,12 @@ pub struct RuntimeStatus {
     pub pps_history: Vec<u32>,
     pub clients: u32,
     pub audio: Vec<AudioSourceStatus>,
+    pub rhythm: RhythmStatus,
+    /// Hot-plug refreshed MIDI input names.
+    pub midi_ports: Vec<String>,
+    pub pro_dj_link_devices: Vec<ProDjLinkDeviceInfo>,
+    pub pro_dj_link_debug: Vec<ProDjLinkDebugEntry>,
+    pub pro_dj_link_tracks: Vec<ProDjLinkTrackInfo>,
     /// Available local capture devices, for the settings UI dropdowns.
     pub input_devices: Vec<DeviceInfo>,
     /// Output devices (selectable as loopback beat sources).
@@ -340,6 +451,7 @@ pub struct RuntimeStatus {
     /// Updater progress / result note ("up to date", "downloading…", errors).
     pub update_state: String,
     pub video: VideoSourceStatus,
+    pub show: ScheduledShowStatus,
 }
 
 #[cfg(test)]
@@ -362,6 +474,22 @@ mod tests {
             message,
             ClientMsg::AudioFrame {
                 stream: BrowserAudioStream::Microphone,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn legacy_paint_defaults_to_the_original_color_profile() {
+        let message: ClientMsg = serde_json::from_str(
+            r#"{"type":"paint","pen":"glow","points":[],"hue":0.5,"size":0.12,"intensity":1.0}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            message,
+            ClientMsg::Paint {
+                saturation: 0.85,
+                brightness: 1.0,
                 ..
             }
         ));

@@ -17,26 +17,29 @@ const ROOT = join(import.meta.dir, "..");
 const DIST = join(ROOT, "dist");
 const PORT = Number(process.argv[2] ?? 9531);
 
-const config = JSON.parse(
-  readFileSync(join(ROOT, "tests/fixtures/default-config.json"), "utf8"),
-);
+const fixture = (name: string) =>
+  JSON.parse(readFileSync(join(ROOT, `tests/fixtures/${name}.json`), "utf8"));
+
+const config = fixture("default-config");
 
 const SPOKES = 64;
 const PIXELS = 64; // decimated preview
 const PREVIEW_MAGIC = 0x45475056;
 
-// A plausible, fully-populated status: the UI shows more chrome when things are
-// running (sACN pill, history bars, device lists), and that chrome is exactly
-// what has to fit.
+// A plausible, fully-populated status. The BASE is RuntimeStatus::default()
+// straight from Rust (kept current by `default_status_fixture_is_current`), so a
+// field the backend starts sending can never silently go missing here — the UI
+// reads some status fields without optional chaining, and a missing one
+// white-screens a whole tab. Only the "looks live" overrides are spelled out:
+// the UI shows more chrome when things are running, and that chrome has to fit.
 const status = {
-  gpu_error: null,
+  ...fixture("default-status"),
   gpu_name: "Mock Vulkan Device",
   engine_fps: 60,
   frame_time_ms: 1.7,
   sacn_enabled: true,
   sacn_universes: 192,
   sacn_pps: 11520,
-  sacn_error: null,
   fps_history: Array.from({ length: 30 }, (_, i) => 58 + (i % 3)),
   pps_history: Array.from({ length: 30 }, () => 11520),
   clients: 1,
@@ -59,25 +62,11 @@ const status = {
   default_input_channels: 2,
   default_output_channels: 2,
   interfaces: ["Ethernet — 10.255.0.77", "Wi-Fi — 192.168.1.50"],
-  firewall_pending: false,
-  video_cache: [],
   client_list: [{ id: "mock-client", name: "Layout test", connected: true, revoked: false }],
   master_brightness: 1,
   master_speed: 1,
   version: "0.0.0-mock",
-  update_available: null,
   update_state: "up to date",
-  video: {
-    active: false,
-    owner_id: "",
-    owner_name: "",
-    title: "",
-    source_url: "",
-    width: 0,
-    height: 0,
-    fps: 0,
-    frames: 0,
-  },
 };
 
 function previewFrame(t: number): Uint8Array {

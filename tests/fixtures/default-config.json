@@ -43,6 +43,15 @@
       }
     ]
   },
+  "rhythm": {
+    "source": "layer_audio",
+    "midi_port": null,
+    "pro_dj_link_player": 0,
+    "pro_dj_link_metadata_player": 3,
+    "latency_ms": 0.0,
+    "fallback_to_audio": true,
+    "fallback_audio_source": 0
+  },
   "render": {
     "fps": 60.0,
     "master_brightness": 1.0,
@@ -164,5 +173,12 @@
       "param_d": 0.5
     }
   ],
+  "saved_stacks": [],
+  "saved_playlists": [],
+  "show_scheduler": {
+    "enabled": false,
+    "active_playlist_id": "",
+    "current_index": 0
+  },
   "clients": []
 }

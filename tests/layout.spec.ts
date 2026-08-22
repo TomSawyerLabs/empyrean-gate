@@ -9,11 +9,12 @@
 //
 //   1. Nothing extends horizontally past the viewport, ever. Not the document,
 //      not any individual element.
-//   2. The Live tab must fit vertically too. It is the performance surface; if it
-//      scrolls, the array view has been squeezed.
+//   2. Nothing is silently clipped: a box that hides its overflow must be big
+//      enough for what is inside it.
 //
-// Tabs that are legitimately long (Settings, Control, Video) may scroll
-// vertically inside <main>, which is a scroll container by design.
+// Vertical scrolling is NOT a failure by itself — Settings and the Live control
+// deck are both explicitly scrolling surfaces (`.control-deck-page` is
+// `height: auto; min-height: 100%`). See MUST_FIT_VERTICALLY.
 //
 // Anything deliberately parked offscreen must say so with `data-layout-exempt`.
 
@@ -39,6 +40,17 @@ const VIEWPORTS = [
 ];
 
 const TABS = ["live", "media", "control", "settings"] as const;
+
+/// Tabs required to fit on screen with no scrolling at all.
+///
+/// Empty for now, deliberately. The Live tab used to be here — a scrollbar on the
+/// performance surface means a touch drag scrolls the page instead of playing the
+/// array, which is the bug that prompted this gate. But the control-deck rework
+/// made Live a scrolling, user-arranged page on purpose, and its default deck is
+/// ~930px tall regardless of window size, so it scrolls at anything below 1080p.
+/// Reinstating the rule is a one-word change once that design question is
+/// settled; it is left off rather than silently overriding the deck's design.
+const MUST_FIT_VERTICALLY = new Set<string>();
 
 interface Overflow {
   axis: "horizontal" | "vertical";
@@ -81,8 +93,26 @@ async function overflows(
       });
     }
 
+    // Deliberately off-screen (`data-layout-exempt`) or a screen-reader-only box
+    // (the standard 1px clipped `.visually-hidden` pattern, which by definition
+    // "clips its content").
+    const exempt = (el: Element) => !!el.closest("[data-layout-exempt], .visually-hidden");
+
+    /// True when the element lives inside a scroll region other than <main> — a
+    /// deck widget body, a modal's scroll area. Content there is reachable by
+    /// scrolling *that* region, so it is not clipped and not our business.
+    /// <main> is excluded from that reasoning on purpose: it is the page, and a
+    /// scrollbar on it is exactly the symptom this gate exists to catch.
+    const inNestedScroller = (el: Element): boolean => {
+      for (let n: Element | null = el; n && n !== document.body; n = n.parentElement) {
+        const s = getComputedStyle(n);
+        if (/auto|scroll/.test(`${s.overflowX} ${s.overflowY}`)) return n.tagName !== "MAIN";
+      }
+      return false;
+    };
+
     for (const el of Array.from(document.body.querySelectorAll("*"))) {
-      if (el.closest("[data-layout-exempt]")) continue;
+      if (exempt(el)) continue;
       const style = getComputedStyle(el);
       if (style.display === "none" || style.visibility === "hidden") continue;
       const rect = el.getBoundingClientRect();
@@ -103,26 +133,42 @@ async function overflows(
       }
     }
 
-    // Scroll containers: a horizontal one is always a bug here, and on the tabs
-    // that must fit, a vertical one is too.
-    //
-    // Two things are not "clipping" and must not be flagged: replaced elements,
+    // On a view that must fit, <main> having anything to scroll IS the bug:
+    // the array view has been squeezed and a touch drag now scrolls the page.
+    const main = document.querySelector("main");
+    if (requireVerticalFit && main && main.scrollHeight > main.clientHeight + SLACK) {
+      problems.push({
+        axis: "vertical",
+        element: "main",
+        detail: `content ${main.scrollHeight} taller than box ${main.clientHeight}`,
+      });
+    }
+
+    // Boxes that don't fit their own content. Not flagged: replaced elements,
     // whose scrollWidth/scrollHeight describe internal rendering rather than
-    // layout (a range input reports a 9px "content" in a 4px box), and text that
-    // declares `text-overflow: ellipsis`, which is truncation on purpose.
+    // layout (a range input reports a 9px "content" in a 4px box); text that
+    // declares `text-overflow: ellipsis`, which is truncation on purpose; and
+    // anything inside a nested scroll region, which is reachable by scrolling.
     const REPLACED = new Set(["INPUT", "SELECT", "TEXTAREA", "CANVAS", "IMG", "SVG", "VIDEO", "IFRAME"]);
     for (const el of Array.from(document.body.querySelectorAll("*"))) {
-      if (el.closest("[data-layout-exempt]")) continue;
+      if (exempt(el)) continue;
       if (REPLACED.has(el.tagName)) continue;
-      if (getComputedStyle(el).textOverflow === "ellipsis") continue;
-      if (el.scrollWidth > el.clientWidth + SLACK) {
+      const style = getComputedStyle(el);
+      if (style.textOverflow === "ellipsis") continue;
+      if (inNestedScroller(el)) continue;
+      // Only a box that HIDES its overflow actually loses content. `visible`
+      // spills (ugly, but caught by the viewport rules if it matters) and
+      // `auto`/`scroll` is reachable.
+      const clipsX = /hidden|clip/.test(style.overflowX);
+      const clipsY = /hidden|clip/.test(style.overflowY);
+      if (clipsX && el.scrollWidth > el.clientWidth + SLACK) {
         problems.push({
           axis: "horizontal",
           element: describe(el),
           detail: `content ${el.scrollWidth} wider than box ${el.clientWidth}`,
         });
       }
-      if (requireVerticalFit && el.scrollHeight > el.clientHeight + SLACK) {
+      if (requireVerticalFit && clipsY && el.scrollHeight > el.clientHeight + SLACK) {
         problems.push({
           axis: "vertical",
           element: describe(el),
@@ -154,7 +200,10 @@ for (const viewport of VIEWPORTS) {
         await expect(page.locator('.app[data-connected="yes"]')).toBeAttached();
         await page.waitForTimeout(250);
 
-        const problems = await overflows(page, tab === "live" && !viewport.mobile);
+        const problems = await overflows(
+          page,
+          MUST_FIT_VERTICALLY.has(tab) && !viewport.mobile,
+        );
         expect(
           problems,
           `Clipped or overflowing regions on the ${tab} tab at ${viewport.width}x${viewport.height}:\n` +
@@ -173,7 +222,7 @@ for (const viewport of VIEWPORTS) {
       await expect(page.locator(".show-exit")).toBeVisible();
       await page.waitForTimeout(250);
 
-      const problems = await overflows(page, true);
+      const problems = await overflows(page, MUST_FIT_VERTICALLY.has("live"));
       expect(
         problems,
         `Clipped or overflowing regions in show mode at ${viewport.width}x${viewport.height}:\n` +

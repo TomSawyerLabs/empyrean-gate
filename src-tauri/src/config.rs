@@ -210,6 +210,59 @@ pub struct AudioConfig {
     pub sources: Vec<AudioSourceConfig>,
 }
 
+/// Where the musical clock used by beat-synchronized visuals comes from. Audio
+/// energy remains per-layer regardless of this choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RhythmSource {
+    /// Preserve the original behavior: each layer follows the beat detector for
+    /// the same audio source it uses for level/bands/spectrum.
+    #[default]
+    LayerAudio,
+    /// One MIDI Timing Clock drives every layer; audio remains independently
+    /// selectable per layer. Intended for DJ mixers, bridges, and controllers.
+    MidiClock,
+    /// Passively receive beat/status packets from a Pioneer/AlphaTheta PRO DJ
+    /// LINK network. This app never announces a virtual deck or sends commands.
+    ProDjLink,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RhythmConfig {
+    pub source: RhythmSource,
+    /// Exact operating-system MIDI input port name. None means no port selected;
+    /// it never silently substitutes another device after a disconnect.
+    pub midi_port: Option<String>,
+    /// 0 follows the reported tempo master. 1..6 pins one player number, useful
+    /// with hardware that broadcasts beat packets but not full status to listeners.
+    pub pro_dj_link_player: u8,
+    /// Unused player number used only as the dbserver query identity. Gate never
+    /// sends transport/master commands. XDJ-XZ decks occupy 1 and 2, so 3 is the
+    /// safe default; metadata queries are refused if that number is observed.
+    pub pro_dj_link_metadata_player: u8,
+    /// Shift the lighting clock relative to the external input to compensate for LED/audio
+    /// transport latency. Positive values make the visual beat happen later.
+    pub latency_ms: f32,
+    /// If the external clock stops arriving, keep the show moving from this audio detector.
+    pub fallback_to_audio: bool,
+    pub fallback_audio_source: u32,
+}
+
+impl Default for RhythmConfig {
+    fn default() -> Self {
+        Self {
+            source: RhythmSource::LayerAudio,
+            midi_port: None,
+            pro_dj_link_player: 0,
+            pro_dj_link_metadata_player: 3,
+            latency_ms: 0.0,
+            fallback_to_audio: true,
+            fallback_audio_source: 0,
+        }
+    }
+}
+
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
@@ -394,6 +447,97 @@ pub struct WindowsConfig {
     pub aux_open: Vec<String>,
 }
 
+/// A named, reusable capture of the layer stack and the motion settings that
+/// shape it. Saved with the main config so every control device sees the same
+/// library and it survives backend restarts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedStack {
+    pub id: String,
+    pub name: String,
+    pub layers: Vec<LayerCfg>,
+    pub master_speed: f32,
+    pub walk_enabled: bool,
+    pub walk_layers: bool,
+    pub walk_min_layers: u32,
+    pub walk_speed: f32,
+    pub walk_depth: f32,
+}
+
+/// One timed composition in a saved unattended show. The stack is embedded rather
+/// than referenced by id so a playlist remains intact if its source scene is later
+/// edited or deleted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShowPlaylistEntry {
+    pub id: String,
+    pub name: String,
+    pub stack: SavedStack,
+    /// Time from this scene's arrival until the scheduler advances.
+    pub duration_secs: f32,
+    /// Crossfade time when entering this scene.
+    pub transition_secs: f32,
+}
+
+impl Default for ShowPlaylistEntry {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: "Untitled scene".into(),
+            stack: SavedStack::default(),
+            duration_secs: 1_800.0,
+            transition_secs: 20.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedPlaylist {
+    pub id: String,
+    pub name: String,
+    pub entries: Vec<ShowPlaylistEntry>,
+    /// Continue from the first entry after the last one finishes.
+    pub repeat: bool,
+}
+
+impl Default for SavedPlaylist {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: "Untitled show".into(),
+            entries: Vec::new(),
+            repeat: true,
+        }
+    }
+}
+
+/// Runtime selection for the backend-owned unattended show. The active index is
+/// persisted at each change, so a headless restart resumes the same playlist.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ShowSchedulerConfig {
+    pub enabled: bool,
+    pub active_playlist_id: String,
+    pub current_index: u32,
+}
+
+impl Default for SavedStack {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: "Untitled stack".into(),
+            layers: Vec::new(),
+            master_speed: 1.0,
+            walk_enabled: false,
+            walk_layers: false,
+            walk_min_layers: 1,
+            walk_speed: 1.0,
+            walk_depth: 1.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -401,6 +545,7 @@ pub struct AppConfig {
     pub output: OutputConfig,
     pub server: ServerConfig,
     pub audio: AudioConfig,
+    pub rhythm: RhythmConfig,
     pub render: RenderConfig,
     pub update: UpdateConfig,
     pub windows: WindowsConfig,
@@ -410,6 +555,11 @@ pub struct AppConfig {
     /// self-updates because the running exe re-registers itself at startup).
     pub autostart: bool,
     pub layers: Vec<LayerCfg>,
+    /// Named layer-stack captures shared by all clients.
+    pub saved_stacks: Vec<SavedStack>,
+    /// Reusable timed shows and the currently running selection.
+    pub saved_playlists: Vec<SavedPlaylist>,
+    pub show_scheduler: ShowSchedulerConfig,
     /// Known client devices (see `ClientRecord`).
     pub clients: Vec<ClientRecord>,
 }
@@ -421,6 +571,7 @@ impl Default for AppConfig {
             output: OutputConfig::default(),
             server: ServerConfig::default(),
             audio: AudioConfig::default(),
+            rhythm: RhythmConfig::default(),
             render: RenderConfig::default(),
             update: UpdateConfig::default(),
             windows: WindowsConfig::default(),
@@ -428,6 +579,9 @@ impl Default for AppConfig {
             beat_taps: BeatTapConfig::default(),
             autostart: false,
             layers: default_layer_stack(),
+            saved_stacks: Vec::new(),
+            saved_playlists: Vec::new(),
+            show_scheduler: ShowSchedulerConfig::default(),
             clients: Vec::new(),
         }
     }
@@ -548,6 +702,14 @@ pub fn load() -> AppConfig {
     if dirty {
         save(&cfg);
     }
+    // Isolated integration tests and parallel local instances can choose a port
+    // without rewriting the persisted operator configuration.
+    if let Some(port) = std::env::var("EMPYREAN_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        cfg.server.port = port;
+    }
     cfg
 }
 
@@ -645,6 +807,100 @@ mod tests {
             normalize(&current),
             "tests/fixtures/default-config.json is stale; regenerate with \
              EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture"
+        );
+    }
+
+    /// Same contract for the runtime status the mock backend replays. The UI
+    /// reads status fields without optional chaining in places, so a fixture
+    /// missing a field the backend now sends white-screens a tab — which is how
+    /// this fixture came to exist.
+    #[test]
+    fn default_status_fixture_is_current() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("tests")
+            .join("fixtures")
+            .join("default-status.json");
+        let current = serde_json::to_string_pretty(&crate::protocol::RuntimeStatus::default())
+            .expect("serialize default status");
+        if std::env::var("EMPYREAN_UPDATE_FIXTURES").is_ok() {
+            std::fs::create_dir_all(path.parent().expect("fixture dir")).expect("create fixture dir");
+            std::fs::write(&path, format!("{current}
+")).expect("write fixture");
+            return;
+        }
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "missing {} ({e}); regenerate with EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture",
+                path.display()
+            )
+        });
+        let normalize = |s: &str| s.replace("
+", "
+").trim_end().to_string();
+        assert_eq!(
+            normalize(&text),
+            normalize(&current),
+            "tests/fixtures/default-status.json is stale; regenerate with              EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture"
+        );
+    }
+
+    #[test]
+    fn config_without_rhythm_section_keeps_legacy_behavior() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        value.as_object_mut().unwrap().remove("rhythm");
+        let config: AppConfig = serde_json::from_value(value).unwrap();
+        assert_eq!(config.rhythm.source, RhythmSource::LayerAudio);
+        assert!(config.rhythm.fallback_to_audio);
+    }
+
+    #[test]
+    fn legacy_config_gets_an_idle_empty_show_scheduler() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("saved_playlists");
+        object.remove("show_scheduler");
+        let config: AppConfig = serde_json::from_value(value).unwrap();
+        assert!(config.saved_playlists.is_empty());
+        assert!(!config.show_scheduler.enabled);
+        assert!(config.show_scheduler.active_playlist_id.is_empty());
+    }
+
+    #[test]
+    fn playlist_embeds_a_restart_safe_scene_snapshot() {
+        let stack = SavedStack {
+            id: "scene-a".into(),
+            name: "Scene A".into(),
+            layers: default_layer_stack(),
+            walk_enabled: true,
+            ..Default::default()
+        };
+        let mut config = AppConfig::default();
+        config.saved_playlists.push(SavedPlaylist {
+            id: "night".into(),
+            name: "All night".into(),
+            entries: vec![ShowPlaylistEntry {
+                id: "cue-a".into(),
+                name: "Scene A".into(),
+                stack,
+                duration_secs: 2_100.0,
+                transition_secs: 20.0,
+            }],
+            repeat: true,
+        });
+        config.show_scheduler = ShowSchedulerConfig {
+            enabled: true,
+            active_playlist_id: "night".into(),
+            current_index: 0,
+        };
+
+        let restored: AppConfig =
+            serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+        assert!(restored.show_scheduler.enabled);
+        assert_eq!(restored.saved_playlists[0].entries[0].stack.layers.len(), 4);
+        assert_eq!(
+            restored.saved_playlists[0].entries[0].duration_secs,
+            2_100.0
         );
     }
 }
