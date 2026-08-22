@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { EFFECTS } from "./effects";
 import GateCanvas from "./GateCanvas";
 import Sparkbars from "./Sparkbars";
-import { useGate } from "./state";
+import { useGate, useThrottled } from "./state";
 import ToolIcon, { type ToolKind } from "./ToolIcon";
 import type { RenderConfig } from "./types";
 
@@ -46,6 +46,11 @@ export default function Live() {
   const [size, setSize] = useState(0.12);
   const [queuePos, setQueuePos] = useState(0);
   const beatDotRef = useRef<HTMLDivElement>(null);
+  const [masterSpeed, setMasterSpeedLocal] = useState(1);
+  const sendMasterSpeed = useThrottled((v: number) => client.setMaster({ speed: v }));
+  useEffect(() => {
+    if (config) setMasterSpeedLocal(config.render.master_speed);
+  }, [config]);
 
   // Viewer-slot queue: >0 means the preview is rationed and we're waiting.
   useEffect(() => {
@@ -169,6 +174,24 @@ export default function Live() {
           value={size}
           onChange={(e) => setSize(Number(e.target.value))}
         />
+      </label>
+      {/* Master pattern speed — scales all layer motion. Independent of the
+          tempo controls, which only retime beat-driven behavior. */}
+      <label className="slider-row">
+        <span>Speed</span>
+        <input
+          type="range"
+          min={0}
+          max={4}
+          step={0.05}
+          value={masterSpeed}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            setMasterSpeedLocal(v);
+            sendMasterSpeed(v);
+          }}
+        />
+        <span className="slider-val">{masterSpeed.toFixed(2)}×</span>
       </label>
     </div>
   );
