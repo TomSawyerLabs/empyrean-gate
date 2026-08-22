@@ -62,7 +62,7 @@ export interface SavedStack {
   walk_depth: number;
 }
 
-export interface PlaylistEntry {
+export interface ShowPlaylistEntry {
   id: string;
   name: string;
   stack: SavedStack;
@@ -73,7 +73,7 @@ export interface PlaylistEntry {
 export interface SavedPlaylist {
   id: string;
   name: string;
-  entries: PlaylistEntry[];
+  entries: ShowPlaylistEntry[];
   repeat: boolean;
 }
 

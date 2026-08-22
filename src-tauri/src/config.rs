@@ -464,7 +464,7 @@ pub struct SavedStack {
 /// edited or deleted.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct PlaylistEntry {
+pub struct ShowPlaylistEntry {
     pub id: String,
     pub name: String,
     pub stack: SavedStack,
@@ -474,7 +474,7 @@ pub struct PlaylistEntry {
     pub transition_secs: f32,
 }
 
-impl Default for PlaylistEntry {
+impl Default for ShowPlaylistEntry {
     fn default() -> Self {
         Self {
             id: String::new(),
@@ -491,7 +491,7 @@ impl Default for PlaylistEntry {
 pub struct SavedPlaylist {
     pub id: String,
     pub name: String,
-    pub entries: Vec<PlaylistEntry>,
+    pub entries: Vec<ShowPlaylistEntry>,
     /// Continue from the first entry after the last one finishes.
     pub repeat: bool,
 }
@@ -744,7 +744,7 @@ mod tests {
         config.saved_playlists.push(SavedPlaylist {
             id: "night".into(),
             name: "All night".into(),
-            entries: vec![PlaylistEntry {
+            entries: vec![ShowPlaylistEntry {
                 id: "cue-a".into(),
                 name: "Scene A".into(),
                 stack,

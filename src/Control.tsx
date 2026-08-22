@@ -8,7 +8,7 @@ import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
 import {
   LAYER_LABELS,
-  type PlaylistEntry,
+  type ShowPlaylistEntry,
   type SavedPlaylist,
   type SavedStack,
 } from "./types";
@@ -30,7 +30,7 @@ function stackFromScene(scene: ScenePreset): SavedStack {
   };
 }
 
-function playlistEntry(stack: SavedStack): PlaylistEntry {
+function playlistEntry(stack: SavedStack): ShowPlaylistEntry {
   return {
     id: newId("cue"),
     name: stack.name,
