@@ -81,6 +81,14 @@ live meters.
   ids and friendly names; Settings → Clients lets you rename, revoke (kicks live,
   blocks rejoin), and optionally require the join token so only QR-scanned devices
   can connect (rotate the token to lock everyone new out).
+- **Show-machine hardening**: the backend blocks system sleep while running (and
+  display sleep while output is enabled — display sleep can take HDMI/DP
+  display-audio loopback sources with it); config saves are crash-safe (temp +
+  fsync + `.bak` fallback, protecting the persistent sACN CID from a power cut
+  mid-save); a one-click banner authorizes a port-scoped Windows Firewall rule
+  (one UAC prompt ever — survives self-update binary swaps); and Settings →
+  Updates has a "Launch at login" toggle that re-registers itself across updates,
+  so a venue power cycle brings the show back without a keyboard.
 - **Seamless takeover**: start a new backend while one is running and it warms its
   GPU first, asks the old instance to stop and hand over its running state (config +
   layer animation phases), then continues the output — the structure sees a sub-second

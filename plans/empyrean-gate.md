@@ -402,9 +402,22 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
   the show NIC (mostly matters for USB/WiFi adapters).
 - Validate Vulkan on the show machine's GPU early (the wgpu-29 pin exists because
   of THIS dev machine's 2022 Intel driver; other hardware may differ).
-- No autostart-on-boot yet: if the venue power-cycles, someone must launch the
-  app (or we add a "Launch at startup" toggle — Startup-folder shortcut, no
-  admin needed — as a follow-up).
+- ~~No autostart-on-boot yet~~ → BUILT (85e09e6): Settings → Updates → "Launch at
+  login". Per-user Run registry key; the exe re-registers itself at startup so
+  the entry follows self-update binary swaps. EMPYREAN_CONFIG instances skip it.
+- Windows Update active hours: set per machine so restarts land mid-morning.
+  Dev machine DONE (2026-08-21): active hours 11:00→05:00 (restarts allowed
+  05:00–11:00), SmartActiveHoursState=0 so Windows can't auto-adjust them.
+  Registry: HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings →
+  ActiveHoursStart=11, ActiveHoursEnd=5 (DWORDs). Repeat on the show machine.
+- Intel driver on THIS dev machine (i7-10710U, Comet Lake, 10th gen): on the
+  legacy 7th–10th gen branch. Latest is 31.0.101.2141 (security-mostly since
+  2023); machine has 30.0.101.1660 (2022-03). Updating is low-risk and MIGHT fix
+  the wgpu-30 vkCreateDevice crash (not guaranteed — legacy branch got few
+  functional fixes). We are NOT stuck on old Vulkan — driver speaks Vulkan 1.3,
+  ample for our compute shader; the pin is wgpu-the-library 29 vs 30, which
+  costs nothing functionally today. After any driver update: try wgpu 30, keep
+  the pin if it still crashes.
 
 ## Next session pickup
 
