@@ -982,11 +982,13 @@ async fn handle_msg(
                 let join_token = c.server.join_token.clone();
                 let require_token = c.server.require_token;
                 let active_patch = c.active_patch.clone();
+                let launch_at_startup = c.windows.launch_at_startup;
                 *c = *config;
                 c.clients = clients;
                 c.server.join_token = join_token;
                 c.server.require_token = require_token;
                 c.active_patch = active_patch;
+                c.windows.launch_at_startup = launch_at_startup;
             });
             if port_changed {
                 let _ = send_json(
@@ -1321,6 +1323,20 @@ async fn handle_msg(
         }
         ClientMsg::InstallUpdate => {
             state.update_install_requested.store(true, Ordering::SeqCst);
+        }
+        ClientMsg::SetLaunchAtStartup { enabled } => {
+            let state2 = state.clone();
+            tokio::task::spawn_blocking(move || {
+                let headless = state2.headless.load(Ordering::SeqCst);
+                let outcome = crate::startup::reconcile(enabled, headless);
+                let applied = outcome.succeeded && outcome.enabled == enabled;
+                outcome.publish(&mut state2.status.lock());
+                if applied {
+                    state2.update_config(|c| c.windows.launch_at_startup = enabled);
+                } else {
+                    state2.broadcast_state();
+                }
+            });
         }
         ClientMsg::TriggerEffect { effect } => {
             state.trigger_effect(effect);

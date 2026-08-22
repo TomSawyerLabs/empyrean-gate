@@ -28,6 +28,7 @@ pub mod testmode;
 /// Windows-only: suppress the OS's touch feedback visuals on our windows.
 #[cfg(target_os = "windows")]
 pub mod touch;
+pub mod startup;
 pub mod updater;
 pub mod videocache;
 pub mod webview2;
@@ -331,6 +332,13 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
         }
         None => {}
     }
+
+    // Refresh the shortcut before updater cleanup removes an older versioned
+    // executable that a previous launch may have targeted.
+    let launch_at_startup = state.config.read().windows.launch_at_startup;
+    startup::reconcile(launch_at_startup, headless).publish(&mut state.status.lock());
+    updater::cleanup_old_binaries();
+    state.broadcast_state();
 
     if headless {
         log::info!("headless mode: no desktop window; web UI only");

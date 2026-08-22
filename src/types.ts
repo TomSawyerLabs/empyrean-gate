@@ -220,6 +220,7 @@ export interface UpdateConfig {
 
 export interface WindowsConfig {
   aux_open: string[];
+  launch_at_startup: boolean;
 }
 
 export type PlaylistKind = "url" | "local_file";
@@ -400,6 +401,9 @@ export interface RuntimeStatus {
   default_output_channels: number;
   interfaces: string[];
   firewall_pending: boolean;
+  startup_supported: boolean;
+  startup_enabled: boolean;
+  startup_state: string;
   video_cache: VideoCacheStatus[];
   client_list: ClientInfo[];
   master_brightness: number;
