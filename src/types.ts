@@ -163,6 +163,7 @@ export interface RhythmConfig {
   source: RhythmSource;
   midi_port: string | null;
   pro_dj_link_player: number;
+  pro_dj_link_metadata_player: number;
   latency_ms: number;
   fallback_to_audio: boolean;
   fallback_audio_source: number;
@@ -281,6 +282,55 @@ export interface RhythmStatus {
 export interface ProDjLinkDeviceInfo {
   number: number;
   name: string;
+  tempo_master: boolean;
+  playing: boolean;
+  cued: boolean;
+  on_air: boolean;
+  looping: boolean;
+  beat_number: number;
+}
+
+export interface ProDjLinkDebugEntry {
+  sequence: number;
+  elapsed_ms: number;
+  category: string;
+  device: number;
+  summary: string;
+  fields: Record<string, string>;
+}
+
+export interface ProDjLinkCueInfo {
+  kind: "memory" | "hot_cue" | "loop";
+  hot_cue_number: number | null;
+  position_ms: number;
+  loop_end_ms: number | null;
+  comment: string;
+  color: string;
+}
+
+export interface ProDjLinkTrackInfo {
+  deck: number;
+  source_player: number;
+  source_slot: string;
+  rekordbox_id: number;
+  loading: boolean;
+  error: string;
+  title: string;
+  artist: string;
+  album: string;
+  genre: string;
+  key: string;
+  label: string;
+  comment: string;
+  duration_seconds: number;
+  bpm: number;
+  rating: number;
+  year: number;
+  bit_rate: number;
+  artwork_id: number;
+  cues: ProDjLinkCueInfo[];
+  waveform_preview: number[];
+  waveform_detail: number[];
 }
 
 export interface RuntimeStatus {
@@ -299,6 +349,8 @@ export interface RuntimeStatus {
   rhythm: RhythmStatus;
   midi_ports: string[];
   pro_dj_link_devices: ProDjLinkDeviceInfo[];
+  pro_dj_link_debug: ProDjLinkDebugEntry[];
+  pro_dj_link_tracks: ProDjLinkTrackInfo[];
   input_devices: DeviceInfo[];
   output_devices: DeviceInfo[];
   default_input_channels: number;
@@ -343,6 +395,7 @@ export type ServerMsg =
   | { type: "state"; config: AppConfig; status: RuntimeStatus }
   | { type: "status"; status: RuntimeStatus }
   | { type: "beat"; source: number; bpm: number }
+  | { type: "pro_dj_link_debug"; entry: ProDjLinkDebugEntry }
   | {
       type: "preview_meta";
       spokes: number;

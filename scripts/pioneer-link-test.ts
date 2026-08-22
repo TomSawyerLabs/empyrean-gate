@@ -108,6 +108,7 @@ ws.onmessage = (event) => {
       ...config.rhythm,
       source: "pro_dj_link",
       pro_dj_link_player: 0,
+      pro_dj_link_metadata_player: 3,
       latency_ms: 0,
       fallback_to_audio: false,
     };

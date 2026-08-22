@@ -28,6 +28,10 @@ struct Globals {
     transition_active: u32,
     transition_progress: f32,
     _pad_transition: f32,
+    dj_link_visual_active: u32,
+    dj_fade_position: f32,
+    dj_fade_activity: f32,
+    dj_looping: f32,
 }
 
 struct AudioU {
@@ -783,6 +787,36 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
             let L = LAYERS[l];
             let c = layer_color(L, ctx);
             acc = apply_blend(acc, c, L.opacity, L.blend);
+        }
+    }
+
+    if G.dj_link_visual_active != 0u {
+        // Master-clock geometry remains expressive even when the DJ is
+        // monitoring entirely in headphones and no audio energy reaches Gate.
+        // A four-lobed fan snaps outward on each beat and slowly rotates.
+        let master_hit = exp(-AUDIO[0].beat_phase * 11.0);
+        let master_fan = pow(max(0.0, cos(ctx.theta * 4.0 - G.time * 0.32)), 10.0);
+        let master_ring = 0.45 + 0.55 * cos(TAU * (ctx.rn * 1.35 - AUDIO[0].beat_phase));
+        let master_col = hsv2rgb(fract(0.52 + G.time * 0.006 + ctx.rn * 0.08), 0.78, 1.0);
+        acc += master_col * master_hit * master_fan * max(master_ring, 0.0) * 0.26;
+
+        // A deck handoff is an additive ribbon travelling across the Gate. It
+        // deliberately never masks or scales the composition underneath it.
+        if G.dj_fade_activity > 0.005 {
+            let fade_y = mix(-0.92, 0.92, clamp(G.dj_fade_position, 0.0, 1.0));
+            let width = 0.10 + 0.10 * G.dj_fade_activity;
+            let ribbon = exp(-pow(ctx.pos.y - fade_y, 2.0) / (width * width));
+            let shimmer = 0.65 + 0.35 * sin(TAU * (ctx.rn * 1.8 - AUDIO[0].beat_phase));
+            let ribbon_col = hsv2rgb(mix(0.58, 0.08, G.dj_fade_position), 0.82, 1.0);
+            acc += ribbon_col * ribbon * shimmer * G.dj_fade_activity * 0.75;
+        }
+
+        // Loops add concentric, beat-locked bands. Loop entry, wrap, and exit
+        // also fire stronger transient effects in the link receiver.
+        if G.dj_looping > 0.5 {
+            let loop_wave = 0.5 + 0.5 * cos(TAU * (AUDIO[0].beat_phase - ctx.rn * 1.5));
+            let loop_col = hsv2rgb(0.78, 0.72, 1.0);
+            acc += loop_col * loop_wave * 0.24;
         }
     }
 
