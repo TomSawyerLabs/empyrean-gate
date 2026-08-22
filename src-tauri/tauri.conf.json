@@ -17,7 +17,9 @@
         "height": 900,
         "minWidth": 900,
         "minHeight": 600,
-        "resizable": true
+        "resizable": true,
+        "zoomHotkeysEnabled": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-pinch --overscroll-history-navigation=0"
       }
     ],
     "security": {

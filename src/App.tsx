@@ -1,8 +1,9 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import Control from "./Control";
 import { EFFECTS } from "./effects";
 import Live from "./Live";
 import Media from "./Media";
+import ReportModal from "./Report";
 import Settings from "./Settings";
 import { useGate } from "./state";
 
@@ -26,6 +27,49 @@ function tabFromHash(): TabId {
 }
 
 const IN_TAURI = "__TAURI_INTERNALS__" in window;
+
+const SHOW_MODE_KEY = "empyrean-show-mode";
+
+/// Show mode: the native window goes real fullscreen AND the app chrome is
+/// hidden, so the array fills the display edge to edge. The preference lives in
+/// localStorage (which survives restarts and self-update binary swaps, since the
+/// webview data folder is keyed by the app identifier), and is re-applied on
+/// mount — so the app comes back in whatever state it was closed in. Browser
+/// clients get the chrome-hiding half; only Tauri can take a window fullscreen.
+function useShowMode(): [boolean, (on: boolean) => void] {
+  const [on, setOn] = useState(() => localStorage.getItem(SHOW_MODE_KEY) === "1");
+
+  const set = useCallback((next: boolean) => {
+    setOn(next);
+    localStorage.setItem(SHOW_MODE_KEY, next ? "1" : "0");
+  }, []);
+
+  useEffect(() => {
+    if (!IN_TAURI) return;
+    void (async () => {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().setFullscreen(on);
+    })();
+  }, [on]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F11") {
+        e.preventDefault();
+        set(!on);
+      } else if (e.key === "Escape" && on && !document.querySelector(".modal-backdrop")) {
+        // A dialog on top owns Escape first — leaving show mode out from under
+        // an open Report would lose what the operator had typed.
+        e.preventDefault();
+        set(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [on, set]);
+
+  return [on, set];
+}
 
 async function openNewWindow(tab: TabId) {
   // Rust creates it with a stable label (aux-<tab>) so its geometry persists and
@@ -158,7 +202,9 @@ export default function App() {
   const { connected, status, errors, dismissError, client, denied, savedPulse } = useGate();
   const [tab, setTab] = useState<TabId>(tabFromHash);
   const [showConnect, setShowConnect] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const [savedVisible, setSavedVisible] = useState(false);
+  const [showMode, setShowMode] = useShowMode();
 
   // Flash "saved" whenever the backend confirms a config change (from any client).
   useEffect(() => {
@@ -205,7 +251,24 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div
+      className={`app ${showMode ? "show-mode" : ""}`}
+      // Reflects the backend link in the DOM. The layout gate waits on this
+      // rather than on a visible chip, which the narrow breakpoint hides.
+      data-connected={connected ? "yes" : "no"}
+    >
+      {showMode && (
+        <div className="show-controls">
+          {/* Still reachable with the chrome hidden: a complaint is only worth
+              anything while it is still inside the capture window. */}
+          <button className="show-report" onClick={() => setShowReport(true)}>
+            ⚑ Report
+          </button>
+          <button className="show-exit" onClick={() => setShowMode(false)}>
+            ⤢ Exit show mode <span className="chip-key">Esc</span>
+          </button>
+        </div>
+      )}
       <header className="topbar">
         <h1>Empyrean Gate</h1>
         <nav>
@@ -221,12 +284,23 @@ export default function App() {
         </nav>
         <span className="spacer" />
         <span className={`saved-chip ${savedVisible ? "show" : ""}`}>✓ saved</span>
-        <button className="ghost" onClick={() => setShowConnect(true)}>
-          ⊕ Connect
+        <button
+          className="ghost report-btn"
+          aria-label="Report"
+          onClick={() => setShowReport(true)}
+        >
+          ⚑ <span className="btn-label">Report</span>
+        </button>
+        <button className="ghost" aria-label="Show mode" onClick={() => setShowMode(true)}>
+          ⛶ <span className="btn-label">Show mode</span>{" "}
+          <span className="chip-key">F11</span>
+        </button>
+        <button className="ghost" aria-label="Connect a device" onClick={() => setShowConnect(true)}>
+          ⊕ <span className="btn-label">Connect</span>
         </button>
         {IN_TAURI && (
-          <button className="ghost" onClick={() => void openNewWindow(tab)}>
-            ⧉ New window
+          <button className="ghost" aria-label="New window" onClick={() => void openNewWindow(tab)}>
+            ⧉ <span className="btn-label">New window</span>
           </button>
         )}
         {status && <span className="gpu-name">{status.gpu_name}</span>}
@@ -274,6 +348,10 @@ export default function App() {
           className={tab === "media" ? "media-tab-active" : "media-tab-background"}
           aria-hidden={tab !== "media"}
           inert={tab !== "media"}
+          // Parked far off-screen on purpose while another tab is showing. The
+          // layout gate (tests/layout.spec.ts) treats out-of-viewport geometry
+          // as a bug unless it is declared here.
+          data-layout-exempt={tab === "media" ? undefined : ""}
         >
           <Media />
         </div>
@@ -285,6 +363,7 @@ export default function App() {
       </main>
 
       {showConnect && <ConnectModal onClose={() => setShowConnect(false)} />}
+      {showReport && <ReportModal onClose={() => setShowReport(false)} />}
       <DisconnectedOverlay disabled={tab === "replay"} />
     </div>
   );

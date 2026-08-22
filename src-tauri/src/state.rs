@@ -263,6 +263,9 @@ pub struct SharedState {
     /// Full-resolution frames; each client task decimates/throttles for itself.
     pub preview: broadcast::Sender<Arc<PreviewFrame>>,
     pub video: Mutex<VideoInput>,
+    /// Always-on rolling capture of operator input + engine state, so the Report
+    /// button can freeze the last seconds of a visual complaint.
+    pub recorder: crate::report::Recorder,
     pub started: Instant,
 }
 
@@ -300,6 +303,7 @@ impl SharedState {
             events,
             preview,
             video: Mutex::new(VideoInput::default()),
+            recorder: crate::report::Recorder::new(),
             started: Instant::now(),
         })
     }

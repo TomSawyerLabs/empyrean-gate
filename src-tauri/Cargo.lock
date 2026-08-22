@@ -1225,6 +1225,7 @@ dependencies = [
  "log",
  "notify",
  "parking_lot",
+ "png 0.18.1",
  "pollster",
  "qrcode",
  "regex",

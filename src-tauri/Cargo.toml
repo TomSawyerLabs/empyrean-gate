@@ -31,6 +31,9 @@ local-ip-address = "0.6.13"
 log = "0.4.33"
 notify = { version = "8.2.0", optional = true }
 parking_lot = "0.12.5"
+# Contact sheets in feedback report bundles — an agent investigating "I didn't
+# like that pattern" needs to be able to *see* the frames, not just read numbers.
+png = "0.18.1"
 pollster = "1.0.1"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 regex = "1.13.1"

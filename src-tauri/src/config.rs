@@ -603,3 +603,48 @@ pub fn save(cfg: &AppConfig) {
         log::error!("failed to save config to {}: {e}", path.display());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The web UI's layout tests drive a mock backend that replays a committed
+    /// snapshot of the default config (no GPU, no audio device, deterministic).
+    /// A fixture that silently drifts from the real defaults would test a UI
+    /// nobody runs, so it is regenerated from here rather than hand-maintained:
+    /// `EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture`.
+    #[test]
+    fn default_config_fixture_is_current() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("tests")
+            .join("fixtures")
+            .join("default-config.json");
+        // Compared as TEXT, not as parsed JSON: serde_json's default float parser
+        // is allowed to land a ULP away from the value that was written, so a
+        // freshly-written fixture would fail a Value == Value comparison on
+        // hue 0.12. Text also catches formatting and key-order drift, which is
+        // fine for a file nobody edits by hand.
+        let current =
+            serde_json::to_string_pretty(&AppConfig::default()).expect("serialize default config");
+        if std::env::var("EMPYREAN_UPDATE_FIXTURES").is_ok() {
+            std::fs::create_dir_all(path.parent().expect("fixture dir")).expect("create fixture dir");
+            std::fs::write(&path, format!("{current}\n")).expect("write fixture");
+            return;
+        }
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "missing {} ({e}); regenerate with EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture",
+                path.display()
+            )
+        });
+        // Line endings are whatever git checked out on this platform.
+        let normalize = |s: &str| s.replace("\r\n", "\n").trim_end().to_string();
+        assert_eq!(
+            normalize(&text),
+            normalize(&current),
+            "tests/fixtures/default-config.json is stale; regenerate with \
+             EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture"
+        );
+    }
+}

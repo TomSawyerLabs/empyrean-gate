@@ -55,6 +55,15 @@ jobs:
       - name: Typecheck frontend
         run: bun run typecheck
 
+      # One platform is enough: the layout gate checks CSS box geometry, which
+      # does not vary by runner OS. Releases are what reach the show machine, so
+      # it runs here as well as in checks.yml.
+      - name: Layout gate
+        if: runner.os == 'Linux'
+        run: |
+          bunx playwright install --with-deps chromium
+          bun run test:layout
+
       - name: Build standalone binary
         run: bun tauri build --no-bundle
 

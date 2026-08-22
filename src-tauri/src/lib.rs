@@ -12,9 +12,13 @@ pub mod layers;
 pub mod media;
 pub mod power;
 pub mod protocol;
+pub mod report;
 pub mod sacn;
 pub mod server;
 pub mod state;
+/// Windows-only: suppress the OS's touch feedback visuals on our windows.
+#[cfg(target_os = "windows")]
+pub mod touch;
 pub mod updater;
 pub mod videocache;
 pub mod firewall;
@@ -228,6 +232,18 @@ pub fn run(headless: bool) {
         .invoke_handler(tauri::generate_handler![backend_info, open_aux])
         .setup(|app| {
             use tauri::Manager;
+            // The show display is a touch screen: kill the OS contact visuals on
+            // every window (again shortly after, once WebView2 has created the
+            // child HWNDs that touch input actually lands on).
+            harden_touch_visuals(app.handle());
+            let touch_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                for _ in 0..4 {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    let handle = touch_handle.clone();
+                    let _ = touch_handle.run_on_main_thread(move || harden_touch_visuals(&handle));
+                }
+            });
             // Recreate the aux windows that were open last run (their geometry is
             // restored by the window-state plugin via their stable labels).
             let aux: Vec<String> = {
@@ -275,6 +291,22 @@ pub fn run(headless: bool) {
     await_sacn_terminate(&state);
 }
 
+/// Suppress the OS's touch feedback visuals on every window we own. Idempotent,
+/// and called repeatedly at startup because the child HWNDs that WebView2 hosts
+/// its content in (where touch input lands) appear after the window does.
+#[cfg(target_os = "windows")]
+fn harden_touch_visuals(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    for window in app.webview_windows().values() {
+        if let Ok(hwnd) = window.hwnd() {
+            touch::disable_feedback_visuals(hwnd.0 as isize);
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn harden_touch_visuals(_app: &tauri::AppHandle) {}
+
 /// Create (or focus) the popped-out window for a tab, with a stable label so the
 /// window-state plugin can restore its geometry. Records it for restore-on-start.
 #[tauri::command]
@@ -298,10 +330,20 @@ fn open_aux_window(app: &tauri::AppHandle, tab: &str) -> tauri::Result<()> {
     let label = format!("aux-{tab}");
     // The hash is applied by an init script (a fragment inside WebviewUrl::App
     // paths does not survive URL conversion reliably).
-    tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App("index.html".into()))
-        .title(format!("Empyrean Gate — {tab}"))
-        .inner_size(900.0, 900.0)
-        .initialization_script(format!("if (!location.hash) location.hash = '#{tab}';"))
-        .build()?;
+    let builder =
+        tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App("index.html".into()))
+            .title(format!("Empyrean Gate — {tab}"))
+            .inner_size(900.0, 900.0)
+            .zoom_hotkeys_enabled(false)
+            .initialization_script(format!("if (!location.hash) location.hash = '#{tab}';"));
+    // Same gesture suppression the main window gets from tauri.conf.json (the
+    // first group is wry's own default, which passing this option replaces).
+    #[cfg(target_os = "windows")]
+    let builder = builder.additional_browser_args(
+        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
+         --disable-pinch --overscroll-history-navigation=0",
+    );
+    builder.build()?;
+    harden_touch_visuals(app);
     Ok(())
 }

@@ -145,6 +145,15 @@ pub enum ClientMsg {
     },
     /// Create the Windows Firewall port rule (one UAC prompt on the Gate machine).
     AuthorizeFirewall,
+    /// "I don't like what it just did." Freezes the last `seconds` of the
+    /// rolling capture (operator input, effective layer params, audio features,
+    /// rendered frames) into a bundle on the Gate machine, together with the
+    /// typed description — see `report.rs`.
+    Report {
+        description: String,
+        #[serde(default = "default_report_seconds")]
+        seconds: f32,
+    },
     /// Ask the updater to poll GitHub Releases now.
     CheckUpdate,
     /// Download + hot-swap to the staged update (two-phase takeover).
@@ -165,6 +174,10 @@ pub enum ClientMsg {
 
 fn default_dab_size() -> f32 {
     0.12
+}
+
+fn default_report_seconds() -> f32 {
+    10.0
 }
 
 fn default_intensity() -> f32 {
@@ -199,6 +212,11 @@ pub enum ServerMsg {
     /// reconnecting and shows the reason.
     Denied {
         reason: String,
+    },
+    /// A feedback bundle was written. Sent to every client so the reports list
+    /// is live on whichever device the operator picks up next.
+    ReportSaved {
+        report: crate::report::ReportInfo,
     },
     /// The live-preview slots are full; this client is queued at `position`
     /// (1 = next). Control input still works while waiting. Sent with position 0
