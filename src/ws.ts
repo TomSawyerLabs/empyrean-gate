@@ -287,6 +287,9 @@ export class GateClient {
   setSacnEnabled(enabled: boolean) {
     this.send({ type: "set_sacn_enabled", enabled });
   }
+  authorizeFirewall() {
+    this.send({ type: "authorize_firewall" });
+  }
   addLayer(layer: LayerCfg) {
     this.send({ type: "add_layer", layer });
   }

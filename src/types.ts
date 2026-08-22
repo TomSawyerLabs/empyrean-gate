@@ -302,6 +302,7 @@ export interface RuntimeStatus {
   default_input_channels: number;
   default_output_channels: number;
   interfaces: string[];
+  firewall_pending: boolean;
   video_cache: VideoCacheStatus[];
   client_list: ClientInfo[];
   master_brightness: number;

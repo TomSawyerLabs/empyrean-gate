@@ -417,8 +417,8 @@ export default function Live() {
         <input
           type="range"
           min={0}
-          max={3}
-          step={0.01}
+          max={4}
+          step={0.05}
           value={masterSpeed}
           onChange={(event) => {
             const value = Number(event.target.value);
@@ -426,7 +426,7 @@ export default function Live() {
             setMasterSpeed(value);
           }}
         />
-        <span className="slider-val">{masterSpeed.toFixed(2)}</span>
+        <span className="slider-val">{masterSpeed.toFixed(2)}×</span>
       </label>
     </div>
   ) : null;

@@ -16,6 +16,7 @@ pub mod server;
 pub mod state;
 pub mod updater;
 pub mod videocache;
+pub mod firewall;
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -40,6 +41,7 @@ pub fn start_backend() -> Backend {
         let mut st = state.status.lock();
         st.interfaces = list_interfaces();
         st.version = updater::CURRENT_VERSION.to_string();
+        st.firewall_pending = firewall::rule_missing(port);
     }
     if takeover {
         log::info!("port {port} is busy — attempting takeover of the running instance");
