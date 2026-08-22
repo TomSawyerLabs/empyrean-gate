@@ -7,6 +7,7 @@ pub mod audio;
 pub mod autostart;
 pub mod config;
 pub mod discovery;
+pub mod diagnostics;
 pub mod engine;
 pub mod game;
 pub mod geometry;
@@ -119,6 +120,10 @@ pub fn start_backend() -> Backend {
         st.interfaces = list_interfaces();
         st.version = updater::effective_version();
         st.firewall_pending = firewall::rule_missing(port);
+        let diagnostics = diagnostics::status();
+        st.diagnostics_path = diagnostics.path;
+        st.diagnostics_active = diagnostics.active;
+        st.diagnostics_error = diagnostics.error;
     }
     if takeover {
         log::info!("port {port} is busy — attempting takeover of the running instance");
@@ -312,6 +317,12 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "<unknown>".into())
     );
+    let diagnostics = diagnostics::init();
+    if diagnostics.active {
+        log::info!("persistent diagnostics: {}", diagnostics.path);
+    } else {
+        log::warn!("persistent diagnostics unavailable at {}: {}", diagnostics.path, diagnostics.error);
+    }
     let backend = start_backend();
     let state = backend.state.clone();
     state.headless.store(headless, Ordering::SeqCst);

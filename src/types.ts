@@ -423,6 +423,9 @@ export interface RuntimeStatus {
   game: GameModeStatus;
   /** True while a controller scan is in flight. */
   discovery_running: boolean;
+  diagnostics_path: string;
+  diagnostics_active: boolean;
+  diagnostics_error: string;
 }
 
 // --- hardware test mode (mirrors src-tauri/src/testmode.rs) ---

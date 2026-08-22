@@ -663,6 +663,10 @@ pub struct RuntimeStatus {
     pub game: GameModeStatus,
     /// True while a controller scan is in flight, so the Scan button can say so.
     pub discovery_running: bool,
+    /// Current bounded persistent log and whether it could be opened.
+    pub diagnostics_path: String,
+    pub diagnostics_active: bool,
+    pub diagnostics_error: String,
 }
 
 #[cfg(test)]
