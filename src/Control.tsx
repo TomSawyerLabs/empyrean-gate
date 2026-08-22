@@ -558,7 +558,6 @@ function ScenesPanel() {
           ＋ Save current stack
         </button>
       </div>
-      <ShowSchedulerPanel />
       <p className="scene-library-lede">
         Authored compositions translated from saved Uprising pieces. Loading one replaces
         the current layer stack; then every layer remains editable below. A restrained
@@ -678,6 +677,7 @@ function ScenesPanel() {
           );
         })}
       </div>
+      <ShowSchedulerPanel />
     </section>
   );
 }
