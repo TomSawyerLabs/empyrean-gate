@@ -405,12 +405,15 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
 - ~~No autostart-on-boot yet~~ → BUILT (85e09e6): Settings → Updates → "Launch at
   login". Per-user Run registry key; the exe re-registers itself at startup so
   the entry follows self-update binary swaps. EMPYREAN_CONFIG instances skip it.
-- Windows Update active hours: set per machine so restarts land 09:00–15:00
-  (people are STILL at the gate at 5am — user call, 2026-08-21). Dev machine
-  DONE: active hours 15:00→09:00 (the 18 h max), SmartActiveHoursState=0 so
-  Windows can't auto-adjust them.
-  Registry: HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings →
-  ActiveHoursStart=15, ActiveHoursEnd=9 (DWORDs). Repeat on the show machine.
+- Windows Update active hours: restarts land 09:00–15:00 only (people are STILL
+  at the gate at 5am — user call, 2026-08-21). Active hours 15:00→09:00 (the
+  18 h max), SmartActiveHoursState=0 so Windows can't auto-adjust them.
+  **Conferred onto the show machine automatically**: the in-app Authorize click
+  (firewall banner) applies them in the same elevated script as the firewall
+  rule. Manual fallback for machines already authorized:
+  HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings →
+  ActiveHoursStart=15, ActiveHoursEnd=9, SmartActiveHoursState=0 (DWORDs).
+  Dev machine already set both ways (manually + by the tested script).
 - Intel driver on THIS dev machine (i7-10710U, Comet Lake, 10th gen): on the
   legacy 7th–10th gen branch. Latest is 31.0.101.2141 (security-mostly since
   2023); machine has 30.0.101.1660 (2022-03). Updating is low-risk and MIGHT fix

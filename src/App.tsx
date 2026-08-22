@@ -260,7 +260,7 @@ export default function App() {
           </button>{" "}
           <span className="hint">
             (one admin prompt on the Gate machine; never asks again, even after
-            updates)
+            updates — also confines Windows Update restarts to 9am–3pm)
           </span>
         </div>
       )}

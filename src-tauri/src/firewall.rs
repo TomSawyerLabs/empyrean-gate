@@ -1,11 +1,19 @@
-//! Windows Firewall bookkeeping. Without an allow rule, Windows pops its
-//! "Allow this app to communicate on networks?" dialog for EVERY new binary that
-//! listens on our port — including each self-updated versioned exe — and a
-//! dismissed dialog silently blocks LAN clients.
+//! Show-machine authorization: the one-UAC-click elevation that configures the
+//! Windows policies the installation needs. Triggered by the firewall check, but
+//! the elevated script applies ALL machine policy, so a fresh show machine is
+//! fully configured by the single Authorize click:
 //!
-//! The fix is a PORT-scoped inbound allow rule (not program-scoped), which is
-//! version-proof: one admin elevation ever, then no prompts and no blocks, no
-//! matter how many binaries come and go. Non-Windows platforms are no-ops.
+//! - **Firewall**: without an allow rule, Windows pops its "Allow this app to
+//!   communicate on networks?" dialog for EVERY new binary that listens on our
+//!   port — including each self-updated versioned exe — and a dismissed dialog
+//!   silently blocks LAN clients. The fix is a PORT-scoped inbound allow rule
+//!   (not program-scoped), which is version-proof.
+//! - **Windows Update active hours**: 15:00→09:00 (the 18 h max), so automatic
+//!   update restarts can only land 09:00–15:00 — people are at the gate until
+//!   well past 5am. Manual (SmartActiveHoursState=0) so Windows can't drift
+//!   them back toward "overnight".
+//!
+//! Non-Windows platforms are no-ops.
 
 /// True when the port allow rule for `port` is missing (Windows only) — the UI
 /// shows an "authorize" banner then.
@@ -64,7 +72,12 @@ pub fn authorize(port: u16) -> anyhow::Result<()> {
             "netsh advfirewall firewall delete rule name=\"{name}\" | Out-Null\r\n\
              netsh advfirewall firewall add rule name=\"{name}\" dir=in action=allow \
              protocol=TCP localport={port} profile=any\r\n\
-             exit $LASTEXITCODE\r\n",
+             $fw = $LASTEXITCODE\r\n\
+             $wu = 'HKLM\\SOFTWARE\\Microsoft\\WindowsUpdate\\UX\\Settings'\r\n\
+             reg add $wu /v ActiveHoursStart /t REG_DWORD /d 15 /f | Out-Null\r\n\
+             reg add $wu /v ActiveHoursEnd /t REG_DWORD /d 9 /f | Out-Null\r\n\
+             reg add $wu /v SmartActiveHoursState /t REG_DWORD /d 0 /f | Out-Null\r\n\
+             exit $fw\r\n",
             name = rule_name(),
         );
         let path = std::env::temp_dir().join("empyrean-gate-firewall.ps1");

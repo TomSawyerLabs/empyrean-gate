@@ -86,7 +86,8 @@ live meters.
   display-audio loopback sources with it); config saves are crash-safe (temp +
   fsync + `.bak` fallback, protecting the persistent sACN CID from a power cut
   mid-save); a one-click banner authorizes a port-scoped Windows Firewall rule
-  (one UAC prompt ever — survives self-update binary swaps); and Settings →
+  and pins Windows Update restarts to 9am–3pm, away from show hours (one UAC
+  prompt ever — survives self-update binary swaps); and Settings →
   Updates has a "Launch at login" toggle that re-registers itself across updates,
   so a venue power cycle brings the show back without a keyboard.
 - **Seamless takeover**: start a new backend while one is running and it warms its
