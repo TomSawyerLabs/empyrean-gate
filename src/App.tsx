@@ -10,6 +10,7 @@ import ReportModal from "./Report";
 import Settings from "./Settings";
 import Test from "./Test";
 import { contenders, peerLabel, peerVerdict, severity } from "./sacnPeers";
+import ShowReadiness from "./ShowReadiness";
 import { useGate } from "./state";
 
 // The patch editor pulls in React Flow; lazy so phones on the play surfaces
@@ -18,6 +19,7 @@ const Patch = lazy(() => import("./Patch"));
 
 const TABS = [
   { id: "live", label: "Live" },
+  { id: "ready", label: "Ready" },
   { id: "media", label: "Media" },
   { id: "patch", label: "Patch" },
   { id: "replay", label: "Archive" },
@@ -718,6 +720,7 @@ export default function App() {
 
       <main>
         {tab === "live" && <Live />}
+        {tab === "ready" && <ShowReadiness />}
         {/* Keep the decoder mounted while the operator visits Live/Settings.
             An offscreen composited video continues producing frames on iPadOS;
             unmounting it would stop the Gate feed at every tab change. */}
