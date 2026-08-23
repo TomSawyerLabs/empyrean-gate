@@ -311,6 +311,55 @@ Bundles live in `<config dir>/EmpyreanGate/reports/<id>/` and are downloadable f
 client. Hand a whole folder to an agent to investigate. Format:
 [`docs/report-bundle.md`](docs/report-bundle.md).
 
+## Commissioning the rig — the Test tab
+
+Shows cannot tell you whether the hardware is wired the way the config claims. The
+**Test** tab can: it replaces every pixel with a deterministic pattern generated on
+the backend, bypassing the engine, audio, effects, the scheduled show and the master
+faders entirely. LED gamma is *not* bypassed, so a test exercises the real output
+path; the tab shows both the requested byte and the post-gamma byte on the wire.
+
+Patterns, and the question each answers: **solid colour** (colour order — send red,
+and a GRB strip announces itself), **colour cycle** (the banner names what should be
+lit right now), **Nth pixel** counted from the outer feed *or* the inner end (pixel
+count, feed direction, null-pixel offsets), **ruler** (every 10th/50th/100th pixel
+marked, so you can count the strip by eye), **universe marks** (first pixel of each
+universe, checked against the controller's patch), **gradient** (feed direction on
+every spoke at once), **spoke ID** (each spoke's number in binary), **chase**, and
+**blackout** (a rig still lit is holding a last look, not following us). All of them
+take a brightness, a blink rate, and a spoke selection: all, one spoke, one
+controller's spokes, or auto-cycling.
+
+**Detecting the controllers.** sACN is fire-and-forget — nothing acknowledges a
+frame, so "output enabled" never tells you a PixLite is listening. The tab asks them
+directly: a broadcast probe on UDP 49150 for Mk1/Mk2, the multicast "DiscProt"
+exchange on 49151 for Mk3/Mk4, and a passive listen on the E1.31 discovery group for
+*other* sACN sources — a second console on your universes is otherwise invisible and
+the rig ends up doing what neither source says. Replies are reconciled against the
+controller list in Settings into found / missing / unexpected. Scanning is read-only
+and safe during a show.
+
+Safety, because this drives the actual rig from any device on the LAN:
+
+- Opening the tab does nothing, and changing parameters does nothing. Arming is a
+  separate, deliberate action.
+- Arming **never switches sACN output on or off**. If output is off the tab says so
+  and offers to enable it; that stays your decision.
+- Arming is **refused while the show scheduler is running a playlist**, naming it and
+  offering to stop it first.
+- Auto-exit after 30 minutes by default, enforced in the engine loop so it holds with
+  no client connected.
+- While armed, a red `TEST MODE` banner with a disarm button sits on every tab of
+  every connected device, and survives show mode.
+
+On Windows, discovery replies arrive unsolicited (they answer a broadcast/multicast),
+so the firewall drops them until the **Authorize** button has been used — a scan finds
+nothing on a network full of healthy controllers otherwise. Authorize now adds that
+inbound UDP rule alongside the existing one.
+
+`bun scripts/fake-pixlite.ts` stands up a fake Mk4 responder, so discovery can be
+exercised without hardware.
+
 ## Live-show guards
 
 The window's X sits a few pixels from the controls on a touch display, so while

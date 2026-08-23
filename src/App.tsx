@@ -387,6 +387,24 @@ export default function App() {
         <VersionChip />
       </header>
 
+      {/* Test mode drives the rig from a fixed pattern instead of the show, so it
+          has to be impossible to leave on by accident. Shown on every tab and in
+          show mode, on every connected device, with the exit right there. */}
+      {status?.test?.active && (
+        <div className="banner testmode-banner">
+          <span className="testmode-dot" />
+          <strong>TEST MODE</strong>
+          <span className="testmode-summary">{status.test.summary}</span>
+          {status.test.expires_secs > 0 && (
+            <span className="hint">
+              auto-exit in {Math.ceil(status.test.expires_secs / 60)} min
+            </span>
+          )}
+          <button className="ghost" onClick={() => client.setTestMode(false)}>
+            Disarm
+          </button>
+        </div>
+      )}
       {status?.gpu_error && (
         <div className="banner error">
           <strong>GPU error:</strong> {status.gpu_error}

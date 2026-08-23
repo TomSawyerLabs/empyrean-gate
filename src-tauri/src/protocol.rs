@@ -179,6 +179,21 @@ pub enum ClientMsg {
         param: String,
         value: f32,
     },
+    /// Arm/disarm hardware test mode. Open to every client (the commissioning
+    /// workflow is a phone in your hand at the array), but refused while the
+    /// show scheduler is running a playlist — see `SharedState::set_test_mode`.
+    SetTestMode {
+        active: bool,
+    },
+    /// Change the live test parameters. Accepted whether or not test mode is
+    /// armed, so the controls can be set up before anything reaches the rig.
+    SetTestConfig {
+        test: crate::testmode::TestConfig,
+    },
+    /// Scan the lighting network for pixel controllers. Read-only — it sends
+    /// vendor discovery probes and listens; nothing about the rig changes — so
+    /// it needs no arming and is safe during a show.
+    DiscoverControllers,
     /// Create the Windows Firewall port rule (one UAC prompt on the Gate machine).
     AuthorizeFirewall,
     /// "I don't like what it just did." Freezes the last `seconds` of the
@@ -285,6 +300,11 @@ pub enum ServerMsg {
         node: String,
         param: String,
         value: f32,
+    },
+    /// A controller scan finished. Broadcast, so a scan started from a phone at
+    /// the array also lands on the laptop.
+    Discovery {
+        result: Box<crate::discovery::DiscoveryResult>,
     },
 }
 
@@ -444,6 +464,22 @@ pub struct ScheduledShowStatus {
     pub transition_progress: f32,
 }
 
+/// Hardware test mode, mirrored to every client so the "TEST MODE" banner can be
+/// unmissable on whichever device the operator picks up.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TestModeStatus {
+    pub active: bool,
+    /// One line naming what is being sent right now, e.g.
+    /// "Pixel 12 from the outer feed · spoke 3 · 25%".
+    pub summary: String,
+    /// Seconds until auto-exit; 0 when no deadline is set.
+    pub expires_secs: f32,
+    /// The live parameters, so every device's controls agree.
+    pub config: crate::testmode::TestConfig,
+    /// Name of the playlist blocking arming, when one is running.
+    pub blocked_by_show: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeStatus {
     /// Set when Vulkan init failed — the UI shows this prominently. No fallbacks.
@@ -505,6 +541,9 @@ pub struct RuntimeStatus {
     /// engine falls back to the layer stack when this is set.
     pub patch_error: Option<String>,
     pub show: ScheduledShowStatus,
+    pub test: TestModeStatus,
+    /// True while a controller scan is in flight, so the Scan button can say so.
+    pub discovery_running: bool,
 }
 
 #[cfg(test)]

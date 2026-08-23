@@ -244,6 +244,15 @@ pub struct SharedState {
     pub pioneer_debug_seq: AtomicU64,
     pub pioneer_tracks: Mutex<HashMap<u8, ProDjLinkTrackInfo>>,
     pub control: Mutex<ControlInputs>,
+    /// Hardware commissioning mode. Deliberately NOT in `AppConfig`: it must not
+    /// be able to survive a restart into a show. Always starts disarmed.
+    pub test: Mutex<crate::testmode::TestState>,
+    /// Result of the last controller scan, kept so a client that connects after
+    /// a scan can still see it.
+    pub last_discovery: Mutex<Option<crate::discovery::DiscoveryResult>>,
+    /// One scan at a time — a second request while one is in flight is answered
+    /// from the running scan rather than putting more probes on the wire.
+    pub discovery_running: AtomicBool,
     pub status: Mutex<RuntimeStatus>,
     pub shutdown: AtomicBool,
     /// Per-layer animation phases, owned by the engine loop but shared so a
@@ -335,6 +344,9 @@ impl SharedState {
             pioneer_debug_seq: AtomicU64::new(1),
             pioneer_tracks: Mutex::new(HashMap::new()),
             control: Mutex::new(ControlInputs::default()),
+            test: Mutex::new(crate::testmode::TestState::default()),
+            last_discovery: Mutex::new(None),
+            discovery_running: AtomicBool::new(false),
             status: Mutex::new(RuntimeStatus::default()),
             shutdown: AtomicBool::new(false),
             layer_phases: Mutex::new(Vec::new()),
@@ -373,6 +385,53 @@ impl SharedState {
     /// running": an app open with output off is not a show.
     pub fn output_live(&self) -> bool {
         self.config.read().output.enabled && !self.leaving.load(Ordering::SeqCst)
+    }
+
+    /// Arm or disarm hardware test mode.
+    ///
+    /// Arming is refused while the show scheduler is driving a playlist —
+    /// commissioning patterns are open to every device on the LAN, and a phone
+    /// must not be able to replace a running show with a single test pixel.
+    /// Stopping the show first is a deliberate, separate action.
+    ///
+    /// This never touches `output.enabled` in either direction: whether the rig
+    /// is being transmitted to is the operator's standing decision, not
+    /// something a test should quietly change under them.
+    pub fn set_test_mode(&self, active: bool) -> Result<(), String> {
+        if active && let Some(playlist) = self.config.read().running_show() {
+            return Err(format!(
+                "\"{}\" is running on the show scheduler. Stop the show before entering test mode.",
+                playlist.name
+            ));
+        }
+        {
+            let mut test = self.test.lock();
+            if test.active == active {
+                return Ok(());
+            }
+            test.active = active;
+            // Patterns are a function of time since arming, so every session
+            // starts at a known phase instead of mid-blink.
+            test.started = Instant::now();
+        }
+        log::info!("test mode {}", if active { "ARMED" } else { "disarmed" });
+        self.broadcast_state();
+        Ok(())
+    }
+
+    /// Replace the live test parameters. Does not arm test mode — the tab's
+    /// controls stay usable (and shared between devices) while disarmed.
+    pub fn set_test_config(&self, cfg: crate::testmode::TestConfig) {
+        {
+            let mut test = self.test.lock();
+            // Restart the clock when the auto-exit budget changes, so raising it
+            // does not leave a deadline that already passed.
+            if test.cfg.auto_exit_secs != cfg.auto_exit_secs {
+                test.started = Instant::now();
+            }
+            test.cfg = cfg;
+        }
+        self.broadcast_state();
     }
 
     /// One-shot: the operator has confirmed a close, so the next CloseRequested

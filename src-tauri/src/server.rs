@@ -810,6 +810,23 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
         ClientMsg::StopVideo { force } => {
             rec.event("video", &name(), json!({ "op": "stop", "force": force }))
         }
+        // Test mode replaces every pixel on the rig, so both the arming and the
+        // pattern changes belong on the timeline — a report captured during
+        // commissioning should say plainly that the array was under test.
+        ClientMsg::SetTestMode { active } => {
+            rec.event("test_mode", &name(), json!({ "active": active }))
+        }
+        ClientMsg::SetTestConfig { test } => rec.event(
+            "test_pattern",
+            &name(),
+            json!({
+                "pattern": test.pattern,
+                "brightness": test.brightness,
+                "index": test.index,
+                "from_inner": test.from_inner,
+                "spoke_select": test.spoke_select,
+            }),
+        ),
         // Continuous signals (phone IMU, audio) are NOT timeline entries: at tens
         // of packets a second they would bury the discrete actions. They ride
         // along in the 10 Hz snapshots instead.
@@ -925,6 +942,21 @@ async fn handle_msg(
         }
         ClientMsg::GetState => {
             state.broadcast_state();
+            // Replay the last controller scan to this client only, so reopening
+            // the Test tab (or reloading a phone) keeps the table populated
+            // without putting another round of probes on the network.
+            // Cloned out of the lock first: the guard is not Send and this task
+            // must stay Send across the await below.
+            let cached = state.last_discovery.lock().clone();
+            if let Some(result) = cached {
+                let _ = send_json(
+                    tx,
+                    &ServerMsg::Discovery {
+                        result: Box::new(result),
+                    },
+                )
+                .await;
+            }
         }
         ClientMsg::SetConfig { config } => {
             let port_changed = {
@@ -1127,6 +1159,52 @@ async fn handle_msg(
                 param,
                 value: clamped,
             });
+        }
+        ClientMsg::SetTestMode { active } => {
+            if let Err(message) = state.set_test_mode(active) {
+                let _ = send_json(tx, &ServerMsg::Error { message }).await;
+            }
+        }
+        ClientMsg::SetTestConfig { test } => {
+            state.set_test_config(test);
+        }
+        ClientMsg::DiscoverControllers => {
+            // Read-only, but it does spend a few seconds on blocking sockets, so
+            // it runs off the async runtime. One scan at a time: a second Scan
+            // tap (or a second device) joins the running one rather than putting
+            // another round of probes on a show network.
+            if state
+                .discovery_running
+                .swap(true, Ordering::SeqCst)
+            {
+                let _ = send_json(
+                    tx,
+                    &ServerMsg::Error {
+                        message: "A controller scan is already running.".into(),
+                    },
+                )
+                .await;
+            } else {
+                let state2 = state.clone();
+                state2.broadcast_state(); // light up the "scanning…" state now
+                tokio::task::spawn_blocking(move || {
+                    let cfg = state2.config.read().clone();
+                    let result =
+                        crate::discovery::scan(&cfg, std::time::Duration::from_secs(3));
+                    log::info!(
+                        "controller scan: {} found, {} missing, {} other sACN source(s)",
+                        result.found.len(),
+                        result.missing.len(),
+                        result.other_sources.len()
+                    );
+                    *state2.last_discovery.lock() = Some(result.clone());
+                    state2.discovery_running.store(false, Ordering::SeqCst);
+                    let _ = state2.events.send(ServerMsg::Discovery {
+                        result: Box::new(result),
+                    });
+                    state2.broadcast_state();
+                });
+            }
         }
         ClientMsg::AuthorizeFirewall => {
             // Elevation blocks on the UAC dialog; run it off the async path.

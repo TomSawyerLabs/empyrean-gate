@@ -569,6 +569,19 @@ fn flags_len(len: usize) -> [u8; 2] {
     (0x7000u16 | (len as u16 & 0x0fff)).to_be_bytes()
 }
 
+/// Packet builders exposed to other modules' tests. `discovery.rs` parses E1.31
+/// universe-discovery advertisements; checking that parser against the builder
+/// here means both sides are held to one definition of the wire format instead
+/// of two independent readings of the spec.
+#[cfg(test)]
+pub mod test_support {
+    /// One universe-discovery page for `universes` (which must fit a single page).
+    pub fn discovery_packet(cid: &[u8; 16], source_name: &str, universes: &[u16]) -> Vec<u8> {
+        super::build_discovery_pages(cid, &super::pad_source_name(source_name), universes)
+            .remove(0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

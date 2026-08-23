@@ -989,6 +989,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut patch_rt: Option<crate::patch::eval::Runtime> = None;
     let mut patch_key: Option<(String, u32)> = None;
 
+    // Hardware test mode: a CPU-generated frame that replaces the rendered one
+    // on its way to sACN and the preview. See `testmode.rs`.
+    let mut test_rgb: Vec<u8> = Vec::new();
+
     // Beat taps and the operator beat pulse follow the lighting-time clock, which
     // can run at half/normal/double the detector's inferred tempo.
     let mut prev_raw_beat_phase = [0.0f32; MAX_AUDIO_SOURCES];
@@ -1093,22 +1097,42 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let dt = (now - last_frame).as_secs_f32();
         last_frame = now;
 
+        // Hardware test mode. Sampled once per frame so the substitution below
+        // and the status published to every client describe the same frame.
+        // Auto-exit is enforced here: it is the only place guaranteed to keep
+        // running whether or not a client is connected.
+        let (test_active, test_cfg, test_t, test_status, test_expired) = {
+            let mut test = state.test.lock();
+            let expired = test.expired();
+            if expired {
+                test.active = false;
+                log::info!("test mode auto-exit after {} s", test.cfg.auto_exit_secs);
+            }
+            let status = crate::protocol::TestModeStatus {
+                active: test.active,
+                summary: crate::testmode::summary(
+                    &test.cfg,
+                    cfg.geometry.pixels_per_spoke,
+                    test.elapsed(),
+                ),
+                expires_secs: test.remaining(),
+                config: test.cfg.clone(),
+                blocked_by_show: cfg.running_show().map(|p| p.name.clone()),
+            };
+            (test.active, test.cfg.clone(), test.elapsed(), status, expired)
+        };
+        if test_expired {
+            state.broadcast_state();
+        }
+
         // Resolve the active timed show and build a temporary layer stack. During
         // a transition the shader composes both scenes independently, then mixes
         // their completed colors. After the fade, incoming animation phases are
         // shifted down so finishing a transition never causes a motion jump.
-        let scheduled = if cfg.show_scheduler.enabled {
-            cfg.saved_playlists
-                .iter()
-                .find(|p| p.id == cfg.show_scheduler.active_playlist_id && !p.entries.is_empty())
-                .map(|p| {
-                    let index =
-                        (cfg.show_scheduler.current_index as usize).min(p.entries.len() - 1);
-                    (p, index, &p.entries[index])
-                })
-        } else {
-            None
-        };
+        let scheduled = cfg.running_show().map(|p| {
+            let index = (cfg.show_scheduler.current_index as usize).min(p.entries.len() - 1);
+            (p, index, &p.entries[index])
+        });
         let mut show_status = ScheduledShowStatus::default();
         let mut render_layers = cfg.layers.clone();
         let mut render_master_speed = cfg.render.master_speed;
@@ -1742,6 +1766,25 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let frame_ms = t0.elapsed().as_secs_f32() * 1000.0;
 
         if let Some(rgb) = rgb {
+            // Hardware test mode replaces the whole frame — for sACN AND for the
+            // preview, so the on-screen array shows exactly what the rig should
+            // be showing. That comparison is half of what makes a test useful.
+            // The engine keeps rendering underneath (it costs ~2 ms and keeps
+            // the loop, the show clock and the readback pipeline undisturbed),
+            // its output is simply discarded while armed.
+            let rgb: &[u8] = if test_active {
+                crate::testmode::render_into(
+                    &test_cfg,
+                    &cfg.geometry,
+                    &cfg.output,
+                    test_t,
+                    &mut test_rgb,
+                );
+                &test_rgb
+            } else {
+                rgb
+            };
+
             frame_number += 1;
             frames_this_sec += 1;
 
@@ -1892,6 +1935,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 st.master_speed = render_master_speed;
                 st.patch_active = patch_rt.is_some();
                 st.show = show_status.clone();
+                st.test = test_status.clone();
+                st.discovery_running = state
+                    .discovery_running
+                    .load(std::sync::atomic::Ordering::Relaxed);
                 st.pro_dj_link_devices = pioneer_devices
                     .iter()
                     .map(|device| crate::protocol::ProDjLinkDeviceInfo {

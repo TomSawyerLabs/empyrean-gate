@@ -60,5 +60,28 @@
     "total": 0,
     "remaining_secs": 0.0,
     "transition_progress": 0.0
-  }
+  },
+  "test": {
+    "active": false,
+    "summary": "",
+    "expires_secs": 0.0,
+    "config": {
+      "pattern": "solid",
+      "brightness": 0.25,
+      "hue": -1.0,
+      "saturation": 1.0,
+      "index": 0,
+      "from_inner": false,
+      "width": 1,
+      "chase_hz": 0.0,
+      "blink_hz": 0.0,
+      "spoke_select": "all",
+      "spoke": 0,
+      "controller": 0,
+      "cycle_hz": 1.0,
+      "auto_exit_secs": 1800
+    },
+    "blocked_by_show": null
+  },
+  "discovery_running": false
 }

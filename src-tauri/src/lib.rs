@@ -6,6 +6,7 @@
 pub mod audio;
 pub mod autostart;
 pub mod config;
+pub mod discovery;
 pub mod engine;
 pub mod geometry;
 pub mod layers;
@@ -20,6 +21,7 @@ pub mod sacn;
 pub mod server;
 pub mod state;
 pub mod taskbar;
+pub mod testmode;
 /// Windows-only: suppress the OS's touch feedback visuals on our windows.
 #[cfg(target_os = "windows")]
 pub mod touch;

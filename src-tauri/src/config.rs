@@ -578,6 +578,22 @@ pub struct AppConfig {
     pub active_patch: Option<String>,
 }
 
+impl AppConfig {
+    /// The playlist the show scheduler is actually running, if any. "Enabled" on
+    /// its own is not enough — the selection can point at a deleted or empty
+    /// playlist, in which case nothing is being driven. Shared by the engine's
+    /// cue clock and by the test-mode gate so both agree on what "a show is
+    /// running" means.
+    pub fn running_show(&self) -> Option<&SavedPlaylist> {
+        if !self.show_scheduler.enabled {
+            return None;
+        }
+        self.saved_playlists
+            .iter()
+            .find(|p| p.id == self.show_scheduler.active_playlist_id && !p.entries.is_empty())
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {

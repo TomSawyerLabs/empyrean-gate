@@ -374,6 +374,90 @@ export interface RuntimeStatus {
   /** Why the active patch is NOT rendering (engine fell back to the stack). */
   patch_error: string | null;
   show: ScheduledShowStatus;
+  test: TestModeStatus;
+  /** True while a controller scan is in flight. */
+  discovery_running: boolean;
+}
+
+// --- hardware test mode (mirrors src-tauri/src/testmode.rs) ---
+
+export type TestPattern =
+  | "blackout"
+  | "solid"
+  | "color_cycle"
+  | "pixel_index"
+  | "ruler"
+  | "universe_marks"
+  | "gradient"
+  | "spoke_id"
+  | "chase";
+
+export type SpokeSelect = "all" | "one" | "controller" | "cycle";
+
+export interface TestConfig {
+  pattern: TestPattern;
+  /** 0..1, applied to the whole test frame. */
+  brightness: number;
+  /** Hue in turns; negative = white. */
+  hue: number;
+  saturation: number;
+  /** Nth pixel, counted from whichever end `from_inner` selects. */
+  index: number;
+  /** Count from the inner end instead of the outer feed end. */
+  from_inner: boolean;
+  width: number;
+  chase_hz: number;
+  blink_hz: number;
+  spoke_select: SpokeSelect;
+  spoke: number;
+  controller: number;
+  cycle_hz: number;
+  /** Disarm automatically after this long; 0 = never. */
+  auto_exit_secs: number;
+}
+
+export interface TestModeStatus {
+  active: boolean;
+  summary: string;
+  expires_secs: number;
+  config: TestConfig;
+  /** Name of the playlist blocking arming, when a show is running. */
+  blocked_by_show: string | null;
+}
+
+// --- controller discovery (mirrors src-tauri/src/discovery.rs) ---
+
+export interface FoundController {
+  ip: string;
+  /** Set only when the controller's own idea of its address disagrees with the
+   *  address it answered from — a static IP that did not take, a stale lease. */
+  reported_ip: string | null;
+  mac: string;
+  model: string;
+  nickname: string;
+  firmware: string;
+  protocol: string;
+  outputs: number;
+  temperature_c: number | null;
+  dhcp: boolean | null;
+  expected: boolean;
+}
+
+export interface SacnSourceSeen {
+  cid: string;
+  source_name: string;
+  from_ip: string;
+  universes: number[];
+}
+
+export interface DiscoveryResult {
+  scanned_interface: string;
+  duration_ms: number;
+  found: FoundController[];
+  missing: string[];
+  unexpected: string[];
+  other_sources: SacnSourceSeen[];
+  errors: string[];
 }
 
 export interface ScheduledShowStatus {
@@ -418,7 +502,8 @@ export type ServerMsg =
   | { type: "preview_queue"; position: number }
   | { type: "patches"; patches: PatchSummary[] }
   | { type: "patch"; patch: PatchDoc }
-  | { type: "patch_param_changed"; node: string; param: string; value: number };
+  | { type: "patch_param_changed"; node: string; param: string; value: number }
+  | { type: "discovery"; result: DiscoveryResult };
 
 // --- node-graph patches (mirrors src-tauri/src/patch/) ---
 

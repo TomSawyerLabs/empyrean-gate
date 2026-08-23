@@ -9,6 +9,7 @@ import type {
   PreviewFrame,
   ReportInfo,
   ServerMsg,
+  TestConfig,
 } from "./types";
 
 const PREVIEW_MAGIC = 0x45475056;
@@ -297,6 +298,18 @@ export class GateClient {
   }
   authorizeFirewall() {
     this.send({ type: "authorize_firewall" });
+  }
+  /** Arm/disarm hardware test mode. Refused by the backend while a show runs. */
+  setTestMode(active: boolean) {
+    this.send({ type: "set_test_mode", active });
+  }
+  /** Change the live test parameters (works armed or not). */
+  setTestConfig(test: TestConfig) {
+    this.send({ type: "set_test_config", test });
+  }
+  /** Probe the lighting network for pixel controllers. Read-only. */
+  discoverControllers() {
+    this.send({ type: "discover_controllers" });
   }
   addLayer(layer: LayerCfg) {
     this.send({ type: "add_layer", layer });

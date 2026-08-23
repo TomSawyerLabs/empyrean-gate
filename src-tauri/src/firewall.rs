@@ -8,6 +8,12 @@
 //!   port — including each self-updated versioned exe — and a dismissed dialog
 //!   silently blocks LAN clients. The fix is a PORT-scoped inbound allow rule
 //!   (not program-scoped), which is version-proof.
+//! - **Controller discovery (UDP 49150/49151/5568)**: replies to a broadcast or
+//!   multicast probe arrive from a source we never sent a packet to directly, so
+//!   Windows does not treat them as solicited and drops them by default. Without
+//!   this rule a controller scan silently finds nothing on a network full of
+//!   working PixLites. Same rule name as the TCP rule so the `delete` above
+//!   still cleans both up.
 //! - **Windows Update active hours**: 15:00→09:00 (the 18 h max), so automatic
 //!   update restarts can only land 09:00–15:00 — people are at the gate until
 //!   well past 5am. Manual (SmartActiveHoursState=0) so Windows can't drift
@@ -73,6 +79,8 @@ pub fn authorize(port: u16) -> anyhow::Result<()> {
              netsh advfirewall firewall add rule name=\"{name}\" dir=in action=allow \
              protocol=TCP localport={port} profile=any\r\n\
              $fw = $LASTEXITCODE\r\n\
+             netsh advfirewall firewall add rule name=\"{name}\" dir=in action=allow \
+             protocol=UDP localport=49150,49151,5568 profile=any | Out-Null\r\n\
              $wu = 'HKLM\\SOFTWARE\\Microsoft\\WindowsUpdate\\UX\\Settings'\r\n\
              reg add $wu /v ActiveHoursStart /t REG_DWORD /d 15 /f | Out-Null\r\n\
              reg add $wu /v ActiveHoursEnd /t REG_DWORD /d 9 /f | Out-Null\r\n\

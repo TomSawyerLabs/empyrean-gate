@@ -161,6 +161,41 @@ code,
   cursor: pointer;
 }
 
+/* Hardware test mode is showing on the rig instead of the show. This banner is
+   the reason nobody can leave it armed by accident: it is on every tab, on every
+   connected device, and survives show mode (which only hides the topbar). */
+.banner.testmode-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #4a1020;
+  color: #ffd6de;
+  border-bottom: 1px solid var(--danger);
+  letter-spacing: 0.04em;
+}
+
+.testmode-banner .testmode-summary {
+  letter-spacing: normal;
+}
+
+.testmode-banner .hint {
+  margin: 0;
+  margin-left: auto;
+}
+
+.testmode-banner button {
+  flex-shrink: 0;
+}
+
+.testmode-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--danger);
+  flex-shrink: 0;
+  animation: test-pulse 1.4s ease-in-out infinite;
+}
+
 main {
   flex: 1;
   min-height: 0;
@@ -4250,6 +4285,33 @@ button:disabled {
   transition: all 120ms ease;
 }
 
+/* Pattern picker: a title plus the question the pattern answers. Left-aligned,
+   because the note is a sentence and centred sentences are hard to scan. */
+.mode-btn.tall {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 12px;
+}
+
+.mode-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.mode-note {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.mode-btn.active .mode-title,
+.mode-btn.active .mode-note {
+  color: #fff;
+}
+
 .mode-btn:hover {
   border-color: var(--accent);
   color: var(--text);
@@ -4280,25 +4342,103 @@ button:disabled {
   color: var(--accent2);
 }
 
-.panel-header {
+/* Arming. Deliberately the loudest thing on the page: it is the control that
+   takes the rig away from whatever it was doing. */
+.test-arm-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.test-arm-head h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.test-arm-head .hint {
+  margin: 0;
+}
+
+.test-arm-btn {
+  flex-shrink: 0;
+  padding: 12px 18px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.test-mode-control.armed {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px rgba(255, 90, 130, 0.25);
+}
+
+.test-live {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  cursor: pointer;
+  gap: 10px;
+  padding: 8px 10px;
+  background: rgba(10, 8, 20, 0.5);
+  border-radius: 6px;
 }
 
-.expand-btn {
-  padding: 4px 8px;
-  background: none;
-  border: none;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 14px;
+.test-live .hint {
+  margin: 0;
+  margin-left: auto;
 }
 
-.expand-btn:hover {
-  color: var(--text);
+.test-live-summary {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.test-live-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--danger);
+  flex-shrink: 0;
+  animation: test-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes test-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .test-live-dot {
+    animation: none;
+  }
+}
+
+/* Index steppers. Sized for a thumb — this gets driven on a phone while
+   standing at the array. */
+.test-stepper {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.test-stepper button {
+  flex: 1;
+  min-width: 44px;
+  min-height: 40px;
+  font-variant-numeric: tabular-nums;
+}
+
+.test-stepper input[type="number"] {
+  width: 90px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.test-canvas-wrap {
+  display: flex;
+  justify-content: center;
+  /* The canvas is square and height-driven; give it a bounded box so the page
+     cannot grow one on a tall viewport. */
+  height: min(46vh, 380px);
 }
 
 .sacn-details {
@@ -4346,6 +4486,10 @@ button:disabled {
 .universe-range {
   font-size: 10px;
   color: var(--muted);
+}
+
+.universe-range.warn-text {
+  color: #ffe9a8;
 }
 
 .stats-grid {
