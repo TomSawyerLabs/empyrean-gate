@@ -157,6 +157,14 @@ rather than the sheet duplicating any DOM.
 - [x] `docs/live-{wide,square,tall,show-1080p}.png` refreshed; README paragraph extended
       to describe the sheet and the reflowing columns.
 - [x] Committed.
+- [x] Cut **v0.6.0** — `package.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`,
+      `src-tauri/tauri.conf.json`, commit `2e80784` titled `v0.6.0` per this repo's
+      convention, annotated tag `v0.6.0` on it. `release.yml` also picked up the UI
+      behaviour tests so a release does not clear a lower bar than a push.
+- [ ] **Not done, and deliberately Cameron's step:** pushing. `git push origin master`
+      then `git push origin v0.6.0` — the tag push is what triggers `release.yml`,
+      which builds the standalone binaries and creates the GitHub Release
+      (`gh release create --verify-tag`, so the tag must be on the remote).
 
 ## Result
 
