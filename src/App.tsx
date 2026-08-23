@@ -7,6 +7,7 @@ import Media from "./Media";
 import Replay from "./Replay";
 import ReportModal from "./Report";
 import Settings from "./Settings";
+import Test from "./Test";
 import { useGate } from "./state";
 
 // The patch editor pulls in React Flow; lazy so phones on the play surfaces
@@ -19,6 +20,7 @@ const TABS = [
   { id: "patch", label: "Patch" },
   { id: "replay", label: "Archive" },
   { id: "control", label: "Control" },
+  { id: "test", label: "Test" },
   { id: "settings", label: "Settings" },
 ] as const;
 
@@ -427,6 +429,7 @@ export default function App() {
           </Suspense>
         )}
         {tab === "control" && <Control />}
+        {tab === "test" && <Test />}
         {tab === "settings" && <Settings />}
       </main>
 
