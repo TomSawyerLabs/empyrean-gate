@@ -105,8 +105,8 @@ path is an iPad on the show LAN, which is unaffected.
    `lib.rs`). Compiles clean, no new clippy warnings.
 6. [x] Committed as `9a69892` "Hold window geometry while an RDP session is
    attached" — see "How it got committed" below.
-7. [ ] **Current step.** Decide whether to close the exit-path hole and/or add
-   self-heal.
+7. [x] Closed the exit-path hole (`windowstate.rs`); self-heal deliberately not
+   built — see below.
 
 ## The fix that landed
 
@@ -126,30 +126,64 @@ remote session gone — resuming window geometry saves
 Effect: an RDP visit no longer overwrites the on-disk show geometry, so the next
 app start comes back correct. It deliberately does **not** move the live window.
 
-## Known remaining hole: the exit path
+## The exit path — now closed
+
+New `src-tauri/src/windowstate.rs` (`LocalGeometry`), wired into `lib.rs`:
+
+- On the local→remote transition, the 5 s thread **captures** the bytes of
+  `.window-state.json`. At that instant the file still describes the show's own
+  layout, because the guard above has been keeping it that way.
+- `lib.rs` switched from `.run(ctx)` to `.build(ctx)?.run(|app, event| …)`, and
+  on `RunEvent::Exit` **while remote** writes those bytes back.
+
+Why that wins the race: tauri dispatches plugin `RunEvent` handlers inside
+`on_event_loop_event`, and only *then* calls the app-level callback
+(`tauri-2.11.5/src/app.rs:1430-1432`). The plugin writes its polluted cache
+first; we overwrite it last.
+
+The form change is safe by construction — `Builder::run(ctx)` is literally
+`self.build(context)?.run(|_, _| {})` (`app.rs:862-865`), so nothing else moved.
+
+The filename comes from the plugin (`AppHandleExt::filename()`) rather than
+being hard-coded, so the two cannot silently desync.
+
+**Self-update handover is unaffected and needs nothing.** That path calls
+`process::exit`, which skips `RunEvent::Exit` entirely — but it also means the
+plugin never gets to write its cache, and the periodic guard has kept the
+on-disk geometry good throughout. Correct by construction, not by luck.
+
+Verified: `cargo check --all-targets` and `cargo clippy --lib` clean (the 21
+warnings are pre-existing, in `updater.rs`/`videocache.rs`). Not yet exercised
+against a real RDP connect/disconnect — the log lines below are how to confirm
+it in the field.
+
+```
+remote session attached — holding window geometry, not saving
+captured the local window geometry before the remote session
+exited from a remote session; restored the local window geometry
+remote session gone — resuming window geometry saves
+```
+
+## How the hole worked (kept for context)
 
 `tauri-plugin-window-state` 2.4.1 keeps an **in-memory cache** that its own
 `WindowEvent::Moved`/`Resized` listeners update unconditionally — our guard
 cannot stop that. It then writes that cache to disk on `RunEvent::Exit`
 (plugin `src/lib.rs:502-504`). So:
 
-- **Covered:** a long RDP visit no longer steadily overwrites disk geometry.
-- **Not covered:** quitting or restarting the app *while still RDP'd in* still
-  writes the polluted cache to disk once, on exit.
+So the periodic guard alone left one path open — quitting or restarting the app
+*while still RDP'd in* wrote the polluted cache to disk once, on exit. Both are
+now covered: the guard handles the steady state, `windowstate.rs` handles exit.
 
-Closing that needs one of:
+Note `WindowExt::restore_state` looks like the obvious tool for this and is
+**not** usable — it restores from that same polluted in-memory cache, not from
+disk. That is why the fix snapshots raw file bytes instead.
 
-- Switch `lib.rs:439` from `.run(ctx)` to `.build(ctx)?.run(|app, event| …)` and,
-  on `RunEvent::Exit` while remote, rewrite `.window-state.json` from a
-  last-known-local snapshot we keep ourselves (the app-level handler runs after
-  the plugin's, so it wins).
-- Or keep our own snapshot and re-apply it on remote→local transition. Note
-  `WindowExt::restore_state` is **not** usable for this — it restores from the
-  same polluted in-memory cache, not from disk.
-
-Self-heal (auto re-applying geometry when the remote session detaches) was
-deliberately *not* built: it would move the show window on a live rig, which is
-a worse failure than needing one F11.
+Self-heal (auto re-applying geometry the moment a remote session detaches, so
+the window jumps back without a restart) is still deliberately *not* built: it
+would move the show window on a live rig, which is a worse failure than needing
+one F11. The exit-path fix gets the same result at the next restart without
+ever touching a running show.
 
 ## How it got committed — shared working tree
 

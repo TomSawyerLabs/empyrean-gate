@@ -28,6 +28,7 @@ pub mod testmode;
 pub mod touch;
 pub mod updater;
 pub mod videocache;
+pub mod windowstate;
 pub mod firewall;
 
 use std::sync::atomic::Ordering;
@@ -318,6 +319,11 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
         return;
     }
 
+    // Survives the plugin's own exit-time write, which comes from a cache an
+    // RDP session pollutes and our periodic guard cannot reach.
+    let local_geometry = windowstate::LocalGeometry::new();
+    let geometry_for_guard = local_geometry.clone();
+
     tauri::Builder::default()
         .manage(backend)
         // Persists per-label window geometry (position/size/maximized) across
@@ -332,7 +338,7 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
             cancel_close,
             set_close_guard_ready
         ])
-        .setup(|app| {
+        .setup(move |app| {
             use tauri::Manager;
             // The show display is a touch screen: kill the OS contact visuals on
             // every window (again shortly after, once WebView2 has created the
@@ -378,6 +384,9 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
                             log::info!(
                                 "remote session attached — holding window geometry, not saving"
                             );
+                            // Disk still holds the show's layout at this instant;
+                            // keep a copy to put back if we exit while remote.
+                            geometry_for_guard.capture(&handle);
                         }
                         continue;
                     }
@@ -456,8 +465,16 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(move |app, event| {
+            // The window-state plugin has just persisted its cache from its own
+            // Exit handler — and tauri runs plugin handlers before this callback
+            // — so this is the last word on what lands on disk.
+            if matches!(event, tauri::RunEvent::Exit) && session::is_remote() {
+                local_geometry.restore(app);
+            }
+        });
 
     state.shutdown.store(true, Ordering::SeqCst);
     await_sacn_terminate(&state);
