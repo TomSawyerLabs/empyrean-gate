@@ -277,6 +277,27 @@ audit found the identity/lifecycle half of E1.31 was unimplemented.
   Cut by the tag-triggered Release workflow (checks → 3-target build → publish);
   assets: windows-x64.exe (19.4 MB), linux-x64 (23.8 MB), macos-arm64 (19.7 MB).
   Future releases: `git tag vX.Y.Z && git push origin vX.Y.Z` — CI does the rest.
+- **v0.5.1** (2026-08-22): https://github.com/cinderblock/empyrean-gate/releases/tag/v0.5.1
+  The first release since v0.4.0, so it carries 60+ commits: control decks,
+  scenes/playlists, unattended shows, Pioneer DJ LINK, external MIDI, plus round
+  14 (touch hardening, show mode, layout gate, feedback reports, close guard).
+  Assets: windows-x64.exe (38 MB), linux-x64 (44 MB), macos-arm64 (39 MB).
+  **v0.5.0 was tagged and failed** — no release was published. Two CI-only bugs,
+  both now fixed and both worth remembering:
+  1. The deck told react-grid-layout `window.innerWidth` while its shell caps at
+     1780px, so at 2560x1080 items sat ~380px past the right edge until the
+     resize observer corrected. A first-paint horizontal scrollbar; it showed up
+     on the slower Linux runner and never locally.
+  2. The status fixture guard's line-ending `normalize` was a no-op — it had been
+     generated through a shell heredoc that ate a level of escaping, so it
+     replaced a newline with a newline. It could only fail where the checkout
+     differs from what the test writes, i.e. the Windows leg, which it broke.
+     Rewritten on `str::lines` (no escapes to mangle), plus `.gitattributes`
+     pinning the fixtures to LF, plus a test for the helper itself.
+     **Lesson: don't generate Rust string literals through a shell heredoc.**
+  Checks now runs the Rust tests on Windows as well as Linux — a Linux-only
+  pre-release gate is not representative of a product whose show machine is
+  Windows.
 
 ## Round 8 (2026-08-20): self-update
 
