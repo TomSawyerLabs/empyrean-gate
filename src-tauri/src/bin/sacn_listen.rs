@@ -599,10 +599,47 @@ fn report(stats: &BTreeMap<Key, Stat>, map: &Map, started: Instant) {
                 overlap.len(),
                 &overlap[..overlap.len().min(8)]
             );
-            println!(
-                "  Receivers MERGE by priority (equal priority = highest value per channel \
-                 wins), so the rig is showing a blend, not either source."
-            );
+            // E1.31 does NOT blend across priorities: a receiver follows the highest
+            // priority present and ignores the rest outright. Only sources at EQUAL
+            // priority get merged (typically HTP). Saying "it's a blend" when one
+            // source outranks the other sends you looking for merge artefacts that
+            // cannot exist, while the real answer is that your output is being
+            // dropped on the floor.
+            let mut tied = 0usize;
+            let mut outranked: BTreeMap<&str, (&str, u8, u8)> = BTreeMap::new();
+            for u in &overlap {
+                let here: Vec<(&str, u8)> = stats
+                    .iter()
+                    .filter(|((un, _), _)| un == u)
+                    .map(|(_, s)| (s.source.as_str(), s.priority))
+                    .collect();
+                let top = here.iter().map(|(_, p)| *p).max().unwrap_or(0);
+                let winners: Vec<&str> = here
+                    .iter()
+                    .filter(|(_, p)| *p == top)
+                    .map(|(n, _)| *n)
+                    .collect();
+                if winners.len() > 1 {
+                    tied += 1;
+                } else if let Some((loser, lp)) =
+                    here.iter().find(|(_, p)| *p != top).map(|(n, p)| (*n, *p))
+                {
+                    outranked.insert(loser, (winners[0], top, lp));
+                }
+            }
+            for (loser, (winner, wp, lp)) in &outranked {
+                println!(
+                    "  '{winner}' (priority {wp}) OUTRANKS '{loser}' (priority {lp}) — \
+                     receivers follow the higher priority and ignore the lower one \
+                     entirely. '{loser}' is not reaching the rig at all."
+                );
+            }
+            if tied > 0 {
+                println!(
+                    "  {tied} universe(s) have sources at EQUAL priority — those really do \
+                     merge (typically HTP, brightest channel wins)."
+                );
+            }
         }
     }
     let _ = std::io::stdout().flush();
