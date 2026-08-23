@@ -302,6 +302,13 @@ pub struct SharedState {
     /// Set once the operator has confirmed closing a live show; the next window
     /// close request is then allowed through instead of being refused again.
     pub close_confirmed: AtomicBool,
+    /// A UI is mounted and listening for the close-confirmation event. The guard
+    /// is DISARMED until this is true, so a webview that failed to load can never
+    /// leave the app unclosable.
+    pub close_guard_ready: AtomicBool,
+    /// Millis-since-start of the last refused close, for the "ask twice and it
+    /// goes through" escape hatch.
+    pub last_close_attempt_ms: AtomicU64,
     /// Always-on rolling capture of operator input + engine state, so the Report
     /// button can freeze the last seconds of a visual complaint.
     pub recorder: crate::report::Recorder,
@@ -353,6 +360,8 @@ impl SharedState {
             focus_requested: AtomicBool::new(false),
             took_over_older: AtomicBool::new(false),
             close_confirmed: AtomicBool::new(false),
+            close_guard_ready: AtomicBool::new(false),
+            last_close_attempt_ms: AtomicU64::new(0),
             recorder: crate::report::Recorder::new(),
             started: Instant::now(),
         })
@@ -378,6 +387,24 @@ impl SharedState {
 
     pub fn cancel_close(&self) {
         self.close_confirmed.store(false, Ordering::SeqCst);
+    }
+
+    pub fn set_close_guard_ready(&self, ready: bool) {
+        self.close_guard_ready.store(ready, Ordering::SeqCst);
+    }
+
+    pub fn close_guard_ready(&self) -> bool {
+        self.close_guard_ready.load(Ordering::SeqCst)
+    }
+
+    /// True when a close was already refused moments ago — the operator is
+    /// pressing X again, so let it through. Costs one accidental double-tap
+    /// versus the possibility of an app that cannot be closed at all.
+    pub fn close_attempted_recently(&self) -> bool {
+        const WINDOW_MS: u64 = 5_000;
+        let now = self.started.elapsed().as_millis() as u64;
+        let previous = self.last_close_attempt_ms.swap(now, Ordering::SeqCst);
+        previous != 0 && now.saturating_sub(previous) < WINDOW_MS
     }
 
     pub fn bump_config(&self) {

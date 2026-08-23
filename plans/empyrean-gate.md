@@ -772,6 +772,38 @@ next restart both exist; `cleanup_old_binaries` deletes versioned siblings
 `<= current` (skipping the running image) at the next startup, so it does not
 accumulate.
 
+### Round 14f: the close guard could wedge the app (2026-08-23)
+
+"did something break multi-window? new windows are white ... and now i can't
+close any windows."
+
+Reproduced the app locally with an aux window forced open (`windows.aux_open`),
+captured both windows off the real desktop, and drove `WM_CLOSE` at them. On
+this machine the aux window renders correctly (dark, full UI) and always closed
+— so the white window is NOT reproducible here and its cause is still unknown.
+The close failure, though, was a real design flaw of mine and is fixed:
+
+**The guard is now FAIL-OPEN.** It only refuses a close once the UI has called
+`set_close_guard_ready`, which happens after its listener is actually attached
+and is dropped again on unload. Before this, if the webview never got that far —
+a failed load, an older build, a crash on mount — `prevent_close` fired with
+nothing listening and the window could never be closed. A guard that can trap the
+operator is worse than the accident it prevents.
+
+Second escape hatch: two close attempts within 5 s always go through, so there
+is a way out that never requires Task Manager.
+
+Verified end-to-end with the guard armed (sACN "live" but pinned to 127.0.0.1 so
+nothing could reach the lighting network): aux window closes immediately, main
+window refused once, second attempt closes and the process exits cleanly.
+
+**Windows now declare a dark background colour** (`#0A0814`, both the main window
+in tauri.conf.json and aux windows in `open_aux_window`). A webview paints white
+until the document's own background applies, so a slow or failed load showed a
+white rectangle — which is at least half of what was reported, and is worth
+fixing regardless of the root cause. Aux window creation is also logged now, so
+a white window on the show machine leaves a trace to read.
+
 ### Windows shell gestures (asked 2026-08-22, not applied)
 
 The in-webview gestures are handled (round 14). The remaining ones are the

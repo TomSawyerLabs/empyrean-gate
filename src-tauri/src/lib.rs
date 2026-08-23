@@ -326,7 +326,8 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
             backend_info,
             open_aux,
             confirm_close,
-            cancel_close
+            cancel_close,
+            set_close_guard_ready
         ])
         .setup(|app| {
             use tauri::Manager;
@@ -405,17 +406,31 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
                 // rig goes dark, and on a touch display the X is a few pixels
                 // from the controls. While sACN is actually transmitting, the
                 // close is refused and handed to the UI to confirm.
+                //
+                // FAIL-OPEN, deliberately. The close is only ever refused when a
+                // UI has told us it is mounted and listening (`close_guard_ready`,
+                // re-armed on every page load). A guard that can leave an operator
+                // unable to close the app — because the webview did not load, or
+                // the build has no guard in it — is worse than the accident it
+                // prevents. Two rapid attempts also force it through, so there is
+                // always a way out without Task Manager.
                 use tauri::Emitter;
                 let backend = window.app_handle().state::<Backend>();
-                if backend.state.output_live() && !backend.state.close_confirmed() {
+                let armed = backend.state.close_guard_ready();
+                let insisting = backend.state.close_attempted_recently();
+                if backend.state.output_live()
+                    && !backend.state.close_confirmed()
+                    && armed
+                    && !insisting
+                {
                     api.prevent_close();
                     if let Err(e) = window.emit("close-requested", ()) {
-                        // If the UI cannot be reached to ask, refusing forever
-                        // would trap the operator with no way to quit.
                         log::warn!("close confirmation could not reach the UI ({e}); closing");
                         backend.state.confirm_close();
                         let _ = window.close();
                     }
+                } else if backend.state.output_live() && !armed {
+                    log::info!("closing with sACN live: no UI is listening to confirm");
                 }
             }
         })
@@ -441,6 +456,15 @@ fn harden_touch_visuals(app: &tauri::AppHandle) {
 
 #[cfg(not(target_os = "windows"))]
 fn harden_touch_visuals(_app: &tauri::AppHandle) {}
+
+/// The UI's close-confirmation dialog is mounted and listening. Until this is
+/// called the guard stays disarmed, so a webview that fails to load can never
+/// leave the app unclosable. Re-armed on every page load, and dropped again on
+/// unload so a reloading webview doesn't leave a stale arm behind.
+#[tauri::command]
+fn set_close_guard_ready(ready: bool, state: tauri::State<'_, Backend>) {
+    state.state.set_close_guard_ready(ready);
+}
 
 /// The operator confirmed closing a live show: let the next close through and
 /// ask for it. Goes through the normal close path so the engine still sends
@@ -488,6 +512,10 @@ fn open_aux_window(app: &tauri::AppHandle, tab: &str) -> tauri::Result<()> {
             .title(format!("Empyrean Gate — {tab}"))
             .inner_size(900.0, 900.0)
             .zoom_hotkeys_enabled(false)
+            // A webview paints white until the document's own background
+            // applies — a bright flash against a dark app, and a permanently
+            // white window if the page never loads at all.
+            .background_color(tauri::window::Color(0x0A, 0x08, 0x14, 0xFF))
             .initialization_script(format!("if (!location.hash) location.hash = '#{tab}';"));
     // Same gesture suppression the main window gets from tauri.conf.json (the
     // first group is wry's own default, which passing this option replaces).
@@ -498,5 +526,6 @@ fn open_aux_window(app: &tauri::AppHandle, tab: &str) -> tauri::Result<()> {
     );
     builder.build()?;
     harden_touch_visuals(app);
+    log::info!("opened aux window '{label}'");
     Ok(())
 }

@@ -220,9 +220,19 @@ function CloseGuard() {
     let stop: (() => void) | undefined;
     void (async () => {
       const { listen } = await import("@tauri-apps/api/event");
+      const { invoke } = await import("@tauri-apps/api/core");
       stop = await listen("close-requested", () => setAsking(true));
+      // Only now is the guard allowed to refuse a close. If this never runs —
+      // the webview failed to load, an older build, a crash on mount — the
+      // native side stays disarmed and the window closes normally.
+      await invoke("set_close_guard_ready", { ready: true });
     })();
-    return () => stop?.();
+    return () => {
+      stop?.();
+      void import("@tauri-apps/api/core").then(({ invoke }) =>
+        invoke("set_close_guard_ready", { ready: false }),
+      );
+    };
   }, []);
 
   if (!asking) return null;
