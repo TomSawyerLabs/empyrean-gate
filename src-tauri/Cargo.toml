@@ -18,6 +18,10 @@ path = "src/main.rs"
 name = "engine-smoke"
 path = "src/bin/engine_smoke.rs"
 
+[[bin]]
+name = "sacn-listen"
+path = "src/bin/sacn_listen.rs"
+
 [dependencies]
 anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["ws"] }
