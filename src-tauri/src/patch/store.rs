@@ -72,11 +72,13 @@ pub fn save(dir: &Path, doc: &mut PatchDoc) -> Result<PathBuf, String> {
     let json = serde_json::to_string_pretty(doc).map_err(|e| e.to_string())?;
     fs::write(&path, json).map_err(|e| format!("write {}: {e}", path.display()))?;
 
-    // A rename produces a fresh slug — drop any other file carrying this id so
-    // the store never yields duplicates.
-    if let Some((old, _)) = find(dir, &doc.id) {
-        if old != path {
-            let _ = fs::remove_file(&old);
+    // A rename produces a fresh slug — drop EVERY other file carrying this id
+    // so the store never yields duplicates. (Not `find`: directory enumeration
+    // order is filesystem-dependent, and on APFS the fresh file can enumerate
+    // first, which left the stale one alive. Caught by CI on macOS.)
+    for (other_path, other_doc) in read_all(dir) {
+        if other_doc.id == doc.id && other_path != path {
+            let _ = fs::remove_file(&other_path);
         }
     }
     Ok(path)
