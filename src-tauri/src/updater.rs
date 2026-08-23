@@ -266,10 +266,82 @@ pub fn promote_over(target: &std::path::Path) {
         }
     }
     log::error!(
-        "could not promote over {} ({:?}) — the launcher still holds the old          version and will downgrade on the next manual start",
+        "could not promote over {} ({:?}) — the launcher still holds the old \
+         version and will start it again on the next manual launch",
         target.display(),
         last_err
     );
+}
+
+/// True when the running image is the versioned file an update downloads, e.g.
+/// `empyrean-gate-v0.5.3.exe`, rather than a launcher the operator double-clicks.
+fn running_from_versioned_sibling() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        .and_then(|name| {
+            let ext = if cfg!(windows) { ".exe" } else { "" };
+            Some(name == format!("empyrean-gate-v{}{ext}", effective_version()))
+        })
+        .unwrap_or(false)
+}
+
+/// Promote without having been told where to.
+///
+/// Binaries older than v0.5.2 don't pass `--promote-to`, so an update *from* one
+/// of them would otherwise leave the launcher holding the old version forever —
+/// the operator would have to install by hand once to escape. They don't: the new
+/// binary can work out the launcher itself. It is a file next to us, named like
+/// us, that isn't one of the versioned downloads.
+///
+/// Only called after taking over an instance that was OLDER than us, which is
+/// what makes this safe: the launcher we are about to replace is by construction
+/// the thing that started that older instance. A launcher NEWER than us can never
+/// be a candidate, because we would have refused to take its port at all.
+pub fn promote_over_discovered_launchers() {
+    if !running_from_versioned_sibling() {
+        return; // already the launcher; nothing to heal
+    }
+    let Ok(running) = std::env::current_exe() else {
+        return;
+    };
+    let Some(dir) = running.parent() else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    let mut found = false;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path == running || !path.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        let lower = name.to_lowercase();
+        // The names an operator actually ends up with: `empyrean-gate.exe`,
+        // `empyrean-gate-windows-x64.exe` straight from the release page, or a
+        // rename like `EmpyreanGate.exe`. Never a `-v<version>` download, and
+        // never something that merely shares the directory.
+        if !lower.contains("empyrean") || lower.starts_with("empyrean-gate-v") {
+            continue;
+        }
+        if cfg!(windows) && !lower.ends_with(".exe") {
+            continue;
+        }
+        log::info!("no --promote-to given; promoting over discovered launcher {name}");
+        promote_over(&path);
+        found = true;
+    }
+    if !found {
+        // Not fatal, but worth saying out loud: the operator will keep starting
+        // the old version by hand until they replace it themselves.
+        log::warn!(
+            "running from a versioned download in {} but found no launcher to \
+             promote over — a launcher named something without \"empyrean\" in \
+             it cannot be recognised, so it will keep starting the old version",
+            dir.display()
+        );
+    }
 }
 
 /// Delete versioned sibling binaries older than the running version. The running

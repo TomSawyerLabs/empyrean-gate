@@ -295,6 +295,10 @@ pub struct SharedState {
     /// A second launch asked us to come forward (POST /focus) instead of taking
     /// the port from us; the Tauri layer polls this and focuses the window.
     pub focus_requested: AtomicBool,
+    /// We took the port from an instance that was not newer than us — i.e. an
+    /// update put us here. Licenses promoting over a launcher we were not told
+    /// about, for updates started by binaries older than v0.5.2.
+    pub took_over_older: AtomicBool,
     /// Set once the operator has confirmed closing a live show; the next window
     /// close request is then allowed through instead of being refused again.
     pub close_confirmed: AtomicBool,
@@ -347,6 +351,7 @@ impl SharedState {
             preview,
             video: Mutex::new(VideoInput::default()),
             focus_requested: AtomicBool::new(false),
+            took_over_older: AtomicBool::new(false),
             close_confirmed: AtomicBool::new(false),
             recorder: crate::report::Recorder::new(),
             started: Instant::now(),

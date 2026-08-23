@@ -660,10 +660,25 @@ processes on an isolated port/config and asserts all of it: old instance up →
 successor takes over → launcher promoted → a stale old binary refuses and exits
 with the new one still serving. Passes.
 
-**Note for the upgrade itself:** v0.4.0 and v0.5.1 both predate promotion, so
-their in-app update still leaves the launcher stale. One manual download of
-v0.5.2+ breaks the cycle; after that it is self-sustaining. The downgrade guard
-protects a v0.5.2 instance from any stale launcher left lying around.
+**No manual install needed** (added in v0.5.3, after the user pushed back on
+that conclusion — correctly). v0.4.0/v0.5.1 can't pass `--promote-to`, but the
+successor doesn't need to be told: if it is running from a versioned download
+AND it just displaced an OLDER instance, it scans its own directory for the
+launcher (any `*empyrean*` executable that isn't a versioned download) and
+promotes over it. The "displaced something older" condition is what makes this
+safe — a launcher newer than us can never be a candidate, because we would have
+refused to take its port in the first place.
+
+Only gap: a launcher renamed to something without "empyrean" in it can't be
+recognised. Logged as a warning rather than failing silently.
+
+`scripts/update-flow-test.ts` covers both paths — with and without
+`--promote-to`. Two things it taught, both about the test rather than the code:
+`std::fs::copy` uses CopyFileExW on Windows and carries the SOURCE's timestamp
+over, so mtime cannot detect a replacement (the fake-old binary now gets padding
+bytes appended so size can); and the versioned download must be named
+`empyrean-gate-v<version>` matching the binary's own version, or the successor
+correctly decides it is not running from a download at all.
 
 ### Windows shell gestures (asked 2026-08-22, not applied)
 

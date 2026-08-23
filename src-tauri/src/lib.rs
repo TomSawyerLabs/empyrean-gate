@@ -114,6 +114,10 @@ pub fn start_backend() -> Backend {
     if takeover {
         log::info!("port {port} is busy — attempting takeover of the running instance");
         state.sacn_hold.store(true, Ordering::SeqCst);
+        // Remember that we displaced someone older: that is the signal that an
+        // update put us here, and it is what licenses promoting over a launcher
+        // we were never told about (see `updater::promote_over_discovered_launchers`).
+        state.took_over_older.store(true, Ordering::SeqCst);
     }
     let remote_chains = audio::spawn(state.clone());
     rhythm::spawn(state.clone());
@@ -283,8 +287,18 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
     // A self-update spawned us from a versioned sibling; take the launcher's
     // place now that the takeover is done and the old process has let go of it.
     // Off the startup path — the copy retries for a few seconds.
-    if let Some(target) = promote_to {
-        std::thread::spawn(move || updater::promote_over(&target));
+    match promote_to {
+        Some(target) => {
+            std::thread::spawn(move || updater::promote_over(&target));
+        }
+        // Updated *from* a binary too old to tell us where it lives (pre-0.5.2).
+        // Work it out instead, so escaping an old version never needs a manual
+        // install. Gated on having displaced an older instance — see the guard's
+        // docs for why that is the safe condition.
+        None if state.took_over_older.load(Ordering::SeqCst) => {
+            std::thread::spawn(updater::promote_over_discovered_launchers);
+        }
+        None => {}
     }
 
     if headless {

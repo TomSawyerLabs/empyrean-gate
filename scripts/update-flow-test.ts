@@ -17,7 +17,7 @@
 //   bun scripts/update-flow-test.ts [path to empyrean-gate exe]
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, copyFileSync, readFileSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, mkdtempSync, copyFileSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -34,9 +34,37 @@ function fail(msg: string): never {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/// Make the stand-in "old" binary distinguishable from the "new" one.
+///
+/// Both are copies of the same build, so content and size are identical and
+/// promotion would be undetectable — and mtime is no help either, because
+/// `std::fs::copy` uses CopyFileExW on Windows, which carries the SOURCE's
+/// timestamp across. Appended bytes sit past the last PE section and are ignored
+/// by the loader, so the file still runs; size then says whether it was replaced.
+function markAsOld(path: string) {
+  appendFileSync(path, Buffer.alloc(4096, 0x7e));
+}
+
+async function waitForPromotion(launcherPath: string, newPath: string, seconds: number) {
+  for (let i = 0; i < seconds * 10; i++) {
+    if (statSync(launcherPath).size === statSync(newPath).size) return;
+    await sleep(100);
+  }
+  fail(`the launcher path was never replaced with the new binary (${launcherPath})`);
+}
 const dir = mkdtempSync(join(tmpdir(), "empyrean-update-"));
-const launcher = join(dir, "launcher.exe"); // what a shortcut points at
-const versioned = join(dir, "empyrean-gate-v9.9.9.exe"); // what an update downloads
+// Named as an operator's really is: either the release asset's own filename or a
+// tidied-up rename. Discovery keys off the name, so testing with something like
+// `launcher.exe` would prove nothing about the real case.
+const launcher = join(dir, "empyrean-gate-windows-x64.exe");
+const newVersion = JSON.parse(
+  readFileSync(join(import.meta.dir, "..", "package.json"), "utf8"),
+).version as string;
+// Named exactly as the updater names its download — `empyrean-gate-v<version>`
+// with the version the binary itself reports. The successor uses that to
+// recognise it is running from a download rather than from a launcher.
+const versioned = join(dir, `empyrean-gate-v${newVersion}.exe`);
 const configPath = join(dir, "config.json");
 const children: ChildProcess[] = [];
 
@@ -74,6 +102,7 @@ async function waitForVersion(want: string, seconds: number): Promise<void> {
 try {
   copyFileSync(EXE, launcher);
   copyFileSync(EXE, versioned);
+  markAsOld(launcher);
   // The launcher pretends to be the old release; the versioned sibling is the
   // freshly "downloaded" new one, which reports its real (higher) version.
   Bun.write(
@@ -88,29 +117,14 @@ try {
   start(launcher, [], OLD_VERSION);
   await waitForVersion(OLD_VERSION, 30);
   console.log(`old instance up, reporting v${OLD_VERSION}`);
-  const launcherBefore = statSync(launcher).mtimeMs;
 
   // --- 2. an update lands: the successor takes over and promotes itself ---
   start(versioned, ["--promote-to", launcher]);
-  const newVersion = JSON.parse(
-    readFileSync(join(import.meta.dir, "..", "package.json"), "utf8"),
-  ).version as string;
   await waitForVersion(newVersion, 60);
   console.log(`successor took over, reporting v${newVersion}`);
 
-  // Promotion retries for up to ~6s after the old process releases the file.
-  let promoted = false;
-  for (let i = 0; i < 120; i++) {
-    if (statSync(launcher).mtimeMs !== launcherBefore) {
-      promoted = true;
-      break;
-    }
-    await sleep(100);
-  }
-  if (!promoted) fail("the launcher path was never replaced with the new binary");
-  if (statSync(launcher).size !== statSync(versioned).size) {
-    fail("the launcher was replaced but does not match the new binary");
-  }
+  // Promotion retries for a few seconds after the old process releases the file.
+  await waitForPromotion(launcher, versioned, 12);
   console.log("launcher path promoted to the new binary");
 
   // --- 3. the stale shortcut gets double-clicked: it must NOT take over ---
@@ -128,6 +142,24 @@ try {
     fail(`downgraded! the port now reports v${still}, expected v${newVersion}`);
   }
   console.log("older instance refused to take over and exited; newer one still serving");
+
+  // --- 4. the same thing, but started by a binary too old to pass --promote-to ---
+  // This is the real-world path off v0.4.0/v0.5.1: their updater spawns the new
+  // binary with no promotion argument at all, so the new one has to work the
+  // launcher out for itself. Without this, escaping an old version would need a
+  // manual install.
+  for (const child of children.splice(0)) {
+    child.kill();
+  }
+  await sleep(1500);
+  copyFileSync(EXE, launcher); // pretend the launcher is the old release again
+  markAsOld(launcher);
+  start(launcher, [], OLD_VERSION);
+  await waitForVersion(OLD_VERSION, 30);
+  start(versioned, []); // NO --promote-to, exactly like an old updater
+  await waitForVersion(newVersion, 60);
+  await waitForPromotion(launcher, versioned, 12);
+  console.log("successor with no --promote-to found and healed the launcher itself");
 
   console.log("UPDATE FLOW PASS");
 } finally {

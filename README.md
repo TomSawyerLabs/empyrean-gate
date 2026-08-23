@@ -271,8 +271,14 @@ version back on the rig. That cannot happen any more regardless: an instance ref
 to take the port from a **newer** one, and instead asks it to come forward
 (`POST /focus`) and exits.
 
-Instances older than v0.5.2 predate promotion, so moving off one needs a single
-manual download; from there updates are self-sustaining.
+Binaries older than v0.5.3 don't pass `--promote-to`, so when the update is
+started *by* one of them the successor works the launcher out for itself: it
+notices it is running from a versioned download, finds the binary beside it that
+the operator launches (any `*empyrean*` executable that isn't a versioned
+download), and takes its place. So updating off an old version needs no manual
+install either — click update and it heals itself. The one case that can't be
+recognised is a launcher renamed to something without "empyrean" in it; that is
+logged loudly.
 
 ### When an update misbehaves
 
