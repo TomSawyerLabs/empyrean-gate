@@ -5,7 +5,7 @@
   "identifier": "com.empyrean.gate",
   "build": {
     "beforeDevCommand": "bun run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:28149",
     "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist"
   },

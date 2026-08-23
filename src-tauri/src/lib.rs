@@ -10,6 +10,7 @@ pub mod engine;
 pub mod geometry;
 pub mod layers;
 pub mod media;
+pub mod patch;
 pub mod power;
 pub mod protocol;
 pub mod report;

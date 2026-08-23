@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import Control from "./Control";
 import { EFFECTS } from "./effects";
 import Live from "./Live";
@@ -9,9 +9,14 @@ import ReportModal from "./Report";
 import Settings from "./Settings";
 import { useGate } from "./state";
 
+// The patch editor pulls in React Flow; lazy so phones on the play surfaces
+// never pay for it.
+const Patch = lazy(() => import("./Patch"));
+
 const TABS = [
   { id: "live", label: "Live" },
   { id: "media", label: "Media" },
+  { id: "patch", label: "Patch" },
   { id: "replay", label: "Archive" },
   { id: "control", label: "Control" },
   { id: "settings", label: "Settings" },
@@ -416,6 +421,11 @@ export default function App() {
           <Media />
         </div>
         {tab === "replay" && <Replay />}
+        {tab === "patch" && (
+          <Suspense fallback={<div className="patch-empty">Loading editor…</div>}>
+            <Patch />
+          </Suspense>
+        )}
         {tab === "control" && <Control />}
         {tab === "settings" && <Settings />}
       </main>

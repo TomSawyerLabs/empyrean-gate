@@ -48,11 +48,20 @@ self-updates.
   stacked with blend modes, each bound to an audio source. Effects (burst / strobe /
   swoosh / collapse) fire from keyboard (1–4), clicks/taps on the preview, or remote
   clients.
-- **Five UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Media
-  (image/video intake), Archive (recorded-show replay), Control (touch-sized effect
-  pads + master/layer faders), and Settings. In the desktop app,
-  "New window" pops the current tab out into its own window. Old `/#view` and `/#draw`
-  links redirect to Live.
+- **Six UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Media
+  (image/video intake), Patch (node-graph editor), Archive (recorded-show replay),
+  Control (touch-sized effect pads + master/layer faders), and Settings. In the
+  desktop app, "New window" pops the current tab out into its own window. Old
+  `/#view` and `/#draw` links redirect to Live.
+- **Patches (early)**: a node-graph alternative to the layer stack — wire
+  generators, transforms, blends, and inputs (audio features, beats, LFOs,
+  envelopes, IMU) into a typed dataflow whose sink is the array. Graphs compile
+  to a single WGSL dispatch; knob tweaks and scalar wires never recompile.
+  Patches save as JSON files under the config dir and activate live (the layer
+  stack renders when no patch is active); six built-in presets seed the palette.
+  Editing works on the Gate machine only; remote clients get a read-only view.
+  Slated to replace the layer stack once all pattern kinds are ported — see
+  `plans/node-graph.md`.
 - **Archived-show replay**: open individual Uprising `.eg.data` RGB recordings or
   index an entire `Uprising-Data` checkout. Playback streams one 64×378 frame at a
   time from disk, supports seeking, looping, and variable playback speed, and keeps

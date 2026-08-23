@@ -562,6 +562,10 @@ pub struct AppConfig {
     pub show_scheduler: ShowSchedulerConfig,
     /// Known client devices (see `ClientRecord`).
     pub clients: Vec<ClientRecord>,
+    /// Id of the node-graph patch the engine renders instead of the layer
+    /// stack; `None` renders the stack (a dev-time bridge until the stack is
+    /// retired — see `plans/node-graph.md`).
+    pub active_patch: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -583,6 +587,7 @@ impl Default for AppConfig {
             saved_playlists: Vec::new(),
             show_scheduler: ShowSchedulerConfig::default(),
             clients: Vec::new(),
+            active_patch: None,
         }
     }
 }

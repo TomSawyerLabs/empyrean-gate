@@ -5,6 +5,7 @@ import type {
   AppConfig,
   EffectCfg,
   LayerCfg,
+  PatchDoc,
   PreviewFrame,
   ReportInfo,
   ServerMsg,
@@ -336,6 +337,27 @@ export class GateClient {
   }
   sendImu(f: { yaw: number; pitch: number; roll: number; shake: number }) {
     this.send({ type: "imu", ...f });
+  }
+
+  // --- node-graph patches (mutations are loopback-only, enforced server-side) ---
+  patchList() {
+    this.send({ type: "patch_list" });
+  }
+  patchGet(id: string) {
+    this.send({ type: "patch_get", id });
+  }
+  patchSave(patch: PatchDoc) {
+    this.send({ type: "patch_save", patch });
+  }
+  patchDelete(id: string) {
+    this.send({ type: "patch_delete", id });
+  }
+  patchActivate(id: string | null) {
+    this.send({ type: "patch_activate", id });
+  }
+  /** Play an exposed param of the active patch — allowed from any client. */
+  patchParam(node: string, param: string, value: number) {
+    this.send({ type: "patch_param", node, param, value });
   }
   /** "I don't like what it just did" — freezes the last `seconds` of capture. */
   sendReport(description: string, seconds: number) {

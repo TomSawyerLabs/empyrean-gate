@@ -49,6 +49,8 @@
     "fps": 0.0,
     "frames": 0
   },
+  "patch_active": false,
+  "patch_error": null,
   "show": {
     "enabled": false,
     "playlist_id": "",

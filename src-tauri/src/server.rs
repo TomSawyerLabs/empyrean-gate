@@ -18,6 +18,7 @@
 use crate::audio::RemoteChains;
 use crate::config::ClientRecord;
 use crate::media::{MediaResolver, ResolveRequest};
+use crate::patch;
 use crate::protocol::{
     BrowserAudioStream, ClientMsg, HandoverGrant, ServerMsg, PREVIEW_MAGIC, VIDEO_FRAME_MAGIC,
 };
@@ -80,6 +81,8 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .route("/handover", post(handover))
         .route("/media/resolve", post(resolve_media))
         .route("/media/stream/{id}", get(stream_media))
+        .route("/patch/registry", get(patch_registry))
+        .route("/patch/presets", get(patch_presets))
         .route("/media/file/{id}", get(serve_media_file))
         .route("/reports", get(list_reports))
         .route("/reports/{id}/{file}", get(serve_report_file))
@@ -442,6 +445,17 @@ async fn handover(
     axum::Json(grant).into_response()
 }
 
+/// The node-type palette for the patch editor — generated from the Rust
+/// registry so the frontend can never drift from what codegen understands.
+async fn patch_registry() -> Response {
+    axum::Json(patch::registry::palette_json()).into_response()
+}
+
+/// Built-in starter patches (immutable templates; the editor copies them).
+async fn patch_presets() -> Response {
+    axum::Json(patch::presets::presets()).into_response()
+}
+
 // ---------------------------------------------------------------------------
 // WebSocket clients
 // ---------------------------------------------------------------------------
@@ -652,6 +666,19 @@ type WsSink = futures_util::stream::SplitSink<WebSocket, Message>;
 async fn send_json(tx: &mut WsSink, msg: &ServerMsg) -> Result<(), axum::Error> {
     let text = serde_json::to_string(msg).expect("serialize ServerMsg");
     tx.send(Message::Text(text.into())).await
+}
+
+/// Refuse a patch mutation from a non-loopback client. Unlike [`deny`], the
+/// connection stays up — the client keeps its play/preview surfaces.
+async fn patch_edit_denied(tx: &mut WsSink) -> Result<(), ()> {
+    let _ = send_json(
+        tx,
+        &ServerMsg::Error {
+            message: "Patch editing is only available on the Gate machine.".into(),
+        },
+    )
+    .await;
+    Ok(())
 }
 
 async fn deny(tx: &mut WsSink, reason: &str) -> Result<(), ()> {
@@ -880,15 +907,18 @@ async fn handle_msg(
                 cur.server.port != config.server.port || cur.server.bind != config.server.bind
             };
             state.update_config(|c| {
-                // Client management + tokens are edited via their dedicated
-                // messages; don't let a stale full-config write clobber them.
+                // Client management, tokens, and the active patch are edited
+                // via their dedicated messages; don't let a stale full-config
+                // write clobber them.
                 let clients = c.clients.clone();
                 let join_token = c.server.join_token.clone();
                 let require_token = c.server.require_token;
+                let active_patch = c.active_patch.clone();
                 *c = *config;
                 c.clients = clients;
                 c.server.join_token = join_token;
                 c.server.require_token = require_token;
+                c.active_patch = active_patch;
             });
             if port_changed {
                 let _ = send_json(
@@ -940,6 +970,137 @@ async fn handle_msg(
                     let l = c.layers.remove(from);
                     c.layers.insert(to, l);
                 }
+            });
+        }
+        ClientMsg::PatchList => {
+            let msg = ServerMsg::Patches {
+                patches: patch::store::list(&patch::store::patches_dir()),
+            };
+            let _ = send_json(tx, &msg).await;
+        }
+        ClientMsg::PatchGet { id } => {
+            let msg = match patch::store::load(&patch::store::patches_dir(), &id) {
+                Ok(doc) => ServerMsg::Patch { patch: Box::new(doc) },
+                Err(e) => ServerMsg::Error { message: e },
+            };
+            let _ = send_json(tx, &msg).await;
+        }
+        ClientMsg::PatchSave { patch: doc } => {
+            if !addr.ip().is_loopback() {
+                return patch_edit_denied(tx).await;
+            }
+            let dir = patch::store::patches_dir();
+            let mut doc = *doc;
+            // Saving never gates on graph validity — a half-wired patch mid-edit
+            // is legitimate state to persist. Activation is where validity bites.
+            match patch::store::save(&dir, &mut doc) {
+                Ok(_) => {
+                    // The engine rebuilds the active patch's pipeline off this.
+                    state.patch_epoch.fetch_add(1, Ordering::SeqCst);
+                    // Echo (the editor learns an assigned id), then refresh
+                    // everyone's palette.
+                    let _ = send_json(tx, &ServerMsg::Patch { patch: Box::new(doc) }).await;
+                    let _ = state.events.send(ServerMsg::Patches {
+                        patches: patch::store::list(&dir),
+                    });
+                }
+                Err(e) => {
+                    let _ = send_json(tx, &ServerMsg::Error { message: e }).await;
+                }
+            }
+        }
+        ClientMsg::PatchDelete { id } => {
+            if !addr.ip().is_loopback() {
+                return patch_edit_denied(tx).await;
+            }
+            let dir = patch::store::patches_dir();
+            match patch::store::delete(&dir, &id) {
+                Ok(()) => {
+                    state.patch_epoch.fetch_add(1, Ordering::SeqCst);
+                    if state.config.read().active_patch.as_deref() == Some(id.as_str()) {
+                        state.update_config(|c| c.active_patch = None);
+                    }
+                    let _ = state.events.send(ServerMsg::Patches {
+                        patches: patch::store::list(&dir),
+                    });
+                }
+                Err(e) => {
+                    let _ = send_json(tx, &ServerMsg::Error { message: e }).await;
+                }
+            }
+        }
+        ClientMsg::PatchActivate { id } => {
+            if !addr.ip().is_loopback() {
+                return patch_edit_denied(tx).await;
+            }
+            // The full codegen check (validation + renderable node kinds +
+            // Output node), so activation can never leave the engine unable to
+            // build what the config points at.
+            let refusal = match &id {
+                None => None,
+                Some(id) => match patch::store::load(&patch::store::patches_dir(), id) {
+                    Err(e) => Some(e),
+                    Ok(doc) => patch::codegen::compile(&doc).err(),
+                },
+            };
+            match refusal {
+                Some(message) => {
+                    let _ = send_json(tx, &ServerMsg::Error { message }).await;
+                }
+                None => state.update_config(|c| c.active_patch = id),
+            }
+        }
+        ClientMsg::PatchParam { node, param, value } => {
+            // The play surface: open to every client, but strictly limited to
+            // params the patch author exposed, on the active patch only.
+            let active = state.config.read().active_patch.clone();
+            let Some(id) = active else {
+                let _ = send_json(tx, &ServerMsg::Error { message: "no active patch".into() })
+                    .await;
+                return Ok(());
+            };
+            let dir = patch::store::patches_dir();
+            let mut doc = match patch::store::load(&dir, &id) {
+                Ok(d) => d,
+                Err(e) => {
+                    let _ = send_json(tx, &ServerMsg::Error { message: e }).await;
+                    return Ok(());
+                }
+            };
+            if !doc.exposed.iter().any(|x| x.node == node && x.param == param) {
+                let _ = send_json(
+                    tx,
+                    &ServerMsg::Error {
+                        message: format!("param {node}.{param} is not exposed"),
+                    },
+                )
+                .await;
+                return Ok(());
+            }
+            let clamped = doc
+                .nodes
+                .iter()
+                .find(|n| n.id == node)
+                .and_then(|n| patch::registry::lookup(&n.kind))
+                .and_then(|t| t.param(&param))
+                .map(|p| value.clamp(p.min, p.max))
+                .unwrap_or(value);
+            if let Some(n) = doc.nodes.iter_mut().find(|n| n.id == node) {
+                n.params.insert(param.clone(), clamped);
+            }
+            // Persist, but WITHOUT a patch-epoch bump: the live value goes
+            // through the runtime queue, no pipeline rebuild.
+            if let Err(e) = patch::store::save(&dir, &mut doc) {
+                log::warn!("persisting patch param: {e}");
+            }
+            state
+                .patch_params
+                .lock()
+                .push((node.clone(), param.clone(), clamped));
+            let _ = state.events.send(ServerMsg::PatchParamChanged {
+                node,
+                param,
+                value: clamped,
             });
         }
         ClientMsg::AuthorizeFirewall => {

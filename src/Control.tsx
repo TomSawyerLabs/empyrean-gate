@@ -1,5 +1,6 @@
 // Control tab: performance surface — effect pads, master faders, and per-layer
-// quick faders. Built for touch (big targets), works everywhere.
+// quick faders (or the active patch's exposed params). Built for touch (big
+// targets), works everywhere.
 
 import { useEffect, useState } from "react";
 import { EFFECTS } from "./effects";
@@ -8,6 +9,9 @@ import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
 import {
   LAYER_LABELS,
+  type PatchDoc,
+  type PatchNodeType,
+  type PatchParamDef,
   type ShowPlaylistEntry,
   type SavedPlaylist,
   type SavedStack,
@@ -238,13 +242,92 @@ export default function Control() {
         {config && <AutopilotForecast />}
       </section>
 
-      <section className="panel">
-        <h2>Layers</h2>
-        {config?.layers.map((l, i) => (
-          <LayerFader key={i} index={i} name={l.name || LAYER_LABELS[l.kind]} />
-        ))}
-      </section>
+      <PatchParamsPanel />
+
+      {!status?.patch_active && (
+        <section className="panel">
+          <h2>Layers</h2>
+          {config?.layers.map((l, i) => (
+            <LayerFader key={i} index={i} name={l.name || LAYER_LABELS[l.kind]} />
+          ))}
+        </section>
+      )}
     </div>
+  );
+}
+
+/** The active patch's exposed params — the phone-facing play surface. Any
+ * client may move these (the backend enforces exposed-only); everyone stays
+ * in sync via patch_param_changed broadcasts. */
+function PatchParamsPanel() {
+  const { client, config, connected } = useGate();
+  const activeId = config?.active_patch ?? null;
+  const [doc, setDoc] = useState<PatchDoc | null>(null);
+  const [registry, setRegistry] = useState<Map<string, PatchNodeType> | null>(null);
+
+  useEffect(() => {
+    if (!activeId || !connected) {
+      if (!activeId) setDoc(null);
+      return;
+    }
+    client.patchGet(activeId);
+    return client.onMessage((msg) => {
+      if (msg.type === "patch" && msg.patch.id === activeId) {
+        setDoc(msg.patch);
+      } else if (msg.type === "patch_param_changed") {
+        setDoc((d) => {
+          if (!d) return d;
+          const n = d.nodes.find((x) => x.id === msg.node);
+          if (!n || n.params[msg.param] === msg.value) return d;
+          const next = structuredClone(d);
+          next.nodes.find((x) => x.id === msg.node)!.params[msg.param] = msg.value;
+          return next;
+        });
+      }
+    });
+  }, [client, activeId, connected]);
+
+  useEffect(() => {
+    if (!activeId || !connected || registry) return;
+    let stale = false;
+    void fetch(`${client.httpBase}/patch/registry`)
+      .then((r) => r.json())
+      .then((types: PatchNodeType[]) => {
+        if (!stale) setRegistry(new Map(types.map((t) => [t.id, t])));
+      })
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [client, activeId, connected, registry]);
+
+  if (!activeId || !doc) return null;
+  return (
+    <section className="panel">
+      <h2>Patch — {doc.name}</h2>
+      {doc.exposed.length === 0 && (
+        <p className="hint">
+          No exposed params. In the Patch editor, tick "expose" on the knobs you
+          want playable from here.
+        </p>
+      )}
+      {doc.exposed.map((x) => {
+        const node = doc.nodes.find((n) => n.id === x.node);
+        const def = node && registry?.get(node.kind);
+        const p = def?.params.find((q) => q.name === x.param);
+        if (!node || !p) return null;
+        return (
+          <PatchParamFader
+            key={`${x.node}.${x.param}`}
+            node={x.node}
+            param={x.param}
+            label={x.label || `${def?.label} · ${p.label}`}
+            def={p}
+            value={node.params[x.param] ?? p.default}
+          />
+        );
+      })}
+    </section>
   );
 }
 
@@ -679,6 +762,65 @@ function ScenesPanel() {
       </div>
       <ShowSchedulerPanel />
     </section>
+  );
+}
+
+function PatchParamFader({
+  node,
+  param,
+  label,
+  def,
+  value,
+}: {
+  node: string;
+  param: string;
+  label: string;
+  def: PatchParamDef;
+  value: number;
+}) {
+  const { client } = useGate();
+  const [local, setLocal] = useState(value);
+  useEffect(() => setLocal(value), [value]);
+  const send = useThrottled((v: number) => client.patchParam(node, param, v));
+
+  if (def.kind !== "number") {
+    return (
+      <label className="slider-row">
+        <span>{label}</span>
+        <select
+          value={Math.round(local)}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            setLocal(v);
+            send(v);
+          }}
+        >
+          {def.kind.select.map((opt, i) => (
+            <option key={opt} value={i}>
+              {opt}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+  return (
+    <label className="slider-row">
+      <span>{label}</span>
+      <input
+        type="range"
+        min={def.min}
+        max={def.max}
+        step={(def.max - def.min) / 200}
+        value={local}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          setLocal(v);
+          send(v);
+        }}
+      />
+      <span className="slider-val">{local.toFixed(2)}</span>
+    </label>
   );
 }
 

@@ -226,6 +226,14 @@ pub struct SharedState {
     pub config: RwLock<AppConfig>,
     /// Bumped on every config change; threads compare to notice reconfiguration.
     pub config_epoch: AtomicU32,
+    /// Bumped when any patch file changes (save/delete), so the engine rebuilds
+    /// the active patch's pipeline even though the config didn't change.
+    pub patch_epoch: AtomicU32,
+    /// Live exposed-param changes queued for the active patch runtime — applied
+    /// by the engine loop with NO pipeline rebuild (that's the point).
+    pub patch_params: Mutex<Vec<(String, String, f32)>>,
+    /// Monotonic count of triggered effects; the patch Tap node edge-detects it.
+    pub effect_seq: AtomicU64,
     pub effects: Mutex<Vec<ActiveEffect>>,
     pub dabs: Mutex<Vec<ActiveDab>>,
     pub audio: [Mutex<AudioFeatures>; MAX_AUDIO_SOURCES],
@@ -300,6 +308,9 @@ impl SharedState {
         Arc::new(Self {
             config: RwLock::new(config),
             config_epoch: AtomicU32::new(0),
+            patch_epoch: AtomicU32::new(0),
+            patch_params: Mutex::new(Vec::new()),
+            effect_seq: AtomicU64::new(0),
             effects: Mutex::new(Vec::new()),
             dabs: Mutex::new(Vec::new()),
             audio: Default::default(),
@@ -444,6 +455,7 @@ impl SharedState {
     }
 
     pub fn trigger_effect(&self, cfg: EffectCfg) {
+        self.effect_seq.fetch_add(1, Ordering::Relaxed);
         let mut effects = self.effects.lock();
         // Cap active effects; drop the oldest if the floor is spamming taps.
         if effects.len() >= crate::layers::MAX_EFFECTS {

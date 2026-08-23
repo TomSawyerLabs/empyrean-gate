@@ -61,6 +61,11 @@ wgpu = { version = "29", default-features = false, features = ["wgsl", "vulkan"]
 [target.'cfg(target_os = "macos")'.dependencies]
 wgpu = { version = "29", default-features = false, features = ["wgsl", "vulkan-portability"] }
 
+[dev-dependencies]
+# Validates generated patch WGSL in unit tests without needing a GPU. Version
+# tracks wgpu (both 29) so tests judge by the same compiler the engine uses.
+naga = { version = "29", features = ["wgsl-in"] }
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

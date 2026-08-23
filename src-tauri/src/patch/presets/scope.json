@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "id": "builtin-scope",
+  "name": "Scope",
+  "description": "Circular oscilloscope ring over spoke-per-bin spectrum bars — raw audio, both scopes.",
+  "nodes": [
+    { "id": "wf", "kind": "waveform", "name": "", "params": { "ring": 0.55, "depth": 0.6, "thickness": 0.4, "hue": 0.33, "brightness": 1.0 }, "pos": [260, 40] },
+    { "id": "spec", "kind": "spectrum", "name": "", "params": { "length": 0.6, "hue": 0.8, "hue_range": 0.3, "brightness": 0.8 }, "pos": [260, 240] },
+    { "id": "mix", "kind": "blend", "name": "", "params": { "opacity": 0.9 }, "pos": [520, 130] },
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [760, 130] }
+  ],
+  "edges": [
+    { "from": { "node": "spec", "port": "out" }, "to": { "node": "mix", "port": "base" } },
+    { "from": { "node": "wf", "port": "out" }, "to": { "node": "mix", "port": "over" } },
+    { "from": { "node": "mix", "port": "out" }, "to": { "node": "out", "port": "in" } }
+  ],
+  "exposed": [
+    { "node": "wf", "param": "hue", "label": "Wave hue" },
+    { "node": "spec", "param": "length", "label": "Bar length" }
+  ]
+}

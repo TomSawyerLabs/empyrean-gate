@@ -1289,6 +1289,7 @@ dependencies = [
  "local-ip-address",
  "log",
  "midir",
+ "naga",
  "notify",
  "parking_lot",
  "png 0.18.1",

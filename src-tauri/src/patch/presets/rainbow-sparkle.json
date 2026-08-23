@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "id": "builtin-rainbow-sparkle",
+  "name": "Rainbow Sparkle",
+  "description": "A turning hue wheel with treble-driven glitter on top.",
+  "nodes": [
+    { "id": "aud", "kind": "audio", "name": "", "params": {}, "pos": [40, 240] },
+    { "id": "bow", "kind": "rainbow", "name": "", "params": { "turns": 2, "speed": 0.5, "hue_range": 0.2, "saturation": 0.9, "brightness": 0.8 }, "pos": [260, 40] },
+    { "id": "spark", "kind": "sparkle", "name": "", "params": { "twinkle": 0.6, "speed": 1.0, "hue": 0.0, "hue_range": 1.0, "saturation": 0.3, "brightness": 1.0 }, "pos": [260, 240] },
+    { "id": "mix", "kind": "blend", "name": "", "params": { "opacity": 0.8 }, "pos": [520, 130] },
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [760, 130] }
+  ],
+  "edges": [
+    { "from": { "node": "aud", "port": "treble" }, "to": { "node": "spark", "port": "density" } },
+    { "from": { "node": "bow", "port": "out" }, "to": { "node": "mix", "port": "base" } },
+    { "from": { "node": "spark", "port": "out" }, "to": { "node": "mix", "port": "over" } },
+    { "from": { "node": "mix", "port": "out" }, "to": { "node": "out", "port": "in" } }
+  ],
+  "exposed": [
+    { "node": "bow", "param": "turns", "label": "Rainbow turns" },
+    { "node": "mix", "param": "opacity", "label": "Sparkle amount" }
+  ]
+}

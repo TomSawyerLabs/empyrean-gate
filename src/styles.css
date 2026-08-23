@@ -3807,6 +3807,286 @@ button:disabled {
   }
 }
 
+/* --- Patch editor (node graph) --------------------------------------------- */
+
+.patch-tab {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.patch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: var(--bg2);
+  background-image: var(--surface-grad);
+  border-bottom: 1px solid #2a2445;
+  flex-wrap: wrap;
+}
+
+.patch-toolbar .patch-name {
+  min-width: 160px;
+  font-weight: 600;
+}
+
+.patch-toolbar button.active {
+  border-color: var(--accent2);
+  color: var(--accent2);
+}
+
+.patch-status.error {
+  color: var(--danger);
+  font-size: 12px;
+  max-width: 44ch;
+}
+
+.patch-status.ok {
+  color: var(--ok);
+  font-size: 12px;
+}
+
+.patch-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.patch-palette {
+  width: 148px;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--bg2);
+  border-right: 1px solid #2a2445;
+  flex-shrink: 0;
+}
+
+.palette-group h4 {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.palette-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin: 2px 0;
+  padding: 4px 8px;
+  font-size: 13px;
+  border-left-width: 3px;
+}
+
+.patch-canvas {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.patch-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted);
+}
+
+.patch-side {
+  width: 240px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--bg2);
+  border-left: 1px solid #2a2445;
+}
+
+.patch-side h3 {
+  margin: 0 0 10px;
+}
+
+.patch-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.patch-param {
+  margin-bottom: 12px;
+}
+
+.patch-param-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.expose-toggle {
+  font-size: 11px;
+  color: var(--muted);
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.patch-param-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.patch-param-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.patch-param-value {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--muted);
+  width: 4ch;
+  text-align: right;
+}
+
+.wired-chip {
+  font-size: 11px;
+  color: var(--accent2);
+}
+
+/* Flow nodes */
+.pnode {
+  background: var(--panel);
+  background-image: var(--surface-grad);
+  border: 1px solid #2a2445;
+  border-radius: 8px;
+  min-width: 130px;
+  font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.pnode.selected {
+  border-color: var(--accent);
+}
+
+.pnode-head {
+  padding: 5px 10px;
+  font-weight: 600;
+  border-bottom: 1px solid #2a2445;
+  border-radius: 8px 8px 0 0;
+}
+
+.pnode-name {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.pnode-body {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.pnode-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pnode-port {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 10px;
+  color: var(--muted);
+  line-height: 16px;
+}
+
+.pnode-port.out {
+  justify-content: flex-end;
+}
+
+/* Category accent on the header edge */
+.pnode.cat-input .pnode-head { border-left: 3px solid #38d1c2; }
+.pnode.cat-scalar .pnode-head { border-left: 3px solid #7cc0ff; }
+.pnode.cat-generator .pnode-head { border-left: 3px solid #7c5cff; }
+.pnode.cat-field .pnode-head { border-left: 3px solid #c05cff; }
+.pnode.cat-combine .pnode-head { border-left: 3px solid #ffb84d; }
+.pnode.cat-texture .pnode-head { border-left: 3px solid #ff5cab; }
+.pnode.cat-sink .pnode-head { border-left: 3px solid #4ade80; }
+
+.palette-item.cat-input { border-left: 3px solid #38d1c2; }
+.palette-item.cat-scalar { border-left: 3px solid #7cc0ff; }
+.palette-item.cat-generator { border-left: 3px solid #7c5cff; }
+.palette-item.cat-field { border-left: 3px solid #c05cff; }
+.palette-item.cat-combine { border-left: 3px solid #ffb84d; }
+.palette-item.cat-texture { border-left: 3px solid #ff5cab; }
+.palette-item.cat-sink { border-left: 3px solid #4ade80; }
+
+/* Typed ports: one color per data shape, ports + wires alike */
+.port-dot {
+  width: 9px !important;
+  height: 9px !important;
+  border: 1px solid rgba(0, 0, 0, 0.5) !important;
+  position: relative !important;
+  transform: none !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+}
+
+.pnode-port.in .port-dot { margin-left: -14px; }
+.pnode-port.out .port-dot { margin-right: -14px; }
+
+.shape-scalar { background: #7cc0ff !important; }
+.shape-event { background: #ffe066 !important; }
+.shape-field_scalar { background: #c0a8ff !important; }
+.shape-field_color { background: #ff8fd0 !important; }
+.shape-points { background: #ffb84d !important; }
+.shape-texture { background: #ff5c7a !important; }
+.shape-pixels { background: #4ade80 !important; }
+
+.react-flow__edge.pedge.shape-scalar path { stroke: #7cc0ff; }
+.react-flow__edge.pedge.shape-event path { stroke: #ffe066; }
+.react-flow__edge.pedge.shape-field_scalar path { stroke: #c0a8ff; }
+.react-flow__edge.pedge.shape-field_color path { stroke: #ff8fd0; }
+.react-flow__edge.pedge.shape-points path { stroke: #ffb84d; }
+.react-flow__edge.pedge.shape-texture path { stroke: #ff5c7a; }
+
+/* React Flow dark chrome to match the app */
+.patch-canvas .react-flow {
+  background: transparent;
+}
+
+.patch-canvas .react-flow__background {
+  opacity: 0.5;
+}
+
+.patch-canvas .react-flow__controls {
+  box-shadow: none;
+}
+
+.patch-canvas .react-flow__controls button {
+  background: var(--panel);
+  border-bottom: 1px solid #2a2445;
+  fill: var(--text);
+}
+
+.pnode-unknown {
+  padding: 8px 10px;
+  color: var(--danger);
+}
+
 @media (max-width: 700px) {
   .live-page.control-deck-page {
     display: block;
