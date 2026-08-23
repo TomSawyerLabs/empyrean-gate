@@ -9,6 +9,7 @@ pub mod config;
 pub mod engine;
 pub mod geometry;
 pub mod layers;
+pub mod logging;
 pub mod media;
 pub mod patch;
 pub mod power;
@@ -33,12 +34,54 @@ pub struct Backend {
     pub state: Arc<SharedState>,
 }
 
+/// What the instance already holding our port reports, or `None` if it is too
+/// old to say (pre-0.5.2) or unreachable.
+fn running_instance_version(port: u16) -> Option<String> {
+    let mut resp = handover_agent()
+        .get(format!("http://127.0.0.1:{port}/version"))
+        .call()
+        .ok()?;
+    let body: serde_json::Value = resp.body_mut().read_json().ok()?;
+    body["version"].as_str().map(str::to_owned)
+}
+
+/// Ask the instance holding the port to bring its window forward. Best effort:
+/// older instances have no such endpoint.
+fn focus_running_instance(port: u16) {
+    let _ = handover_agent()
+        .post(format!("http://127.0.0.1:{port}/focus"))
+        .send_empty();
+}
+
+/// True when the instance on our port is NEWER than us, in which case taking
+/// over from it would be a silent downgrade of a possibly-live show.
+///
+/// This is the failure that was reported from the field: a self-update leaves the
+/// updated binary running while the launcher path still holds the old one, so the
+/// next double-click started the OLD version, which found the port busy, took
+/// over, and put v0.4.0 back on the rig. Updates now also promote themselves over
+/// the launcher path (see `updater`), but this guard is what makes the downgrade
+/// impossible rather than merely unlikely.
+fn running_instance_is_newer(port: u16) -> Option<String> {
+    let running = running_instance_version(port)?;
+    let ours = updater::effective_version();
+    let parse = |v: &str| -> Option<(u32, u32, u32)> {
+        let mut it = v.trim_start_matches('v').split('.').map(|p| p.parse::<u32>().ok());
+        Some((it.next()??, it.next()??, it.next()??))
+    };
+    match (parse(&running), parse(&ours)) {
+        (Some(theirs), Some(mine)) if theirs > mine => Some(running),
+        _ => None,
+    }
+}
+
 /// Start every backend subsystem. UI-independent; returns immediately.
 ///
 /// If another instance is already running on our port, take over from it: warm the
 /// GPU engine first (sACN gated), ask the old instance to stop and hand back its
 /// running state (config + layer phases), then start sending — the structure sees
 /// at most a few frames of hold, and patterns continue without a visual jump.
+/// The exception is an instance NEWER than us, which we refuse to displace.
 pub fn start_backend() -> Backend {
     let cfg = config::load();
     // Re-register at every launch so the Run key follows the current exe across
@@ -46,11 +89,26 @@ pub fn start_backend() -> Backend {
     autostart::sync(cfg.autostart);
     let port = cfg.server.port;
     let takeover = port_in_use(port);
+    // Refuse to take the port from a NEWER instance — that is a downgrade, and
+    // if a show is running it happens on the wire. Checked before any subsystem
+    // starts, so the loser leaves nothing behind.
+    if takeover
+        && let Some(newer) = running_instance_is_newer(port)
+    {
+        log::warn!(
+            "v{newer} is already running on port {port} and this binary is v{}; \
+             refusing to take over — that would downgrade a running show. \
+             Focusing the running instance and exiting.",
+            updater::CURRENT_VERSION
+        );
+        focus_running_instance(port);
+        std::process::exit(0);
+    }
     let state = SharedState::new(cfg);
     {
         let mut st = state.status.lock();
         st.interfaces = list_interfaces();
-        st.version = updater::CURRENT_VERSION.to_string();
+        st.version = updater::effective_version();
         st.firewall_pending = firewall::rule_missing(port);
     }
     if takeover {
@@ -209,11 +267,25 @@ fn backend_info(state: tauri::State<'_, Backend>) -> serde_json::Value {
     serde_json::json!({ "wsPort": cfg.server.port })
 }
 
-pub fn run(headless: bool) {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
+    logging::init();
+    log::info!(
+        "Empyrean Gate v{} starting from {}",
+        updater::CURRENT_VERSION,
+        std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "<unknown>".into())
+    );
     let backend = start_backend();
     let state = backend.state.clone();
     state.headless.store(headless, Ordering::SeqCst);
+
+    // A self-update spawned us from a versioned sibling; take the launcher's
+    // place now that the takeover is done and the old process has let go of it.
+    // Off the startup path — the copy retries for a few seconds.
+    if let Some(target) = promote_to {
+        std::thread::spawn(move || updater::promote_over(&target));
+    }
 
     if headless {
         log::info!("headless mode: no desktop window; web UI only");
@@ -273,6 +345,26 @@ pub fn run(headless: bool) {
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(5));
                     let _ = handle.save_window_state(StateFlags::all());
+                }
+            });
+            // A second launch that refused to take our port asks us to come
+            // forward (POST /focus) — so a stale shortcut surfaces this window
+            // instead of appearing to do nothing.
+            let focus_handle = app.handle().clone();
+            let focus_state = app.state::<Backend>().state.clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    if focus_state.focus_requested.swap(false, Ordering::SeqCst) {
+                        let handle = focus_handle.clone();
+                        let _ = focus_handle.run_on_main_thread(move || {
+                            if let Some(window) = handle.get_webview_window("main") {
+                                let _ = window.unminimize();
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        });
+                    }
                 }
             });
             Ok(())

@@ -10,6 +10,21 @@
 //! Auto-CHECK is on by default (every 6 h + at startup); auto-INSTALL is opt-in —
 //! the swap is seamless, but whether to take an update mid-show is the operator's
 //! call. Both are also triggerable from the UI.
+//!
+//! ## Promotion, and why it matters
+//!
+//! The successor runs from the versioned sibling, so without a further step the
+//! path the operator actually launches (a desktop shortcut, the Start menu, the
+//! downloaded `empyrean-gate-windows-x64.exe`) still holds the OLD binary. The
+//! next double-click then starts the old version, which finds the port busy and
+//! *takes over* — silently downgrading a running show, which is exactly what was
+//! reported in the field after v0.4.0 -> v0.5.1.
+//!
+//! So the successor is told where it came from (`--promote-to <path>`) and, once
+//! the takeover is committed and the old process has released the file, copies
+//! itself over that path. Windows cannot overwrite a *running* image, but the
+//! old process is gone by then; the copy is retried for a few seconds to cover
+//! the gap. Launch-at-login is re-pointed at the same path afterwards.
 
 use crate::state::SharedState;
 use std::path::PathBuf;
@@ -22,7 +37,10 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 3600);
 
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn effective_version() -> String {
+/// The version this instance presents to everyone — status, `/version`, and the
+/// downgrade guard. Honors the `EMPYREAN_FAKE_VERSION` test hook so the whole
+/// update path can be exercised without cutting a release.
+pub fn effective_version() -> String {
     // Test hook: fake a lower running version to exercise the full update path.
     std::env::var("EMPYREAN_FAKE_VERSION").unwrap_or_else(|_| CURRENT_VERSION.to_string())
 }
@@ -204,9 +222,54 @@ fn download_and_launch(version: &str, url: &str, state: &SharedState) -> anyhow:
     if state.headless.load(Ordering::Relaxed) {
         cmd.arg("--headless");
     }
+    // Hand the successor the path we were launched from, so it can take our
+    // place there once we are gone (see the module docs).
+    if let Ok(current) = std::env::current_exe() {
+        cmd.arg("--promote-to").arg(current);
+    }
     cmd.spawn()
         .map_err(|e| anyhow::anyhow!("failed to launch {}: {e}", target.display()))?;
     Ok(())
+}
+
+/// Copy this running binary over `target`, which is where the operator launches
+/// from. Called after a takeover, once the process that held `target` has exited.
+///
+/// Retries: on Windows the file stays locked until the old process is fully gone,
+/// and that happens a moment after it acknowledges the handover.
+pub fn promote_over(target: &std::path::Path) {
+    let Ok(running) = std::env::current_exe() else {
+        return;
+    };
+    if running == target {
+        return; // already the launcher
+    }
+    let mut last_err = None;
+    for attempt in 0..30 {
+        std::thread::sleep(Duration::from_millis(200));
+        match std::fs::copy(&running, target) {
+            Ok(_) => {
+                log::info!(
+                    "promoted v{CURRENT_VERSION} over {} after {} attempt(s)",
+                    target.display(),
+                    attempt + 1
+                );
+                // Launch-at-login must follow, or the machine boots the binary we
+                // just replaced (which would then take over and downgrade).
+                let autostart = crate::config::load().autostart;
+                if autostart {
+                    crate::autostart::sync_path(true, target);
+                }
+                return;
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+    log::error!(
+        "could not promote over {} ({:?}) — the launcher still holds the old          version and will downgrade on the next manual start",
+        target.display(),
+        last_err
+    );
 }
 
 /// Delete versioned sibling binaries older than the running version. The running
@@ -222,7 +285,10 @@ fn cleanup_old_binaries() {
         let Some(rest) = name.strip_prefix("empyrean-gate-v") else { continue };
         let version_part = rest.trim_end_matches(".exe");
         if let Some(v) = parse_version(version_part) {
-            if v < cur && entry.path() != current_exe {
+            // `<=`, not `<`: after promotion the versioned sibling we were
+            // launched from is the same version as the running (promoted) image
+            // and is now dead weight. The running image itself is skipped.
+            if v <= cur && entry.path() != current_exe {
                 match std::fs::remove_file(entry.path()) {
                     Ok(()) => log::info!("cleaned up old binary {name}"),
                     Err(_) => {} // probably still running (mid-handover); next boot

@@ -13,6 +13,17 @@ use std::sync::atomic::{AtomicU8, Ordering};
 static SYNCED: AtomicU8 = AtomicU8::new(0);
 
 pub fn sync(enabled: bool) {
+    match std::env::current_exe() {
+        Ok(exe) => sync_path(enabled, &exe),
+        Err(e) => log::warn!("autostart: cannot resolve the running exe: {e}"),
+    }
+}
+
+/// Register `exe` rather than the running image. Used after a self-update
+/// promotion: the running image is the versioned sibling, but the entry must
+/// point at the launcher path we just replaced — otherwise the machine boots the
+/// versioned file and the promoted one is never used.
+pub fn sync_path(enabled: bool, exe: &std::path::Path) {
     #[cfg(windows)]
     {
         // Isolated instances (tests, spare dev copies) must not claim the
@@ -24,7 +35,6 @@ pub fn sync(enabled: bool) {
         if SYNCED.swap(want, Ordering::Relaxed) == want {
             return;
         }
-        let Ok(exe) = std::env::current_exe() else { return };
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         const KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
@@ -64,5 +74,5 @@ pub fn sync(enabled: bool) {
         }
     }
     #[cfg(not(windows))]
-    let _ = enabled;
+    let _ = (enabled, exe);
 }

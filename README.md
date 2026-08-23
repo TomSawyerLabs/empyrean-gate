@@ -249,11 +249,42 @@ Grab binaries from https://github.com/cinderblock/empyrean-gate/releases.
 
 No installer needed. The app checks GitHub Releases (startup + every 6 h; toggle in
 Settings → Updates) and shows a lit version chip in the top bar when a newer release
-exists — click it (or use Settings) to update: the new binary downloads *beside* the
-running one, launches, and takes over via the seamless handover. Mid-show updates
-cost about one frame. Auto-install is available but off by default; old versioned
-binaries are cleaned up automatically. (Instances older than v0.2.0 predate the
-updater and need one manual swap.)
+exists — click it (or use Settings) to update. Mid-show updates cost about one frame.
+Auto-install is available but off by default.
+
+What actually happens, since a standalone exe cannot overwrite itself while running:
+
+1. The new binary downloads *beside* the running one as `empyrean-gate-v<version>.exe`
+   and is launched.
+2. The successor performs the two-phase handover — it warms its GPU pipeline, the old
+   instance stops sACN and hands back config, layer phases and its sACN sequence
+   number, then exits.
+3. The successor **promotes** itself: it copies its own image over the path it was
+   launched from (passed as `--promote-to`), so the shortcut, the Start menu entry
+   and launch-at-login all point at the new version. Windows only releases the lock
+   once the old process is gone, so the copy retries for a few seconds.
+4. Superseded versioned siblings are deleted at the next startup.
+
+Step 3 is what makes an update stick. Without it the launcher keeps the old binary
+forever, and starting it finds the port busy and takes over — putting the *old*
+version back on the rig. That cannot happen any more regardless: an instance refuses
+to take the port from a **newer** one, and instead asks it to come forward
+(`POST /focus`) and exits.
+
+Instances older than v0.5.2 predate promotion, so moving off one needs a single
+manual download; from there updates are self-sustaining.
+
+### When an update misbehaves
+
+Release builds on Windows have no console, so logs go to a file next to the config:
+
+```
+%APPDATA%\EmpyreanGate\logs\empyrean-gate.log      # Windows
+~/.config/EmpyreanGate/logs/empyrean-gate.log      # Linux
+```
+
+It records the version and path at startup, every takeover, and every update step —
+including the promotion, which is the part that used to fail silently.
 
 ## Feedback reports
 

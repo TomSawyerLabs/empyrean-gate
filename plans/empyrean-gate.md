@@ -624,6 +624,47 @@ external MIDI). Merged straight to master on the user's call (2026-08-22).
 - Note: upstream added a `package-lock.json`. The project standardizes on Bun +
   `bun.lock`; left in place rather than deleted mid-merge, but it should go.
 
+### Round 14c: self-update was broken for standalone exes (2026-08-23)
+
+Reported from the field after v0.4.0 -> v0.5.1: "it downloads, quits, and then the
+new instance isn't running... launching the app again, it briefly says v0.5.1 but
+then changes to v0.4.0."
+
+That last detail is the whole diagnosis. The version chip reads `status.version`
+from whatever backend the webview is talking to, so showing v0.5.1 *first* proves
+the updated instance WAS running and holding the port. Then the freshly-launched
+old binary saw a busy port, ran the takeover, and displaced it — a downgrade,
+mid-show if a show had been running.
+
+Three defects, all fixed:
+
+1. **The launcher path was never updated.** The successor runs from
+   `empyrean-gate-v<version>.exe`; nothing ever replaced the exe the operator
+   actually double-clicks. So every manual start re-launched the old version,
+   forever. Now the updater passes `--promote-to <launcher path>` and the
+   successor copies itself there once the old process releases the lock
+   (retried ~6 s), then re-points launch-at-login at that path.
+2. **Takeover had no version check.** Any instance could displace any other.
+   Now an instance refuses to take the port from a NEWER one: it calls
+   `POST /focus` so the running window comes forward, and exits 0. New
+   `GET /version` endpoint; absent on pre-0.5.2 instances, which are treated as
+   "unknown" and handled as before.
+3. **There were no logs.** Release builds are `windows_subsystem = "windows"`, so
+   stderr goes nowhere — and a self-update's successor is a *child* process whose
+   stderr is even more lost. `logging.rs` tees to
+   `<config>/EmpyreanGate/logs/empyrean-gate.log` (5 MB, one generation kept).
+   This is why the report could only be symptoms.
+
+`scripts/update-flow-test.ts` reproduces the exact field failure with real
+processes on an isolated port/config and asserts all of it: old instance up →
+successor takes over → launcher promoted → a stale old binary refuses and exits
+with the new one still serving. Passes.
+
+**Note for the upgrade itself:** v0.4.0 and v0.5.1 both predate promotion, so
+their in-app update still leaves the launcher stale. One manual download of
+v0.5.2+ breaks the cycle; after that it is self-sustaining. The downgrade guard
+protects a v0.5.2 instance from any stale launcher left lying around.
+
 ### Windows shell gestures (asked 2026-08-22, not applied)
 
 The in-webview gestures are handled (round 14). The remaining ones are the

@@ -84,6 +84,8 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .route("/patch/registry", get(patch_registry))
         .route("/patch/presets", get(patch_presets))
         .route("/media/file/{id}", get(serve_media_file))
+        .route("/version", get(running_version))
+        .route("/focus", post(focus_window))
         .route("/reports", get(list_reports))
         .route("/reports/{id}/{file}", get(serve_report_file))
         .fallback(get(serve_asset))
@@ -297,6 +299,29 @@ fn parse_range(range: &str, total: u64) -> Option<(u64, u64)> {
 // ---------------------------------------------------------------------------
 // Static assets, QR, handover
 // ---------------------------------------------------------------------------
+
+/// What version is running here. Deliberately tiny and unauthenticated: a
+/// starting instance asks this BEFORE deciding whether to take the port, and it
+/// must work even when the running instance is a different (older or newer)
+/// build. Absent on instances older than v0.5.2, which the caller treats as
+/// "unknown".
+async fn running_version() -> Response {
+    axum::Json(serde_json::json!({ "version": crate::updater::effective_version() })).into_response()
+}
+
+/// Bring the running instance's window forward. Called by a second launch that
+/// refused to take over, so double-clicking a stale shortcut surfaces the app
+/// the operator already has rather than appearing to do nothing.
+async fn focus_window(
+    State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> Response {
+    if !addr.ip().is_loopback() {
+        return (StatusCode::FORBIDDEN, "focus is local-only").into_response();
+    }
+    ctx.state.focus_requested.store(true, Ordering::SeqCst);
+    StatusCode::NO_CONTENT.into_response()
+}
 
 // ---------------------------------------------------------------------------
 // Feedback report bundles

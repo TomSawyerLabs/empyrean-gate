@@ -292,6 +292,9 @@ pub struct SharedState {
     /// Full-resolution frames; each client task decimates/throttles for itself.
     pub preview: broadcast::Sender<Arc<PreviewFrame>>,
     pub video: Mutex<VideoInput>,
+    /// A second launch asked us to come forward (POST /focus) instead of taking
+    /// the port from us; the Tauri layer polls this and focuses the window.
+    pub focus_requested: AtomicBool,
     /// Set once the operator has confirmed closing a live show; the next window
     /// close request is then allowed through instead of being refused again.
     pub close_confirmed: AtomicBool,
@@ -343,6 +346,7 @@ impl SharedState {
             events,
             preview,
             video: Mutex::new(VideoInput::default()),
+            focus_requested: AtomicBool::new(false),
             close_confirmed: AtomicBool::new(false),
             recorder: crate::report::Recorder::new(),
             started: Instant::now(),
