@@ -1,5 +1,11 @@
 # Node-graph pattern paradigm ("patches")
 
+**STATUS: MERGED to master via PR #3 (2026-08-23).** Steps 1–4 complete,
+step 5 generator parity complete, video half of step 7 complete. Remaining:
+Layers-tab retirement (user-gated, after real-show validation), sub-patches
+(step 6), Feedback node (step 7), polish (step 8), and the queued dual-stack
+IPv6 listener fix.
+
 ## Goal
 
 Replace-over-time the fixed layer stack with a visual node-graph editor (TiXL /
