@@ -19,6 +19,7 @@ pub mod rhythm;
 pub mod sacn;
 pub mod server;
 pub mod state;
+pub mod taskbar;
 /// Windows-only: suppress the OS's touch feedback visuals on our windows.
 #[cfg(target_os = "windows")]
 pub mod touch;
@@ -273,6 +274,9 @@ fn backend_info(state: tauri::State<'_, Backend>) -> serde_json::Value {
 
 pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
     logging::init();
+    // Before any window exists: keeps ONE taskbar button across self-updates,
+    // which otherwise run from a new file each time and get a new button.
+    taskbar::set_app_identity();
     log::info!(
         "Empyrean Gate v{} starting from {}",
         updater::CURRENT_VERSION,

@@ -280,6 +280,11 @@ install either — click update and it heals itself. The one case that can't be
 recognised is a launcher renamed to something without "empyrean" in it; that is
 logged loudly.
 
+Updates keep a single taskbar button: the app declares an explicit
+AppUserModelID, without which Windows would give each new binary its own button
+and break a pinned shortcut. A versioned binary sits beside the launcher between
+an update and the next restart, then is cleaned up.
+
 ### When an update misbehaves
 
 Release builds on Windows have no console, so logs go to a file next to the config:

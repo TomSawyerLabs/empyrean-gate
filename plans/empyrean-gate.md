@@ -726,6 +726,43 @@ Known, not fixed: the deck's scheduler widget ("Blackout · 0.00 · HOLD") clips
 its own text at the default widget size. It lives inside a scrolling widget body
 so it is reachable, and it is the deck author's default layout.
 
+### Round 14e: the black square was the APP ICON (2026-08-23)
+
+"The thumbnail used everywhere still has that black square background
+everywhere" — after two rounds of chasing this in CSS. A DOM probe walking the
+canvas's ancestors at 1920x1080 and 820x1180 found no opaque background at all,
+which is what finally made the phrasing land: *the thumbnail used everywhere* is
+the app icon, and the sentence right after it was about the taskbar.
+
+Every icon was flattened onto the app's own backdrop: corner pixels were
+`(10, 8, 24, 255)`. Fully opaque. Windows drew that square verbatim in the
+taskbar, alt-tab, the window corner and pinned shortcuts.
+
+`scripts/rebuild-icons.py` undoes it exactly rather than guessing: the artwork is
+additive light on a known flat backdrop, so subtracting the backdrop leaves the
+light itself, alpha comes from the residual's strength, and the colour is
+un-premultiplied so the ring doesn't darken as it fades. Downsampling happens in
+premultiplied space or thin spokes bleed a halo. `icons/source-icon.png` keeps
+the original flattened artwork so this is repeatable.
+
+**Lesson worth keeping: "square background" was reported three times and only the
+third reading was right.** The first two fixes (tap highlight, widget panel) were
+real problems, but they were not this one. A DOM probe would have ruled out CSS
+in minutes at any point.
+
+Also this round: **one taskbar button across updates** (`taskbar.rs`). Windows
+derives taskbar identity from the exe path unless told otherwise, and a
+self-update runs from a new file every time, so each update produced a fresh
+button and broke pinning. `SetCurrentProcessExplicitAppUserModelID` with the
+app's identifier fixes it; it must run before any window exists.
+
+On "a new binary every time": expected, and transient. Windows cannot overwrite a
+running image, so an update downloads `empyrean-gate-v<version>.exe` beside the
+launcher and promotes over the launcher from there. Between the update and the
+next restart both exist; `cleanup_old_binaries` deletes versioned siblings
+`<= current` (skipping the running image) at the next startup, so it does not
+accumulate.
+
 ### Windows shell gestures (asked 2026-08-22, not applied)
 
 The in-webview gestures are handled (round 14). The remaining ones are the
