@@ -103,8 +103,10 @@ path is an iPad on the show LAN, which is unaffected.
 4. [x] User restarted the app, which cleared the immediate symptom.
 5. [x] Land the remote-session guard on the periodic save (`session.rs` +
    `lib.rs`). Compiles clean, no new clippy warnings.
-6. [ ] **Current step.** Not committed — see "Commit blocked" below.
-7. [ ] Decide whether to close the exit-path hole and/or add self-heal.
+6. [x] Committed as `9a69892` "Hold window geometry while an RDP session is
+   attached" — see "How it got committed" below.
+7. [ ] **Current step.** Decide whether to close the exit-path hole and/or add
+   self-heal.
 
 ## The fix that landed
 
@@ -149,26 +151,34 @@ Self-heal (auto re-applying geometry when the remote session detaches) was
 deliberately *not* built: it would move the show window on a live rig, which is
 a worse failure than needing one F11.
 
-## Commit blocked — shared working tree
+## How it got committed — shared working tree
 
-Another agent is actively working in this tree and has a **large changeset
-staged in the index** (discovery.rs, testmode.rs, Test.tsx, README.md,
-scripts/, ~3400 insertions across 23 files). None of it is mine, so this work
-was **not committed** — a `git commit` would have swept all of it up.
+This work was deliberately left staged-but-uncommitted, because a peer agent
+was working in the same tree and had ~3400 insertions across 23 files staged in
+the index (discovery.rs, testmode.rs, Test.tsx, README.md, scripts/). Committing
+would have swept all of that into one commit.
 
-State left behind:
-- My changes are in the working tree and also staged (`session.rs`,
-  `plans/rdp-window-state-corruption.md`, and my hunks in `lib.rs`).
-- `lib.rs` in the index contains **both** my `pub mod session;` + guard and the
-  peer's `pub mod discovery;` / `pub mod testmode;`, so the index is consistent
-  and builds.
-- Safety snapshot taken (working tree + index), recoverable:
-  `stash@{0}` — "safety: peer agent staged changeset + RDP window-state guard".
+The peer then **rewrote history** at 12:24 local (reflog: `reset: moving to
+6974c8a` at 12:24:55, after re-committing the chain at 12:24:21–12:24:42), and
+in doing so split this work out cleanly on its own:
 
-To commit only this work once the peer's changeset is dealt with, the three
-paths are `src-tauri/src/session.rs`, `plans/rdp-window-state-corruption.md`,
-and the two `lib.rs` hunks (`pub mod session;`, and the `skipping` guard inside
-the 5 s thread).
+```
+9a69892  Hold window geometry while an RDP session is attached
+         plans/rdp-window-state-corruption.md | 189 +
+         src-tauri/src/lib.rs                 |  20 +
+         src-tauri/src/session.rs             |  37 +
+```
+
+Verified after the fact: `session.rs` and the plan in `HEAD` are byte-identical
+to the working tree, the guard block is intact in `HEAD:src-tauri/src/lib.rs`,
+`git status` is clean for all three paths, and `cargo check --lib` passes.
+
+Note the pre-rewrite SHAs (`f0ee5d6`, `6ce643e`, `0faaa61`, `f11d401`,
+`dcb5c4d`) are gone from the branch; they are still reachable via the reflog if
+anything looks missing.
+
+Safety snapshot of the pre-commit state is at `stash@{0}` — "safety: peer agent
+staged changeset + RDP window-state guard". Safe to drop once this is settled.
 
 ## Things not to do
 
