@@ -53,10 +53,13 @@ a design question — take it once and lock it in:
   offset** (a rotation)?
 
 Neither shows up in the universe numbers — all 64 spokes light correctly either way, but
-chases sweep the wrong way and/or start on the wrong side of the room. Measure with the
-Test tab: pixel index 0 → spoke 0 position 0 (which physical spoke, which end); pixel index
-`pixels_per_spoke` → spoke 1 position 0 (which neighbour ⇒ direction). Requires sACN output
-enabled, i.e. real light on the rig.
+chases sweep the wrong way and/or start on the wrong side of the room. Reading the wire
+cannot settle it either: `sacn-listen` proves universe 7 carries a spoke's worth of
+pixels, not which physical arm that is. Measure with the Test tab: pixel index 0 → spoke 0
+position 0 (which physical spoke, which end); pixel index `pixels_per_spoke` → spoke 1
+position 0 (which neighbour ⇒ direction). Requires sACN output enabled *and* reaching the
+rig — as of 2026-08-23 LightJams outranks Gate on priority, so Gate must win the handover
+before any of this is visible.
 
 If mirroring or an offset turns out to be needed, it belongs in config (a spoke-order
 mapping), not in per-pattern math — every layer and effect derives angle from the spoke
@@ -959,6 +962,48 @@ established pattern for machine settings this app needs.
   build) — huge headroom vs the 16.6 ms 60 fps budget.
 - cpal 0.18: `Device::name()` is gone → `device.description()?.name()`; `SampleRate`
   is a plain `u32`; `build_input_stream` takes `StreamConfig` by value.
+
+## Round 14 (2026-08-23): match the installed patch, then verify it from the wire
+
+Started from a screenshot of the controller software's patch table and ended with the
+live rig's own traffic decoded. What changed:
+
+- `output.universe_stride` (default 6). The rig allocates a 6-universe block per spoke
+  and uses 3; strips sit on every other PixLite output, half of each block reserved for
+  the doubling. The sender packed spokes tightly, so spoke 1 landed on universe 4 where
+  the rig listens on 7, and the error compounded around the ring.
+- `pixels_per_spoke` 350 → 378 in the defaults, and **set on the Gate machine itself**
+  (2026-08-23, at the user's request) via the WS `set_config` API — editing `config.json`
+  would be clobbered by the running process. Confirmed on disk and on the wire.
+- Spoke numbering displayed 0-based everywhere; universes/channels stay 1-based. See the
+  indexing-conventions bullet at the top.
+- New `sacn-listen` binary: passive E1.31 decoder that reports traffic in this
+  installation's terms ("universe 7 = spoke 1, px 0-169") and compares each universe's
+  used extent against what the config predicts.
+
+Wire evidence (LightJams driving the rig, ~31.7k packets): block starts every 6
+universes, offsets 0 and 1 carrying 510 channels, offset 2 carrying exactly 114
+(38 px), nothing at all on offsets 3-5, 63 consecutive spoke blocks with no gaps.
+The patch is confirmed independently of the screenshot it was derived from.
+
+### Gotchas found the hard way
+
+- **Multicast joins lie at scale.** `join_multicast_v4` returns Ok for all 400 groups;
+  the NIC's filter table (commonly 32-64) then drops the rest in hardware, silently.
+  130+ universes looked exactly like universes nobody was transmitting. `sacn-listen`
+  sweeps in windows above `--window` and says so. Any future receiver must do the same.
+- **E1.31 priority outranks, it does not blend.** LightJams transmits at priority 101,
+  Gate at 100, on the same 192 universes: receivers follow the highest priority and
+  ignore the rest outright — Gate's output never reaches the rig. Only *equal*
+  priorities merge (HTP). The user is handling the handover separately.
+- **`config::load()` writes to whatever `EMPYREAN_CONFIG` points at** (generates the CID
+  and join token when blank, leaves a `.json.bak`). Pointing a tool at
+  `tests/fixtures/default-config.json` therefore dirties the fixture and breaks its
+  guard test. Restore it afterwards.
+- The Gate machine has `require_token: true`; a WS client must send `server.join_token`
+  in its hello or gets `denied` after the first `state` message.
+- `Instant::now() + Duration::MAX` panics with an overflow. Model "no deadline" as
+  `Option<Instant>`.
 
 ## Open questions for the user
 
