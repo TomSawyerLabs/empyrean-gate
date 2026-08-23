@@ -64,6 +64,12 @@ jobs:
           bunx playwright install --with-deps chromium
           bun run test:layout
 
+      # Same reasoning, same bundle: whatever checks.yml gates a push on, a
+      # release has to clear too.
+      - name: UI behaviour tests
+        if: runner.os == 'Linux'
+        run: bun run test:behavior
+
       - name: Build standalone binary
         run: bun tauri build --no-bundle
 
