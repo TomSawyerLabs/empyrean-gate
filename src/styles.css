@@ -957,10 +957,17 @@ main {
 }
 
 /* Tighter still: the version/update chip is the least urgent thing up there and
-   the same information (plus the install button) lives in Settings → Updates. */
+   the same information (plus the install button) lives in Settings → Updates.
+   The transient "✓ saved" flash goes too, and the tabs give up some padding —
+   six tabs plus the action icons otherwise wrap onto a second row on an iPad in
+   portrait, and that row costs the array 30-odd pixels of height. */
 @media (max-width: 950px) {
-  .topbar > .version-chip {
+  .topbar > .version-chip,
+  .topbar > .saved-chip {
     display: none;
+  }
+  .topbar nav button {
+    padding: 6px 9px;
   }
 }
 
@@ -2728,6 +2735,21 @@ button:disabled {
 .control-widget-preview {
   container-type: size;
   background: rgba(7, 6, 15, 0.42);
+}
+
+/* The array is LIGHT. Its canvas is transparent so the ring composites over the
+   page, the way it does over a dark room — the whole reason `buildGl` asks for
+   an alpha context. Sitting it in a widget panel puts a black square around it,
+   which is what "the thumbnail has a black square background" was.
+   Only the preview widget is stripped, and only while performing: the other
+   widgets are buttons and want their panel, and edit mode needs visible bounds
+   to drag and resize. Deliberately not inside a width media query — the square
+   was there at every size below 1180px, which is every iPad and small window. */
+.control-deck-page:not(.deck-editing) .control-widget-preview,
+.control-deck-page:not(.deck-editing) .control-widget-preview .control-widget-body {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .control-widget-body {
