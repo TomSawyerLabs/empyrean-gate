@@ -20,7 +20,17 @@ keyboard/mouse/touch. CI builds a standalone binary (no installer/updater).
   default inner radius 8 ft (configurable; user unsure).
 - LED density 30 or 60 LED/m (default 60, configurable; only affects physical-space mapping).
 - **Strings are fed from the outside**: pixel 0 = outer radius (50 ft dia), last pixel =
-  innermost radius. Spoke direction matters for chases.
+  innermost radius. **Confirmed 100% by the user 2026-08-23** — treat as fixed, not an
+  assumption. Spoke direction matters for chases.
+- **Indexing conventions** (they differ on purpose; this is a classic off-by-one trap):
+  spokes and pixels are **0-based** everywhere — config, engine, Test tab, Settings hint.
+  Universes and channels are **1-based**, because that is the wire format and what
+  controller software shows. `start_universe: 1` is literally universe 1; channel 1 is the
+  first slot after the DMX start code (`property_count = 1 + data_len`, start code 0x00 at
+  byte 125, slots from 126 — verified, no off-by-one). The controller's own strip labels
+  are a *third* numbering: with stride 6 and the odd outputs wired, LightJams "Strip 01,
+  03, 05 … 127" correspond to our spokes 0, 1, 2 … 63 (strip = 2·spoke + 1). Cross-
+  reference by **universe number**, which is unambiguous in both systems.
 - Protocol: sACN over UDP 5568. Unicast to controller IPs (configurable) or multicast
   239.255.u.u. 378 px = 1134 ch → 3 universes/spoke of data (170 px per universe: two
   full at 510 ch, then 38 px = 114 ch), each spoke starting on a fresh universe
@@ -30,6 +40,27 @@ keyboard/mouse/touch. CI builds a standalone binary (no installer/updater).
   other PixLite output, so spoke N starts at `1 + 6N`: 001.001–003.114, 007.001–009.114,
   … 379.001–381.114. Universes 4–6, 10–12, … are reserved for the doubling and stay
   dark. Set the field to 0 to pack spokes with no gaps.
+
+## Open: spoke order and rotational direction (the last unknown in the mapping)
+
+The addressing is settled and test-pinned; **which physical spoke each universe block
+drives is not**. The strips are in a defined physical order, so this is a measurement, not
+a design question — take it once and lock it in:
+
+- Unknown 1: does our spoke index advance the same rotational direction as the patch, or
+  does the structure need **mirroring**?
+- Unknown 2: is our spoke 0 the same strip the patch calls first, or is there an **origin
+  offset** (a rotation)?
+
+Neither shows up in the universe numbers — all 64 spokes light correctly either way, but
+chases sweep the wrong way and/or start on the wrong side of the room. Measure with the
+Test tab: pixel index 0 → spoke 0 position 0 (which physical spoke, which end); pixel index
+`pixels_per_spoke` → spoke 1 position 0 (which neighbour ⇒ direction). Requires sACN output
+enabled, i.e. real light on the rig.
+
+If mirroring or an offset turns out to be needed, it belongs in config (a spoke-order
+mapping), not in per-pattern math — every layer and effect derives angle from the spoke
+index, so one mapping at the boundary fixes all of them at once.
 
 ## Decisions already made (don't re-ask)
 

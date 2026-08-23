@@ -1050,15 +1050,25 @@ function OutputPanel({ config }: { config: AppConfig }) {
         <NumberField label="Priority" value={out.priority} onCommit={(v) => commit({ priority: v })} />
       </div>
       <p className="hint">
-        Universe map: spoke 1 = {addr(out.start_universe, 1)} → {spokeEnd(0)}, spoke 2 starts
-        at {addr(out.start_universe + stride, 1)}, spoke {spokes} ends at {spokeEnd(spokes - 1)}.
-        That is {dataUniverses} universes of data per spoke ({spokes * dataUniverses} total)
+        Universe map: spoke 0 = {addr(out.start_universe, 1)} → {spokeEnd(0)}, spoke 1 starts
+        at {addr(out.start_universe + stride, 1)}, spoke {spokes - 1} ends at{" "}
+        {spokeEnd(spokes - 1)}. That is {dataUniverses} universes of data per spoke (
+        {spokes * dataUniverses} total)
         {stride > dataUniverses
           ? `, with ${stride - dataUniverses} reserved universes left dark between spokes.`
           : ", packed with no gaps."}{" "}
         Set universes/spoke to reserve room a controller patch already allocates — the rig's
         PixLites are mapped 6 per spoke with every other output wired, so the second half of
         each block waits for the doubling.
+      </p>
+      <p className="hint">
+        Counting conventions, because they differ on purpose: <strong>spokes and pixels are
+        0-based</strong> (spoke 0 … spoke {spokes - 1}, pixel 0 = the OUTER end), matching the
+        Test tab and the engine's own indexing. <strong>Universes and channels are 1-based</strong>,
+        because that is what goes on the wire and what controller software displays — start
+        universe {out.start_universe} really is universe {out.start_universe}, and channel 1 is
+        the first slot after the DMX start code. So the app's spoke 0 is the first strip in the
+        controller's patch, whatever that patch calls it.
       </p>
       <p className="hint">
         LED-wire ceiling at {pxPerString} px/string: ~{wireFpsCap.toFixed(0)} fps (800 kbps ×
