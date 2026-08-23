@@ -26,9 +26,11 @@
 //! Discovery: while transmitting, the universe list is advertised on the E1.31
 //! discovery universe every 10 s, so sACNView and controller UIs can see this source.
 //!
-//! Universe layout: each spoke occupies `universes_per_spoke` consecutive universes
-//! starting at `start_universe + spoke * universes_per_spoke`, `pixels_per_universe`
-//! RGB pixels per universe, channel 1 = red of the spoke's outermost pixel.
+//! Universe layout: each spoke fills `universes_per_spoke` consecutive universes
+//! starting at `start_universe + spoke * universe_stride`, `pixels_per_universe`
+//! RGB pixels per universe, channel 1 = red of the spoke's outermost pixel. The
+//! stride can exceed what the pixels need, leaving reserved universes dark between
+//! spokes to match a controller patch (see `OutputConfig::universe_stride`).
 
 use crate::config::{GeometryConfig, OutputConfig};
 use crate::geometry;
@@ -144,6 +146,7 @@ impl SacnSender {
         let mut plan = Vec::new();
         let ppu = out.pixels_per_universe.max(1) as u32;
         let ups = geometry::universes_per_spoke(geo, out) as u32;
+        let stride = geometry::universe_stride(geo, out) as u32;
 
         for spoke in 0..geo.spokes {
             // Destination mode is exclusive. The old UI exposed multicast and
@@ -160,7 +163,7 @@ impl SacnSender {
                     break;
                 }
                 let count = ppu.min(geo.pixels_per_spoke - first_pixel);
-                let universe = out.start_universe + (spoke * ups + u) as u16;
+                let universe = out.start_universe + (spoke * stride + u) as u16;
                 let multicast = out
                     .multicast
                     .then(|| SocketAddrV4::new(multicast_group(universe), SACN_PORT));
@@ -695,11 +698,40 @@ mod tests {
         let out = OutputConfig {
             cid: "01234567-89ab-cdef-0123-456789abcdef".into(),
             pixels_per_universe: 4,
+            universe_stride: 0, // pack tightly: these tests are about sequencing
             multicast: false,  // no controllers configured either → no destinations
             discovery: false,  // keep the test off the wire entirely
             ..Default::default()
         };
         (geo, out)
+    }
+
+    /// The shipped defaults must reproduce the controller patch the rig is already
+    /// wired to: strips on every other PixLite output, so spoke N starts six
+    /// universes after spoke N-1 while only three of those carry data.
+    #[test]
+    fn defaults_match_the_installed_controller_patch() {
+        let geo = GeometryConfig::default();
+        let out = OutputConfig {
+            cid: "01234567-89ab-cdef-0123-456789abcdef".into(),
+            multicast: false, // no controllers → offline, no destinations
+            discovery: false,
+            ..Default::default()
+        };
+        let mut s = SacnSender::new().unwrap();
+        s.configure(&geo, &out);
+
+        assert_eq!(s.plan.len(), 64 * 3, "378 px at 170/universe = 3 per spoke");
+        let universes: Vec<u16> = s.plan.iter().map(|p| p.universe).collect();
+        // Strip 01 → 1-3, Strip 03 → 7-9, … Strip 127 → 379-381.
+        assert_eq!(&universes[..6], &[1, 2, 3, 7, 8, 9]);
+        assert_eq!(*universes.last().unwrap(), 381);
+
+        // Each spoke's third universe ends at channel 114: 378 - 2*170 = 38 px.
+        let tail = &s.plan[2];
+        assert_eq!(tail.universe, 3);
+        assert_eq!(tail.src_len, 38 * 3, "sACN 003.001 … 003.114");
+        assert_eq!(s.plan[0].src_len, 170 * 3);
     }
 
     #[test]

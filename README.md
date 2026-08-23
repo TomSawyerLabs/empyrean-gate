@@ -1,7 +1,7 @@
 # Empyrean Gate
 
 GPU pattern generator and sACN pixel driver for the **Empyrean Gate** — a radial array
-of lights above a dance floor: 64 spokes of LED strip (~350 px each, fed from the
+of lights above a dance floor: 64 spokes of LED strip (378 px each, fed from the
 outside) in a 50 ft diameter ring, driven by 16× Advatek PixLite Mk4-S controllers over
 sACN (E1.31).
 
@@ -334,7 +334,12 @@ its backing square under a tap.
   universes at 60 fps is real traffic; unicast to controller IPs is preferred over
   multicast.
 - Everything about the geometry (spoke count, pixels, radii, universe layout) is
-  config, editable live in Settings and persisted to the user config dir.
+  config, editable live in Settings and persisted to the user config dir. The
+  defaults reproduce the patch the rig is already wired to: 378 px per spoke, 170
+  px per universe (3 universes of data), and a **6-universe stride per spoke** —
+  spoke 1 at 001.001–003.114, spoke 2 at 007.001, … spoke 64 ending at 381.114.
+  The reserved universes between spokes are the unwired half of each PixLite's 8
+  outputs, held for the planned doubling; nothing is transmitted on them.
 - Remote media fetching accepts only HTTP(S), rejects credentials and local/private/
   reserved destinations, pins each connection to its validated DNS answers,
   bypasses system proxies, revalidates redirects, caps inspected HTML and live proxy

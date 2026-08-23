@@ -18,12 +18,22 @@ pub fn pixel_polar(geo: &GeometryConfig, spoke: u32, i: u32) -> (f32, f32) {
     (angle, radius)
 }
 
-/// Universes needed per spoke (each spoke starts on a fresh universe boundary).
+/// Universes that actually carry pixels for one spoke.
 pub fn universes_per_spoke(geo: &GeometryConfig, out: &OutputConfig) -> u16 {
     let ppu = out.pixels_per_universe.max(1) as u32;
     geo.pixels_per_spoke.div_ceil(ppu) as u16
 }
 
+/// Spacing between consecutive spokes' start universes — each spoke begins on a
+/// fresh universe boundary, and the patch may reserve more universes per spoke
+/// than the pixels need (`output.universe_stride`; see its doc comment). Never
+/// less than the data requires, or spokes would overlap on the wire.
+pub fn universe_stride(geo: &GeometryConfig, out: &OutputConfig) -> u16 {
+    universes_per_spoke(geo, out).max(out.universe_stride)
+}
+
+/// Universes we transmit. Reserved-but-unused universes inside each spoke's block
+/// are not counted: nothing is sent on them.
 pub fn total_universes(geo: &GeometryConfig, out: &OutputConfig) -> u16 {
     universes_per_spoke(geo, out) * geo.spokes as u16
 }

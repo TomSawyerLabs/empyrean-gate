@@ -1,7 +1,7 @@
 {
   "geometry": {
     "spokes": 64,
-    "pixels_per_spoke": 350,
+    "pixels_per_spoke": 378,
     "outer_radius_ft": 25.0,
     "inner_radius_ft": 8.0,
     "leds_per_meter": 60.0
@@ -14,6 +14,7 @@
     "sync_universe": 0,
     "start_universe": 1,
     "pixels_per_universe": 170,
+    "universe_stride": 6,
     "controllers": [],
     "strings_per_controller": 4,
     "multicast": true,

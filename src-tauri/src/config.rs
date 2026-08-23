@@ -24,7 +24,7 @@ impl Default for GeometryConfig {
     fn default() -> Self {
         Self {
             spokes: 64,
-            pixels_per_spoke: 350,
+            pixels_per_spoke: 378,
             outer_radius_ft: 25.0,
             inner_radius_ft: 8.0,
             leds_per_meter: 60.0,
@@ -59,6 +59,15 @@ pub struct OutputConfig {
     pub start_universe: u16,
     /// Pixels per universe (170 * 3 = 510 channels fits the 512-channel DMX frame).
     pub pixels_per_universe: u16,
+    /// Universes allocated per spoke — the spacing between consecutive spokes'
+    /// start universes. 0 = pack tightly, using only what the pixels need.
+    /// The existing rig is patched 6 per spoke while only 3 carry data (378 px at
+    /// 170/universe): the 16 PixLite Mk4 boxes have 8 outputs each and only every
+    /// other output is wired today, so the controller map already reserves the
+    /// second half of each block for the planned doubling. Spoke N therefore
+    /// starts at `start_universe + N * 6` — 1, 7, 13 … 379 — and universes
+    /// 4-6, 10-12 … are deliberately left dark.
+    pub universe_stride: u16,
     /// Unicast destinations, one per controller in spoke order. Used only when
     /// `multicast` is false; controller i drives `strings_per_controller` spokes.
     /// Empty entries leave the corresponding spokes without an output destination.
@@ -100,6 +109,7 @@ impl Default for OutputConfig {
             sync_universe: 0,
             start_universe: 1,
             pixels_per_universe: 170,
+            universe_stride: 6,
             controllers: Vec::new(),
             strings_per_controller: 4,
             multicast: true,

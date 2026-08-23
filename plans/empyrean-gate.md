@@ -11,16 +11,25 @@ keyboard/mouse/touch. CI builds a standalone binary (no installer/updater).
 ## Physical installation (defaults; ALL configurable in-app — user is unsure of exact numbers)
 
 - 64 spokes of LED strip in a radial array ("wagon wheel" viewed from below).
-- 16× Advatek Pixlite Mk4-S controllers, 4 strings each → 64 strings, 1 string = 1 spoke.
-- ~350 px per spoke (default 350, configurable).
+- 16× Advatek Pixlite Mk4-S controllers. Each box has **8 outputs but only 4 are
+  wired** — every other output — giving 64 strings, 1 string = 1 spoke. The unused
+  half is deliberate: the rig is intended to double to 128 spokes later.
+- **378 px per spoke** (confirmed 2026-08-23 against the existing controller patch;
+  matches the 64×378 Uprising recordings the Archive tab replays).
 - Major (outer) diameter 50 ft → outer radius 25 ft. Minor radius ~15–20 ft diameter →
   default inner radius 8 ft (configurable; user unsure).
 - LED density 30 or 60 LED/m (default 60, configurable; only affects physical-space mapping).
 - **Strings are fed from the outside**: pixel 0 = outer radius (50 ft dia), last pixel =
   innermost radius. Spoke direction matters for chases.
 - Protocol: sACN over UDP 5568. Unicast to controller IPs (configurable) or multicast
-  239.255.u.u. 350 px = 1050 ch → 3 universes/spoke (170 px per universe), each spoke
-  starts on a fresh universe boundary → 192 universes total by default.
+  239.255.u.u. 378 px = 1134 ch → 3 universes/spoke of data (170 px per universe: two
+  full at 510 ch, then 38 px = 114 ch), each spoke starting on a fresh universe
+  boundary → 192 universes transmitted.
+- **Universe stride is 6, not 3** (`output.universe_stride`, added 2026-08-23). The
+  installed patch allocates a 6-universe block per spoke because strips sit on every
+  other PixLite output, so spoke N starts at `1 + 6N`: 001.001–003.114, 007.001–009.114,
+  … 379.001–381.114. Universes 4–6, 10–12, … are reserved for the doubling and stay
+  dark. Set the field to 0 to pack spokes with no gaps.
 
 ## Decisions already made (don't re-ask)
 
@@ -890,8 +899,9 @@ established pattern for machine settings this app needs.
 
 ## Open questions for the user
 
-1. Exact pixel count / density / minor radius — defaults chosen, all editable in
-   Settings → Geometry. Update `default-config` when real numbers are known.
+1. Pixel count and universe map are now confirmed against the installed patch (378
+   px/spoke, 6-universe stride) and shipped in `default-config`. Still estimates:
+   LED density (60/m) and the minor radius (8 ft) — editable in Settings → Geometry.
 2. Show machine OS? CI builds Windows + Linux; add macOS on request.
 3. Which public video providers matter in practice? Direct files and standards-based
    metadata work now; changing provider sites remain optional `yt-dlp` territory.

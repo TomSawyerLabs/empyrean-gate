@@ -886,6 +886,18 @@ function OutputPanel({ config }: { config: AppConfig }) {
   const pxPerString = config.geometry.pixels_per_spoke;
   const wireFpsCap = 1 / ((pxPerString * 30e-6) + 300e-6);
 
+  // Universe map, in the same u.chan notation controller software uses, so it can
+  // be compared line by line against the patch the rig is already wired to.
+  const ppu = Math.max(1, out.pixels_per_universe);
+  const dataUniverses = Math.max(1, Math.ceil(pxPerString / ppu));
+  const stride = Math.max(dataUniverses, out.universe_stride);
+  const spokes = Math.max(1, config.geometry.spokes);
+  const tailChannel = (pxPerString - (dataUniverses - 1) * ppu) * 3;
+  const addr = (u: number, ch: number) =>
+    `${String(u).padStart(3, "0")}.${String(ch).padStart(3, "0")}`;
+  const spokeEnd = (spoke: number) =>
+    addr(out.start_universe + spoke * stride + dataUniverses - 1, tailChannel);
+
   return (
     <section className="panel">
       <h2>sACN output</h2>
@@ -1020,6 +1032,11 @@ function OutputPanel({ config }: { config: AppConfig }) {
           onCommit={(v) => commit({ pixels_per_universe: v })}
         />
         <NumberField
+          label="Universes / spoke (0 = packed)"
+          value={out.universe_stride}
+          onCommit={(v) => commit({ universe_stride: v })}
+        />
+        <NumberField
           label="Strings / controller"
           value={out.strings_per_controller}
           onCommit={(v) => commit({ strings_per_controller: v })}
@@ -1032,6 +1049,17 @@ function OutputPanel({ config }: { config: AppConfig }) {
         />
         <NumberField label="Priority" value={out.priority} onCommit={(v) => commit({ priority: v })} />
       </div>
+      <p className="hint">
+        Universe map: spoke 1 = {addr(out.start_universe, 1)} → {spokeEnd(0)}, spoke 2 starts
+        at {addr(out.start_universe + stride, 1)}, spoke {spokes} ends at {spokeEnd(spokes - 1)}.
+        That is {dataUniverses} universes of data per spoke ({spokes * dataUniverses} total)
+        {stride > dataUniverses
+          ? `, with ${stride - dataUniverses} reserved universes left dark between spokes.`
+          : ", packed with no gaps."}{" "}
+        Set universes/spoke to reserve room a controller patch already allocates — the rig's
+        PixLites are mapped 6 per spoke with every other output wired, so the second half of
+        each block waits for the doubling.
+      </p>
       <p className="hint">
         LED-wire ceiling at {pxPerString} px/string: ~{wireFpsCap.toFixed(0)} fps (800 kbps ×
         24 bits/px + reset). Ethernet is not the limit. Sync universe uses E1.31 universe
@@ -1059,7 +1087,11 @@ function OutputPanel({ config }: { config: AppConfig }) {
         unicast keeps lighting traffic off unrelated switch ports.
       </p>
       <label className="field-col">
-        <span>Controller IPs (one per line, in spoke order; controller N drives spokes N×4…N×4+3)</span>
+        <span>
+          Controller IPs (one per line, in spoke order; controller N drives{" "}
+          {out.strings_per_controller} spokes, N×{out.strings_per_controller}…N×
+          {out.strings_per_controller}+{Math.max(1, out.strings_per_controller) - 1})
+        </span>
         <textarea
           rows={6}
           defaultValue={out.controllers.join("\n")}

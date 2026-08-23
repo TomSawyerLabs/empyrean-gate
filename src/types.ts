@@ -111,6 +111,8 @@ export interface OutputConfig {
   sync_universe: number;
   start_universe: number;
   pixels_per_universe: number;
+  /** Universes allocated per spoke (spacing between spoke start universes); 0 = packed. */
+  universe_stride: number;
   controllers: string[];
   strings_per_controller: number;
   multicast: boolean;
