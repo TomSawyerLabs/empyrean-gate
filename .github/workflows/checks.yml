@@ -31,6 +31,12 @@ jobs:
       - name: Layout gate
         run: bun run test:layout
 
+      # Reuses the bundle the layout gate just built. Covers the browser-only
+      # bits the typechecker cannot see — quick-setting edit mode, and the
+      # migration that carries shortcuts off the removed control decks.
+      - name: UI behaviour tests
+        run: bun run test:behavior
+
       - uses: actions/upload-artifact@v6
         if: failure()
         with:

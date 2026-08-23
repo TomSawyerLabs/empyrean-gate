@@ -3,12 +3,14 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = 9531;
 
 /**
- * Layout gate only — this is not a general UI test suite. One browser
- * (Chromium: WebView2 on the Gate machine and Safari/Chrome on the iPads all
- * lay out to the same CSS box model, and a second engine would double CI time
- * to re-check the same rules).
+ * The layout gate plus the handful of UI behaviours that only exist in the
+ * browser — this is not a general UI test suite. One browser (Chromium: WebView2
+ * on the Gate machine and Safari/Chrome on the iPads all lay out to the same CSS
+ * box model, and a second engine would double CI time to re-check the same
+ * rules).
  *
- * `bun run test:layout` builds the bundle, starts the mock backend, and runs it.
+ * `bun run test:layout` builds the bundle, starts the mock backend, and runs the
+ * gate; `bun run test:behavior` runs the rest against an already-built bundle.
  */
 export default defineConfig({
   testDir: "./tests",

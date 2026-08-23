@@ -21,7 +21,12 @@ sources) drives the patterns via beat tracking and band energies.
 The Live surface adapts to the window: the array view stays as large as possible and
 the controls flow into whatever space is left — side columns, top/bottom bars, or the
 corners the circle never reaches. The empty ring center carries the title, beat, and
-live meters.
+live meters. The columns reflow into more sub-columns as the leftover space grows, so
+an ultrawide show display shows everything at once. Where the window genuinely has no
+room — a squarish aux window, a portrait tablet — the secondary controls (master,
+quick settings, layers, status) fold behind an **All controls** sheet rather than
+taking size away from the array. The whole thing is chosen by CSS aspect-ratio media
+queries, so it is correct at first paint with nothing to arrange or maintain.
 
 **Show mode** (⛶ in the top bar, or F11) takes the native window fullscreen and hides
 the app chrome so the array fills the display; Esc or the corner pill brings it back.

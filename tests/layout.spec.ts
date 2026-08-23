@@ -12,9 +12,9 @@
 //   2. Nothing is silently clipped: a box that hides its overflow must be big
 //      enough for what is inside it.
 //
-// Vertical scrolling is NOT a failure by itself — Settings and the Live control
-// deck are both explicitly scrolling surfaces (`.control-deck-page` is
-// `height: auto; min-height: 100%`). See MUST_FIT_VERTICALLY.
+// Vertical scrolling is NOT a failure by itself — Settings is an explicitly
+// scrolling surface, and so is Live below the 700px mobile breakpoint. See
+// MUST_FIT_VERTICALLY.
 //
 // Anything deliberately parked offscreen must say so with `data-layout-exempt`.
 
@@ -45,9 +45,9 @@ const TABS = ["live", "media", "control", "test", "settings"] as const;
 ///
 /// Live is the performance surface: a scrollbar there means a touch drag scrolls
 /// the page instead of playing the array, which is the bug that prompted this
-/// gate in the first place. The rule was off for one round while the control
-/// deck sized its rows at a fixed 48px and therefore scrolled below 1080p; the
-/// deck now derives row height from the space it is given, so this holds again.
+/// gate in the first place. The aspect-adaptive layout keeps the whole surface
+/// inside the window at every viewport here; where a control column runs out of
+/// height it scrolls itself, which is a nested scroller and not the document.
 const MUST_FIT_VERTICALLY = new Set<string>(["live"]);
 
 interface Overflow {
@@ -97,7 +97,7 @@ async function overflows(
     const exempt = (el: Element) => !!el.closest("[data-layout-exempt], .visually-hidden");
 
     /// True when the element lives inside a scroll region other than <main> — a
-    /// deck widget body, a modal's scroll area. Content there is reachable by
+    /// Live control column, a modal's scroll area. Content there is reachable by
     /// scrolling *that* region, so it is not clipped and not our business.
     /// <main> is excluded from that reasoning on purpose: it is the page, and a
     /// scrollbar on it is exactly the symptom this gate exists to catch.

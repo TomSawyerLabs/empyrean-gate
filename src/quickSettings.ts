@@ -63,6 +63,58 @@ export function defaultQuickSettings(): QuickSettingShortcut[] {
   }];
 }
 
+const STORAGE_KEY = "empyrean-live-quick-settings-v1";
+/// Shortcuts used to be a field on the quick-settings *widget* of a control deck.
+/// The decks are gone; a customized Blackout button should not be.
+const LEGACY_DECK_KEY = "empyrean-control-decks-v1";
+
+function isShortcut(value: unknown): value is QuickSettingShortcut {
+  if (!value || typeof value !== "object") return false;
+  const shortcut = value as Partial<QuickSettingShortcut>;
+  return (
+    typeof shortcut.id === "string" &&
+    typeof shortcut.label === "string" &&
+    QUICK_SETTING_TARGETS.some((entry) => entry.id === shortcut.target)
+  );
+}
+
+function migrateFromDecks(): QuickSettingShortcut[] | null {
+  const decks = JSON.parse(localStorage.getItem(LEGACY_DECK_KEY) ?? "null") as unknown;
+  if (!Array.isArray(decks)) return null;
+  for (const deck of decks) {
+    const widgets = (deck as { widgets?: unknown }).widgets;
+    if (!Array.isArray(widgets)) continue;
+    for (const widget of widgets) {
+      const shortcuts = (widget as { shortcuts?: unknown }).shortcuts;
+      if (Array.isArray(shortcuts) && shortcuts.some(isShortcut)) {
+        return shortcuts.filter(isShortcut);
+      }
+    }
+  }
+  return null;
+}
+
+export function loadQuickSettings(): QuickSettingShortcut[] {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored !== null) {
+      const parsed = JSON.parse(stored) as unknown;
+      // An empty list is a real choice — "I deleted every shortcut" — so only an
+      // absent key falls through to the default or the migration.
+      if (Array.isArray(parsed)) return parsed.filter(isShortcut);
+    }
+    const migrated = migrateFromDecks();
+    if (migrated) return migrated;
+  } catch {
+    // A malformed local edit should never keep the performance surface from loading.
+  }
+  return defaultQuickSettings();
+}
+
+export function saveQuickSettings(shortcuts: QuickSettingShortcut[]): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(shortcuts));
+}
+
 export function newQuickSetting(): QuickSettingShortcut {
   return {
     id: `shortcut-${Math.random().toString(36).slice(2, 8)}`,

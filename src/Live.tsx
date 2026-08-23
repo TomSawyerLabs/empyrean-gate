@@ -1,36 +1,20 @@
-// Live: a user-configurable touch control plane. Widgets are arranged in named,
-// locally saved responsive decks; performance mode locks the layout while Edit
-// mode enables touch dragging, resizing, adding, and removing controls.
+// Live: the merged view + draw surface. The array view is always as large as the
+// window allows; the controls flow into whatever space the aspect ratio leaves —
+// side columns when wide, top/bottom bars when tall, and tucked into the corners
+// (which the circle never reaches) when squarish. The empty ring center carries
+// the title and live status. Tap anywhere = burst; drag = draw with the pen.
+//
+// v0.5.0 through v0.5.7 replaced this with a drag-and-resize "control deck" grid.
+// It was more layout to maintain than it was worth, and the circle stopped being
+// the largest thing the window could hold. The mode switch here is pure CSS
+// (aspect-ratio media queries), so it is right at first paint with no resize
+// observer to get wrong.
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Responsive,
-  noCompactor,
-  type ResponsiveLayouts,
-  useContainerWidth,
-} from "react-grid-layout";
-import {
-  addWidgetToDeck,
-  cloneControlDeck,
-  DECK_BREAKPOINTS,
-  DECK_COLUMNS,
-  DECK_BASE_ROW_HEIGHT,
-  deckWidthGuess,
-  defaultControlDeck,
-  loadControlDecks,
-  removeWidgetFromDeck,
-  saveControlDecks,
-  WIDGET_CATALOG,
-  widgetLabel,
-  type ControlDeck,
-  type ControlWidget,
-  type ControlWidgetKind,
-  type DeckBreakpoint,
-} from "./controlDecks";
+import { useEffect, useRef, useState } from "react";
 import { EFFECTS } from "./effects";
 import GateCanvas from "./GateCanvas";
 import CustomColorPicker from "./CustomColorPicker";
-import { QuickSettingsEditor, QuickSettingsPanel } from "./DeckQuickSettings";
+import { QuickSettingsEditor, QuickSettingsPanel } from "./LiveQuickSettings";
 import {
   BUILTIN_LIVE_COLORS,
   loadCustomLiveColors,
@@ -39,6 +23,7 @@ import {
   saveSelectedLiveColor,
   type LiveColor,
 } from "./liveColors";
+import { loadQuickSettings, saveQuickSettings } from "./quickSettings";
 import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
 import ToolIcon, { type ToolKind } from "./ToolIcon";
@@ -55,13 +40,6 @@ const TOOLS: { kind: ToolKind; label: string }[] = [
   { kind: "ember", label: "Ember" },
 ];
 
-function editorWidgetLabel(kind: ControlWidgetKind): string {
-  if (kind === "tools") return "Tools";
-  if (kind === "quick_settings") return "Quick";
-  if (kind === "size") return "Size";
-  return widgetLabel(kind);
-}
-
 export default function Live() {
   const { client, config, status, beatAt } = useGate();
   const [tool, setTool] = useState<ToolKind>("tap");
@@ -70,54 +48,21 @@ export default function Live() {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [size, setSize] = useState(0.12);
   const [queuePos, setQueuePos] = useState(0);
-  const [decks, setDecks] = useState<ControlDeck[]>(loadControlDecks);
-  const [activeDeckId, setActiveDeckId] = useState(
-    () => localStorage.getItem("empyrean-active-control-deck") ?? "default",
-  );
-  const [editing, setEditing] = useState(false);
-  const [addKind, setAddKind] = useState<ControlWidgetKind>("status");
   const [brightness, setBrightnessLocal] = useState(1);
   const [masterSpeed, setMasterSpeedLocal] = useState(1);
+  const [shortcuts, setShortcuts] = useState(loadQuickSettings);
   const [shortcutEditorId, setShortcutEditorId] = useState<string | null>(null);
+  const [editingShortcuts, setEditingShortcuts] = useState(false);
+  // Squarish windows have no leftover width for a column, so the controls that
+  // do not fit a canvas corner live behind this toggle. It is display:none in
+  // every other mode — there the side columns already show everything.
+  const [showMore, setShowMore] = useState(false);
   const beatDotRef = useRef<HTMLDivElement>(null);
-  const { width: deckWidth, containerRef: deckContainerRef, mounted: deckMounted } =
-    useContainerWidth({ initialWidth: deckWidthGuess() });
-  const breakpoint: DeckBreakpoint = deckWidth >= DECK_BREAKPOINTS.desktop
-    ? "desktop"
-    : deckWidth >= DECK_BREAKPOINTS.tablet
-      ? "tablet"
-      : "phone";
+
   const setBrightness = useThrottled((value: number) =>
     client.setMaster({ brightness: value }),
   );
   const setMasterSpeed = useThrottled((value: number) => client.setMaster({ speed: value }));
-
-  const activeDeck = useMemo(
-    () => decks.find((deck) => deck.id === activeDeckId) ?? decks[0] ?? defaultControlDeck(),
-    [activeDeckId, decks],
-  );
-  // react-grid-layout normalizes layouts in place while changing breakpoints.
-  // Give it a disposable copy so a phone/tablet visit cannot corrupt the saved
-  // desktop composition (or vice versa) when the deck is not being edited.
-  const renderedLayouts = useMemo(
-    () => structuredClone(
-      activeDeck.id === "default" ? defaultControlDeck().layouts : activeDeck.layouts,
-    ),
-    [activeDeck.id, activeDeck.layouts, breakpoint],
-  );
-
-  // Row height is FIXED, deliberately.
-  //
-  // v0.5.4 grew it to fill the window; that used the whole display but stretched
-  // every widget with it, and the deck stopped looking like what was arranged in
-  // the editor. Filling space is the layout tool's job — resize the widgets and
-  // the deck uses whatever room the window has. Width still spans the window
-  // (the shell's old 1780px cap is gone), and when a deck is taller than the
-  // window the shell scrolls rather than the page.
-
-  useEffect(() => {
-    saveControlDecks(decks);
-  }, [decks]);
 
   useEffect(() => {
     saveCustomLiveColors(customColors);
@@ -128,19 +73,14 @@ export default function Live() {
   }, [color]);
 
   useEffect(() => {
-    localStorage.setItem("empyrean-active-control-deck", activeDeck.id);
-    if (activeDeck.id !== activeDeckId) setActiveDeckId(activeDeck.id);
-  }, [activeDeck.id, activeDeckId]);
+    saveQuickSettings(shortcuts);
+  }, [shortcuts]);
 
   useEffect(() => {
     if (!config) return;
     setBrightnessLocal(config.render.master_brightness);
     setMasterSpeedLocal(config.render.master_speed);
   }, [config?.render.master_brightness, config?.render.master_speed]);
-
-  const updateActiveDeck = (update: (deck: ControlDeck) => ControlDeck) => {
-    setDecks((current) => current.map((deck) => (deck.id === activeDeck.id ? update(deck) : deck)));
-  };
 
   // Viewer-slot queue: >0 means the preview is rationed and we're waiting.
   useEffect(() => {
@@ -339,8 +279,95 @@ export default function Live() {
     </div>
   ) : null;
 
-  const preview = (
-    <div className="live-canvas-wrap deck-preview-wrap">
+  const master = config ? (
+    <div className="cluster master-ctl">
+      <label className="slider-row">
+        <span>Brightness</span>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={brightness}
+          onChange={(event) => {
+            const value = Number(event.target.value);
+            setBrightnessLocal(value);
+            setBrightness(value);
+          }}
+        />
+        <span className="slider-val">{brightness.toFixed(2)}</span>
+      </label>
+      <label className="slider-row">
+        <span>Speed</span>
+        <input
+          type="range"
+          min={0}
+          max={4}
+          step={0.05}
+          value={masterSpeed}
+          onChange={(event) => {
+            const value = Number(event.target.value);
+            setMasterSpeedLocal(value);
+            setMasterSpeed(value);
+          }}
+        />
+        <span className="slider-val">{masterSpeed.toFixed(2)}×</span>
+      </label>
+    </div>
+  ) : null;
+
+  // The deck put the shortcut editor behind a widget handle that only existed in
+  // deck-edit mode. With the deck gone the cluster carries its own toggle: a mode
+  // switch rather than a long-press, because a "hold" shortcut already owns the
+  // long press.
+  const quick = (
+    <div className={`cluster quick-ctl ${editingShortcuts ? "editing" : ""}`}>
+      <QuickSettingsPanel
+        shortcuts={shortcuts}
+        editing={editingShortcuts}
+        onEdit={(id) => setShortcutEditorId(id)}
+      />
+      {shortcuts.length > 0 && (
+        <div className="quick-settings-actions">
+          <button
+            className={editingShortcuts ? "active" : ""}
+            aria-pressed={editingShortcuts}
+            onClick={() => setEditingShortcuts((current) => !current)}
+          >
+            {editingShortcuts ? "✓ Done" : "✎ Edit"}
+          </button>
+          <button onClick={() => setShortcutEditorId("")}>+ Add</button>
+        </div>
+      )}
+    </div>
+  );
+
+  const layers = config ? (
+    <div className="cluster live-layer-list">
+      {config.layers.map((layer, index) => (
+        <button
+          key={`${layer.name}-${index}`}
+          className={layer.enabled ? "active" : ""}
+          onClick={() => client.updateLayer(index, { ...layer, enabled: !layer.enabled })}
+        >
+          <span className="live-layer-dot" />
+          <span>{layer.name || `Layer ${index + 1}`}</span>
+        </button>
+      ))}
+    </div>
+  ) : null;
+
+  const showStatus = (
+    <div className="cluster live-status-grid">
+      <div><strong>{bpm > 0 ? bpm.toFixed(0) : "—"}</strong><span>BPM</span></div>
+      <div><strong>{status?.engine_fps.toFixed(0) ?? "—"}</strong><span>FPS</span></div>
+      <div><strong>{status?.sacn_enabled ? status.sacn_pps : "off"}</strong><span>sACN pkt/s</span></div>
+      <div><strong>{status?.clients ?? "—"}</strong><span>clients</span></div>
+    </div>
+  );
+
+  const canvas = (
+    <div className="live-canvas-wrap">
       <GateCanvas
         drawPen={tool === "tap" ? undefined : {
           pen: tool,
@@ -402,258 +429,58 @@ export default function Live() {
         )}
         {status?.sacn_enabled && <span className="live-pill">sACN LIVE</span>}
       </div>
+      {/* Square-ish windows: controls float in the corners the circle never
+          reaches. Visibility is pure CSS (aspect-ratio media queries), so the
+          layout is right at first paint with no resize-observer fragility. */}
+      <div className="corner tl">{pens}</div>
+      <div className="corner-stack tr">
+        <div className="corner-card">{effects}</div>
+        <div className="corner-card">{tempoCtl}</div>
+      </div>
+      <div className="corner bl">{colors}</div>
+      <div className="corner br">{sizeCtl}</div>
+      {/* Squarish only: four corners cannot hold nine clusters, so this reveals
+          the side columns as an overlay sheet instead of duplicating them. */}
+      <button
+        className="live-more-toggle"
+        aria-expanded={showMore}
+        onClick={() => setShowMore((current) => !current)}
+      >
+        {showMore ? "× Close controls" : "⋯ All controls"}
+      </button>
     </div>
   );
-
-  const master = config ? (
-    <div className="deck-master-controls">
-      <label className="slider-row">
-        <span>Brightness</span>
-        <input
-          type="range"
-          min={0}
-          max={1}
-          step={0.01}
-          value={brightness}
-          onChange={(event) => {
-            const value = Number(event.target.value);
-            setBrightnessLocal(value);
-            setBrightness(value);
-          }}
-        />
-        <span className="slider-val">{brightness.toFixed(2)}</span>
-      </label>
-      <label className="slider-row">
-        <span>Speed</span>
-        <input
-          type="range"
-          min={0}
-          max={4}
-          step={0.05}
-          value={masterSpeed}
-          onChange={(event) => {
-            const value = Number(event.target.value);
-            setMasterSpeedLocal(value);
-            setMasterSpeed(value);
-          }}
-        />
-        <span className="slider-val">{masterSpeed.toFixed(2)}×</span>
-      </label>
-    </div>
-  ) : null;
-
-  const layers = config ? (
-    <div className="deck-layer-list">
-      {config.layers.map((layer, index) => (
-        <button
-          key={`${layer.name}-${index}`}
-          className={layer.enabled ? "active" : ""}
-          onClick={() => client.updateLayer(index, { ...layer, enabled: !layer.enabled })}
-        >
-          <span className="deck-layer-dot" />
-          <span>{layer.name || `Layer ${index + 1}`}</span>
-        </button>
-      ))}
-    </div>
-  ) : null;
-
-  const showStatus = (
-    <div className="deck-status-grid">
-      <div><strong>{bpm > 0 ? bpm.toFixed(0) : "—"}</strong><span>BPM</span></div>
-      <div><strong>{status?.engine_fps.toFixed(0) ?? "—"}</strong><span>FPS</span></div>
-      <div><strong>{status?.sacn_enabled ? status.sacn_pps : "off"}</strong><span>sACN pkt/s</span></div>
-      <div><strong>{status?.clients ?? "—"}</strong><span>clients</span></div>
-    </div>
-  );
-
-  const widgetContent = (widget: ControlWidget) => {
-    switch (widget.kind) {
-      case "preview": return preview;
-      case "tools": return pens;
-      case "effects": return effects;
-      case "tempo": return tempoCtl;
-      case "colors": return colors;
-      case "size": return sizeCtl;
-      case "master": return master;
-      case "quick_settings": return (
-        <QuickSettingsPanel
-          shortcuts={widget.shortcuts ?? []}
-          onEdit={(id) => setShortcutEditorId(id)}
-        />
-      );
-      case "layers": return layers;
-      case "status": return showStatus;
-    }
-  };
-
-  const availableWidgets = WIDGET_CATALOG.filter(
-    (entry) => !activeDeck.widgets.some((widget) => widget.kind === entry.kind),
-  );
-
-  useEffect(() => {
-    if (availableWidgets.length > 0 && !availableWidgets.some((entry) => entry.kind === addKind)) {
-      setAddKind(availableWidgets[0].kind);
-    }
-  }, [activeDeck.id, activeDeck.widgets.length, addKind, availableWidgets]);
-
-  const duplicateDeck = () => {
-    const duplicate = cloneControlDeck(activeDeck);
-    setDecks((current) => [...current, duplicate]);
-    setActiveDeckId(duplicate.id);
-    setEditing(true);
-  };
-
-  const toggleEditing = () => {
-    if (editing) {
-      setEditing(false);
-      return;
-    }
-    if (activeDeck.id === "default") {
-      const duplicate = cloneControlDeck(defaultControlDeck());
-      duplicate.name = "Live · Custom";
-      setDecks((current) => [...current, duplicate]);
-      setActiveDeckId(duplicate.id);
-    }
-    setEditing(true);
-  };
-
-  const deleteDeck = () => {
-    if (decks.length <= 1 || !window.confirm(`Delete “${activeDeck.name}”?`)) return;
-    const remaining = decks.filter((deck) => deck.id !== activeDeck.id);
-    setDecks(remaining);
-    setActiveDeckId(remaining[0].id);
-  };
 
   return (
-    <div className={`live-page control-deck-page ${editing ? "deck-editing" : ""}`}>
-      <div className="control-deck-toolbar">
-        <label>
-          <span className="visually-hidden">Control deck</span>
-          <select value={activeDeck.id} onChange={(event) => setActiveDeckId(event.target.value)}>
-            {decks.map((deck) => <option key={deck.id} value={deck.id}>{deck.name}</option>)}
-          </select>
-        </label>
-        <span className="deck-device-chip">{breakpoint}</span>
-        <span className="spacer" />
-        <button
-          className={editing ? "primary" : ""}
-          onClick={toggleEditing}
-          aria-pressed={editing}
-        >
-          {editing ? "✓ Done" : "✦ Edit deck"}
-        </button>
+    <div className={`live-page ${showMore ? "more-open" : ""}`}>
+      <div className="live-side a">
+        {pens}
+        {effects}
+        {tempoCtl}
       </div>
-
-      {editing && (
-        <div className="control-deck-editorbar">
-          <input
-            aria-label="Deck name"
-            value={activeDeck.name}
-            onChange={(event) =>
-              updateActiveDeck((deck) => ({ ...deck, name: event.target.value }))
-            }
-          />
-          {availableWidgets.length > 0 && (
-            <div className="deck-add-control">
-              <select value={addKind} onChange={(event) => setAddKind(event.target.value as ControlWidgetKind)}>
-                {availableWidgets.map((entry) => (
-                  <option key={entry.kind} value={entry.kind}>{entry.label}</option>
-                ))}
-              </select>
-              <button
-                onClick={() => {
-                  const kind = availableWidgets.some((entry) => entry.kind === addKind)
-                    ? addKind
-                    : availableWidgets[0].kind;
-                  updateActiveDeck((deck) => addWidgetToDeck(deck, kind));
-                }}
-              >
-                + Add
-              </button>
-            </div>
-          )}
-          <button onClick={duplicateDeck}>Duplicate</button>
-          <button
-            onClick={() => updateActiveDeck((deck) => ({
-              ...defaultControlDeck(),
-              id: deck.id,
-              name: deck.name,
-            }))}
-          >
-            Reset
-          </button>
-          {decks.length > 1 && <button className="danger" onClick={deleteDeck}>Delete</button>}
-          <span className="deck-edit-hint">Drag the dotted handle · resize from a corner</span>
+      {canvas}
+      <div className="live-side b">
+        {colors}
+        {sizeCtl}
+        {/* `display: contents` wherever there is room, so these sit in the column
+            grid like any other cluster. Where there isn't — a portrait tablet,
+            a squarish window — they collapse into the "All controls" sheet
+            instead of eating the height the array wants. */}
+        <div className="live-extras">
+          {master}
+          {quick}
+          {layers}
+          {showStatus}
         </div>
-      )}
-
-      <div className="control-deck-shell" ref={deckContainerRef}>
-        {deckMounted && (
-          <Responsive<DeckBreakpoint>
-            width={deckWidth}
-            layouts={renderedLayouts}
-            breakpoints={DECK_BREAKPOINTS}
-            cols={DECK_COLUMNS}
-            rowHeight={DECK_BASE_ROW_HEIGHT}
-            margin={{ phone: [8, 8], tablet: [10, 10], desktop: [10, 10] }}
-            containerPadding={{ phone: [8, 8], tablet: [10, 10], desktop: [10, 10] }}
-            compactor={noCompactor}
-            dragConfig={{ enabled: editing, bounded: true, handle: ".deck-drag-handle", cancel: "button,input,select" }}
-            resizeConfig={{ enabled: editing, handles: ["se", "sw"] }}
-            onLayoutChange={(_layout, layouts: ResponsiveLayouts<DeckBreakpoint>) => {
-              if (!editing) return;
-              updateActiveDeck((deck) =>
-                JSON.stringify(deck.layouts) === JSON.stringify(layouts)
-                  ? deck
-                  : { ...deck, layouts },
-              );
-            }}
-          >
-            {activeDeck.widgets.map((widget) => (
-              <section key={widget.id} className={`control-widget control-widget-${widget.kind}`}>
-                {editing && (
-                  <div className="deck-drag-handle">
-                    <span aria-hidden="true">⠿</span>
-                    <strong title={widgetLabel(widget.kind)}>{editorWidgetLabel(widget.kind)}</strong>
-                    {widget.kind === "quick_settings" && (
-                      <button
-                        aria-label="Customize quick settings"
-                        onClick={() => setShortcutEditorId("")}
-                      >
-                        ⚙
-                      </button>
-                    )}
-                    <button
-                      aria-label={`Remove ${widgetLabel(widget.kind)}`}
-                      onClick={() => updateActiveDeck((deck) => removeWidgetFromDeck(deck, widget.id))}
-                    >
-                      ×
-                    </button>
-                  </div>
-                )}
-                <div className="control-widget-body">{widgetContent(widget)}</div>
-              </section>
-            ))}
-          </Responsive>
-        )}
       </div>
-      {shortcutEditorId !== null && (() => {
-        const widget = activeDeck.widgets.find((entry) => entry.kind === "quick_settings");
-        if (!widget) return null;
-        return (
-          <QuickSettingsEditor
-            shortcuts={widget.shortcuts ?? []}
-            initialId={shortcutEditorId}
-            onClose={() => setShortcutEditorId(null)}
-            onChange={(shortcuts) => updateActiveDeck((deck) => ({
-              ...deck,
-              widgets: deck.widgets.map((entry) => entry.id === widget.id
-                ? { ...entry, shortcuts }
-                : entry),
-            }))}
-          />
-        );
-      })()}
+      {shortcutEditorId !== null && (
+        <QuickSettingsEditor
+          shortcuts={shortcuts}
+          initialId={shortcutEditorId}
+          onClose={() => setShortcutEditorId(null)}
+          onChange={setShortcuts}
+        />
+      )}
       {showColorPicker && (
         <CustomColorPicker
           colors={customColors}

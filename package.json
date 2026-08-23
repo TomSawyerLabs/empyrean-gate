@@ -12,14 +12,14 @@
     "typecheck": "tsc -b",
     "mock-backend": "bun scripts/mock-backend.ts",
     "test:layout": "bun run build && playwright test layout",
+    "test:behavior": "playwright test quick-settings",
     "screenshots": "bun run build && UPDATE_SCREENSHOTS=1 playwright test screenshots"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
     "@xyflow/react": "^12.11.3",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "react-grid-layout": "^2.2.4"
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

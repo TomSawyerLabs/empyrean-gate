@@ -29,9 +29,13 @@ function modeLabel(shortcut: QuickSettingShortcut): string {
 
 export function QuickSettingsPanel({
   shortcuts,
+  editing,
   onEdit,
 }: {
   shortcuts: QuickSettingShortcut[];
+  /// In edit mode a press opens the editor for that shortcut instead of firing
+  /// it. A long-press cannot do that job: "hold" shortcuts already own it.
+  editing: boolean;
   onEdit: (shortcutId: string) => void;
 }) {
   const { client, config } = useGate();
@@ -102,11 +106,13 @@ export function QuickSettingsPanel({
   }, []);
 
   const pointerDown = (event: ReactPointerEvent<HTMLButtonElement>, shortcut: QuickSettingShortcut) => {
+    if (editing) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     if (shortcut.mode === "hold") start(shortcut);
   };
 
   const pointerEnd = (shortcut: QuickSettingShortcut) => {
+    if (editing) return;
     if (shortcut.mode === "hold") restore(shortcut);
   };
 
@@ -126,9 +132,12 @@ export function QuickSettingsPanel({
           onLostPointerCapture={() => pointerEnd(shortcut)}
           onContextMenu={(event) => event.preventDefault()}
           onClick={() => {
-            if (shortcut.mode !== "hold") start(shortcut);
+            if (editing) onEdit(shortcut.id);
+            else if (shortcut.mode !== "hold") start(shortcut);
           }}
-          aria-label={`${shortcut.label}: ${targetDefinition(shortcut.target).label} ${valueLabel(shortcut)}`}
+          aria-label={editing
+            ? `Edit ${shortcut.label}`
+            : `${shortcut.label}: ${targetDefinition(shortcut.target).label} ${valueLabel(shortcut)}`}
         >
           <strong>{shortcut.label}</strong>
           <span>{valueLabel(shortcut)} · {modeLabel(shortcut)}</span>
@@ -187,7 +196,7 @@ export function QuickSettingsEditor({
         <div className="quick-settings-editor-title">
           <div>
             <h2 id="quick-settings-editor-title">{exists ? "Edit shortcut" : "New shortcut"}</h2>
-            <p className="hint">Long-press any quick button to return here.</p>
+            <p className="hint">Tap ✎ Edit on the quick cluster to come back here.</p>
           </div>
           <button aria-label="Close quick setting editor" onClick={onClose}>×</button>
         </div>
