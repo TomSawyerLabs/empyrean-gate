@@ -48,10 +48,10 @@ export const DECK_BREAKPOINTS: Record<DeckBreakpoint, number> = {
 /// resize observer corrects it on the next frame either way.
 export const deckWidthGuess = () => Math.max(320, window.innerWidth - 20);
 
-/// Row height floor, and what phones use outright (there the deck scrolls by
-/// design rather than being squeezed into one screenful). Rows only ever grow
-/// above this to fill a taller window — shrinking below it clips the content
-/// inside the widgets instead of making anything fit.
+/// Grid row height, fixed at every window size. Deliberately not derived from
+/// the available height: making rows grow to fill the window stretches every
+/// widget with them, and the deck stops resembling what was arranged in the
+/// editor. Using the extra space is the layout tool's job.
 export const DECK_BASE_ROW_HEIGHT = 48;
 
 

@@ -688,18 +688,22 @@ separate caps:
 
 - **Width.** `.control-deck-shell` had `max-width: 1780px; margin: 0 auto`, so a
   1920 or 2560 display got dead margins down both sides. Removed.
-- **Height.** The grid used a fixed `rowHeight={48}`, so the deck was the same
-  height on every display — a band of unused screen at 1080p, and an overflowing
-  page below that. `.control-deck-page` is now a full-height flex column, the
-  shell takes the leftover height, and the row height is derived from it.
+- **Height.** `.control-deck-page` is now a full-height flex column and the shell
+  takes the leftover height, so the deck has real room to be arranged into. The
+  row height itself stays fixed (see below).
 
-**Rows GROW to fill but never shrink.** Shrinking them does make the deck fit,
-but it fits by clipping the contents of each widget — the pen grid loses its
-last row, the effects pad loses a pair — so the deck looks broken and nothing is
-gained. Caught it in a screenshot at 900x900 after the first attempt did exactly
-that. Below the base height the shell scrolls instead, which keeps the *page*
-from scrolling (a page scrollbar is what turns a touch drag into a scroll rather
-than a stroke — the thing actually worth preventing).
+**Row height is FIXED — do not make it grow again.** v0.5.4 derived it from the
+available height so the deck filled the window; the user's verdict on seeing it
+was "the full screen stretches the deck system... maybe revert that?", and they
+were right: growing rows stretches every widget with them and the deck stops
+resembling what was arranged in the editor. Reverted in v0.5.5. Using the extra
+space is the **layout tool's** job — resize the widgets in Edit deck.
+(An earlier attempt to make rows *shrink* to fit was worse still: it fits by
+clipping the inside of each widget — the pen grid loses its last row, the
+effects pad loses a pair. Caught in a 900x900 screenshot.)
+When a deck is taller than the window the shell scrolls, which keeps the *page*
+from scrolling — a page scrollbar is what turns a touch drag into a scroll
+rather than a stroke, and that is the thing actually worth preventing.
 
 Consequently **the gate's `MUST_FIT_VERTICALLY` rule is back on for Live**, which
 is the strongest state it has been in. Phones still opt out at the 700px
@@ -709,6 +713,14 @@ Also: the Patch tab pushed the topbar onto two lines at 1400px, so the
 label-collapse breakpoint moved 1150 → 1500. And `docs/live-show-1080p.png` is a
 new screenshot taken in show mode at the display's real resolution, since that is
 the configuration that actually ships.
+
+Also in this round: the array preview widget had a panel background behind it,
+so the ring sat in a black square instead of compositing over the page. The deck
+already stripped widget panels in performance mode, but only inside a
+`min-width: 1180px` media query — so the square was there on every iPad and
+every window below that. Now the preview widget is stripped at any size, and
+only it (other widgets are buttons and want their panel; edit mode keeps bounds
+visible).
 
 Known, not fixed: the deck's scheduler widget ("Blackout · 0.00 · HOLD") clips
 its own text at the default widget size. It lives inside a scrolling widget body

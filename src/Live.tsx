@@ -106,44 +106,14 @@ export default function Live() {
     [activeDeck.id, activeDeck.layouts, breakpoint],
   );
 
-  // Fill the window vertically as well as horizontally.
+  // Row height is FIXED, deliberately.
   //
-  // react-grid-layout positions rows at a fixed pixel height, so with a constant
-  // `rowHeight` the deck was always the same height regardless of the display —
-  // leaving a band of dead screen on a 1080p show display, and overflowing into
-  // a page scrollbar on anything shorter. Deriving the row height from the space
-  // the shell actually got makes the deck exactly fill it.
-  //
-  // The shell's height is layout-driven (`flex: 1` inside a full-height column),
-  // never content-driven, so measuring it here cannot feed back into itself.
-  const [deckHeight, setDeckHeight] = useState(0);
-  useEffect(() => {
-    const shell = deckContainerRef.current;
-    if (!shell) return;
-    setDeckHeight(shell.clientHeight);
-    const observer = new ResizeObserver(([entry]) => {
-      setDeckHeight(entry.contentRect.height);
-    });
-    observer.observe(shell);
-    return () => observer.disconnect();
-  }, [deckContainerRef, deckMounted]);
-
-  const rowHeight = useMemo(() => {
-    const gap = breakpoint === "phone" ? 8 : 10;
-    const rows = Math.max(
-      1,
-      ...(renderedLayouts[breakpoint] ?? []).map((item) => item.y + item.h),
-    );
-    // Phones scroll by design, so they keep the fixed row height.
-    if (breakpoint === "phone" || deckHeight <= 0) return DECK_BASE_ROW_HEIGHT;
-    const available = deckHeight - gap * 2 - gap * (rows - 1);
-    // GROW to fill, never shrink. Squeezing rows below the base height does make
-    // the deck fit, but it does it by clipping the content inside each widget
-    // (a pen grid loses its last row, an effects pad loses its last pair) — the
-    // deck looks broken and gains nothing. When there is not enough height, keep
-    // the widgets readable and let the shell scroll instead.
-    return Math.max(DECK_BASE_ROW_HEIGHT, available / rows);
-  }, [deckHeight, renderedLayouts, breakpoint]);
+  // v0.5.4 grew it to fill the window; that used the whole display but stretched
+  // every widget with it, and the deck stopped looking like what was arranged in
+  // the editor. Filling space is the layout tool's job — resize the widgets and
+  // the deck uses whatever room the window has. Width still spans the window
+  // (the shell's old 1780px cap is gone), and when a deck is taller than the
+  // window the shell scrolls rather than the page.
 
   useEffect(() => {
     saveControlDecks(decks);
@@ -624,7 +594,7 @@ export default function Live() {
             layouts={renderedLayouts}
             breakpoints={DECK_BREAKPOINTS}
             cols={DECK_COLUMNS}
-            rowHeight={rowHeight}
+            rowHeight={DECK_BASE_ROW_HEIGHT}
             margin={{ phone: [8, 8], tablet: [10, 10], desktop: [10, 10] }}
             containerPadding={{ phone: [8, 8], tablet: [10, 10], desktop: [10, 10] }}
             compactor={noCompactor}
