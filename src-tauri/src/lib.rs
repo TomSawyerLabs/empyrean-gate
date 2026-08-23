@@ -19,6 +19,7 @@ pub mod report;
 pub mod rhythm;
 pub mod sacn;
 pub mod server;
+pub mod session;
 pub mod state;
 pub mod taskbar;
 pub mod testmode;
@@ -363,8 +364,27 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+                let mut skipping = false;
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(5));
+                    // An RDP session takes over the console and re-lays-out the
+                    // window into its own virtual display — different size, DPI
+                    // and no fullscreen. Saving that would overwrite the show
+                    // geometry, so the gate display comes back windowed once the
+                    // remote visit ends. Leave the last local layout on disk.
+                    if session::is_remote() {
+                        if !skipping {
+                            skipping = true;
+                            log::info!(
+                                "remote session attached — holding window geometry, not saving"
+                            );
+                        }
+                        continue;
+                    }
+                    if skipping {
+                        skipping = false;
+                        log::info!("remote session gone — resuming window geometry saves");
+                    }
                     let _ = handle.save_window_state(StateFlags::all());
                 }
             });
