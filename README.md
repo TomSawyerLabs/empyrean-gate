@@ -23,6 +23,11 @@ the controls flow into whatever space is left — side columns, top/bottom bars,
 corners the circle never reaches. The empty ring center carries the title, beat, and
 live meters.
 
+**Show mode** (⛶ in the top bar, or F11) takes the native window fullscreen and hides
+the app chrome so the array fills the display; Esc or the corner pill brings it back.
+The state persists, so the app reopens the way it was closed — including across
+self-updates.
+
 ## Architecture
 
 - **Backend is the app.** Frame generation runs on a dedicated thread:
@@ -195,6 +200,27 @@ Useful during pattern development:
   `EMPYREAN_UPRISING_DIR` when needed.
 - `bun scripts/e2e-test.ts` — protocol smoke test against a running backend.
   It also sends a generated video texture and verifies live source status.
+- `bun scripts/report-test.ts` — drives operator input against a running backend,
+  requests a feedback report, and verifies the bundle end to end (timeline folding,
+  frames.bin geometry, PNG contact sheet, path-traversal defense).
+- `bun run test:layout` — the **layout gate** (see below).
+- `bun run mock-backend` — serve the built UI with a deterministic fake backend
+  (no GPU, no audio device) at http://127.0.0.1:9531. Handy for UI work.
+- `bun run screenshots` — regenerate the screenshots in `docs/` from that same
+  mock backend, so they never depend on this machine's config or GPU.
+
+### The layout gate
+
+CSS has no compile-time notion of "this doesn't fit", and on a touch surface the
+failure is not cosmetic: one control a few pixels past the edge gives the whole app a
+scrollbar, and then a drag scrolls the page instead of drawing on the array.
+
+`bun run test:layout` builds the bundle, serves it through the mock backend, and walks
+every tab at eight viewports (the 1080p show display, the 900px minimum window, a
+square aux window, ultrawide, both iPad orientations, a phone). It fails when anything
+extends past the viewport horizontally, when any box clips its own content, or when the
+Live tab needs to scroll vertically. Anything deliberately parked off-screen must
+declare `data-layout-exempt`. It runs on every push and on release tags.
 
 ## Production build
 
@@ -228,6 +254,37 @@ running one, launches, and takes over via the seamless handover. Mid-show update
 cost about one frame. Auto-install is available but off by default; old versioned
 binaries are cleaned up automatically. (Instances older than v0.2.0 predate the
 updater and need one manual swap.)
+
+## Feedback reports
+
+Hit **⚑ Report** (top bar, and still reachable in show mode) when the array does
+something you don't like. The backend continuously keeps the last ~20 seconds of
+everything that shapes a frame, so the button only has to ask what was wrong: it
+freezes the chosen window — operator input, effective layer parameters (post-autopilot,
+which is *not* what the config file says), audio features, and the rendered frames —
+into a self-describing bundle on the Gate machine, with a PNG contact sheet of what it
+actually looked like.
+
+Bundles live in `<config dir>/EmpyreanGate/reports/<id>/` and are downloadable from any
+client. Hand a whole folder to an agent to investigate. Format:
+[`docs/report-bundle.md`](docs/report-bundle.md).
+
+## Live-show guards
+
+The window's X sits a few pixels from the controls on a touch display, so while
+sACN is actually transmitting it is refused and asks first; confirming still goes
+through the normal shutdown, which sends E1.31 stream termination rather than
+leaving the rig on its last look. Switching output off asks the same way. With
+output off, neither asks.
+
+## Touch screens
+
+The Gate machine's display is multi-touch, and several fingers can draw or trigger
+effects at once. The browser's own gestures are suppressed app-wide so they cannot
+steal a stroke mid-gesture: press-and-hold context menus, pinch and keyboard zoom,
+overscroll/back-swipe, double-tap zoom, long-press selection callouts, and — on Windows
+— the OS-drawn contact visuals, which also caused the transparent array canvas to flash
+its backing square under a tap.
 
 ## Safety notes
 

@@ -1,7 +1,7 @@
 {
   "name": "empyrean-gate",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "demo:uprising": "bash scripts/fetch-uprising-demo.sh",
     "tauri": "tauri",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "mock-backend": "bun scripts/mock-backend.ts",
+    "test:layout": "bun run build && playwright test layout",
+    "screenshots": "bun run build && UPDATE_SCREENSHOTS=1 playwright test screenshots"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
@@ -19,6 +22,7 @@
     "react-grid-layout": "^2.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tauri-apps/cli": "^2.11.4",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

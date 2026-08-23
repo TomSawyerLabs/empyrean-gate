@@ -1,0 +1,75 @@
+name: Checks
+
+# The fast gate that runs on every push, unlike the three-platform Tauri matrix
+# in build.yml (manual) and release.yml (tags). Nothing here needs a GPU.
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  ui:
+    name: Frontend + layout gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck frontend
+        run: bun run typecheck
+
+      - name: Install Chromium for the layout gate
+        run: bunx playwright install --with-deps chromium
+
+      # Builds the bundle, serves it through the mock backend, and fails if
+      # anything is clipped or overflows at any viewport in the matrix. CSS has
+      # no compile-time "this doesn't fit"; this is the substitute.
+      - name: Layout gate
+        run: bun run test:layout
+
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: layout-failure-traces
+          path: test-results
+          if-no-files-found: ignore
+
+  rust:
+    name: Rust unit tests (${{ matrix.os }})
+    # Windows as well as Linux: the show machine is Windows, and the difference
+    # that matters here is the checkout — git converts text files to CRLF there,
+    # which is exactly what broke the v0.5.0 release after a Linux-only run of
+    # these same tests went green.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Linux system deps (webkit for the Tauri shell, ALSA for audio)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+
+      # sACN wire format, report bundle timestamps/decimation, and the guard that
+      # keeps tests/fixtures/default-config.json in step with AppConfig::default()
+      # — a drifted fixture would silently make the layout gate test a UI nobody
+      # runs.
+      - name: Library tests
+        working-directory: src-tauri
+        run: cargo test --lib

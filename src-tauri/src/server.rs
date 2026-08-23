@@ -84,6 +84,8 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .route("/patch/registry", get(patch_registry))
         .route("/patch/presets", get(patch_presets))
         .route("/media/file/{id}", get(serve_media_file))
+        .route("/reports", get(list_reports))
+        .route("/reports/{id}/{file}", get(serve_report_file))
         .fallback(get(serve_asset))
         .layer(
             CorsLayer::new()
@@ -295,6 +297,35 @@ fn parse_range(range: &str, total: u64) -> Option<(u64, u64)> {
 // ---------------------------------------------------------------------------
 // Static assets, QR, handover
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Feedback report bundles
+// ---------------------------------------------------------------------------
+
+/// Newest first. The UI lists these so a bundle can be pulled off the Gate
+/// machine from any device instead of someone walking over with a USB stick.
+async fn list_reports() -> Response {
+    axum::Json(crate::report::list()).into_response()
+}
+
+/// Serve one file out of a bundle. Both path segments are validated: `id` must
+/// look like an id we generated, and `file` must be one of the fixed names —
+/// this endpoint is reachable by every LAN client.
+async fn serve_report_file(Path((id, file)): Path<(String, String)>) -> Response {
+    let content_type = match file.as_str() {
+        "report.json" | "info.json" => "application/json",
+        "frames.bin" => "application/octet-stream",
+        "contact-sheet.png" => "image/png",
+        _ => return (StatusCode::NOT_FOUND, "no such report file").into_response(),
+    };
+    if !crate::report::valid_id(&id) {
+        return (StatusCode::BAD_REQUEST, "bad report id").into_response();
+    }
+    match tokio::fs::read(crate::report::reports_dir().join(&id).join(&file)).await {
+        Ok(bytes) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
+        Err(_) => (StatusCode::NOT_FOUND, "no such report").into_response(),
+    }
+}
 
 async fn serve_asset(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
@@ -661,6 +692,106 @@ async fn deny(tx: &mut WsSink, reason: &str) -> Result<(), ()> {
     Err(())
 }
 
+/// Friendly device name for the timeline; falls back to the raw id.
+fn client_name(state: &SharedState, client_id: &str) -> String {
+    if client_id.is_empty() {
+        return "unknown".into();
+    }
+    state
+        .config
+        .read()
+        .clients
+        .iter()
+        .find(|c| c.id == client_id)
+        .map(|c| c.name.clone())
+        .unwrap_or_else(|| client_id.to_owned())
+}
+
+/// Map an incoming message onto a feedback-timeline entry. Messages that cannot
+/// change the look of the array (hello, state queries, preview subscriptions,
+/// client admin) deliberately produce nothing.
+fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
+    use serde_json::json;
+    let name = || client_name(state, client_id);
+    let rec = &state.recorder;
+    match msg {
+        ClientMsg::TriggerEffect { effect } => rec.event(
+            "effect",
+            &name(),
+            json!({
+                "kind": effect.kind,
+                "angle": effect.angle,
+                "radius": effect.radius,
+                "hue": effect.hue,
+                "size": effect.size,
+            }),
+        ),
+        ClientMsg::Paint {
+            pen,
+            points,
+            hue,
+            size,
+            ..
+        } => {
+            let pen = serde_json::to_value(pen)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_default();
+            rec.paint_event(&name(), &pen, points.len() as u64, *hue, *size);
+        }
+        ClientMsg::SetMaster { brightness, speed } => rec.event(
+            "master",
+            &name(),
+            json!({ "brightness": brightness, "speed": speed }),
+        ),
+        ClientMsg::SetSacnEnabled { enabled } => {
+            rec.event("sacn", &name(), json!({ "enabled": enabled }))
+        }
+        ClientMsg::AddLayer { layer } => rec.event(
+            "layer",
+            &name(),
+            json!({ "op": "add", "name": layer.name, "kind": layer.kind }),
+        ),
+        ClientMsg::UpdateLayer { index, layer } => rec.event(
+            "layer",
+            &name(),
+            json!({ "op": "update", "index": index, "name": layer.name, "kind": layer.kind }),
+        ),
+        ClientMsg::RemoveLayer { index } => {
+            rec.event("layer", &name(), json!({ "op": "remove", "index": index }))
+        }
+        ClientMsg::MoveLayer { from, to } => rec.event(
+            "layer",
+            &name(),
+            json!({ "op": "move", "from": from, "to": to }),
+        ),
+        // A full-config write is the Settings page saving; the effective values
+        // are captured by the 10 Hz snapshots either way.
+        ClientMsg::SetConfig { config } => rec.event(
+            "config",
+            &name(),
+            json!({
+                "master_brightness": config.render.master_brightness,
+                "master_speed": config.render.master_speed,
+                "layers": config.layers.len(),
+                "walk_enabled": config.render.walk_enabled,
+            }),
+        ),
+        ClientMsg::StartVideo { title, source_url } => rec.event(
+            "video",
+            &name(),
+            json!({ "op": "start", "title": title, "source_url": source_url }),
+        ),
+        ClientMsg::StopVideo { force } => {
+            rec.event("video", &name(), json!({ "op": "stop", "force": force }))
+        }
+        // Continuous signals (phone IMU, audio) are NOT timeline entries: at tens
+        // of packets a second they would bury the discrete actions. They ride
+        // along in the 10 Hz snapshots instead.
+        _ => {}
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_msg(
     ctx: &Ctx,
@@ -673,6 +804,9 @@ async fn handle_msg(
     tx: &mut WsSink,
 ) -> Result<(), ()> {
     let state = &ctx.state;
+    // Feedback capture: every operator action that can change what the array
+    // does, logged in one place so new message kinds can't quietly go unrecorded.
+    record_timeline(state, &msg, client_id);
     match msg {
         ClientMsg::Hello {
             name,
@@ -987,6 +1121,28 @@ async fn handle_msg(
                     }
                 }
                 state2.broadcast_state();
+            });
+        }
+        ClientMsg::Report {
+            description,
+            seconds,
+        } => {
+            // Writing the bundle touches the disk (and renders a contact sheet);
+            // keep it off the async runtime's worker threads.
+            let state2 = state.clone();
+            let who = client_name(state, client_id);
+            tokio::task::spawn_blocking(move || {
+                match crate::report::write_bundle(&state2, &description, seconds, &who) {
+                    Ok(info) => {
+                        let _ = state2.events.send(ServerMsg::ReportSaved { report: info });
+                    }
+                    Err(e) => {
+                        log::warn!("could not write feedback report: {e:#}");
+                        let _ = state2.events.send(ServerMsg::Error {
+                            message: format!("Could not save the report: {e}"),
+                        });
+                    }
+                }
             });
         }
         ClientMsg::CheckUpdate => {

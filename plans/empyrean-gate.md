@@ -466,6 +466,180 @@ exactly what made that matter.
   pins the premise (restarting at 0 IS discarded for exactly 20 of them), so the
   fix cannot be quietly regressed into a no-op.
 
+## Round 14 (2026-08-22): touch-screen hardening, show mode, layout gate, feedback reports
+
+Prompted by a live session on the production Windows show machine with a
+multi-touch display. Five asks, all in this round.
+
+### Decisions taken with the user (don't re-ask)
+
+- **Multi-touch itself already works** — the correction from the user is that the
+  problem is *OS/browser gesture interference*: press-and-hold raises the context
+  menu, and stray contacts start pinch-zoom / scroll. So this is gesture
+  suppression, not pointer plumbing.
+- **"Compile-time" overflow checking is not achievable in CSS.** Agreed
+  substitute: a **Playwright layout test in CI** over a viewport matrix that fails
+  the build when anything overflows the viewport. (User picked this over a
+  dev-only runtime detector.)
+- **Report bundles carry a timeline *and* rendered frames**, written to disk on
+  the Gate machine and listed/downloadable from the UI.
+- **Fullscreen is "show mode"**: it also hides the app chrome so the array fills
+  the display. Esc or an unobtrusive corner control brings the UI back.
+
+### Steps
+
+- [x] **Touch/gesture hardening.** `src/touch.ts` suppresses contextmenu (except in
+      text fields — pasting an IP into Settings still needs it), Ctrl/⌘+wheel zoom,
+      Safari `gesture*` pinch, and Ctrl +/-/0. CSS adds
+      `-webkit-tap-highlight-color: transparent`, `touch-action: manipulation` on
+      html/body, `overscroll-behavior: none`, `-webkit-touch-callout: none`,
+      app-wide `user-select: none` (re-enabled for inputs/code), and
+      `touch-action: none` on the whole `.live-page` (not just the canvas — a
+      stray contact on the padding used to start a scroll and cancel another
+      finger's stroke). `tauri.conf.json` gets `--disable-pinch
+      --overscroll-history-navigation=0` (keeping wry's own
+      `--disable-features=msWebOOUI,...`, which passing the option replaces) and
+      `zoomHotkeysEnabled: false`; aux windows get the same in `open_aux_window`.
+- [x] **Windows touch-feedback visuals off** (`src-tauri/src/touch.rs`).
+      `SetWindowFeedbackSetting` for all 11 FEEDBACK_TYPE values, on the window
+      AND every child HWND (WebView2 hosts content in children — that is where
+      touch lands, and the setting does not inherit). Declared as a bare
+      `unsafe extern "system"` block against user32 rather than pulling in the
+      `windows` crate. Re-applied 4× at 500 ms after startup because the child
+      HWNDs appear after the window does. **This is the suspected cause of the
+      "square background flashes when I tap" artifact** — the OS contact visual
+      forces a repaint that exposes the transparent canvas's backing — with the
+      tap-highlight fix as the other candidate. Needs the user to confirm live.
+- [x] **Show mode** (`useShowMode` in App.tsx): F11 / ⛶ button toggles native
+      fullscreen (`setFullscreen`, capability added) *and* hides the topbar. Esc
+      exits, unless a modal is open (it owns Escape first). Persisted in
+      localStorage, re-applied on mount — the WebView2 data folder is keyed by the
+      app identifier, so it survives restarts and self-update binary swaps. The
+      Live tab's top-right corner cluster shifts down 44px to share the corner
+      with the exit pill; Report stays reachable in show mode.
+- [x] **Layout gate** (`tests/layout.spec.ts` + `playwright.config.ts` +
+      `scripts/mock-backend.ts`). 8 viewports × 4 tabs + show mode. Fails on any
+      horizontal overflow, any box clipping its own content, or the Live tab
+      needing to scroll (except at the ≤700px breakpoint, where a scrolling
+      column is the design). Replaced elements and `text-overflow: ellipsis` are
+      exempt; anything deliberately off-screen must declare `data-layout-exempt`.
+      Runs in the new `checks.yml` on every push and on release tags.
+- [x] **Feedback reports** (`src-tauri/src/report.rs`, `src/Report.tsx`,
+      `docs/report-bundle.md`). Always-on 22 s ring buffer; 10 Hz snapshots of
+      *effective* layer params + audio + control bus; discrete actions in a
+      timeline (drawing folded to ≤4 entries/s with running totals); frames
+      decimated 8× and stored raw; PNG contact sheet so an agent can see the
+      complaint. Written to `<config>/EmpyreanGate/reports/<id>/`, served at
+      `/reports` and `/reports/{id}/{file}`, 40 kept.
+
+### Layout bugs the gate found (all real, all fixed)
+
+1. **The reported one.** In portrait (`max-aspect-ratio: 39/50`), `.size-ctl`'s
+   base `width: 100%` claimed an entire wrap row, stretching the Size/Speed
+   sliders the full window width. Now `min(340px, 100%)` there.
+2. `.gate-canvas` sized itself `min(100%, 100vh - 60px)` — a *guess* at the chrome
+   height. Whenever the guess was low (a banner showing, a 900×900 aux window) the
+   square came out taller than its box and `main` grew a scrollbar. Now sized from
+   its container (`height: 100%; width: auto; max-width: 100%; aspect-ratio: 1`).
+   **Watch out:** that made the squarish media query's `align-items: center` fatal —
+   it shrinks `.live-canvas-wrap` to content height, so `height: 100%` resolves
+   against an indefinite height and the canvas collapses to the 300px default,
+   dragging the floating corner clusters inward. Removed; the wrap already centers.
+   The gate did NOT catch this (a too-small canvas doesn't overflow) — the
+   screenshot run did.
+3. `.slider-val { width: 40px }` clipped "1.00×" (45px). Now `min-width: 48px`.
+4. The topbar overflowed at ≤900px (worse after adding Report + Show mode). Now
+   `flex-wrap: wrap` as an invariant backstop, plus icon-only ghost buttons and
+   no GPU name below 1150px and no version chip below 950px.
+5. `.key-hint` is `position: absolute` (styled for the corner of an effect
+   button); reusing it in the topbar sent "F11" to the page's top-right corner.
+   Added `.chip-key`, an inline badge. Also gave the icon-only topbar buttons
+   `aria-label`s — the accessible name must not vanish with the visible one.
+
+### Verification
+
+- `cargo check --all-targets` clean, zero warnings; 27 lib tests pass (new: report
+  timestamps incl. leap/century days, id ordering, frame decimation shape, id
+  traversal rejection, and the default-config fixture guard).
+- Layout gate: 39 passed, 1 skipped (show mode on phone), 8 viewports.
+- `bun scripts/report-test.ts` against a real headless backend on this machine's
+  Intel Vulkan: 99 frames, 4 effect entries, 20 paint messages folded to 3 with
+  totals intact, 99 snapshots, 374 KB contact sheet, traversal refused.
+- `docs/*.png` regenerated from the mock backend (`bun run screenshots`), so they
+  no longer depend on this machine's config or GPU.
+
+### Round 14b: merged with 35 upstream commits, then shipped
+
+This checkout was 35 commits behind `origin/master` — a large unreleased body of
+work (control decks, saved scenes/playlists, unattended shows, Pioneer DJ LINK,
+external MIDI). Merged straight to master on the user's call (2026-08-22).
+
+- Conflicts were mechanical: module lists, both sides adding tests, and the
+  engine layer loop (upstream refactored it onto `render_*` effective values for
+  scene transitions). The recorder now reads those, plus
+  `master_brightness * master_drop_brightness` — strictly more correct than the
+  configured values it had.
+- **The merge broke the Live tab and the gate caught it.** `status?.rhythm.bpm`
+  guards the status object but not the section, so any status without `rhythm`
+  throws and white-screens the tab. Fixed the chain, and gave the mock backend a
+  `default-status.json` fixture generated from `RuntimeStatus::default()` with
+  the same drift guard as the config — the hand-written mock status is what let
+  it through.
+- **The gate's vertical rule is now off for Live** (`MUST_FIT_VERTICALLY` is
+  empty). The control deck is deliberately a scrolling, user-arranged page
+  (`.control-deck-page { height: auto; min-height: 100% }`) and its default
+  layout is ~930 px tall at a fixed `rowHeight={48}`, so it scrolls at anything
+  below 1080p. **Open question for the user** (see below) — left off rather than
+  overriding a collaborator's design decision mid-merge.
+- Clipping detection is more precise: only boxes that actually *hide* their
+  overflow are flagged, so a resizable deck widget scrolling inside itself is no
+  longer reported. `.visually-hidden` is exempt.
+- **Live-show close guard** (d66a676): `CloseRequested` on the main window is
+  refused while sACN is transmitting and handed to the UI to confirm; confirming
+  goes back through the normal close path so stream termination still goes out.
+  Same confirmation on switching output off, only in the dangerous direction. If
+  the UI can't be reached, the close is ALLOWED — a guard that can trap the
+  operator with no way to quit is worse than what it guards against.
+- Note: upstream added a `package-lock.json`. The project standardizes on Bun +
+  `bun.lock`; left in place rather than deleted mid-merge, but it should go.
+
+### Windows shell gestures (asked 2026-08-22, not applied)
+
+The in-webview gestures are handled (round 14). The remaining ones are the
+*shell's* — edge swipes for Action Center / Task View / the taskbar, and the
+Win11 three/four-finger touch gestures. **No application can disable those**; they
+are owned by explorer.exe and are machine policy.
+
+Checked on this machine: `HKLM\SOFTWARE\Policies\Microsoft\Windows\EdgeUI` does
+not exist (so edge swipe is on), OS is Windows 11 Pro N build 26200.
+
+Options, in increasing order of heaviness — NONE applied, awaiting the user:
+1. `HKLM\SOFTWARE\Policies\Microsoft\Windows\EdgeUI` → `AllowEdgeSwipe`=0 (DWORD).
+   Documented for Win10; Win11 26xxx coverage is not guaranteed and needs testing
+   on the actual machine.
+2. Settings → Bluetooth & devices → Touch → turn off three- and four-finger
+   gestures. Per-user, no policy needed.
+3. Taskbar auto-hide, to take the bottom edge out of play.
+4. Assigned Access / kiosk mode for the show account — the only complete answer,
+   and the most disruptive.
+
+If wanted, (1) belongs in the existing elevated Authorize script alongside the
+firewall rule and Windows Update active hours — one UAC prompt, already the
+established pattern for machine settings this app needs.
+
+### Still to confirm with the user (needs the real touch display)
+
+0. Should the Live control deck be forced to fit the window (derive `rowHeight`
+   from the available height instead of a fixed 48) so the show surface never
+   scrolls? Recommendation: yes — a scrolling performance surface means a touch
+   drag scrolls the page instead of playing — but it changes a collaborator's
+   deliberate design, so it needs a decision.
+1. Does the tap artifact (square background flash) actually go away? Two fixes
+   landed for it; if it persists, the next suspect is WebView2 compositing the
+   transparent canvas, and the test is whether an opaque canvas backdrop stops it.
+2. Is multi-touch now uninterrupted in practice (no context menu, no zoom/scroll
+   stealing strokes)?
+
 ## Next session pickup
 
 - **Node-graph patch paradigm designed** — see `plans/node-graph.md` (typed

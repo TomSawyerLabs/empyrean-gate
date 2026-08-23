@@ -1,0 +1,4 @@
+# Generated fixtures are written with LF by `cargo test` and compared against
+# the checked-out file. Without this, a Windows checkout converts them to CRLF
+# and the drift guards fail on line endings alone.
+tests/fixtures/*.json eol=lf

@@ -40,6 +40,13 @@ export const DECK_BREAKPOINTS: Record<DeckBreakpoint, number> = {
   phone: 0,
 };
 
+/// Widest the deck ever gets, mirroring `.control-deck-shell { max-width }`.
+/// The grid positions its items with transforms computed from the width it is
+/// told, so a first-paint guess LARGER than the container throws items past the
+/// right edge and the whole app briefly grows a horizontal scrollbar — caught by
+/// the layout gate at 2560x1080, where the gap between window and cap is biggest.
+export const DECK_MAX_WIDTH = 1780;
+
 export const DECK_COLUMNS: Record<DeckBreakpoint, number> = {
   desktop: 12,
   tablet: 8,

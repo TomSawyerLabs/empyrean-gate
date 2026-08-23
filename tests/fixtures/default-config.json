@@ -1,0 +1,185 @@
+{
+  "geometry": {
+    "spokes": 64,
+    "pixels_per_spoke": 350,
+    "outer_radius_ft": 25.0,
+    "inner_radius_ft": 8.0,
+    "leds_per_meter": 60.0
+  },
+  "output": {
+    "enabled": false,
+    "interface": "",
+    "sync_to_render": true,
+    "fps": 60.0,
+    "sync_universe": 0,
+    "start_universe": 1,
+    "pixels_per_universe": 170,
+    "controllers": [],
+    "strings_per_controller": 4,
+    "multicast": true,
+    "priority": 100,
+    "led_gamma": 2.2,
+    "cid": "",
+    "source_name": "Empyrean Gate",
+    "discovery": true
+  },
+  "server": {
+    "bind": "0.0.0.0",
+    "port": 9520,
+    "max_preview_clients": 10,
+    "auth_token": null,
+    "join_token": "",
+    "require_token": false
+  },
+  "audio": {
+    "sources": [
+      {
+        "id": "main",
+        "kind": "device",
+        "device": null,
+        "channels": [],
+        "loopback": false,
+        "gain": 1.0
+      }
+    ]
+  },
+  "rhythm": {
+    "source": "layer_audio",
+    "midi_port": null,
+    "pro_dj_link_player": 0,
+    "pro_dj_link_metadata_player": 3,
+    "latency_ms": 0.0,
+    "fallback_to_audio": true,
+    "fallback_audio_source": 0
+  },
+  "render": {
+    "fps": 60.0,
+    "master_brightness": 1.0,
+    "master_speed": 1.0,
+    "manual_bpm": null,
+    "beat_time": "normal",
+    "walk_enabled": true,
+    "walk_layers": false,
+    "walk_min_layers": 2,
+    "walk_speed": 1.0,
+    "walk_depth": 1.0
+  },
+  "update": {
+    "auto_check": true,
+    "auto_install": false
+  },
+  "windows": {
+    "aux_open": []
+  },
+  "video": {
+    "playlist": [],
+    "dirs": [],
+    "auto_advance": false
+  },
+  "beat_taps": {
+    "enabled": false,
+    "audio_source": 0,
+    "spin": 0.0833,
+    "vary": true,
+    "radius": 0.8,
+    "intensity": 0.7,
+    "hue": -1.0,
+    "every": 1
+  },
+  "autostart": false,
+  "layers": [
+    {
+      "kind": "noise_color",
+      "enabled": true,
+      "name": "Nebula base",
+      "blend": "alpha_over",
+      "opacity": 1.0,
+      "speed": 0.25,
+      "scale": 1.2,
+      "audio_source": 0,
+      "audio_amount": 0.3,
+      "hue": 0.65,
+      "hue_range": 0.25,
+      "saturation": 0.9,
+      "brightness": 0.5,
+      "tilt_amount": 0.0,
+      "walk_amount": 0.25,
+      "param_a": 0.5,
+      "param_b": 0.5,
+      "param_c": 0.5,
+      "param_d": 0.5
+    },
+    {
+      "kind": "radial_waves",
+      "enabled": true,
+      "name": "Harmonic rings",
+      "blend": "add",
+      "opacity": 0.6,
+      "speed": 1.0,
+      "scale": 1.0,
+      "audio_source": 0,
+      "audio_amount": 0.8,
+      "hue": 0.55,
+      "hue_range": 0.1,
+      "saturation": 0.9,
+      "brightness": 1.0,
+      "tilt_amount": 0.0,
+      "walk_amount": 0.25,
+      "param_a": 3.0,
+      "param_b": 4.0,
+      "param_c": 0.5,
+      "param_d": 0.5
+    },
+    {
+      "kind": "sparkle",
+      "enabled": true,
+      "name": "Treble glitter",
+      "blend": "add",
+      "opacity": 0.7,
+      "speed": 1.0,
+      "scale": 1.0,
+      "audio_source": 0,
+      "audio_amount": 0.9,
+      "hue": 0.12,
+      "hue_range": 0.05,
+      "saturation": 0.3,
+      "brightness": 1.0,
+      "tilt_amount": 0.0,
+      "walk_amount": 0.25,
+      "param_a": 0.15,
+      "param_b": 0.5,
+      "param_c": 0.5,
+      "param_d": 0.5
+    },
+    {
+      "kind": "beat_rings",
+      "enabled": true,
+      "name": "Beat rings",
+      "blend": "add",
+      "opacity": 0.8,
+      "speed": 1.0,
+      "scale": 1.0,
+      "audio_source": 0,
+      "audio_amount": 1.0,
+      "hue": 0.85,
+      "hue_range": 0.0,
+      "saturation": 0.9,
+      "brightness": 1.0,
+      "tilt_amount": 0.0,
+      "walk_amount": 0.25,
+      "param_a": 0.08,
+      "param_b": 0.5,
+      "param_c": 0.5,
+      "param_d": 0.5
+    }
+  ],
+  "saved_stacks": [],
+  "saved_playlists": [],
+  "show_scheduler": {
+    "enabled": false,
+    "active_playlist_id": "",
+    "current_index": 0
+  },
+  "clients": [],
+  "active_patch": null
+}

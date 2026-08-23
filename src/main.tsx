@@ -4,7 +4,13 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import App from "./App";
 import { GateProvider } from "./state";
+import { installTouchHardening } from "./touch";
 import "./styles.css";
+
+// Before React mounts: the show display is a touch screen, and the browser's own
+// gestures (press-and-hold menu, pinch-zoom, overscroll) otherwise interrupt
+// drawing and effect taps.
+installTouchHardening();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

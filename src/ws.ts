@@ -2,11 +2,12 @@
 // LAN browsers, and phones. Text = JSON protocol; binary = preview frames.
 
 import type {
+  AppConfig,
   EffectCfg,
   LayerCfg,
-  AppConfig,
   PatchDoc,
   PreviewFrame,
+  ReportInfo,
   ServerMsg,
 } from "./types";
 
@@ -357,6 +358,18 @@ export class GateClient {
   /** Play an exposed param of the active patch — allowed from any client. */
   patchParam(node: string, param: string, value: number) {
     this.send({ type: "patch_param", node, param, value });
+  }
+  /** "I don't like what it just did" — freezes the last `seconds` of capture. */
+  sendReport(description: string, seconds: number) {
+    this.send({ type: "report", description, seconds });
+  }
+  async listReports(): Promise<ReportInfo[]> {
+    const response = await fetch(`${this.httpBase}/reports`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Reports listing returned ${response.status}`);
+    return (await response.json()) as ReportInfo[];
+  }
+  reportFileUrl(id: string, file: string): string {
+    return `${this.httpBase}/reports/${id}/${file}`;
   }
 }
 

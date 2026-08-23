@@ -775,6 +775,97 @@ pub fn save(cfg: &AppConfig) {
 mod tests {
     use super::*;
 
+    /// Compare fixtures without caring how git checked them out. `str::lines`
+    /// splits on `\n` and drops a trailing `\r`, so this needs no escape
+    /// sequences — which matters, because an earlier version of this helper was
+    /// written through a shell heredoc that mangled `\r\n` into a real newline,
+    /// quietly turning it into a no-op and only failing on Windows CI.
+    /// `.gitattributes` pins these fixtures to LF as well; this is the backstop.
+    fn normalize_lines(text: &str) -> String {
+        text.lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end()
+            .to_string()
+    }
+
+    #[test]
+    fn fixture_comparison_ignores_line_endings() {
+        assert_eq!(normalize_lines("a\r\nb\r\n"), normalize_lines("a\nb"));
+        assert_ne!(normalize_lines("a\nb"), normalize_lines("a\nc"));
+    }
+
+    /// The web UI's layout tests drive a mock backend that replays a committed
+    /// snapshot of the default config (no GPU, no audio device, deterministic).
+    /// A fixture that silently drifts from the real defaults would test a UI
+    /// nobody runs, so it is regenerated from here rather than hand-maintained:
+    /// `EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture`.
+    #[test]
+    fn default_config_fixture_is_current() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("tests")
+            .join("fixtures")
+            .join("default-config.json");
+        // Compared as TEXT, not as parsed JSON: serde_json's default float parser
+        // is allowed to land a ULP away from the value that was written, so a
+        // freshly-written fixture would fail a Value == Value comparison on
+        // hue 0.12. Text also catches formatting and key-order drift, which is
+        // fine for a file nobody edits by hand.
+        let current =
+            serde_json::to_string_pretty(&AppConfig::default()).expect("serialize default config");
+        if std::env::var("EMPYREAN_UPDATE_FIXTURES").is_ok() {
+            std::fs::create_dir_all(path.parent().expect("fixture dir")).expect("create fixture dir");
+            std::fs::write(&path, format!("{current}\n")).expect("write fixture");
+            return;
+        }
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "missing {} ({e}); regenerate with EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture",
+                path.display()
+            )
+        });
+        assert_eq!(
+            normalize_lines(&text),
+            normalize_lines(&current),
+            "tests/fixtures/default-config.json is stale; regenerate with \
+             EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture"
+        );
+    }
+
+    /// Same contract for the runtime status the mock backend replays. The UI
+    /// reads status fields without optional chaining in places, so a fixture
+    /// missing a field the backend now sends white-screens a tab — which is how
+    /// this fixture came to exist.
+    #[test]
+    fn default_status_fixture_is_current() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("tests")
+            .join("fixtures")
+            .join("default-status.json");
+        let current = serde_json::to_string_pretty(&crate::protocol::RuntimeStatus::default())
+            .expect("serialize default status");
+        if std::env::var("EMPYREAN_UPDATE_FIXTURES").is_ok() {
+            std::fs::create_dir_all(path.parent().expect("fixture dir")).expect("create fixture dir");
+            std::fs::write(&path, format!("{current}\n")).expect("write fixture");
+            return;
+        }
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "missing {} ({e}); regenerate with EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture",
+                path.display()
+            )
+        });
+        assert_eq!(
+            normalize_lines(&text),
+            normalize_lines(&current),
+            "tests/fixtures/default-status.json is stale; regenerate with \
+             EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture"
+        );
+    }
+
     #[test]
     fn config_without_rhythm_section_keeps_legacy_behavior() {
         let mut value = serde_json::to_value(AppConfig::default()).unwrap();

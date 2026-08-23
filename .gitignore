@@ -6,3 +6,6 @@ src-tauri/gen/schemas/
 tsconfig.tsbuildinfo
 headless.log
 demo-data/
+# Playwright (layout gate) output
+test-results/
+playwright-report/

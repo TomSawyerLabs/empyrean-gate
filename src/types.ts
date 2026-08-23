@@ -412,6 +412,7 @@ export type ServerMsg =
     }
   | { type: "error"; message: string }
   | { type: "denied"; reason: string }
+  | { type: "report_saved"; report: ReportInfo }
   | { type: "preview_queue"; position: number }
   | { type: "patches"; patches: PatchSummary[] }
   | { type: "patch"; patch: PatchDoc }
@@ -502,6 +503,20 @@ export function shapeAccepts(into: PatchShape, from: PatchShape): boolean {
     (from === "scalar" && into === "field_scalar") ||
     (from === "field_scalar" && into === "field_color")
   );
+}
+
+/** Summary of a saved feedback bundle (see src-tauri/src/report.rs). */
+export interface ReportInfo {
+  id: string;
+  created: string;
+  created_unix_ms: number;
+  description: string;
+  reported_by: string;
+  window_seconds: number;
+  frames: number;
+  app_version: string;
+  /** Absolute path of the bundle directory on the Gate machine. */
+  path: string;
 }
 
 export interface PreviewMeta {

@@ -14,6 +14,7 @@ import {
   cloneControlDeck,
   DECK_BREAKPOINTS,
   DECK_COLUMNS,
+  DECK_MAX_WIDTH,
   defaultControlDeck,
   loadControlDecks,
   removeWidgetFromDeck,
@@ -79,7 +80,7 @@ export default function Live() {
   const [shortcutEditorId, setShortcutEditorId] = useState<string | null>(null);
   const beatDotRef = useRef<HTMLDivElement>(null);
   const { width: deckWidth, containerRef: deckContainerRef, mounted: deckMounted } =
-    useContainerWidth({ initialWidth: window.innerWidth });
+    useContainerWidth({ initialWidth: Math.min(window.innerWidth, DECK_MAX_WIDTH) });
   const breakpoint: DeckBreakpoint = deckWidth >= DECK_BREAKPOINTS.desktop
     ? "desktop"
     : deckWidth >= DECK_BREAKPOINTS.tablet
@@ -157,14 +158,14 @@ export default function Live() {
   const multiplier =
     config?.render.beat_time === "half" ? 0.5 : config?.render.beat_time === "double" ? 2 : 1;
   const activeSource = status?.audio.find((a) => a.active);
-  const effectiveAutoBpm = status?.rhythm.bpm ?? activeSource?.bpm ?? 0;
+  const effectiveAutoBpm = status?.rhythm?.bpm ?? activeSource?.bpm ?? 0;
   const inferredBpm = effectiveAutoBpm / multiplier;
   const manualBpm = config?.render.manual_bpm ?? null;
   const bpm = manualBpm !== null ? manualBpm * multiplier : effectiveAutoBpm;
   const externalClockTrusted = Boolean(
-    status?.rhythm.active &&
-    !status.rhythm.using_fallback &&
-    (status.rhythm.source === "midi_clock" || status.rhythm.source === "pro_dj_link"),
+    status?.rhythm?.active &&
+    !status.rhythm?.using_fallback &&
+    (status.rhythm?.source === "midi_clock" || status.rhythm?.source === "pro_dj_link"),
   );
   // External clocks are authoritative. Audio-derived estimates still need enough
   // confidence to avoid presenting noise as a real tempo.
@@ -366,7 +367,7 @@ export default function Live() {
           <div ref={beatDotRef} className="beat-dot" />
           <span>
             {bpm > 0 && bpmTrusted
-              ? `${bpm.toFixed(0)} BPM${manualBpm !== null ? " manual" : status?.rhythm.using_fallback ? " fallback" : status?.rhythm.source === "midi_clock" ? " MIDI" : status?.rhythm.source === "pro_dj_link" ? " LINK" : ""}`
+              ? `${bpm.toFixed(0)} BPM${manualBpm !== null ? " manual" : status?.rhythm?.using_fallback ? " fallback" : status?.rhythm?.source === "midi_clock" ? " MIDI" : status?.rhythm?.source === "pro_dj_link" ? " LINK" : ""}`
               : bpm > 0
                 ? "finding beat…"
                 : "no beat"}

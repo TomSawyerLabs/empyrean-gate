@@ -1550,6 +1550,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             }
         }
 
+        // Feedback capture (10 Hz): the config on disk is NOT what is rendering
+        // once autopilot, the layer walk and scene transitions are in play, so the
+        // recorder wants the effective parameters, collected only on the frames it
+        // actually samples.
+        let recording = state.recorder.sample_due();
+        let mut effective_layers: Vec<crate::layers::LayerCfg> = Vec::new();
+
         let mut layers = Vec::with_capacity(render_layers.len().min(render_layer_limit));
         let mut gpu_transition_split = 0u32;
         for (i, l) in render_layers.iter().take(render_layer_limit).enumerate() {
@@ -1580,6 +1587,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             };
             l.opacity *= layer_env[i];
             layer_phases[i] += (l.speed * render_master_speed * dt) as f64;
+            if recording {
+                effective_layers.push(l.clone());
+            }
             if render_transition_active && i < render_transition_split {
                 gpu_transition_split += 1;
             }
@@ -1715,6 +1725,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             patch_params,
         };
 
+        // Read before the vectors move into FrameInputs; the recorder reports
+        // what this frame actually had live, not what survives to the next one.
+        let (effects_active, dabs_active) = (inputs.effects.len(), inputs.dabs.len());
+
         let t0 = Instant::now();
         let rgb = match engine.render(&inputs) {
             Ok(r) => r,
@@ -1791,6 +1805,57 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     pixels_per_spoke: cfg.geometry.pixels_per_spoke,
                     rgb: rgb.to_vec(),
                 }));
+            }
+
+            // Feedback capture. `rgb` is frame N-1 (readback is one frame behind
+            // the dispatch), so the stored pixels trail the layer parameters
+            // recorded alongside them by a single frame — far finer than the
+            // 100 ms sampling period, but worth knowing when reading a bundle.
+            if recording {
+                let audio = state
+                    .audio
+                    .iter()
+                    .zip(cfg.audio.sources.iter())
+                    .map(|(features, src)| {
+                        let f = *features.lock();
+                        crate::report::AudioSnapshot {
+                            id: src.id.clone(),
+                            active: f.active,
+                            level: f.level,
+                            bass: f.bass,
+                            mid: f.mid,
+                            treble: f.treble,
+                            onset: f.onset,
+                            bpm: f.bpm,
+                            bpm_confidence: f.bpm_conf,
+                            beat_phase: f.beat_phase,
+                        }
+                    })
+                    .collect();
+                state.recorder.record(
+                    crate::report::Snapshot {
+                        t: 0.0, // stamped by the recorder
+                        fps: fps_ema,
+                        // Effective values, not the configured ones: a master drop
+                        // or a scene transition overrides both, and the whole point
+                        // of a report is what was actually rendering.
+                        master_brightness: cfg.render.master_brightness * master_drop_brightness,
+                        master_speed: render_master_speed,
+                        effects_active,
+                        dabs_active,
+                        control: crate::report::ControlSnapshot {
+                            yaw: control.yaw,
+                            pitch: control.pitch,
+                            roll: control.roll,
+                            shake: control.shake,
+                        },
+                        audio,
+                        layers: effective_layers,
+                    },
+                    rgb,
+                    cfg.geometry.spokes,
+                    cfg.geometry.pixels_per_spoke,
+                );
             }
         }
 
