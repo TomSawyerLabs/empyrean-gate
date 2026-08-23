@@ -1027,3 +1027,28 @@ The patch is confirmed independently of the screenshot it was derived from.
 - No non-Vulkan wgpu backends, no CPU fallback renderer — error clearly instead.
 - Don't default sACN output on.
 - Don't add an installer/updater to CI — raw binary artifact only.
+
+## Show machine (empyreangate) — state as of 2026-08-23
+
+Managed over SSH (`ssh empyreangate`, key-only, elevated) via the self-hosted
+headscale tailnet — see `plans/headscale-mesh.md` in the ops repo for that layer.
+
+- **Autostart cutover done**: `Lightjams LED Mapper` removed from the Run key;
+  `Empyrean Gate` registered (config `autostart: true` + HKCU Run seeded).
+  Autologin is on and BIOS boots on power-loss, so power-cycle → show, no hands.
+  Teams/OneDrive autostart removed.
+- **Drivers updated** (both installed driver-only via signed-payload + pnputil,
+  no OEM installers): GPU 31.0.101.3729 → **32.0.101.7088**, NIC I225-V
+  1.1.3.28 → **2.1.5.7**. App verified running on the new GPU driver.
+  - GOTCHA: 12th-gen iGPU (DEV_46A6) is NOT in Intel's newest "Arc & Iris Xe"
+    branch (8xxx) — it needs the split-off "11th–14th Gen" branch (7088).
+  - GOTCHA: the NUC OEM driver matches full SUBSYS and OUTRANKS any generic INF
+    regardless of version — new driver only binds after `pnputil /delete-driver
+    <oemNN>.inf` of the OEM package, then `/scan-devices` (no reboot needed).
+  - GOTCHA: editing the app's `config.json` from PowerShell 5.1 with
+    `-Encoding utf8` writes a BOM; the app then falls back to its own
+    `config.json.bak` (settings survive) and re-saves — which reverted
+    `autostart` and deleted the Run key. Edit with
+    `[IO.File]::WriteAllText($p,$s,[Text.UTF8Encoding]::new($false))`.
+- The wgpu-29 pin (this dev machine's old driver) may be re-testable against
+  the show machine's new driver when convenient — dev machine driver is still old.
