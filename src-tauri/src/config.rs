@@ -770,6 +770,27 @@ pub fn save(cfg: &AppConfig) {
 mod tests {
     use super::*;
 
+    /// Compare fixtures without caring how git checked them out. `str::lines`
+    /// splits on `\n` and drops a trailing `\r`, so this needs no escape
+    /// sequences — which matters, because an earlier version of this helper was
+    /// written through a shell heredoc that mangled `\r\n` into a real newline,
+    /// quietly turning it into a no-op and only failing on Windows CI.
+    /// `.gitattributes` pins these fixtures to LF as well; this is the backstop.
+    fn normalize_lines(text: &str) -> String {
+        text.lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end()
+            .to_string()
+    }
+
+    #[test]
+    fn fixture_comparison_ignores_line_endings() {
+        assert_eq!(normalize_lines("a\r\nb\r\n"), normalize_lines("a\nb"));
+        assert_ne!(normalize_lines("a\nb"), normalize_lines("a\nc"));
+    }
+
     /// The web UI's layout tests drive a mock backend that replays a committed
     /// snapshot of the default config (no GPU, no audio device, deterministic).
     /// A fixture that silently drifts from the real defaults would test a UI
@@ -800,11 +821,9 @@ mod tests {
                 path.display()
             )
         });
-        // Line endings are whatever git checked out on this platform.
-        let normalize = |s: &str| s.replace("\r\n", "\n").trim_end().to_string();
         assert_eq!(
-            normalize(&text),
-            normalize(&current),
+            normalize_lines(&text),
+            normalize_lines(&current),
             "tests/fixtures/default-config.json is stale; regenerate with \
              EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture"
         );
@@ -825,8 +844,7 @@ mod tests {
             .expect("serialize default status");
         if std::env::var("EMPYREAN_UPDATE_FIXTURES").is_ok() {
             std::fs::create_dir_all(path.parent().expect("fixture dir")).expect("create fixture dir");
-            std::fs::write(&path, format!("{current}
-")).expect("write fixture");
+            std::fs::write(&path, format!("{current}\n")).expect("write fixture");
             return;
         }
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
@@ -835,13 +853,11 @@ mod tests {
                 path.display()
             )
         });
-        let normalize = |s: &str| s.replace("
-", "
-").trim_end().to_string();
         assert_eq!(
-            normalize(&text),
-            normalize(&current),
-            "tests/fixtures/default-status.json is stale; regenerate with              EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture"
+            normalize_lines(&text),
+            normalize_lines(&current),
+            "tests/fixtures/default-status.json is stale; regenerate with \
+             EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture"
         );
     }
 
