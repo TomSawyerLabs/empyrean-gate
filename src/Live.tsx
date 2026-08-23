@@ -14,6 +14,7 @@ import {
   cloneControlDeck,
   DECK_BREAKPOINTS,
   DECK_COLUMNS,
+  DECK_MAX_WIDTH,
   defaultControlDeck,
   loadControlDecks,
   removeWidgetFromDeck,
@@ -79,7 +80,7 @@ export default function Live() {
   const [shortcutEditorId, setShortcutEditorId] = useState<string | null>(null);
   const beatDotRef = useRef<HTMLDivElement>(null);
   const { width: deckWidth, containerRef: deckContainerRef, mounted: deckMounted } =
-    useContainerWidth({ initialWidth: window.innerWidth });
+    useContainerWidth({ initialWidth: Math.min(window.innerWidth, DECK_MAX_WIDTH) });
   const breakpoint: DeckBreakpoint = deckWidth >= DECK_BREAKPOINTS.desktop
     ? "desktop"
     : deckWidth >= DECK_BREAKPOINTS.tablet
