@@ -680,6 +680,40 @@ bytes appended so size can); and the versioned download must be named
 `empyrean-gate-v<version>` matching the binary's own version, or the successor
 correctly decides it is not running from a download at all.
 
+### Round 14d: Live fills the window (2026-08-23)
+
+"live seems to be limited in size? full screen should use as much of the screen
+as possible" — this settles the question round 14b left open, and it was two
+separate caps:
+
+- **Width.** `.control-deck-shell` had `max-width: 1780px; margin: 0 auto`, so a
+  1920 or 2560 display got dead margins down both sides. Removed.
+- **Height.** The grid used a fixed `rowHeight={48}`, so the deck was the same
+  height on every display — a band of unused screen at 1080p, and an overflowing
+  page below that. `.control-deck-page` is now a full-height flex column, the
+  shell takes the leftover height, and the row height is derived from it.
+
+**Rows GROW to fill but never shrink.** Shrinking them does make the deck fit,
+but it fits by clipping the contents of each widget — the pen grid loses its
+last row, the effects pad loses a pair — so the deck looks broken and nothing is
+gained. Caught it in a screenshot at 900x900 after the first attempt did exactly
+that. Below the base height the shell scrolls instead, which keeps the *page*
+from scrolling (a page scrollbar is what turns a touch drag into a scroll rather
+than a stroke — the thing actually worth preventing).
+
+Consequently **the gate's `MUST_FIT_VERTICALLY` rule is back on for Live**, which
+is the strongest state it has been in. Phones still opt out at the 700px
+breakpoint, where stacking and scrolling is the design.
+
+Also: the Patch tab pushed the topbar onto two lines at 1400px, so the
+label-collapse breakpoint moved 1150 → 1500. And `docs/live-show-1080p.png` is a
+new screenshot taken in show mode at the display's real resolution, since that is
+the configuration that actually ships.
+
+Known, not fixed: the deck's scheduler widget ("Blackout · 0.00 · HOLD") clips
+its own text at the default widget size. It lives inside a scrolling widget body
+so it is reachable, and it is the deck author's default layout.
+
 ### Windows shell gestures (asked 2026-08-22, not applied)
 
 The in-webview gestures are handled (round 14). The remaining ones are the
@@ -706,11 +740,11 @@ established pattern for machine settings this app needs.
 
 ### Still to confirm with the user (needs the real touch display)
 
-0. Should the Live control deck be forced to fit the window (derive `rowHeight`
+~~0. Should the Live control deck be forced to fit the window (derive `rowHeight`
    from the available height instead of a fixed 48) so the show surface never
    scrolls? Recommendation: yes — a scrolling performance surface means a touch
    drag scrolls the page instead of playing — but it changes a collaborator's
-   deliberate design, so it needs a decision.
+   deliberate design, so it needs a decision. **ANSWERED — done, see round 14d.**
 1. Does the tap artifact (square background flash) actually go away? Two fixes
    landed for it; if it persists, the next suspect is WebView2 compositing the
    transparent canvas, and the test is whether an opaque canvas backdrop stops it.

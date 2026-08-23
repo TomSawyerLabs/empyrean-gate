@@ -13,8 +13,18 @@
 
 import { test } from "@playwright/test";
 
-const SHOTS = [
+interface Shot {
+  file: string;
+  hash: string;
+  width: number;
+  height: number;
+  /** Enter show mode first: fullscreen, no chrome — how the Gate machine runs. */
+  showMode?: boolean;
+}
+
+const SHOTS: Shot[] = [
   { file: "live-wide.png", hash: "live", width: 1400, height: 900 },
+  { file: "live-show-1080p.png", hash: "live", width: 1920, height: 1080, showMode: true },
   { file: "live-square.png", hash: "live", width: 900, height: 900 },
   { file: "live-tall.png", hash: "live", width: 820, height: 1180 },
   { file: "control.png", hash: "control", width: 1400, height: 900 },
@@ -27,6 +37,10 @@ for (const shot of SHOTS) {
     await page.setViewportSize({ width: shot.width, height: shot.height });
     await page.goto(`/#${shot.hash}`);
     await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+    if (shot.showMode) {
+      await page.getByRole("button", { name: /Show mode/ }).click();
+      await page.locator(".show-exit").waitFor();
+    }
     // Let the preview stream paint a few frames so the array is lit.
     await page.waitForTimeout(1200);
     await page.screenshot({ path: `docs/${shot.file}` });

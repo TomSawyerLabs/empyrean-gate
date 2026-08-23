@@ -40,12 +40,21 @@ export const DECK_BREAKPOINTS: Record<DeckBreakpoint, number> = {
   phone: 0,
 };
 
-/// Widest the deck ever gets, mirroring `.control-deck-shell { max-width }`.
-/// The grid positions its items with transforms computed from the width it is
-/// told, so a first-paint guess LARGER than the container throws items past the
-/// right edge and the whole app briefly grows a horizontal scrollbar — caught by
-/// the layout gate at 2560x1080, where the gap between window and cap is biggest.
-export const DECK_MAX_WIDTH = 1780;
+/// First-paint width guess. The grid positions items with transforms computed
+/// from the width it is told, so a guess LARGER than the container throws items
+/// past the right edge and the app briefly grows a horizontal scrollbar (the
+/// layout gate caught exactly that at 2560x1080). The shell is full-bleed now,
+/// so the window width minus the page's own padding is the right estimate; the
+/// resize observer corrects it on the next frame either way.
+export const deckWidthGuess = () => Math.max(320, window.innerWidth - 20);
+
+/// Row height floor, and what phones use outright (there the deck scrolls by
+/// design rather than being squeezed into one screenful). Rows only ever grow
+/// above this to fill a taller window — shrinking below it clips the content
+/// inside the widgets instead of making anything fit.
+export const DECK_BASE_ROW_HEIGHT = 48;
+
+
 
 export const DECK_COLUMNS: Record<DeckBreakpoint, number> = {
   desktop: 12,

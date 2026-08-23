@@ -43,14 +43,12 @@ const TABS = ["live", "media", "control", "settings"] as const;
 
 /// Tabs required to fit on screen with no scrolling at all.
 ///
-/// Empty for now, deliberately. The Live tab used to be here — a scrollbar on the
-/// performance surface means a touch drag scrolls the page instead of playing the
-/// array, which is the bug that prompted this gate. But the control-deck rework
-/// made Live a scrolling, user-arranged page on purpose, and its default deck is
-/// ~930px tall regardless of window size, so it scrolls at anything below 1080p.
-/// Reinstating the rule is a one-word change once that design question is
-/// settled; it is left off rather than silently overriding the deck's design.
-const MUST_FIT_VERTICALLY = new Set<string>();
+/// Live is the performance surface: a scrollbar there means a touch drag scrolls
+/// the page instead of playing the array, which is the bug that prompted this
+/// gate in the first place. The rule was off for one round while the control
+/// deck sized its rows at a fixed 48px and therefore scrolled below 1080p; the
+/// deck now derives row height from the space it is given, so this holds again.
+const MUST_FIT_VERTICALLY = new Set<string>(["live"]);
 
 interface Overflow {
   axis: "horizontal" | "vertical";

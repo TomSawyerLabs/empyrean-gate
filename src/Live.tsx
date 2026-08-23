@@ -14,7 +14,8 @@ import {
   cloneControlDeck,
   DECK_BREAKPOINTS,
   DECK_COLUMNS,
-  DECK_MAX_WIDTH,
+  DECK_BASE_ROW_HEIGHT,
+  deckWidthGuess,
   defaultControlDeck,
   loadControlDecks,
   removeWidgetFromDeck,
@@ -80,7 +81,7 @@ export default function Live() {
   const [shortcutEditorId, setShortcutEditorId] = useState<string | null>(null);
   const beatDotRef = useRef<HTMLDivElement>(null);
   const { width: deckWidth, containerRef: deckContainerRef, mounted: deckMounted } =
-    useContainerWidth({ initialWidth: Math.min(window.innerWidth, DECK_MAX_WIDTH) });
+    useContainerWidth({ initialWidth: deckWidthGuess() });
   const breakpoint: DeckBreakpoint = deckWidth >= DECK_BREAKPOINTS.desktop
     ? "desktop"
     : deckWidth >= DECK_BREAKPOINTS.tablet
@@ -104,6 +105,45 @@ export default function Live() {
     ),
     [activeDeck.id, activeDeck.layouts, breakpoint],
   );
+
+  // Fill the window vertically as well as horizontally.
+  //
+  // react-grid-layout positions rows at a fixed pixel height, so with a constant
+  // `rowHeight` the deck was always the same height regardless of the display —
+  // leaving a band of dead screen on a 1080p show display, and overflowing into
+  // a page scrollbar on anything shorter. Deriving the row height from the space
+  // the shell actually got makes the deck exactly fill it.
+  //
+  // The shell's height is layout-driven (`flex: 1` inside a full-height column),
+  // never content-driven, so measuring it here cannot feed back into itself.
+  const [deckHeight, setDeckHeight] = useState(0);
+  useEffect(() => {
+    const shell = deckContainerRef.current;
+    if (!shell) return;
+    setDeckHeight(shell.clientHeight);
+    const observer = new ResizeObserver(([entry]) => {
+      setDeckHeight(entry.contentRect.height);
+    });
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, [deckContainerRef, deckMounted]);
+
+  const rowHeight = useMemo(() => {
+    const gap = breakpoint === "phone" ? 8 : 10;
+    const rows = Math.max(
+      1,
+      ...(renderedLayouts[breakpoint] ?? []).map((item) => item.y + item.h),
+    );
+    // Phones scroll by design, so they keep the fixed row height.
+    if (breakpoint === "phone" || deckHeight <= 0) return DECK_BASE_ROW_HEIGHT;
+    const available = deckHeight - gap * 2 - gap * (rows - 1);
+    // GROW to fill, never shrink. Squeezing rows below the base height does make
+    // the deck fit, but it does it by clipping the content inside each widget
+    // (a pen grid loses its last row, an effects pad loses its last pair) — the
+    // deck looks broken and gains nothing. When there is not enough height, keep
+    // the widgets readable and let the shell scroll instead.
+    return Math.max(DECK_BASE_ROW_HEIGHT, available / rows);
+  }, [deckHeight, renderedLayouts, breakpoint]);
 
   useEffect(() => {
     saveControlDecks(decks);
@@ -584,7 +624,7 @@ export default function Live() {
             layouts={renderedLayouts}
             breakpoints={DECK_BREAKPOINTS}
             cols={DECK_COLUMNS}
-            rowHeight={48}
+            rowHeight={rowHeight}
             margin={{ phone: [8, 8], tablet: [10, 10], desktop: [10, 10] }}
             containerPadding={{ phone: [8, 8], tablet: [10, 10], desktop: [10, 10] }}
             compactor={noCompactor}

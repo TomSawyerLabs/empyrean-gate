@@ -939,8 +939,10 @@ main {
 
 /* One line of chrome is worth more than the GPU name, the key hints and the
    button labels; below this the topbar would otherwise wrap and steal height
-   from the array view. Icons stay — they are what gets tapped. */
-@media (max-width: 1150px) {
+   from the array view. Icons stay — they are what gets tapped.
+   Raised from 1150 to 1500 when the Patch tab arrived: six tabs plus the action
+   buttons no longer fit on one line at 1400. */
+@media (max-width: 1500px) {
   .topbar {
     gap: 8px;
   }
@@ -2591,9 +2593,16 @@ button:disabled {
 
 .control-deck-page {
   position: relative;
-  display: block;
-  height: auto;
-  min-height: 100%;
+  /* A column that FILLS the window rather than growing to fit its content: the
+     deck is the performance surface, so unused screen is wasted screen, and a
+     page that scrolls means a touch drag scrolls instead of playing. The shell
+     below takes the leftover height and the grid sizes its rows to match.
+     The mobile breakpoint opts back out — there, stacking and scrolling is the
+     right answer. */
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   padding: 0;
 }
 
@@ -2674,9 +2683,18 @@ button:disabled {
 
 .control-deck-shell {
   width: 100%;
-  max-width: 1780px;
-  min-height: 240px;
+  /* No max-width: on a 1920 or 2560 show display a centred 1780px deck left
+     dead margins down both sides. */
+  flex: 1;
+  min-height: 0;
   margin: 0 auto;
+  /* Only bites when the deck has more rows than the window can give a usable
+     height to (rows stop shrinking at DECK_MIN_ROW_HEIGHT). Then the deck
+     scrolls inside itself rather than pushing the PAGE into a scrollbar — a
+     page scrollbar is what turns a touch drag into a scroll instead of a
+     stroke, which is the thing worth preventing. */
+  overflow: auto;
+  scrollbar-width: thin;
 }
 
 .control-deck-shell > .react-grid-layout {
@@ -3326,12 +3344,17 @@ button:disabled {
 }
 
 @media (max-width: 700px) {
+  /* Phones opt out of the fill-the-window behaviour: a stacked deck on a narrow
+     screen wants to be scrolled, not squeezed into one screenful. */
   .control-deck-page {
     display: block;
+    height: auto;
+    min-height: 100%;
     padding: 0 0 calc(8px + env(safe-area-inset-bottom));
   }
 
   .control-deck-shell {
+    flex: none;
     max-width: none;
   }
 
