@@ -13,6 +13,8 @@
   "sacn_peers": [],
   "sacn_watched_universes": 0,
   "sacn_watch_error": null,
+  "config_error": null,
+  "power_error": null,
   "fps_history": [],
   "pps_history": [],
   "clients": 0,
@@ -37,6 +39,9 @@
   "default_output_channels": 0,
   "interfaces": [],
   "firewall_pending": false,
+  "startup_supported": false,
+  "startup_enabled": false,
+  "startup_state": "",
   "video_cache": [],
   "client_list": [],
   "master_brightness": 0.0,
@@ -97,5 +102,8 @@
     "effects_overlay": false,
     "blocked_by_show": null
   },
-  "discovery_running": false
+  "discovery_running": false,
+  "diagnostics_path": "",
+  "diagnostics_active": false,
+  "diagnostics_error": ""
 }

@@ -944,13 +944,16 @@ fn load_recovery(tmp: &std::path::Path, bak: &std::path::Path) -> AppConfig {
 }
 
 pub fn save(cfg: &AppConfig) -> Result<(), String> {
+    crate::autostart::sync(cfg.autostart);
     let path = config_path();
     let _file_lock = ConfigFileLock::acquire(&path)
         .map_err(|e| format!("cannot lock {}: {e}", path.display()))?;
     save_to_path(cfg, &path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-struct ConfigFileLock(std::fs::File);
+struct ConfigFileLock {
+    _file: std::fs::File,
+}
 
 impl ConfigFileLock {
     fn acquire(path: &std::path::Path) -> std::io::Result<Self> {
@@ -966,15 +969,7 @@ impl ConfigFileLock {
             .truncate(false)
             .open(lock_path)?;
         file.lock_exclusive()?;
-        Ok(Self(file))
-    }
-}
-
-pub fn save(cfg: &AppConfig) {
-    crate::autostart::sync(cfg.autostart);
-    let path = config_path();
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
+        Ok(Self { _file: file })
     }
 }
 

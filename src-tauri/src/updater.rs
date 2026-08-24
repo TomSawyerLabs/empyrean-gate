@@ -277,7 +277,9 @@ fn stage(
     _state: &SharedState,
 ) -> anyhow::Result<PathBuf> {
     let target = versioned_path(version)?;
-    if already_staged(&target) && sha256_file(&target).as_deref() == Ok(expected_sha256) {
+    if already_staged(&target)
+        && matches!(sha256_file(&target), Ok(digest) if digest == expected_sha256)
+    {
         log::info!("v{version} is already staged at {}", target.display());
         return Ok(target);
     }

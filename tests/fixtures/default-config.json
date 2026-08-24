@@ -30,7 +30,7 @@
     "max_preview_clients": 10,
     "auth_token": null,
     "join_token": "",
-    "require_token": false
+    "require_token": true
   },
   "audio": {
     "sources": [
@@ -73,7 +73,8 @@
     "leave_show_at": "09:00"
   },
   "windows": {
-    "aux_open": []
+    "aux_open": [],
+    "launch_at_startup": false
   },
   "video": {
     "playlist": [],

@@ -191,13 +191,17 @@ struct DiagnosticsRequest {
     token: String,
 }
 
-fn client_authorized(state: &SharedState, addr: SocketAddr, client_id: &str, token: &str) -> bool {
+fn diagnostics_authorized(
+    state: &SharedState,
+    addr: SocketAddr,
+    client_id: &str,
+    token: &str,
+) -> bool {
     let cfg = state.config.read();
     if cfg.clients.iter().any(|client| client.id == client_id && client.revoked) {
         return false;
     }
-    addr.ip().is_loopback()
-        || (!token.is_empty() && token == cfg.server.join_token)
+    addr.ip().is_loopback() || (!token.is_empty() && token == cfg.server.join_token)
 }
 
 async fn recent_diagnostics(
@@ -205,7 +209,7 @@ async fn recent_diagnostics(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     axum::Json(req): axum::Json<DiagnosticsRequest>,
 ) -> Response {
-    if !client_authorized(&ctx.state, addr, &req.client_id, &req.token) {
+    if !diagnostics_authorized(&ctx.state, addr, &req.client_id, &req.token) {
         return (StatusCode::FORBIDDEN, "diagnostics access denied").into_response();
     }
     let join_token = ctx.state.config.read().server.join_token.clone();
@@ -513,6 +517,18 @@ async fn handover_state(
 /// Phase 2 (commit): stop sACN NOW — and wait for the engine loop to ACK that it
 /// skipped a send, so the wire provably never has two sources — then hand back
 /// fresh layer phases (drift correction for the successor) and exit shortly.
+fn handover_authorized(state: &SharedState, addr: SocketAddr, headers: &HeaderMap) -> bool {
+    if !addr.ip().is_loopback() {
+        return false;
+    }
+    let supplied = headers
+        .get("x-empyrean-handover")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    let expected = state.config.read().server.join_token.clone();
+    !expected.is_empty() && supplied == expected
+}
+
 async fn handover(
     State(ctx): State<Ctx>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -820,6 +836,20 @@ async fn deny(tx: &mut WsSink, reason: &str) -> Result<(), ()> {
     )
     .await;
     Err(())
+}
+
+async fn require_local_operator(tx: &mut WsSink, addr: SocketAddr, action: &str) -> bool {
+    if addr.ip().is_loopback() {
+        return true;
+    }
+    let _ = send_json(
+        tx,
+        &ServerMsg::Error {
+            message: format!("{action} must be performed on the Gate machine."),
+        },
+    )
+    .await;
+    false
 }
 
 /// Friendly device name for the timeline; falls back to the raw id.
@@ -1606,9 +1636,9 @@ mod diagnostics_tests {
         });
         let state = SharedState::new(config);
 
-        assert!(!client_authorized(&state, remote(), "unknown", ""));
-        assert!(!client_authorized(&state, remote(), "operator", ""));
-        assert!(client_authorized(&state, remote(), "unknown", "show-secret"));
+        assert!(!diagnostics_authorized(&state, remote(), "unknown", ""));
+        assert!(!diagnostics_authorized(&state, remote(), "operator", ""));
+        assert!(diagnostics_authorized(&state, remote(), "unknown", "show-secret"));
     }
 
     #[test]
@@ -1621,13 +1651,13 @@ mod diagnostics_tests {
             revoked: true,
         });
         let state = SharedState::new(config);
-        assert!(!client_authorized(&state, remote(), "revoked", "show-secret"));
+        assert!(!diagnostics_authorized(&state, remote(), "revoked", "show-secret"));
     }
 
     #[test]
     fn loopback_diagnostics_do_not_require_a_token() {
         let state = SharedState::new(AppConfig::default());
         let loopback = "127.0.0.1:1234".parse().unwrap();
-        assert!(client_authorized(&state, loopback, "", ""));
+        assert!(diagnostics_authorized(&state, loopback, "", ""));
     }
 }

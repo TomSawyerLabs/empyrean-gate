@@ -124,7 +124,7 @@ pub fn start_backend() -> Backend {
         let mut st = state.status.lock();
         st.interfaces = list_interfaces();
         st.version = updater::effective_version();
-        st.firewall_pending = firewall::rule_missing(port);
+        st.firewall_pending = lan_server && firewall::rule_missing(port);
         let diagnostics = diagnostics::status();
         st.diagnostics_path = diagnostics.path;
         st.diagnostics_active = diagnostics.active;

@@ -120,8 +120,21 @@ function DjLinkTracksPanel() {
 function DjLinkDebugPanel() {
   const { djLinkLog, clearDjLinkLog } = useGate();
   const [showBeats, setShowBeats] = useState(false);
+  const [copyLabel, setCopyLabel] = useState("Copy");
   const streamRef = useRef<HTMLDivElement>(null);
   const visible = showBeats ? djLinkLog : djLinkLog.filter((entry) => entry.category !== "beat");
+
+  const copyVisible = async () => {
+    const heading = `DJ LINK live inspector (${visible.length} entries; beats ${showBeats ? "included" : "filtered"})`;
+    const text = [heading, ...visible.map((entry) => JSON.stringify(entry))].join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyLabel(`Copied ${visible.length}`);
+    } catch {
+      setCopyLabel("Copy failed");
+    }
+    window.setTimeout(() => setCopyLabel("Copy"), 1800);
+  };
 
   useEffect(() => {
     const stream = streamRef.current;
@@ -147,6 +160,9 @@ function DjLinkDebugPanel() {
             />
             Show every beat
           </label>
+          <button type="button" disabled={visible.length === 0} onClick={() => void copyVisible()}>
+            {copyLabel}
+          </button>
           <button type="button" onClick={clearDjLinkLog}>Clear view</button>
         </div>
       </div>

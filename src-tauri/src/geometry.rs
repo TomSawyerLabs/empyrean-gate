@@ -21,7 +21,7 @@ pub fn pixel_polar(geo: &GeometryConfig, spoke: u32, i: u32) -> (f32, f32) {
 /// Universes that actually carry pixels for one spoke.
 pub fn universes_per_spoke(geo: &GeometryConfig, out: &OutputConfig) -> u16 {
     let ppu = out.pixels_per_universe.max(1) as u32;
-    geo.pixels_per_spoke.div_ceil(ppu)
+    geo.pixels_per_spoke.div_ceil(ppu) as u16
 }
 
 /// Spacing between consecutive spokes' start universes — each spoke begins on a

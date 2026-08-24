@@ -378,6 +378,10 @@ impl SacnSender {
         self.plan.len() as u16
     }
 
+    pub fn error_message(&self) -> Option<String> {
+        self.bind_error.clone().or_else(|| self.send_error.clone())
+    }
+
     /// The sequence number last sent, for a successor to continue from. Universes
     /// advance in lockstep, so this is normally one value; `max` is defensive
     /// against the rare skip (a universe whose slice was missing mid-reconfigure).

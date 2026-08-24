@@ -882,6 +882,9 @@ fn effective_beat_phase(
 struct MasterDropDetector {
     reference: f32,
     candidate_secs: f32,
+    healthy_secs: f32,
+    cooldown_secs: f32,
+    armed: bool,
     latched: bool,
     brightness: f32,
 }
@@ -891,6 +894,9 @@ impl Default for MasterDropDetector {
         Self {
             reference: 0.0,
             candidate_secs: 0.0,
+            healthy_secs: 0.0,
+            cooldown_secs: 0.0,
+            armed: false,
             latched: false,
             brightness: 1.0,
         }
@@ -904,24 +910,49 @@ impl MasterDropDetector {
         if !enabled {
             self.reference = level;
             self.candidate_secs = 0.0;
+            self.healthy_secs = 0.0;
+            self.cooldown_secs = 0.0;
+            self.armed = false;
             self.latched = false;
             self.brightness += (1.0 - self.brightness) * (1.0 - (-dt / 0.35).exp());
             return (self.brightness, false);
         }
 
-        let reference_tau = if level > self.reference { 0.12 } else { 3.0 };
+        self.cooldown_secs = (self.cooldown_secs - dt).max(0.0);
+        let reference_tau = if level > self.reference { 0.12 } else { 4.0 };
         self.reference += (level - self.reference) * (1.0 - (-dt / reference_tau).exp());
-        let large_drop =
-            self.reference > 0.25 && self.reference - level > 0.30 && level < self.reference * 0.22;
-        if large_drop {
+
+        // Do not arm from one transient peak. Require a real run of healthy
+        // master audio, and require it again after every cut before another cut
+        // can fire. This keeps kick/snare gaps and compressor pumping from
+        // repeatedly blacking out the structure.
+        let healthy = level > 0.28 && level > self.reference * 0.55;
+        if healthy {
+            self.healthy_secs += dt;
+            if self.healthy_secs >= 1.5 && self.cooldown_secs == 0.0 {
+                self.armed = true;
+            }
+        } else {
+            self.healthy_secs = 0.0;
+        }
+
+        let large_drop = self.armed
+            && self.cooldown_secs == 0.0
+            && self.reference > 0.35
+            && self.reference - level > 0.40
+            && level < self.reference * 0.12;
+        if large_drop && !self.latched {
             self.candidate_secs += dt;
         } else {
             self.candidate_secs = 0.0;
         }
 
-        let triggered = !self.latched && self.candidate_secs >= 0.075;
+        let triggered = !self.latched && self.candidate_secs >= 0.30;
         if triggered {
             self.latched = true;
+            self.armed = false;
+            self.healthy_secs = 0.0;
+            self.cooldown_secs = 4.0;
         }
         if self.latched && level > (self.reference * 0.48).max(0.16) {
             self.latched = false;
@@ -1016,9 +1047,15 @@ mod beat_time_tests {
         assert!(!detector.step(0.02, true, 1.0 / 60.0).1);
         detector.step(0.8, true, 1.0 / 60.0);
 
+        // Even a fairly long musical gap should not count as a fader cut.
+        for _ in 0..12 {
+            assert!(!detector.step(0.01, true, 1.0 / 60.0).1);
+        }
+        detector.step(0.8, true, 1.0 / 60.0);
+
         let mut triggered = false;
         let mut brightness = 1.0;
-        for _ in 0..36 {
+        for _ in 0..48 {
             let result = detector.step(0.01, true, 1.0 / 60.0);
             brightness = result.0;
             triggered |= result.1;
@@ -1030,6 +1067,11 @@ mod beat_time_tests {
             brightness = detector.step(0.8, true, 1.0 / 60.0).0;
         }
         assert!(brightness > 0.9, "brightness={brightness}");
+
+        // Recovery has to be sustained before the detector can arm again.
+        for _ in 0..12 {
+            assert!(!detector.step(0.01, true, 1.0 / 60.0).1);
+        }
     }
 
     #[test]
