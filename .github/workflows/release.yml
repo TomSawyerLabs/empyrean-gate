@@ -61,7 +61,7 @@ jobs:
       - name: Layout gate
         if: runner.os == 'Linux'
         run: |
-          bunx playwright install --with-deps chromium
+          bunx playwright install --with-deps chromium webkit
           bun run test:layout
 
       # Same reasoning, same bundle: whatever checks.yml gates a push on, a

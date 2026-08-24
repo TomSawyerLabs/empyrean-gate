@@ -72,7 +72,16 @@ export default defineConfig({
   },
   envPrefix: ["VITE_", "TAURI_ENV_"],
   build: {
-    target: "chrome120",
+    // Not Chromium alone. The desktop app is WebView2, but the SAME bundle is
+    // served over the LAN to iPads and phones — QR join, "Add to Home Screen",
+    // remote mic — so WebKit is a first-class target, not an afterthought.
+    // Naming Safari here is what makes esbuild downlevel syntax and keep CSS it
+    // would otherwise assume Chromium could handle.
+    //
+    // safari16 = iPadOS 16 (Sept 2022), which is also the floor for container
+    // queries. Anything older falls back rather than breaking; see the
+    // `@container live-cluster` note in styles.css.
+    target: ["chrome120", "safari16"],
     sourcemap: true,
   },
 });

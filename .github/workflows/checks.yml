@@ -22,8 +22,8 @@ jobs:
       - name: Typecheck frontend
         run: bun run typecheck
 
-      - name: Install Chromium for the layout gate
-        run: bunx playwright install --with-deps chromium
+      - name: Install browsers (Chromium for the gate, WebKit for behaviour)
+        run: bunx playwright install --with-deps chromium webkit
 
       # Builds the bundle, serves it through the mock backend, and fails if
       # anything is clipped or overflows at any viewport in the matrix. CSS has

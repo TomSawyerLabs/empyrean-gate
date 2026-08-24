@@ -227,6 +227,16 @@ extends past the viewport horizontally, when any box clips its own content, or w
 Live tab needs to scroll vertically. Anything deliberately parked off-screen must
 declare `data-layout-exempt`. It runs on every push and on release tags.
 
+`bun run test:behavior` covers what the gate structurally cannot see: a control can be
+laid out perfectly and still be unusable. It asserts that the master sliders never
+shrink below a width you could actually aim at, that brightness survives a drag to 0
+**and back**, that the colour wheel's compass points are the right way round, and that
+quick-setting shortcuts migrate off the removed control decks. These run on **both**
+Chromium and WebKit — the iPads are first-class clients, and range-input rendering,
+pointer capture and canvas are not portable the way box geometry is. The layout gate
+itself stays Chromium-only; that all 47 of its cases pass identically under WebKit was
+checked rather than assumed.
+
 ## Production build
 
 ```sh

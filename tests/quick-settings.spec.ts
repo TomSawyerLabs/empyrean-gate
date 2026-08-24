@@ -30,6 +30,17 @@ test("quick settings edit mode opens the editor for a shortcut", async ({ page }
 test("legacy deck shortcuts migrate", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.goto("/#live");
+
+  // Wait for Live to have written its own shortcut key before touching storage.
+  // Racing that write is not hypothetical: Live loads shortcuts on mount and
+  // persists them in an effect, so seeding the legacy blob first means the app's
+  // write lands AFTER it, the key exists on reload, and the migration correctly
+  // declines to run. WebKit's boot timing lost this race once in CI.
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+  await page.waitForFunction(
+    () => localStorage.getItem("empyrean-live-quick-settings-v1") !== null,
+  );
+
   await page.evaluate(() => {
     localStorage.removeItem("empyrean-live-quick-settings-v1");
     localStorage.setItem(
