@@ -250,6 +250,9 @@ pub struct SharedState {
     /// Hardware commissioning mode. Deliberately NOT in `AppConfig`: it must not
     /// be able to survive a restart into a show. Always starts disarmed.
     pub test: Mutex<crate::testmode::TestState>,
+    /// Game mode control surface (see `game::GameControl`). Same rule as test
+    /// mode: not in `AppConfig`, always starts inactive.
+    pub game: Mutex<crate::game::GameControl>,
     /// Result of the last controller scan, kept so a client that connects after
     /// a scan can still see it.
     pub last_discovery: Mutex<Option<crate::discovery::DiscoveryResult>>,
@@ -349,6 +352,7 @@ impl SharedState {
             pioneer_tracks: Mutex::new(HashMap::new()),
             control: Mutex::new(ControlInputs::default()),
             test: Mutex::new(crate::testmode::TestState::default()),
+            game: Mutex::new(crate::game::GameControl::default()),
             last_discovery: Mutex::new(None),
             discovery_running: AtomicBool::new(false),
             status: Mutex::new(RuntimeStatus::default()),
@@ -436,6 +440,70 @@ impl SharedState {
             test.cfg = cfg;
         }
         self.broadcast_state();
+    }
+
+    /// Start or stop a game (see plans/game-mode.md). Mirrors `set_test_mode`:
+    /// starting is refused while the show scheduler is running a playlist —
+    /// stopping the show first is a deliberate, separate action. (A future
+    /// playlist *game cue* enters through the scheduler itself, not here, so
+    /// this guard only ever applies to the manual path.) Never touches
+    /// `output.enabled`. Stopping is always allowed; the engine crossfades out.
+    pub fn set_game_mode(&self, game: Option<crate::game::GameKind>) -> Result<(), String> {
+        if game.is_some() && let Some(playlist) = self.config.read().running_show() {
+            return Err(format!(
+                "\"{}\" is running on the show scheduler. Stop the show before starting a game.",
+                playlist.name
+            ));
+        }
+        {
+            let mut g = self.game.lock();
+            if g.active == game {
+                return Ok(());
+            }
+            g.active = game;
+            g.started = game.map(|_| Instant::now());
+            g.inputs.clear();
+        }
+        match game {
+            Some(kind) => log::info!("game mode: {} started", kind.label()),
+            None => log::info!("game mode: stopped"),
+        }
+        self.broadcast_state();
+        Ok(())
+    }
+
+    /// Live game parameters. Accepted while inactive too, so the Games tab's
+    /// controls can be set up before anything reaches the array.
+    pub fn set_game_config(&self, species: Option<u8>, effects_overlay: Option<bool>) {
+        {
+            let mut g = self.game.lock();
+            if let Some(s) = species {
+                g.species = s.clamp(crate::game::rps::MIN_SPECIES, crate::game::rps::MAX_SPECIES);
+            }
+            if let Some(o) = effects_overlay {
+                g.effects_overlay = o;
+            }
+        }
+        self.broadcast_state();
+    }
+
+    /// Queue player injections for the running game. Collaborative like
+    /// `paint`: inputs from all clients merge, oldest dropped under flood.
+    pub fn game_input(&self, species: u8, points: &[crate::layers::DabPoint]) {
+        let mut g = self.game.lock();
+        if g.active.is_none() {
+            return;
+        }
+        for p in points {
+            if g.inputs.len() >= crate::game::MAX_QUEUED_INPUTS {
+                g.inputs.remove(0);
+            }
+            g.inputs.push(crate::game::QueuedInput {
+                angle: p.angle,
+                radius: p.radius.clamp(0.0, 1.0),
+                species,
+            });
+        }
     }
 
     /// One-shot: the operator has confirmed a close, so the next CloseRequested

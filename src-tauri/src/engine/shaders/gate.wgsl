@@ -32,6 +32,15 @@ struct Globals {
     dj_fade_position: f32,
     dj_fade_activity: f32,
     dj_looping: f32,
+    // Game mode (plans/game-mode.md): the world crossfades over the scene.
+    game_active: u32,
+    game_mix: f32,
+    game_theta: u32,
+    game_rings: u32,
+    game_alpha: f32,   // 0..1 from the previous sim generation to the current
+    game_beat: f32,    // beat envelope for the brightness pulse
+    _pad_game0: f32,
+    _pad_game1: f32,
 }
 
 struct AudioU {
@@ -117,6 +126,10 @@ struct Dab {
 @group(0) @binding(6) var<storage, read> SCOPE: array<f32>;
 // Latest browser-decoded video frame, packed RGBA8 (one u32 per texel).
 @group(0) @binding(7) var<storage, read> VIDEO: array<u32>;
+// Game grid: two packed-RGB snapshots (previous then current sim generation),
+// game_theta × game_rings cells each, row-major with ring 0 at the hole.
+// Colors are baked CPU-side — the shader never knows species or palettes.
+@group(0) @binding(9) var<storage, read> GAME: array<u32>;
 
 const WAVE_N: u32 = 256u;
 const SPEC_N: u32 = 64u;
@@ -992,6 +1005,39 @@ fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
 }
 
 // ---------------------------------------------------------------------------
+// Game mode
+// ---------------------------------------------------------------------------
+
+fn game_unpack(v: u32) -> vec3f {
+    return vec3f(
+        f32(v & 0xffu),
+        f32((v >> 8u) & 0xffu),
+        f32((v >> 16u) & 0xffu),
+    ) / 255.0;
+}
+
+// The game world: a dumb lookup into the CPU simulation's cell grid,
+// interpolating between the previous and current generation so fronts glide
+// instead of strobing, with a gentle beat pulse on top.
+fn game_color(ctx: Ctx) -> vec3f {
+    let it = ctx.spoke * G.game_theta / G.spokes;
+    // Ring 0 is at the hole; r01 is 0 at the OUTER end of the spoke.
+    let t = 1.0 - ctx.r01;
+    let ir = min(u32(t * f32(G.game_rings)), G.game_rings - 1u);
+    let cell = ir * G.game_theta + it;
+    let n = G.game_theta * G.game_rings;
+    let a = game_unpack(GAME[cell]);
+    let b = game_unpack(GAME[n + cell]);
+    var c = mix(a, b, smoothstep(0.0, 1.0, clamp(G.game_alpha, 0.0, 1.0)));
+    // Dim toward radial cell edges so the grid reads as tiles rather than an
+    // unbroken smear. (θ edges are the physical gaps between spokes already.)
+    let fr = fract(t * f32(G.game_rings));
+    let edge = smoothstep(0.0, 0.18, fr) * smoothstep(1.0, 0.82, fr);
+    c *= 0.75 + 0.25 * edge;
+    return c * (1.0 + 0.18 * G.game_beat);
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -1066,6 +1112,13 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
             let loop_col = hsv2rgb(0.78, 0.72, 1.0);
             acc += loop_col * loop_wave * 0.24;
         }
+    }
+
+    // Game mode: the world crossfades over the scene (layers + DJ overlays).
+    // Effects and dabs stay on top when the operator's overlay toggle is on —
+    // the engine zeroes their counts when it isn't.
+    if G.game_active != 0u {
+        acc = mix(acc, game_color(ctx), clamp(G.game_mix, 0.0, 1.0));
     }
 
     for (var e = 0u; e < G.effect_count; e++) {

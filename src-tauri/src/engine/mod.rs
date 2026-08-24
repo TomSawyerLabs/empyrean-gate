@@ -54,6 +54,19 @@ pub struct Globals {
     pub dj_fade_position: f32,
     pub dj_fade_activity: f32,
     pub dj_looping: f32,
+    /// Game mode (plans/game-mode.md). Non-zero while a game world should be
+    /// composited over the scene; `game_mix` is the smoothed crossfade.
+    pub game_active: u32,
+    pub game_mix: f32,
+    /// Game grid dimensions: θ cells (1:1 with spokes, clamped) × radial cells.
+    pub game_theta: u32,
+    pub game_rings: u32,
+    /// 0..1 progress from the previous sim tick's grid to the current one; the
+    /// shader interpolates so cells glide instead of strobing per generation.
+    pub game_alpha: f32,
+    /// Beat envelope (1 on the beat, decaying) for the game's brightness pulse.
+    pub game_beat: f32,
+    pub _pad_game: [f32; 2],
 }
 
 #[repr(C)]
@@ -92,6 +105,9 @@ pub struct FrameInputs {
     /// compiled patch pipeline instead of the layer stack — the transition
     /// bridge from plans/node-graph.md.
     pub patch_params: Option<Vec<f32>>,
+    /// Game grid upload: previous-tick then current-tick packed RGB cells,
+    /// concatenated. Present only when the grid changed (tick or injection).
+    pub game_cells: Option<Vec<u32>>,
 }
 
 #[derive(Clone)]
@@ -121,6 +137,7 @@ pub struct Engine {
     scope_buf: wgpu::Buffer,
     video_buf: wgpu::Buffer,
     params_buf: wgpu::Buffer,
+    game_buf: wgpu::Buffer,
     out_buf: wgpu::Buffer,
     staging: [wgpu::Buffer; 2],
     /// Submission index of the copy targeting each staging buffer.
@@ -228,6 +245,14 @@ impl Engine {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        // Two packed-RGB grid snapshots (previous + current sim tick), sized for
+        // the maximum grid so a geometry change never needs a realloc.
+        let game_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("game-cells"),
+            size: (crate::game::GRID_MAX_THETA * crate::game::GRID_RINGS * 2 * 4) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let (out_buf, staging) = Self::make_pixel_buffers(&device, npix);
 
@@ -260,6 +285,7 @@ impl Engine {
                 &scope_buf,
                 &video_buf,
                 &params_buf,
+                &game_buf,
             ),
             pipeline: Self::make_pipeline(&device, &bind_group_layout)?,
             patch_pipeline: None,
@@ -274,6 +300,7 @@ impl Engine {
             scope_buf,
             video_buf,
             params_buf,
+            game_buf,
             out_buf,
             staging,
             staging_submission: [None, None],
@@ -383,6 +410,7 @@ impl Engine {
         scope: &wgpu::Buffer,
         video: &wgpu::Buffer,
         params: &wgpu::Buffer,
+        game: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("gate"),
@@ -397,6 +425,7 @@ impl Engine {
                 bind(6, scope),
                 bind(7, video),
                 bind(8, params),
+                bind(9, game),
             ],
         })
     }
@@ -425,6 +454,7 @@ impl Engine {
             &self.scope_buf,
             &self.video_buf,
             &self.params_buf,
+            &self.game_buf,
         );
     }
 
@@ -456,6 +486,12 @@ impl Engine {
             && !rgba.is_empty()
         {
             self.queue.write_buffer(&self.video_buf, 0, rgba);
+        }
+        if let Some(cells) = inputs.game_cells.as_ref()
+            && !cells.is_empty()
+        {
+            self.queue
+                .write_buffer(&self.game_buf, 0, bytemuck::cast_slice(cells));
         }
         let patch = match (&inputs.patch_params, &self.patch_pipeline) {
             (Some(params), Some(pipeline)) => {
@@ -1071,6 +1107,55 @@ mod beat_time_tests {
     }
 }
 
+/// Seconds for the scene ↔ game-world crossfade on enter/exit.
+const GAME_FADE_SECS: f32 = 2.0;
+
+/// The engine-local side of game mode: the simulation plus the two packed
+/// grid snapshots the shader interpolates between. Owned by the frame loop
+/// (like `patch_rt`); `SharedState::game` is only the control surface.
+struct GameRuntime {
+    kind: crate::game::GameKind,
+    sim: crate::game::rps::RpsSim,
+    prev: Vec<u32>,
+    next: Vec<u32>,
+    last_tick: Instant,
+    /// Current generation interval in seconds (follows the beat when confident).
+    interval: f32,
+    /// Grid changed (tick / injection / creation) — upload this frame.
+    dirty: bool,
+}
+
+impl GameRuntime {
+    fn new(kind: crate::game::GameKind, theta: usize, species: u8, seed: u64, time: f32) -> Self {
+        let sim = crate::game::rps::RpsSim::new(theta, crate::game::GRID_RINGS, species, seed);
+        let cells = Self::pack_cells(&sim, time);
+        Self {
+            kind,
+            sim,
+            prev: cells.clone(),
+            next: cells,
+            last_tick: Instant::now(),
+            interval: 0.35,
+            dirty: true,
+        }
+    }
+
+    /// Bake species colors + vigor into packed RGB, so the shader is a dumb
+    /// lookup and never needs the species count or palette. The palette
+    /// rotates over minutes so no species permanently owns a hue.
+    fn pack_cells(sim: &crate::game::rps::RpsSim, time: f32) -> Vec<u32> {
+        let species = sim.species_count() as f32;
+        sim.cells()
+            .iter()
+            .map(|c| {
+                let hue = c.species as f32 / species + time * 0.0015;
+                let value = 0.30 + 0.70 * (c.vigor as f32 / 255.0);
+                crate::game::hsv_to_packed_rgb(hue, 0.85, value)
+            })
+            .collect()
+    }
+}
+
 fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut sacn = match SacnSender::new() {
         Ok(s) => Some(s),
@@ -1161,6 +1246,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     // Hardware test mode: a CPU-generated frame that replaces the rendered one
     // on its way to sACN and the preview. See `testmode.rs`.
     let mut test_rgb: Vec<u8> = Vec::new();
+
+    // Game mode (plans/game-mode.md): the loop owns the simulation, sampled
+    // against the control surface each frame. `game_fade` ramps the scene ↔
+    // game crossfade; the sim stays alive until fully faded out so stopping a
+    // game is a fade, not a cut. Not transplanted on handover — a self-update
+    // mid-game reseeds the world, which for a continuous ecosystem is fine.
+    let mut game_rt: Option<GameRuntime> = None;
+    let mut game_fade = 0.0f32;
+    let mut game_prev_beat = 0.0f32;
 
     // Beat taps and the operator beat pulse follow the lighting-time clock, which
     // can run at half/normal/double the detector's inferred tempo.
@@ -1900,6 +1994,104 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         }
         *state.layer_phases.lock() = layer_phases.clone();
 
+        // Game mode: sample the control surface, keep the local simulation in
+        // step with it, and drive the crossfade. Ticks follow the beat when
+        // the tracker is confident, else a fixed cadence; the shader
+        // interpolates between generations so nothing strobes.
+        let (game_desired, game_species, game_overlay, game_inputs) = {
+            let mut g = state.game.lock();
+            (
+                g.active,
+                g.species,
+                g.effects_overlay,
+                std::mem::take(&mut g.inputs),
+            )
+        };
+        let game_now = state.started.elapsed().as_secs_f32();
+        if let Some(kind) = game_desired {
+            let theta = (cfg.geometry.spokes as usize).clamp(8, crate::game::GRID_MAX_THETA);
+            let stale = game_rt
+                .as_ref()
+                .is_none_or(|rt| rt.kind != kind || rt.sim.theta() != theta);
+            if stale {
+                // Seeded from the wall clock so every game session's soup is
+                // different; determinism within a session is what matters.
+                let seed = state.started.elapsed().as_nanos() as u64 | 1;
+                game_rt = Some(GameRuntime::new(kind, theta, game_species, seed, game_now));
+            }
+        }
+        game_fade = if game_desired.is_some() {
+            (game_fade + dt / GAME_FADE_SECS).min(1.0)
+        } else {
+            (game_fade - dt / GAME_FADE_SECS).max(0.0)
+        };
+        if game_desired.is_none() && game_fade <= 0.0 {
+            game_rt = None;
+        }
+        let mut game_alpha = 1.0f32;
+        let mut game_cells: Option<Vec<u32>> = None;
+        let (game_theta, game_rings) = if let Some(rt) = game_rt.as_mut() {
+            rt.sim.set_species_count(game_species);
+            // Player injections: polar (angle, 0..1 disc radius) → cell
+            // coordinates. Cells cover the strip only; a tap in the hole
+            // clamps to the innermost ring.
+            let inner = (cfg.geometry.inner_radius_ft / cfg.geometry.outer_radius_ft.max(0.001))
+                .clamp(0.0, 0.99);
+            for input in &game_inputs {
+                let it = (input.angle.rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU
+                    * rt.sim.theta() as f32) as i32;
+                let t = ((input.radius - inner) / (1.0 - inner)).clamp(0.0, 1.0);
+                let ir = (t * (rt.sim.radial() as f32 - 1.0)).round() as i32;
+                rt.sim.inject(it, ir, 1.5, 3.0, input.species);
+            }
+            if !game_inputs.is_empty() {
+                // Repack "next" so the blob blends in over the rest of this
+                // generation instead of waiting a beat to exist.
+                rt.next = GameRuntime::pack_cells(&rt.sim, game_now);
+                rt.dirty = true;
+            }
+            let bpm_ok = audio[0].bpm_conf > 0.3 && audio[0].bpm > 20.0;
+            rt.interval = if bpm_ok {
+                (60.0 / audio[0].bpm).clamp(0.12, 0.75)
+            } else {
+                0.35
+            };
+            let beat_wrapped = audio[0].beat_phase < game_prev_beat - 0.5;
+            let since_tick = rt.last_tick.elapsed().as_secs_f32();
+            // On-beat when locked (with a free-run backstop if beats stall);
+            // the half-interval guard swallows double-fires around the wrap.
+            let tick_now = if bpm_ok {
+                (beat_wrapped && since_tick > rt.interval * 0.5)
+                    || since_tick > rt.interval * 1.75
+            } else {
+                since_tick >= rt.interval
+            };
+            if tick_now {
+                rt.sim.tick();
+                rt.sim.watchdog();
+                std::mem::swap(&mut rt.prev, &mut rt.next);
+                rt.next = GameRuntime::pack_cells(&rt.sim, game_now);
+                rt.last_tick = Instant::now();
+                rt.dirty = true;
+            }
+            game_alpha = (rt.last_tick.elapsed().as_secs_f32() / rt.interval.max(0.01))
+                .clamp(0.0, 1.0);
+            if std::mem::take(&mut rt.dirty) {
+                let mut cells = rt.prev.clone();
+                cells.extend_from_slice(&rt.next);
+                game_cells = Some(cells);
+            }
+            (rt.sim.theta() as u32, rt.sim.radial() as u32)
+        } else {
+            (0, 0)
+        };
+        game_prev_beat = audio[0].beat_phase;
+        // The game replaces the scene, so triggered effects and drawing are
+        // suppressed while it is (even partially) on screen — unless the
+        // operator's overlay toggle says otherwise. State still ages out
+        // below so nothing piles up for the moment the game ends.
+        let game_suppress = game_fade > 0.0 && !game_overlay;
+
         let effects: Vec<GpuEffect> = {
             let mut fx = state.effects.lock();
             fx.retain(|e| {
@@ -1948,11 +2140,12 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     dir: d.dir,
                     saturation: d.saturation,
                     brightness: d.brightness,
-                    rotation: e.cfg.rotation,
-                    grow: e.cfg.grow.clamp(-1.0, 1.0),
+                    _pad: [0.0; 2],
                 })
                 .collect()
         };
+        let effects = if game_suppress { Vec::new() } else { effects };
+        let dabs = if game_suppress { Vec::new() } else { dabs };
 
         let (video_width, video_height, video_active, video_upload) = {
             let v = state.video.lock();
@@ -2020,6 +2213,14 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 dj_fade_position,
                 dj_fade_activity,
                 dj_looping: if pioneer_visual.looping { 1.0 } else { 0.0 },
+                game_active: u32::from(game_fade > 0.0 && game_theta > 0),
+                // Smoothstepped here so the shader mix stays a plain lerp.
+                game_mix: game_fade * game_fade * (3.0 - 2.0 * game_fade),
+                game_theta,
+                game_rings,
+                game_alpha,
+                game_beat: (-audio[0].beat_phase * 6.0).exp() * audio[0].bpm_conf,
+                _pad_game: [0.0; 2],
             },
             audio,
             layers,
@@ -2028,6 +2229,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             scope: scope_data,
             video_upload,
             patch_params,
+            game_cells,
         };
 
         // Read before the vectors move into FrameInputs; the recorder reports
@@ -2310,6 +2512,21 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 st.patch_active = patch_rt.is_some();
                 st.show = show_status.clone();
                 st.test = test_status.clone();
+                st.game = crate::protocol::GameModeStatus {
+                    active: game_desired,
+                    summary: match (game_desired, state.game.lock().started) {
+                        (Some(kind), Some(started)) => format!(
+                            "{} · {} species · {} min",
+                            kind.label(),
+                            game_species,
+                            started.elapsed().as_secs() / 60
+                        ),
+                        _ => String::new(),
+                    },
+                    species: game_species,
+                    effects_overlay: game_overlay,
+                    blocked_by_show: cfg.running_show().map(|p| p.name.clone()),
+                };
                 st.discovery_running = state
                     .discovery_running
                     .load(std::sync::atomic::Ordering::Relaxed);

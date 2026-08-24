@@ -508,6 +508,7 @@ fn make_inputs(scenario: &Scenario, spokes: u32, pixels: u32) -> FrameInputs {
         scope,
         video_upload: has_video.then(benchmark_video_frame),
         patch_params: None,
+        game_cells: None,
     }
 }
 

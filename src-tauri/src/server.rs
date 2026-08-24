@@ -810,6 +810,17 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
         ClientMsg::StopVideo { force } => {
             rec.event("video", &name(), json!({ "op": "stop", "force": force }))
         }
+        // Game mode replaces the whole look of the array, so mode changes and
+        // player injections belong on the timeline — a report captured during a
+        // game should say plainly that the array was a game world.
+        ClientMsg::SetGameMode { game } => {
+            rec.event("game_mode", &name(), json!({ "game": game }))
+        }
+        ClientMsg::GameInput { species, points } => rec.event(
+            "game_input",
+            &name(),
+            json!({ "species": species, "points": points.len() }),
+        ),
         // Test mode replaces every pixel on the rig, so both the arming and the
         // pattern changes belong on the timeline — a report captured during
         // commissioning should say plainly that the array was under test.
@@ -1182,6 +1193,40 @@ async fn handle_msg(
                 param,
                 value: clamped,
             });
+        }
+        ClientMsg::SetGameMode { game } => {
+            // Same trust model as patch editing: starting/stopping a game
+            // replaces the whole look of the array — the Gate machine's call.
+            if !addr.ip().is_loopback() {
+                let _ = send_json(
+                    tx,
+                    &ServerMsg::Error {
+                        message: "Game control is only available on the Gate machine.".into(),
+                    },
+                )
+                .await;
+            } else if let Err(message) = state.set_game_mode(game) {
+                let _ = send_json(tx, &ServerMsg::Error { message }).await;
+            }
+        }
+        ClientMsg::SetGameConfig {
+            species,
+            effects_overlay,
+        } => {
+            if !addr.ip().is_loopback() {
+                let _ = send_json(
+                    tx,
+                    &ServerMsg::Error {
+                        message: "Game control is only available on the Gate machine.".into(),
+                    },
+                )
+                .await;
+            } else {
+                state.set_game_config(species, effects_overlay);
+            }
+        }
+        ClientMsg::GameInput { species, points } => {
+            state.game_input(species, &points);
         }
         ClientMsg::SetTestMode { active } => {
             if let Err(message) = state.set_test_mode(active) {

@@ -89,5 +89,12 @@
     },
     "blocked_by_show": null
   },
+  "game": {
+    "active": null,
+    "summary": "",
+    "species": 3,
+    "effects_overlay": false,
+    "blocked_by_show": null
+  },
   "discovery_running": false
 }

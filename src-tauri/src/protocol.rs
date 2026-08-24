@@ -184,6 +184,27 @@ pub enum ClientMsg {
         param: String,
         value: f32,
     },
+    /// Start (`Some(kind)`) or stop (`None`) game mode. Loopback connections
+    /// only, like patch editing — starting a game replaces the whole look of
+    /// the array, which is the operator's call. Also refused while the show
+    /// scheduler runs a playlist — see `SharedState::set_game_mode`.
+    SetGameMode {
+        game: Option<crate::game::GameKind>,
+    },
+    /// Live game parameters (species count, effects overlay). Loopback only.
+    SetGameConfig {
+        #[serde(default)]
+        species: Option<u8>,
+        #[serde(default)]
+        effects_overlay: Option<bool>,
+    },
+    /// Player input into the running game: a batch of polar points (same space
+    /// as `Paint`) injecting the chosen species. Open to every client —
+    /// playing is the phone-facing surface, and inputs from all clients merge.
+    GameInput {
+        species: u8,
+        points: Vec<DabPoint>,
+    },
     /// Arm/disarm hardware test mode. Open to every client (the commissioning
     /// workflow is a phone in your hand at the array), but refused while the
     /// show scheduler is running a playlist — see `SharedState::set_test_mode`.
@@ -485,6 +506,37 @@ pub struct TestModeStatus {
     pub blocked_by_show: Option<String>,
 }
 
+/// Game mode, mirrored to every client: the GAME MODE banner, the Games tab's
+/// controls, and the phone controller surfaces all read this.
+#[derive(Debug, Clone, Serialize)]
+pub struct GameModeStatus {
+    /// The running game, if any.
+    pub active: Option<crate::game::GameKind>,
+    /// One line naming the game and how long it has been running.
+    pub summary: String,
+    /// Species count the ecosystem sim is running with.
+    pub species: u8,
+    /// Whether effects/drawing are overlaid on the game world.
+    pub effects_overlay: bool,
+    /// Name of the playlist blocking a manual start, when one is running.
+    pub blocked_by_show: Option<String>,
+}
+
+impl Default for GameModeStatus {
+    fn default() -> Self {
+        Self {
+            active: None,
+            summary: String::new(),
+            // Mirrors `GameControl::default` so a fresh backend, the status
+            // fixture, and the mock backend all agree before the engine's
+            // first status write.
+            species: 3,
+            effects_overlay: false,
+            blocked_by_show: None,
+        }
+    }
+}
+
 /// Another sACN source heard on the wire, and what it means for our output.
 /// Produced continuously by `sacnwatch`, unlike `DiscoveryResult::other_sources`
 /// which is a one-shot from the Test tab's scan.
@@ -594,6 +646,7 @@ pub struct RuntimeStatus {
     pub patch_error: Option<String>,
     pub show: ScheduledShowStatus,
     pub test: TestModeStatus,
+    pub game: GameModeStatus,
     /// True while a controller scan is in flight, so the Scan button can say so.
     pub discovery_running: bool,
 }
