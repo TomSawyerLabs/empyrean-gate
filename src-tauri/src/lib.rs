@@ -29,6 +29,7 @@ pub mod testmode;
 pub mod touch;
 pub mod updater;
 pub mod videocache;
+pub mod webview2;
 pub mod windowstate;
 pub mod firewall;
 
@@ -281,6 +282,22 @@ fn backend_info(state: tauri::State<'_, Backend>) -> serde_json::Value {
     serde_json::json!({ "wsPort": cfg.server.port })
 }
 
+/// Park until Ctrl+C or a shutdown (e.g. a successor took over), then let sACN
+/// close its streams cleanly rather than leaving the rig on its last frame.
+fn park_until_shutdown(state: &SharedState) {
+    while !state.shutdown.load(Ordering::SeqCst) {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    await_sacn_terminate(state);
+}
+
+/// Where to send someone whose desktop window could not be created. Loopback,
+/// not the LAN address: this is read off the screen of the machine it names.
+#[cfg(windows)]
+fn web_ui_url(state: &SharedState) -> String {
+    format!("http://localhost:{}", state.config.read().server.port)
+}
+
 pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
     logging::init();
     // Before any window exists: keeps ONE taskbar button across self-updates,
@@ -316,11 +333,23 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
 
     if headless {
         log::info!("headless mode: no desktop window; web UI only");
-        // Park until Ctrl+C or a shutdown (e.g. a successor took over).
-        while !state.shutdown.load(Ordering::SeqCst) {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-        }
-        await_sacn_terminate(&state);
+        park_until_shutdown(&state);
+        return;
+    }
+
+    // Windows 11 ships the WebView2 runtime; Windows 10 often does not, and a
+    // portable exe has no installer to bootstrap it (see `webview2`). Asking
+    // first turns a silent "no window ever appears" into a dialog that offers to
+    // fix it — and when it cannot be fixed we carry on WITHOUT a window rather
+    // than exiting, because the backend is the app: sACN and the web UI are
+    // already up by this line, so the show does not care.
+    #[cfg(windows)]
+    if !webview2::ensure_runtime(&web_ui_url(&state)) {
+        log::warn!("no desktop window; continuing headless with the web UI only");
+        // So a self-update spawns its successor headless too — this machine
+        // still will not be able to draw a window on the next launch.
+        state.headless.store(true, Ordering::SeqCst);
+        park_until_shutdown(&state);
         return;
     }
 

@@ -65,6 +65,22 @@ wgpu = { version = "29", default-features = false, features = ["wgsl", "vulkan"]
 [target.'cfg(target_os = "macos")'.dependencies]
 wgpu = { version = "29", default-features = false, features = ["wgsl", "vulkan-portability"] }
 
+# Detecting whether a WebView2 runtime exists (see `webview2`). Both crates are
+# ALREADY in the graph via tauri/wry — pinned to the versions the lockfile
+# resolves so nothing gets compiled twice.
+#
+# `taskbar.rs` declares its one Win32 call by hand precisely to avoid this
+# dependency, and that is the right call for `shell32`. It is the wrong call
+# here: the version query lives in WebView2Loader, whose linkage webview2-com's
+# build script exists to get right, and hand-linking it is the sort of thing
+# that works until a toolchain update.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38.2"
+windows = { version = "0.61.3", features = [
+  "Win32_System_Com",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
 [dev-dependencies]
 # Validates generated patch WGSL in unit tests without needing a GPU. Version
 # tracks wgpu (both 29) so tests judge by the same compiler the engine uses.

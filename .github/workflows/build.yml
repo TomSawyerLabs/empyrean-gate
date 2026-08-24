@@ -52,6 +52,34 @@ jobs:
       - name: Build standalone binary
         run: bun tauri build --no-bundle
 
+      # Linux only, and additional to the bare binary rather than replacing it.
+      #
+      # The bare Linux binary needs libwebkit2gtk present on the machine, which
+      # is the one thing an installer would genuinely have fixed for us (Windows
+      # and macOS both ship their webview with the OS). An AppImage carries those
+      # libraries with it and is still a single executable file — so it keeps the
+      # property the self-updater depends on, that "the app" is one path that can
+      # be copied over itself. A .deb would not.
+      #
+      # `|| true`: proving the AppImage bundler works on the runner image is the
+      # entire point of building it here first, and a failure should report
+      # itself in the next step rather than take the whole matrix down.
+      - name: Build AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: bun tauri build --bundles appimage || true
+
+      - name: AppImage result
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          found=$(find src-tauri/target/release/bundle -name '*.AppImage' 2>/dev/null | head -1)
+          if [ -n "$found" ]; then
+            echo "AppImage built: $found ($(du -h "$found" | cut -f1))"
+          else
+            echo "::warning::no AppImage produced — the bundler did not run or failed"
+            find src-tauri/target/release/bundle -type f 2>/dev/null | head -20 || echo "(no bundle dir at all)"
+          fi
+
       - name: Build headless smoke-test binary
         working-directory: src-tauri
         run: cargo build --release --bin engine-smoke
