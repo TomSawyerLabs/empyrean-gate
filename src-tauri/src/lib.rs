@@ -8,6 +8,7 @@ pub mod autostart;
 pub mod config;
 pub mod discovery;
 pub mod engine;
+pub mod game;
 pub mod geometry;
 pub mod layers;
 pub mod logging;
