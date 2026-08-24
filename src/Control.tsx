@@ -534,7 +534,7 @@ function ShowSchedulerPanel() {
 }
 
 function ScenesPanel() {
-  const { client, config } = useGate();
+  const { client, config, status } = useGate();
   const [capturing, setCapturing] = useState(false);
   const [stackName, setStackName] = useState("");
   const [sceneSpeed, setSceneSpeedLocal] = useState(1);
@@ -575,19 +575,7 @@ function ScenesPanel() {
   };
 
   const loadSaved = (stack: SavedStack) => {
-    client.setConfig({
-      ...config,
-      render: {
-        ...config.render,
-        master_speed: stack.master_speed,
-        walk_enabled: stack.walk_enabled,
-        walk_layers: stack.walk_layers,
-        walk_min_layers: stack.walk_min_layers,
-        walk_speed: stack.walk_speed,
-        walk_depth: stack.walk_depth,
-      },
-      layers: stack.layers.map((item) => ({ ...item })),
-    });
+    client.activateStack({ ...stack, layers: stack.layers.map((item) => ({ ...item })) });
   };
 
   const updateSaved = (stack: SavedStack) => {
@@ -608,19 +596,7 @@ function ScenesPanel() {
   };
 
   const load = (scene: ScenePreset) => {
-    client.setConfig({
-      ...config,
-      render: {
-        ...config.render,
-        walk_enabled: true,
-        walk_layers: false,
-        master_speed: scene.masterSpeed,
-        walk_speed: scene.walkSpeed,
-        walk_depth: scene.walkDepth,
-      },
-      beat_taps: { ...config.beat_taps, enabled: false },
-      layers: scene.layers.map((item) => ({ ...item })),
-    });
+    client.activateStack(stackFromScene(scene));
   };
 
   return (
@@ -642,10 +618,23 @@ function ScenesPanel() {
         </button>
       </div>
       <p className="scene-library-lede">
-        Authored compositions translated from saved Uprising pieces. Loading one replaces
-        the current layer stack; then every layer remains editable below. A restrained
-        drift keeps the composition moving without changing which layers play.
+        Authored compositions translated from saved Uprising pieces. Loading one hands
+        over smoothly to the new renderer; then every layer remains editable below.
       </p>
+      <div className="manual-transition-control">
+        <div>
+          <strong>{status?.render_transition_active ? "Crossfading to the new look…" : "Default scene crossfade"}</strong>
+          <span>Used for manual scene, stack, and patch switches.</span>
+        </div>
+        <input type="range" min={0} max={10} step={0.25}
+          value={config.render.manual_transition_secs}
+          onChange={(event) => client.setConfig({
+            ...config,
+            render: { ...config.render, manual_transition_secs: Number(event.target.value) },
+          })}
+        />
+        <output>{config.render.manual_transition_secs.toFixed(2)} s</output>
+      </div>
       <div className="scene-speed-control">
         <div className="scene-speed-copy">
           <strong>Scene speed</strong>

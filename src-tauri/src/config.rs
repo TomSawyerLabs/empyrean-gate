@@ -295,6 +295,9 @@ pub struct RenderConfig {
     pub fps: f32,
     pub master_brightness: f32,
     pub master_speed: f32,
+    /// Duration of an operator-triggered scene, stack, or patch handoff. The
+    /// outgoing and incoming renderers remain live for the whole crossfade.
+    pub manual_transition_secs: f32,
     /// When set, drive the lighting beat clock at this BPM instead of following
     /// the audio detector. Half/normal/double time is applied afterward.
     pub manual_bpm: Option<f32>,
@@ -354,6 +357,7 @@ impl Default for RenderConfig {
             fps: 60.0,
             master_brightness: 1.0,
             master_speed: 1.0,
+            manual_transition_secs: 3.0,
             manual_bpm: None,
             beat_time: BeatTime::Normal,
             walk_enabled: true,

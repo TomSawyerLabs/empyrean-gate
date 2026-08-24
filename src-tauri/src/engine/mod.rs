@@ -77,6 +77,7 @@ pub struct AudioUniform {
 /// Floats per source in the scope storage buffer (256 waveform + 64 spectrum).
 pub const SCOPE_FLOATS: usize = 256 + crate::audio::analysis::SPECTRUM_BINS;
 
+#[derive(Clone)]
 pub struct FrameInputs {
     pub globals: Globals,
     pub audio: [AudioUniform; MAX_AUDIO_SOURCES],
@@ -91,6 +92,16 @@ pub struct FrameInputs {
     /// compiled patch pipeline instead of the layer stack — the transition
     /// bridge from plans/node-graph.md.
     pub patch_params: Option<Vec<f32>>,
+}
+
+#[derive(Clone)]
+struct RenderBusSnapshot {
+    inputs: FrameInputs,
+    /// Phase delta per second for each packed layer in `inputs.layers`.
+    layer_phase_rates: Vec<f32>,
+    patch_runtime: Option<crate::patch::eval::Runtime>,
+    patch_wgsl: Option<String>,
+    master_speed: f32,
 }
 
 pub struct Engine {
@@ -911,6 +922,16 @@ fn apply_stack_to_config(cfg: &mut crate::config::AppConfig, stack: &crate::conf
     cfg.render.walk_depth = stack.walk_depth;
 }
 
+fn eased_crossfade(outgoing: &[u8], incoming: &[u8], progress: f32, out: &mut Vec<u8>) {
+    let p = progress.clamp(0.0, 1.0);
+    let mix = p * p * (3.0 - 2.0 * p);
+    out.clear();
+    out.reserve(incoming.len());
+    for (&a, &b) in outgoing.iter().zip(incoming) {
+        out.push((a as f32 + (b as f32 - a as f32) * mix).round().clamp(0.0, 255.0) as u8);
+    }
+}
+
 /// Keep scene blend math intact by arranging complete outgoing and incoming stacks.
 /// The shader composes each side independently and mixes only their finished colors.
 fn transition_layers(
@@ -1034,6 +1055,19 @@ mod beat_time_tests {
         assert!(slow_reverse <= -0.03 / std::f32::consts::E);
         assert_eq!(walked_speed(0.0, 2.5, 3.0), 0.0);
     }
+
+    #[test]
+    fn renderer_handoff_is_eased_and_reaches_both_endpoints() {
+        let outgoing = [0, 20, 255];
+        let incoming = [200, 220, 5];
+        let mut out = Vec::new();
+        super::eased_crossfade(&outgoing, &incoming, 0.0, &mut out);
+        assert_eq!(out, outgoing);
+        super::eased_crossfade(&outgoing, &incoming, 0.5, &mut out);
+        assert_eq!(out, vec![100, 120, 130]);
+        super::eased_crossfade(&outgoing, &incoming, 1.0, &mut out);
+        assert_eq!(out, incoming);
+    }
 }
 
 fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
@@ -1065,6 +1099,25 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut frame_ms_ema = 0.0f32;
     let mut frame_number: u64 = 0;
     let mut video_revision: u64 = u64::MAX;
+    // A second independent render bus keeps the outgoing renderer alive during
+    // arbitrary layer/patch handoffs. It owns its own GPU buffers/pipeline and
+    // patch evaluator; the CPU only mixes the two completed RGB frames.
+    let mut outgoing_engine = match Engine::new(engine.npix) {
+        Ok(bus) => Some(bus),
+        Err(error) => {
+            log::warn!("second render bus unavailable; handoffs use held-frame fallback: {error:#}");
+            None
+        }
+    };
+    let mut handoff_epoch = state.render_transition_epoch.load(Ordering::Relaxed);
+    let mut handoff_started: Option<Instant> = None;
+    let mut handoff_from = Vec::<u8>::new();
+    let mut handoff_rgb = Vec::<u8>::new();
+    let mut last_normal_rgb = Vec::<u8>::new();
+    let mut last_render_bus: Option<RenderBusSnapshot> = None;
+    let mut outgoing_render_bus: Option<RenderBusSnapshot> = None;
+    let mut handoff_active = false;
+    let mut handoff_progress = 0.0f32;
 
     // The show clock belongs to the backend, not a browser. `current_stack` and
     // `transition_from` are render-only snapshots; the durable selection/index
@@ -1101,6 +1154,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     // rebuild. See plans/node-graph.md.
     let mut patch_rt: Option<crate::patch::eval::Runtime> = None;
     let mut patch_key: Option<(String, u32)> = None;
+    let mut patch_wgsl: Option<String> = None;
 
     // Hardware test mode: a CPU-generated frame that replaces the rendered one
     // on its way to sACN and the preview. See `testmode.rs`.
@@ -1140,6 +1194,45 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // Reconfigure buffers + the sACN plan only when geometry/output change —
         // NOT on every config epoch bump (sliders would reset sequence numbers).
         let cfg = state.config.read().clone();
+        let requested_handoff = state.render_transition_epoch.load(Ordering::Relaxed);
+        if requested_handoff != handoff_epoch {
+            handoff_epoch = requested_handoff;
+            if cfg.render.manual_transition_secs > 0.001 && !last_normal_rgb.is_empty() {
+                handoff_from.clone_from(&last_normal_rgb);
+                handoff_started = Some(Instant::now());
+                handoff_active = true;
+                handoff_progress = 0.0;
+                outgoing_render_bus = last_render_bus.take();
+                if let Some(bus) = outgoing_render_bus.as_mut() {
+                    let video = state.video.lock();
+                    if video.active && !video.rgba.is_empty() {
+                        bus.inputs.video_upload = Some(video.rgba.clone());
+                    }
+                }
+                let mut setup_failed = false;
+                if let (Some(bus), Some(outgoing)) =
+                    (outgoing_render_bus.as_ref(), outgoing_engine.as_mut())
+                {
+                    outgoing.ensure_capacity(cfg.geometry.pixel_count() as u32);
+                    if let Err(error) = outgoing.set_patch_shader(bus.patch_wgsl.as_deref()) {
+                        log::warn!("outgoing patch bus could not compile: {error:#}");
+                        setup_failed = true;
+                    } else {
+                        // Prime ping-pong readback so the first mixed frame can
+                        // use moving output rather than a one-tick-old hold.
+                        let _ = outgoing.render(&bus.inputs);
+                    }
+                }
+                if setup_failed {
+                    outgoing_render_bus = None;
+                }
+            } else {
+                handoff_started = None;
+                handoff_active = false;
+                handoff_progress = 1.0;
+                outgoing_render_bus = None;
+            }
+        }
         let current_epoch = state.epoch();
         if current_epoch != epoch {
             epoch = current_epoch;
@@ -1147,6 +1240,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             if key != output_cfg_key {
                 output_cfg_key = key;
                 engine.ensure_capacity(cfg.geometry.pixel_count() as u32);
+                if let Some(outgoing) = outgoing_engine.as_mut() {
+                    outgoing.ensure_capacity(cfg.geometry.pixel_count() as u32);
+                }
                 if let Some(s) = sacn.as_mut() {
                     s.configure(&cfg.geometry, &cfg.output);
                     let mut st = state.status.lock();
@@ -1163,6 +1259,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         if wanted != patch_key {
             patch_key = wanted.clone();
             patch_rt = None;
+            patch_wgsl = None;
             let mut patch_error = None;
             match &wanted {
                 None => {
@@ -1175,7 +1272,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         });
                     match result {
                         Ok((doc, prog)) => match engine.set_patch_shader(Some(&prog.wgsl)) {
-                            Ok(()) => patch_rt = Some(crate::patch::eval::Runtime::new(doc, prog)),
+                            Ok(()) => {
+                                patch_wgsl = Some(prog.wgsl.clone());
+                                patch_rt = Some(crate::patch::eval::Runtime::new(doc, prog));
+                            }
                             Err(e) => patch_error = Some(format!("patch pipeline failed: {e:#}")),
                         },
                         Err(e) => patch_error = Some(format!("patch compile failed: {e}")),
@@ -1725,6 +1825,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let mut effective_layers: Vec<crate::layers::LayerCfg> = Vec::new();
 
         let mut layers = Vec::with_capacity(render_layers.len().min(render_layer_limit));
+        let mut bus_layer_phase_rates = Vec::with_capacity(render_layer_limit);
         let mut gpu_transition_split = 0u32;
         for (i, l) in render_layers.iter().take(render_layer_limit).enumerate() {
             // Envelope eases layers in/out of the mix over a few seconds.
@@ -1770,6 +1871,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             }
             let (gpu_phase, gpu_epoch) = l.split_phase(layer_phases[i]);
             layers.push(l.to_gpu(gpu_phase, gpu_epoch));
+            bus_layer_phase_rates.push(l.speed * render_master_speed);
         }
         *state.layer_phases.lock() = layer_phases.clone();
 
@@ -1905,6 +2007,70 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // what this frame actually had live, not what survives to the next one.
         let (effects_active, dabs_active) = (inputs.effects.len(), inputs.dabs.len());
 
+        let mut outgoing_bus_failed = false;
+        let outgoing_rgb = if handoff_active {
+            match (outgoing_render_bus.as_mut(), outgoing_engine.as_mut()) {
+                (Some(bus), Some(outgoing)) => {
+                    // Global live inputs keep flowing to both buses, while the
+                    // outgoing bus retains its own layer topology and patch state.
+                    let layer_count = bus.inputs.globals.layer_count;
+                    let transition_split = bus.inputs.globals.transition_split;
+                    let transition_active = bus.inputs.globals.transition_active;
+                    let transition_progress = bus.inputs.globals.transition_progress;
+                    bus.inputs.globals = inputs.globals;
+                    bus.inputs.globals.layer_count = layer_count;
+                    bus.inputs.globals.transition_split = transition_split;
+                    bus.inputs.globals.transition_active = transition_active;
+                    bus.inputs.globals.transition_progress = transition_progress;
+                    bus.inputs.audio = inputs.audio;
+                    bus.inputs.effects.clone_from(&inputs.effects);
+                    bus.inputs.dabs.clone_from(&inputs.dabs);
+                    bus.inputs.scope.clone_from(&inputs.scope);
+                    bus.inputs.video_upload.clone_from(&inputs.video_upload);
+                    for (layer, rate) in bus.inputs.layers.iter_mut().zip(&bus.layer_phase_rates) {
+                        layer.phase += rate * dt;
+                    }
+                    bus.inputs.patch_params = bus.patch_runtime.as_mut().map(|runtime| {
+                        runtime
+                            .eval(&crate::patch::eval::EvalInputs {
+                                dt,
+                                master_speed: bus.master_speed,
+                                audio: &audio,
+                                yaw: control.yaw,
+                                pitch: control.pitch,
+                                roll: control.roll,
+                                shake: control.shake,
+                                effect_seq: state.effect_seq.load(Ordering::Relaxed),
+                            })
+                            .to_vec()
+                    });
+                    match outgoing.render(&bus.inputs) {
+                        Ok(Some(rgb)) => Some(rgb.to_vec()),
+                        Ok(None) => None,
+                        Err(error) => {
+                            log::warn!("outgoing render bus failed: {error:#}");
+                            outgoing_bus_failed = true;
+                            None
+                        }
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if outgoing_bus_failed {
+            outgoing_render_bus = None;
+        }
+
+        last_render_bus = Some(RenderBusSnapshot {
+            inputs: inputs.clone(),
+            layer_phase_rates: bus_layer_phase_rates,
+            patch_runtime: patch_rt.clone(),
+            patch_wgsl: patch_wgsl.clone(),
+            master_speed: render_master_speed,
+        });
+
         let t0 = Instant::now();
         let rgb = match engine.render(&inputs) {
             Ok(r) => r,
@@ -1917,7 +2083,34 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         };
         let frame_ms = t0.elapsed().as_secs_f32() * 1000.0;
 
-        if let Some(rgb) = rgb {
+        if let Some(rendered_rgb) = rgb {
+            let normal_rgb: &[u8] = if let Some(started) = handoff_started {
+                let duration = cfg.render.manual_transition_secs.clamp(0.0, 30.0);
+                let linear = if duration <= 0.001 {
+                    1.0
+                } else {
+                    (started.elapsed().as_secs_f32() / duration).clamp(0.0, 1.0)
+                };
+                handoff_progress = linear;
+                let moving_outgoing = outgoing_rgb
+                    .as_deref()
+                    .filter(|rgb| rgb.len() == rendered_rgb.len());
+                let outgoing = moving_outgoing.unwrap_or(&handoff_from);
+                if outgoing.len() == rendered_rgb.len() && linear < 1.0 {
+                    eased_crossfade(outgoing, rendered_rgb, linear, &mut handoff_rgb);
+                    &handoff_rgb
+                } else {
+                    handoff_started = None;
+                    handoff_active = false;
+                    outgoing_render_bus = None;
+                    rendered_rgb
+                }
+            } else {
+                rendered_rgb
+            };
+            last_normal_rgb.clear();
+            last_normal_rgb.extend_from_slice(normal_rgb);
+
             // Hardware test mode replaces the whole frame — for sACN AND for the
             // preview, so the on-screen array shows exactly what the rig should
             // be showing. That comparison is half of what makes a test useful.
@@ -1934,7 +2127,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 );
                 &test_rgb
             } else {
-                rgb
+                normal_rgb
             };
 
             frame_number += 1;
@@ -2085,6 +2278,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 st.pps_history = pps_hist.iter().copied().collect();
                 st.master_brightness = cfg.render.master_brightness;
                 st.master_speed = render_master_speed;
+                st.render_transition_active = handoff_active;
+                st.render_transition_progress = handoff_progress;
                 st.patch_active = patch_rt.is_some();
                 st.show = show_status.clone();
                 st.test = test_status.clone();

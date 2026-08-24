@@ -1672,6 +1672,18 @@ main {
   white-space: nowrap;
 }
 
+.manual-transition-control {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(10rem, 18rem) 4.5rem;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.manual-transition-control > div { display: grid; gap: 0.15rem; }
+.manual-transition-control span { color: var(--muted); font-size: 0.82rem; }
+.manual-transition-control output { text-align: right; font-variant-numeric: tabular-nums; }
+
 .stack-capture {
   display: flex;
   align-items: flex-end;
@@ -1940,6 +1952,16 @@ main {
   }
   .scene-speed-control {
     grid-template-columns: 1fr;
+  }
+  .manual-transition-control {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .manual-transition-control > div {
+    grid-column: 1 / -1;
+  }
+  .manual-transition-control input {
+    min-width: 0;
+    width: 100%;
   }
   .scene-speed-slider {
     grid-column: auto;

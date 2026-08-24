@@ -229,6 +229,9 @@ pub struct SharedState {
     /// Bumped when any patch file changes (save/delete), so the engine rebuilds
     /// the active patch's pipeline even though the config didn't change.
     pub patch_epoch: AtomicU32,
+    /// Explicit renderer changes bump this so the engine can snapshot the
+    /// outgoing bus before applying the new layer stack or patch.
+    pub render_transition_epoch: AtomicU64,
     /// Live exposed-param changes queued for the active patch runtime — applied
     /// by the engine loop with NO pipeline rebuild (that's the point).
     pub patch_params: Mutex<Vec<(String, String, f32)>>,
@@ -332,6 +335,7 @@ impl SharedState {
             config: RwLock::new(config),
             config_epoch: AtomicU32::new(0),
             patch_epoch: AtomicU32::new(0),
+            render_transition_epoch: AtomicU64::new(0),
             patch_params: Mutex::new(Vec::new()),
             effect_seq: AtomicU64::new(0),
             effects: Mutex::new(Vec::new()),
@@ -468,6 +472,10 @@ impl SharedState {
 
     pub fn bump_config(&self) {
         self.config_epoch.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub fn request_render_transition(&self) {
+        self.render_transition_epoch.fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn epoch(&self) -> u32 {

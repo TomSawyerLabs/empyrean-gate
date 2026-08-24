@@ -293,6 +293,9 @@ export class GateClient {
   setMaster(v: { brightness?: number; speed?: number }) {
     this.send({ type: "set_master", ...v });
   }
+  activateStack(stack: import("./types").SavedStack) {
+    this.send({ type: "activate_stack", stack });
+  }
   setSacnEnabled(enabled: boolean) {
     this.send({ type: "set_sacn_enabled", enabled });
   }

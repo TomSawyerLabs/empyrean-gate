@@ -57,6 +57,7 @@
     "fps": 60.0,
     "master_brightness": 1.0,
     "master_speed": 1.0,
+    "manual_transition_secs": 3.0,
     "manual_bpm": null,
     "beat_time": "normal",
     "walk_enabled": true,

@@ -193,7 +193,9 @@ src-tauri/src/
 ## Development
 
 Requirements: [Rust](https://rustup.rs), [Bun](https://bun.sh), a Vulkan-capable GPU +
-driver. A current [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) installation with a
+driver. On macOS, install the Homebrew `vulkan-loader` and `molten-vk` packages; the
+development binary discovers them automatically. A current
+[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) installation with a
 supported external JavaScript runtime (Node works) is optional for resolving provider
 pages; direct media URLs, metadata pages, and local device files do not need it.
 

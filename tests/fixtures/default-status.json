@@ -3,6 +3,8 @@
   "gpu_name": "",
   "engine_fps": 0.0,
   "frame_time_ms": 0.0,
+  "render_transition_active": false,
+  "render_transition_progress": 0.0,
   "sacn_enabled": false,
   "sacn_universes": 0,
   "sacn_pps": 0,

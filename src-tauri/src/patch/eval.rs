@@ -54,6 +54,7 @@ impl Default for NodeState {
 
 /// One compiled patch, live: owns the document, the program, and all
 /// control-rate state. Rebuilt whenever the active patch or its file changes.
+#[derive(Clone)]
 pub struct Runtime {
     doc: PatchDoc,
     prog: Program,

@@ -25,7 +25,7 @@ pub const MAX_SLAB_FLOATS: usize = 2048;
 const PRELUDE: &str = include_str!("../engine/shaders/patch_lib.wgsl");
 
 /// Everything the engine + evaluator need to run one compiled patch.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Program {
     pub wgsl: String,
     pub slab_len: usize,
@@ -37,7 +37,7 @@ pub struct Program {
 }
 
 /// One f32 in the parameter slab, filled by the evaluator every frame.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SlabSlot {
     pub slot: usize,
     /// The GPU node this value feeds.

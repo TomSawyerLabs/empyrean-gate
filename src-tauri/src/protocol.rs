@@ -50,6 +50,11 @@ pub enum ClientMsg {
         #[serde(default)]
         speed: Option<f32>,
     },
+    /// Atomically hand rendering back to the classic layer stack and load it.
+    /// Unlike a full config write, this cannot be hidden by an active patch.
+    ActivateStack {
+        stack: crate::config::SavedStack,
+    },
     SetSacnEnabled {
         enabled: bool,
     },
@@ -518,6 +523,8 @@ pub struct RuntimeStatus {
     pub gpu_name: String,
     pub engine_fps: f32,
     pub frame_time_ms: f32,
+    pub render_transition_active: bool,
+    pub render_transition_progress: f32,
     pub sacn_enabled: bool,
     pub sacn_universes: u16,
     /// sACN packets actually sent per second — the "is it transmitting" truth.

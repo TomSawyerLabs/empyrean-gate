@@ -997,6 +997,20 @@ async fn handle_msg(
                 }
             });
         }
+        ClientMsg::ActivateStack { stack } => {
+            state.request_render_transition();
+            state.update_config(|c| {
+                c.active_patch = None;
+                c.show_scheduler.enabled = false;
+                c.layers = stack.layers;
+                c.render.master_speed = stack.master_speed;
+                c.render.walk_enabled = stack.walk_enabled;
+                c.render.walk_layers = stack.walk_layers;
+                c.render.walk_min_layers = stack.walk_min_layers;
+                c.render.walk_speed = stack.walk_speed;
+                c.render.walk_depth = stack.walk_depth;
+            });
+        }
         ClientMsg::SetSacnEnabled { enabled } => {
             state.update_config(|c| c.output.enabled = enabled);
         }
@@ -1104,7 +1118,10 @@ async fn handle_msg(
                 Some(message) => {
                     let _ = send_json(tx, &ServerMsg::Error { message }).await;
                 }
-                None => state.update_config(|c| c.active_patch = id),
+                None => {
+                    state.request_render_transition();
+                    state.update_config(|c| c.active_patch = id);
+                }
             }
         }
         ClientMsg::PatchParam { node, param, value } => {

@@ -175,6 +175,7 @@ export interface RenderConfig {
   fps: number;
   master_brightness: number;
   master_speed: number;
+  manual_transition_secs: number;
   manual_bpm: number | null;
   beat_time: "half" | "normal" | "double";
   walk_enabled: boolean;
@@ -348,6 +349,8 @@ export interface RuntimeStatus {
   gpu_name: string;
   engine_fps: number;
   frame_time_ms: number;
+  render_transition_active: boolean;
+  render_transition_progress: number;
   sacn_enabled: boolean;
   sacn_universes: number;
   sacn_pps: number;
