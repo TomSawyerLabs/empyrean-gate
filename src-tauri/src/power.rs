@@ -7,6 +7,9 @@
 //! while sACN output is enabled (i.e. actually performing), so a dev machine
 //! with output off keeps its normal monitor timeout.
 
+// Only `run` uses this, and `run` is Windows-only — without the gate every
+// Linux and macOS build carries an unused-import warning.
+#[cfg(windows)]
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 

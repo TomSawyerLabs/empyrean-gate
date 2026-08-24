@@ -63,30 +63,6 @@ pub fn detect() -> Runtime {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    /// Exercises the loader binding for real. A wrong signature or a bad free
-    /// would crash or return nonsense here rather than on an operator's machine
-    /// at the one moment they have no window to read an error in.
-    ///
-    /// `Missing` is NOT a failure: a dev box or a CI image legitimately might
-    /// not have the runtime, and that is the case this module exists to handle.
-    /// What is asserted is that a reported version looks like a version.
-    #[test]
-    fn detect_returns_a_plausible_version_or_a_clean_miss() {
-        match super::detect() {
-            super::Runtime::Present(version) => {
-                eprintln!("detected WebView2 runtime {version}");
-                assert!(
-                    version.split('.').count() >= 3 && version.starts_with(|c: char| c.is_ascii_digit()),
-                    "loader reported an implausible version string: {version:?}"
-                );
-            }
-            super::Runtime::Missing => eprintln!("no WebView2 runtime on this machine"),
-        }
-    }
-}
-
 /// Blocking Yes/No box. Deliberately a native dialog rather than anything of
 /// ours: the entire problem is that we cannot render our own UI.
 fn ask(title: &str, body: &str) -> bool {
@@ -248,6 +224,31 @@ pub fn ensure_runtime(web_ui_url: &str) -> bool {
                 ),
             );
             false
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Exercises the loader binding for real. A wrong signature or a bad free
+    /// would crash or return nonsense here rather than on an operator's machine
+    /// at the one moment they have no window to read an error in.
+    ///
+    /// `Missing` is NOT a failure: a dev box or a CI image legitimately might
+    /// not have the runtime, and that is the case this module exists to handle.
+    /// What is asserted is that a reported version looks like a version.
+    #[test]
+    fn detect_returns_a_plausible_version_or_a_clean_miss() {
+        match super::detect() {
+            super::Runtime::Present(version) => {
+                eprintln!("detected WebView2 runtime {version}");
+                assert!(
+                    version.split('.').count() >= 3
+                        && version.starts_with(|c: char| c.is_ascii_digit()),
+                    "loader reported an implausible version string: {version:?}"
+                );
+            }
+            super::Runtime::Missing => eprintln!("no WebView2 runtime on this machine"),
         }
     }
 }
