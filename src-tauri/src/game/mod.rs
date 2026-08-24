@@ -4,6 +4,7 @@
 //! prerequisites. This module holds the pure simulation cores; engine/protocol
 //! wiring lives with the rest of the frame loop.
 
+pub mod flak;
 pub mod life;
 pub mod rps;
 pub mod spokewar;
@@ -22,6 +23,8 @@ pub enum GameKind {
     Life,
     /// Rim bases firing army particles; territory war (see `spokewar`).
     Spokewar,
+    /// Co-op inverted Missile Command: meteors in, taps detonate (see `flak`).
+    Flak,
 }
 
 impl GameKind {
@@ -30,6 +33,7 @@ impl GameKind {
             GameKind::Rps => "Ecosystem",
             GameKind::Life => "Primordial",
             GameKind::Spokewar => "Spokewar",
+            GameKind::Flak => "Flak",
         }
     }
 }
@@ -41,6 +45,7 @@ pub enum GameSim {
     Rps(rps::RpsSim),
     Life(life::LifeSim),
     Spokewar(spokewar::SpokewarSim),
+    Flak(flak::FlakSim),
 }
 
 impl GameSim {
@@ -51,6 +56,7 @@ impl GameSim {
             GameKind::Spokewar => {
                 GameSim::Spokewar(spokewar::SpokewarSim::new(theta, radial, species, seed))
             }
+            GameKind::Flak => GameSim::Flak(flak::FlakSim::new(theta, radial, species, seed)),
         }
     }
 
@@ -59,6 +65,7 @@ impl GameSim {
             GameSim::Rps(s) => s.theta(),
             GameSim::Life(s) => s.theta(),
             GameSim::Spokewar(s) => s.theta(),
+            GameSim::Flak(s) => s.theta(),
         }
     }
 
@@ -67,16 +74,19 @@ impl GameSim {
             GameSim::Rps(s) => s.radial(),
             GameSim::Life(s) => s.radial(),
             GameSim::Spokewar(s) => s.radial(),
+            GameSim::Flak(s) => s.radial(),
         }
     }
 
     /// The "species" admin knob: species count for the ecosystem, palette
-    /// slots for Life, base count for Spokewar. One knob, per-game meaning.
+    /// slots for Life, base count for Spokewar, color slots for Flak. One
+    /// knob, per-game meaning.
     pub fn set_species(&mut self, species: u8) {
         match self {
             GameSim::Rps(s) => s.set_species_count(species),
             GameSim::Life(s) => s.set_palette(species),
             GameSim::Spokewar(s) => s.set_bases(species),
+            GameSim::Flak(s) => s.set_slots(species),
         }
     }
 
@@ -86,6 +96,7 @@ impl GameSim {
         match self {
             GameSim::Rps(_) | GameSim::Life(_) => None,
             GameSim::Spokewar(_) => Some(spokewar::TICK_SECS),
+            GameSim::Flak(_) => Some(flak::TICK_SECS),
         }
     }
 
@@ -94,6 +105,7 @@ impl GameSim {
             GameSim::Rps(s) => s.tick(),
             GameSim::Life(s) => s.tick(),
             GameSim::Spokewar(s) => s.tick(),
+            GameSim::Flak(s) => s.tick(),
         }
     }
 
@@ -102,6 +114,7 @@ impl GameSim {
             GameSim::Rps(s) => s.watchdog(),
             GameSim::Life(s) => s.watchdog(),
             GameSim::Spokewar(s) => s.watchdog(),
+            GameSim::Flak(s) => s.watchdog(),
         }
     }
 
@@ -110,6 +123,7 @@ impl GameSim {
             GameSim::Rps(s) => s.inject(it, ir, half_theta, half_r, species % s.species_count()),
             GameSim::Life(s) => s.inject(it, ir, half_theta, half_r, species),
             GameSim::Spokewar(s) => s.inject(it, ir, species),
+            GameSim::Flak(s) => s.inject(it, ir, species),
         }
     }
 
@@ -142,6 +156,7 @@ impl GameSim {
                 })
                 .collect(),
             GameSim::Spokewar(s) => s.pack_cells(),
+            GameSim::Flak(s) => s.pack_cells(),
         }
     }
 }

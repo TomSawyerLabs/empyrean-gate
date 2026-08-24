@@ -62,8 +62,16 @@ GAME MODE banner. Commits `c7f3bb6`, `608a85d`, `f0b7a6b`.
 - [ ] Spokewar boss mode (co-op, thing in the hole with tendrils) — roster
       design exists; needs a mode toggle story first (second knob or a
       per-game variant field on GameCue).
-- [ ] Next games: pick from tier 2 (Comets wants IMU steering; Flak reuses
-      Burst; Pulse wants the beat grid).
+- [x] **Flak** (`game/flak.rs`): co-op inverted Missile Command on the
+      particle cadence. Two scaling rules make 0..N one world: storm pressure
+      follows a ~12 s sliding window of human blooms (CALM 0.8/s +0.35 per
+      recent bloom, capped), and a deliberately lazy auto-defense fires only
+      after ~4 s of human silence — imperfect on purpose so the attract mode
+      shows meteors slipping through (an invitation, not a performance).
+      Impacts at the hole are a warm flash, not a fail state. Kills sparkle
+      in the defender's chip color: score IS color.
+- [ ] Next games: Comets (wants IMU steering — sensors.ts already streams
+      orientation) or Pulse (wants a beat-grid claim mechanic).
 
 ## Handover notes for a fresh session
 

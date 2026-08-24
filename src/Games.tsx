@@ -42,6 +42,19 @@ const GAMES: {
       "Newborns blend their parents' colors where colonies meet.",
   },
   {
+    kind: "flak",
+    name: "Flak",
+    blurb:
+      "Meteors stream from the rim toward the center; every tap detonates a " +
+      "flak bloom that vaporizes what it catches, in your color. Pure co-op — " +
+      "the storm swells with how hard the crowd is firing, and calms when " +
+      "everyone wanders off.",
+    knob: { label: "Colors", min: 2, max: 8 },
+    playHint:
+      "Tap ahead of a falling meteor to catch it in your bloom — kills flash " +
+      "your color. The harder everyone fires, the heavier the storm.",
+  },
+  {
     kind: "spokewar",
     name: "Spokewar",
     blurb:

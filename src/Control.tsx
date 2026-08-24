@@ -52,6 +52,7 @@ const GAME_CUES: { kind: GameKind; name: string }[] = [
   { kind: "rps", name: "Ecosystem" },
   { kind: "life", name: "Primordial" },
   { kind: "spokewar", name: "Spokewar" },
+  { kind: "flak", name: "Flak" },
 ];
 
 /// A cue that runs a game world (plans/game-mode.md). The underlying stack is
