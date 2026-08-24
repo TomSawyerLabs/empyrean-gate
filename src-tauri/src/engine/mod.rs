@@ -243,6 +243,7 @@ impl Engine {
                 storage_entry(6, true),
                 storage_entry(7, true),
                 storage_entry(8, true),
+                storage_entry(9, true),
             ],
         });
 
@@ -1723,6 +1724,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         saturation: 0.85,
                         brightness: 1.0,
                         duration,
+                        ..Default::default()
                     });
                 };
                 if tap_beat_count.is_multiple_of(4) {
@@ -1818,7 +1820,6 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             next_phase_reset_check = now + Duration::from_secs(1);
             if let Some(at) = cfg.render.phase_reset_at.as_deref().and_then(parse_hhmm) {
                 let local = chrono::Local::now();
-                        ..Default::default()
                 let today = local.date_naive();
                 let due = local.time() >= at;
                 if !phase_reset_primed {
@@ -1925,7 +1926,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     hue: e.cfg.hue,
                     saturation: e.cfg.saturation.clamp(0.0, 1.0),
                     brightness: e.cfg.brightness.clamp(0.0, 1.0),
-                    _pad: [0.0; 2],
+                    rotation: e.cfg.rotation,
+                    grow: e.cfg.grow.clamp(-1.0, 1.0),
                 })
                 .collect()
         };

@@ -87,8 +87,8 @@ struct Effect {
     hue: f32,
     saturation: f32,
     brightness: f32,
-    _pad0: f32,
-    _pad1: f32,
+    rotation: f32,  // shapes: the figure's own spin, independent of `angle`
+    grow: f32,      // shapes: scale drift over the life, -1 .. 1
 }
 
 struct Dab {
@@ -102,8 +102,8 @@ struct Dab {
     dir: f32,     // stroke motion direction, for directional pens
     saturation: f32,
     brightness: f32,
-    rotation: f32,  // shapes: the figure's own spin, independent of `angle`
-    grow: f32,      // shapes: scale drift over the life, -1 .. 1
+    _pad0: f32,
+    _pad1: f32,
 }
 
 @group(0) @binding(0) var<uniform> G: Globals;
@@ -622,23 +622,10 @@ fn apply_blend(acc: vec3f, c: vec4f, opacity: f32, mode: u32) -> vec3f {
 }
 
 // ---------------------------------------------------------------------------
-// Triggered effects (transient, additive on top of the layer stack)
-// ---------------------------------------------------------------------------
-
-fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
-    let t = clamp(E.age / max(E.duration, 0.001), 0.0, 1.0);
-    let fade = (1.0 - t) * (1.0 - t);
-    var col: vec3f;
-    if E.hue < 0.0 {
-        col = vec3f(1.0);
-    } else {
-        col = hsv2rgb(E.hue, E.saturation, E.brightness);
-    }
-// ---------------------------------------------------------------------------
 // Shape stamps
 //
-// The figure effects (star, heart, â€¦) are drawn from exact signed distance
-// fields â€” Inigo Quilez's, ported â€” rather than polar radius functions. An exact
+// The figure effects (star, heart, …) are drawn from exact signed distance
+// fields — Inigo Quilez's, ported — rather than polar radius functions. An exact
 // Euclidean distance gives the outline a constant width the whole way round; a
 // radial `rn - R(theta)` proxy fattens the rim wherever the edge runs steeply in
 // r, which on a star is most of it.
@@ -648,7 +635,7 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
 // `atan(x, y)` for what WGSL spells `atan2(x, y)`.
 // ---------------------------------------------------------------------------
 
-/// Floor-based modulo â€” GLSL `mod`, which WGSL's `%` is not.
+/// Floor-based modulo — GLSL `mod`, which WGSL's `%` is not.
 fn fmod_pos(x: f32, y: f32) -> f32 { return x - y * floor(x / y); }
 
 fn rot2(p: vec2f, a: f32) -> vec2f {
@@ -677,7 +664,7 @@ fn sd_star(p_in: vec2f, r: f32, n: f32, m: f32) -> f32 {
 ///
 /// iq also has an exact heart SDF, and it was the first thing tried here. Its
 /// cleft is only 9% of the figure's height, which on 64 spokes under a 0.11-wide
-/// rim glow is not a cleft at all â€” it rendered as a disc. This curve's notch
+/// rim glow is not a cleft at all — it rendered as a disc. This curve's notch
 /// goes all the way to the origin, which is the one feature that makes a heart
 /// read as a heart. Every ray from the notch crosses the boundary exactly once,
 /// so `length - r(angle)` is a sound inside/outside test.
@@ -716,7 +703,7 @@ fn sd_moon(p_in: vec2f, d: f32, ra: f32, rb: f32) -> f32 {
     return max(length(p) - ra, -(length(p - vec2f(d, 0.0)) - rb));
 }
 
-/// World radius of a shape stamped at `size` 1 â€” the Live size slider's default.
+/// World radius of a shape stamped at `size` 1 — the Live size slider's default.
 /// Shapes have to be generous: 64 spokes is 5.6 degrees of arc, so a small figure
 /// is just a blob.
 const SHAPE_UNIT: f32 = 0.38;
@@ -751,7 +738,7 @@ fn stamp_frame(E: Effect, ctx: Ctx, t: f32, spin: f32) -> Stamp {
 }
 
 /// Turn a signed distance into brightness: a bright rim of width `rim` on the
-/// outline, plus a dimmer interior. Rim-first is deliberate â€” the array is a ring
+/// outline, plus a dimmer interior. Rim-first is deliberate — the array is a ring
 /// with a 32% hole, so a stamp's middle is missing whatever we do, and a fill
 /// bright enough to carry the figure on its own would swamp the layer stack the
 /// effect is supposed to sit on top of.
@@ -775,6 +762,19 @@ fn shape_hold(t: f32) -> f32 {
     return 1.0 - smoothstep(0.45, 1.0, t);
 }
 
+// ---------------------------------------------------------------------------
+// Triggered effects (transient, additive on top of the layer stack)
+// ---------------------------------------------------------------------------
+
+fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
+    let t = clamp(E.age / max(E.duration, 0.001), 0.0, 1.0);
+    let fade = (1.0 - t) * (1.0 - t);
+    var col: vec3f;
+    if E.hue < 0.0 {
+        col = vec3f(1.0);
+    } else {
+        col = hsv2rgb(E.hue, E.saturation, E.brightness);
+    }
 
     switch E.kind {
         // Burst — circular shockwave expanding from a point
@@ -805,20 +805,7 @@ fn shape_hold(t: f32) -> f32 {
             let v = exp(-(d * d) / 0.003);
             return col * v * fade * E.intensity * 1.8;
         }
-        default: {
-            return vec3f(0.0);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Live-draw dabs (collaborative strokes from any client)
-// ---------------------------------------------------------------------------
-
-fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
-    let fade = (1.0 - D.age) * (1.0 - D.age);
-    let origin = D.radius * vec2f(cos(D.angle), sin(D.angle));
-        // Bloom â€” an iris opening from the center out, petalled, with a wake
+        // Bloom — an iris opening from the center out, petalled, with a wake
         case 4u: {
             let s = max(E.size, 0.2);
             let front = t * 1.15;
@@ -831,14 +818,14 @@ fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
             let petals = 0.7 + 0.3 * cos(6.0 * (ctx.theta - E.angle));
             return col * (ring + wake) * petals * fade * E.intensity * 1.7;
         }
-        // Pinwheel â€” spiral arms whipping up to speed, then gone
+        // Pinwheel — spiral arms whipping up to speed, then gone
         case 5u: {
             let spin = E.angle + TAU * 1.75 * t * t;
             let sharp = clamp(8.0 / max(E.size, 0.25), 1.0, 40.0);
             let arm = pow(max(cos(5.0 * (ctx.theta - spin) + ctx.rn * 3.0), 0.0), sharp);
             return col * arm * fade * E.intensity * 1.7;
         }
-        // Twinkle â€” glitter storm swelling across the whole array
+        // Twinkle — glitter storm swelling across the whole array
         case 6u: {
             // Rise and fall, so the storm arrives rather than starting at full tilt.
             let swell = sin(PI * clamp(t * 1.1, 0.0, 1.0));
@@ -853,7 +840,7 @@ fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
             let vary = 0.55 + 0.45 * hash01(idx * 97u + cell * 26699u + seed);
             return col * lit * vary * swell * E.intensity * 1.8;
         }
-        // Wipe â€” a straight bar crossing the disc, lit wake behind it
+        // Wipe — a straight bar crossing the disc, lit wake behind it
         case 7u: {
             let s = max(E.size, 0.2);
             let dir = vec2f(cos(E.angle), sin(E.angle));
@@ -869,13 +856,13 @@ fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
             );
             return col * (bar + wake) * fade * E.intensity * 1.6;
         }
-        // Star â€” turning slowly on its own axis
+        // Star — turning slowly on its own axis
         case 8u: {
             let s = stamp_frame(E, ctx, t, t * 0.5);
             let sd = sd_star(s.p, s.r, 5.0, 3.0);
             return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
         }
-        // Heart â€” beats twice while it fades
+        // Heart — beats twice while it fades
         case 9u: {
             let s = stamp_frame(E, ctx, t, 0.0);
             let beat = 1.0 + 0.07 * sin(TAU * 2.0 * t) * (1.0 - t);
@@ -886,7 +873,7 @@ fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
             let sd = length(q) - heart_r(atan2(q.y, q.x)) * unit;
             return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
         }
-        // Flower â€” a circle that unfolds into six petals as it lands
+        // Flower — a circle that unfolds into six petals as it lands
         case 10u: {
             let s = stamp_frame(E, ctx, t, t * 0.4);
             let open = smoothstep(0.0, 0.35, t);
@@ -908,12 +895,25 @@ fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
             return col * shape_stamp(sd_triangle(s.p, s.r), s.r)
                 * shape_hold(t) * E.intensity * 1.5;
         }
-        // Moon â€” crescent, tilted to read the way the glyph does
+        // Moon — crescent, tilted to read the way the glyph does
         case 13u: {
             let s = stamp_frame(E, ctx, t, 0.35);
             let sd = sd_moon(s.p, 0.41 * s.r, s.r, 0.98 * s.r);
             return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
         }
+        default: {
+            return vec3f(0.0);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Live-draw dabs (collaborative strokes from any client)
+// ---------------------------------------------------------------------------
+
+fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
+    let fade = (1.0 - D.age) * (1.0 - D.age);
+    let origin = D.radius * vec2f(cos(D.angle), sin(D.angle));
     let d = distance(ctx.pos, origin);
     var col: vec3f;
     if D.hue < 0.0 {
