@@ -396,9 +396,11 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
         // SpokeChase — per-spoke comets running along the radius
         case 7u: {
             let h = hash01(ctx.spoke * 7919u);
-            let dir = select(1.0, -1.0, L.param_b > 0.5); // toward center or outward
-            let speed = 0.2 + L.param_a * 1.5 + aud * A.level * 0.8;
-            let head = fract(h + L.phase * speed * 0.2 * dir);
+            // Travel rate — direction (param_b), param_a and audio level — is
+            // integrated into L.phase by LayerCfg::phase_rate (src/layers.rs).
+            // Multiplying it in here instead would make every rate change jump
+            // the comets by phase * delta.
+            let head = fract(h + L.phase);
             let d = fract(ctx.r01 - head);
             let tail_len = 0.05 + L.param_c * 0.4;
             let v = exp(-d / tail_len) * step(0.0, d);
@@ -408,7 +410,8 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
         // Sparkle — hash twinkles; density rides the treble
         case 8u: {
             let idx = ctx.spoke * G.pixels + ctx.i;
-            let clock = max(L.phase * (4.0 + L.param_b * 20.0), 0.0);
+            // Re-roll rate (param_b) is integrated into L.phase — see phase_rate.
+            let clock = max(L.phase, 0.0);
             let cell = u32(clock);
             let f = fract(clock);
             let rnd0 = hash01(idx * 2654435761u + cell * 40503u);
@@ -497,9 +500,9 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
         }
         // Meteors — random radial shooting stars with trails
         case 15u: {
-            let rate = 0.15 + L.param_b * 1.2;
+            // Launch rate (param_b) is integrated into L.phase — see phase_rate.
             let h0 = hash01(ctx.spoke * 4099u);
-            let t = max(L.phase * rate + h0 * 7.0, 0.0);
+            let t = max(L.phase + h0 * 7.0, 0.0);
             let epoch = u32(t);
             let t_ep = fract(t);
             let current = meteor_event(L, ctx, epoch, t_ep);
@@ -513,8 +516,9 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
         case 16u: {
             let cells = 6.0 + L.param_a * 20.0;
             let u = ctx.r01 * cells + hash01(ctx.spoke * 7919u) * 13.0;
-            let spd = (0.5 + L.param_b * 2.0) * (1.0 + aud * A.level);
-            let flow = u + L.phase * spd; // r01 grows inward, so +phase streams outward
+            // Flow rate (param_b, audio level) is integrated into L.phase — see
+            // phase_rate. r01 grows inward, so +phase streams outward.
+            let flow = u + L.phase;
             let cell = u32(flow);
             let f = fract(flow);
             let threshold = 1.0 - (0.15 + L.param_a * 0.2);

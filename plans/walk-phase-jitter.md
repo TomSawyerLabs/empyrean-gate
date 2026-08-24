@@ -12,8 +12,18 @@ Two operator feedback bundles filed on 2026-08-24 complain about motion quality:
 Both are real, both are reproducible from the bundles, and both are caused by the
 autopilot walk feeding parameters into the shader in places where a small
 parameter change is *not* a small visual change. Nothing is wrong with the frame
-pipeline. Fix not yet written — diagnosis below is complete and confirmed
-against the recorded pixels.
+pipeline.
+
+**Status: fixed in the working tree, not yet verified on the gate.** The
+diagnosis below is confirmed against the recorded pixels; the fixes are the
+recommended options of each class, implemented as described in "Fixes applied".
+
+Operator description on 2026-08-24, before being shown the diagnosis, which
+matches it exactly: *"somethings go super fast. sometimes it looks like they go
+backwards … it's only some of the layers … the fire looks good always. the
+meteors are stuttery. and it's getting worse over time."* Fire multiplies phase
+by a constant and is on the not-affected list; Meteors is a class A kind; "worse
+over time" is the uptime term.
 
 ## Environment / context
 
@@ -140,6 +150,18 @@ and does nothing at all elsewhere in the range.
 (Wedges `n = 2 + floor(param_a*14)`), `gate.wgsl:567`
 (Video `mirrors = u32(floor(param_b*10 + 0.5))` — `param_b` is walked).
 
+**Two more found while implementing**, both `x > 0.5` direction flips on walked
+params, i.e. the same floor-with-two-cells pathology with the most visible
+possible consequence — the whole layer reverses:
+
+| kind | line | expression |
+| --- | --- | --- |
+| SpokeChase | `gate.wgsl:400` | `dir = select(1.0, -1.0, L.param_b > 0.5)` |
+| Meteors | `gate.wgsl:301` (`meteor_event`) | `dir_r = select(r01, 1.0 - r01, L.param_c > 0.5)` |
+
+This is the direct answer to "sometimes it looks like they go backwards": with
+`param_b`/`param_c` parked near 0.5 the walk flips direction at frame rate.
+
 ### 4. Latent, low priority: phase is f32 at the GPU boundary
 
 `mod.rs:1620` sends `layer_phases[i] as f32` and nothing wraps it. Accumulating
@@ -149,38 +171,103 @@ at ~1 hour of layer phase the f32 step is 2.4e-4 (harmless), at ~28 hours it is
 stepping for an installation left running. Not what these two reports are about;
 worth fixing when the phase plumbing is touched.
 
-## Proposed fixes (not yet implemented — needs a decision)
+## Fixes applied
 
-### Class A — phase × walked rate
+Both classes took the recommended option. Options 2/3 for class A (drop the
+params from the walk, or low-pass them) were rejected: they trade away exactly
+the parameters that make those layers interesting and leave the audio term
+broken.
 
-The shader wants ∫rate·dt but computes phase·rate. Options:
+### Class A — phase × walked rate → integrate the rate
 
-1. **Integrate the kind-specific rate on the CPU** (recommended). Move the
-   `0.2 + 1.5·param_a`-style expressions into Rust, accumulate a second
-   per-layer phase alongside the existing one (`layer_phases_kind[i] += rate ·
-   l.speed · master · dt`), and pass it as a new uniform field the four kinds
-   use in place of `L.phase * rate`. Correct at every frame, removes the uptime
-   dependency entirely, and makes audio drive a genuine speed-up instead of a
-   teleport. Cost: the rate expression is duplicated CPU-side and must be kept
-   in step with the shader.
-2. **Drop these params from the walk set per kind** — cheap, no plumbing, but
-   loses autopilot variety on exactly the params that make those layers
-   interesting, and leaves the audio term broken.
-3. **Low-pass the walked value before the shader** — reduces the artefact
-   without removing it; still scales with uptime. Not worth it.
+The shader wants ∫rate·dt but computed phase·rate. Rather than add a second
+phase channel, the rate is folded into the *existing* phase integration, because
+all four kinds use `L.phase` for nothing else:
 
-### Class B — floored params
+- `LayerCfg::phase_rate(audio_level)` in `src-tauri/src/layers.rs` returns the
+  kind's rate factor (1.0 for every unaffected kind). It mirrors the shader
+  expressions and must be kept in step with them — both sides say so in comments.
+- The frame loop multiplies it into `layer_phases[i] += …` at both accumulation
+  sites (`engine/mod.rs`, the visible one and the faded-out one).
+- The four shader sites now use `L.phase` unscaled: `gate.wgsl` cases 7, 8, 15,
+  16. The `speed` / `rate` / `spd` locals are gone.
 
-1. **Snap the walk to the quantization grid** (recommended): mark discrete
-   params per kind, and have `walked_layer` round the walked value to the same
-   grid the shader will floor it to, with a dwell/hysteresis (e.g. must exceed
-   the boundary by 25% of a step, and hold for ≥2 s) so it steps deliberately
-   instead of dithering.
-2. **Exclude discrete params from the walk** — simplest; the arm count then only
-   changes when the operator changes it.
+No new uniform field, no protocol change, and no separate state to transplant.
+Nominal behaviour is unchanged (SpokeChase at defaults integrates 0.19 cycles/s,
+same as before); what changes is that a rate change is now a rate change instead
+of a teleport proportional to uptime. Audio now genuinely speeds those layers up.
 
-Either needs a per-kind descriptor of which of `param_a/b/c` are discrete;
-`layers.rs` metadata is the natural home.
+`LayerCfg::phase_period()` additionally wraps SpokeChase's phase to 1.0, which is
+exact (`fract(h + phase)`) and keeps that kind out of the f32 problem in §4
+forever. No other kind has a wrap that is free — see §4.
+
+### Class B — floored params → snap with hysteresis
+
+- `LayerKind::discrete_params()` in `layers.rs` declares, per kind, which of
+  `param_a/b/c` the shader quantizes and onto what grid (`floor(v*steps + bias)`;
+  `bias` is 0.5 where the shader rounds). Six kinds: Spiral, SpokeChase, Rainbow,
+  Wedges, Meteors, Video.
+- `walked_discrete()` in `engine/mod.rs` holds the current cell and steps only
+  when the walk goes past the boundary by ≥25% of a cell **and** stays there for
+  ≥2 s (`DISCRETE_MARGIN`, `DISCRETE_DWELL`). It emits the middle of the held
+  cell so the shader lands on it unambiguously.
+- An operator slider edit bypasses the dwell entirely: `walked_discrete` tracks
+  the cell of the *un-walked* base value and snaps the moment that changes, so
+  dragging the arm count is not laggy.
+
+State lives in `LayerWalk::discrete`, so it survives alongside the walk offsets
+across scene transitions.
+
+### Tests
+
+`src-tauri/src/engine/mod.rs` gained a `tests` module:
+
+- `gate_wgsl_validates_with_naga` — the layer shader had **no** automated check
+  at all before this; the patch codegen did. Parses and validates `gate.wgsl`
+  with naga, no GPU needed.
+- Four `discrete_walk_*` tests: ignores dithering at the exact 0.51/six-arms
+  configuration from the report, steps after a committed excursion, follows an
+  operator edit immediately, round-mode grid round-trips.
+- `phase_rate_reproduces_the_shader_expressions`.
+
+Also verified against a real device: `cargo run --bin engine-smoke` compiles and
+runs the shader on Vulkan (Intel UHD), 1.07 ms mean, 0/120 misses.
+
+## Known remaining instances (deliberately not changed)
+
+### The patch node graph has a weaker version of class A
+
+`src-tauri/src/patch/codegen.rs` ports several `gate.wgsl` bodies, and its
+`{phase}` is an integrated wire, so most are already correct — `warp` (line 626)
+and `spiral` (361) multiply phase by 1, and `spoke_chase` (463) bakes `dir` as a
+literal constant, so none of those can exhibit the bug. Two can, but only if the
+user wires the rate input to something varying:
+
+| node | line | expression |
+| --- | --- | --- |
+| `sparkle` | 479, 482 | `{phase} * tw_rate`, `tw_rate = 4 + {twinkle} * 20` |
+| `beat_rings` (meteors body) | 602 | `{phase} * rate`, `rate = 0.15 + {tail} * 1.2` |
+
+Left alone on purpose: the node graph has no autopilot walk driving those inputs,
+so the "gets worse over time" failure needs a deliberate patch to provoke, and
+the fix would change the semantics of a user-facing node parameter. Worth doing
+if anyone reports it, or next time that codegen is opened.
+
+### §4's f32 hand-off is now a slightly tighter budget for three kinds
+
+Folding the rate into the accumulator means Sparkle/Meteors/Warp phases grow at
+the *rate* rather than at `speed` — Sparkle up to ~24 units/s. The precision
+picture is close to what it was (previously the shader multiplied a smaller f32
+by the rate, which preserves relative precision, so this is mildly worse, not
+newly broken), and both versions degrade over a multi-day run rather than a show.
+
+The clean fix is a per-kind `phase_period()` wrap, which is already the mechanism
+SpokeChase uses. It isn't free for these three: they do `u32(t)` epoch/cell
+lookups keyed into a hash, so wrapping at period *P* re-rolls every twinkle,
+meteor or star for one frame when it wraps. At P = 2^16 that is one invisible
+frame every ~45 min (Sparkle, rate 24), ~7 h (Warp), ~24 h (Meteors). Probably
+fine, but it is a real visual tradeoff and it is not what the two reports are
+about, so it needs a decision rather than a quiet commit.
 
 ## Progress log
 
@@ -189,8 +276,15 @@ Either needs a per-kind descriptor of which of `param_a/b/c` are discrete;
 - [x] Confirmed SpokeChase artefact quantitatively (head tracking + 2-term fit).
 - [x] Confirmed Spiral arm flip in the recorded pixels (angular DFT).
 - [x] Swept the shader for both patterns; 4 kinds in class A, 4 in class B.
-- [ ] Decide fix approach for each class (user).
-- [ ] Implement, then re-file a report from the gate to verify.
+- [x] Found two more class B sites during implementation: the SpokeChase and
+      Meteors direction flips, which are what "goes backwards" refers to.
+- [x] Implemented class A (rate integrated CPU-side) and class B (grid snap with
+      margin + dwell), with tests and the first naga check on `gate.wgsl`.
+- [ ] **Next:** build, deploy to `empyreangate`, re-file a report with Spiral and
+      SpokeChase enabled after a long uptime, and confirm the head-tracking and
+      angular-DFT signatures are gone. Open question: whether `DISCRETE_DWELL`
+      of 2 s feels right in the room or wants to be longer.
+- [ ] Decide on the §4 phase wrap for Sparkle/Meteors/Warp (see above).
 
 ## Things not to do
 

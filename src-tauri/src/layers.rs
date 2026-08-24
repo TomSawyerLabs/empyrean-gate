@@ -82,6 +82,65 @@ impl LayerKind {
     pub fn gpu_id(self) -> u32 {
         Self::ALL.iter().position(|k| *k == self).unwrap() as u32
     }
+
+    /// Params this kind's shader quantizes, and the grid it quantizes them to.
+    ///
+    /// A walked value sitting near a cell boundary crosses it many times a
+    /// second, so the pattern strobes between (say) five and six spiral arms.
+    /// The autopilot uses this to step such params deliberately instead — see
+    /// `walked_discrete` in `engine/mod.rs`. Keep in step with `gate.wgsl`.
+    pub fn discrete_params(self) -> &'static [DiscreteParam] {
+        match self {
+            // arms = max(1, floor(param_a * 12))
+            LayerKind::Spiral => &[DiscreteParam {
+                index: 0,
+                steps: 12.0,
+                bias: 0.0,
+            }],
+            // dir = param_b > 0.5 — a flip reverses every comet at once
+            LayerKind::SpokeChase => &[DiscreteParam {
+                index: 1,
+                steps: 2.0,
+                bias: 0.0,
+            }],
+            // turns = max(1, floor(param_a * 4 + 0.5))
+            LayerKind::Rainbow => &[DiscreteParam {
+                index: 0,
+                steps: 4.0,
+                bias: 0.5,
+            }],
+            // n = 2 + floor(param_a * 14)
+            LayerKind::Wedges => &[DiscreteParam {
+                index: 0,
+                steps: 14.0,
+                bias: 0.0,
+            }],
+            // dir_r = param_c > 0.5 — inward vs outward streaks
+            LayerKind::Meteors => &[DiscreteParam {
+                index: 2,
+                steps: 2.0,
+                bias: 0.0,
+            }],
+            // mirrors = floor(param_b * 10 + 0.5)
+            LayerKind::Video => &[DiscreteParam {
+                index: 1,
+                steps: 10.0,
+                bias: 0.5,
+            }],
+            _ => &[],
+        }
+    }
+}
+
+/// One shader-quantized layer parameter. The shader's cell index is
+/// `floor(value * steps + bias)`; `bias` is 0.5 where it rounds rather than
+/// truncates.
+#[derive(Debug, Clone, Copy)]
+pub struct DiscreteParam {
+    /// Which walked param: 0 = `param_a`, 1 = `param_b`, 2 = `param_c`.
+    pub index: usize,
+    pub steps: f32,
+    pub bias: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -361,6 +420,48 @@ pub struct GpuEffect {
 }
 
 impl LayerCfg {
+    /// Rate factor the engine folds into this layer's phase integration.
+    ///
+    /// Four kinds animate at a rate derived from a parameter. Written naively the
+    /// shader computes `phase * rate`, so a change in `rate` moves the pattern by
+    /// `phase * Δrate` — proportional to how long the layer has been up. With the
+    /// autopilot nudging that param every frame the result is a pattern that
+    /// vibrates instead of travelling, reverses direction at random, and gets
+    /// worse the longer the show runs; audio does the same thing, harder. What
+    /// the shader wants is ∫rate·dt, so the rate is integrated here and the
+    /// shader uses `L.phase` unscaled. Every expression below is a mirror of one
+    /// in `engine/shaders/gate.wgsl` and must be kept in step with it.
+    pub fn phase_rate(&self, audio_level: f32) -> f32 {
+        let aud = self.audio_amount * audio_level;
+        match self.kind {
+            // case 7 — comet travel along each spoke, either direction.
+            LayerKind::SpokeChase => {
+                let dir = if self.param_b > 0.5 { -1.0 } else { 1.0 };
+                (0.2 + self.param_a * 1.5 + aud * 0.8) * 0.2 * dir
+            }
+            // case 8 — twinkle re-roll clock.
+            LayerKind::Sparkle => 4.0 + self.param_b * 20.0,
+            // case 15 — meteor launch epochs.
+            LayerKind::Meteors => 0.15 + self.param_b * 1.2,
+            // case 16 — starfield flow.
+            LayerKind::Warp => (0.5 + self.param_b * 2.0) * (1.0 + aud),
+            _ => 1.0,
+        }
+    }
+
+    /// Period over which this kind's shader output is *exactly* invariant in
+    /// phase, if it has one. Phase accumulates in f64 but crosses to the GPU as
+    /// f32, which quantizes the per-frame step once the value gets large — so
+    /// wrap wherever it costs nothing. Only claim a period here when the wrap is
+    /// invisible; the other kinds are addressed in `plans/walk-phase-jitter.md`.
+    pub fn phase_period(&self) -> Option<f64> {
+        match self.kind {
+            // case 7 — the only use is fract(h + phase).
+            LayerKind::SpokeChase => Some(1.0),
+            _ => None,
+        }
+    }
+
     pub fn to_gpu(&self, phase: f32) -> GpuLayer {
         GpuLayer {
             kind: self.kind.gpu_id(),

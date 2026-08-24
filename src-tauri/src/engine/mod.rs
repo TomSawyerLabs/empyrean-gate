@@ -558,6 +558,91 @@ const WALK_PARAMS: usize = 8; // speed, scale, hue, hue_range, brightness, pa, p
 #[derive(Clone, Default)]
 struct LayerWalk {
     offsets: [f32; WALK_PARAMS],
+    /// One slot per walked param (a/b/c); only the kind's discrete ones are used.
+    discrete: [DiscreteWalk; 3],
+}
+
+/// Hysteresis state for one shader-quantized param (`LayerKind::discrete_params`).
+#[derive(Clone, Copy)]
+struct DiscreteWalk {
+    /// Cell the shader is currently being shown. NaN until the first frame seeds it.
+    held: f32,
+    /// Cell of the operator's own slider, so a deliberate edit can be told apart
+    /// from the walk wandering.
+    base: f32,
+    /// Candidate cell serving out its dwell, and how long it has waited.
+    pending: f32,
+    pending_secs: f32,
+}
+
+impl Default for DiscreteWalk {
+    fn default() -> Self {
+        Self {
+            held: f32::NAN,
+            base: f32::NAN,
+            pending: f32::NAN,
+            pending_secs: 0.0,
+        }
+    }
+}
+
+/// How far past a cell boundary the walk must go before the step counts, as a
+/// fraction of one cell, and how long it must stay there.
+const DISCRETE_MARGIN: f32 = 0.25;
+const DISCRETE_DWELL: f32 = 2.0;
+
+/// Step a shader-quantized param the way a person would: hold the current cell,
+/// and move only once the walk has committed to a neighbour. Without this the
+/// walk dithers across the boundary at frame rate and the layer strobes between
+/// two versions of itself — the "very jumpy at times" spiral.
+fn walked_discrete(
+    d: &mut DiscreteWalk,
+    base: f32,
+    walked: f32,
+    spec: &crate::layers::DiscreteParam,
+    dt: f32,
+) -> f32 {
+    let base_cell = (base * spec.steps + spec.bias).floor();
+    if d.held.is_nan() || base_cell != d.base {
+        // First frame, or the operator moved the slider — follow them at once.
+        d.base = base_cell;
+        d.held = base_cell;
+        d.pending = f32::NAN;
+        d.pending_secs = 0.0;
+    }
+
+    // Where the walked value sits on the shader's grid, in cell units.
+    let x = walked * spec.steps + spec.bias;
+    let want = x.floor();
+    if want == d.held {
+        d.pending = f32::NAN;
+        d.pending_secs = 0.0;
+    } else {
+        // How far past the boundary we crossed, as a fraction of a cell.
+        let over = if want > d.held {
+            x - (d.held + 1.0)
+        } else {
+            d.held - x
+        };
+        if over < DISCRETE_MARGIN {
+            d.pending = f32::NAN;
+            d.pending_secs = 0.0;
+        } else {
+            if d.pending != want {
+                d.pending = want;
+                d.pending_secs = 0.0;
+            }
+            d.pending_secs += dt;
+            if d.pending_secs >= DISCRETE_DWELL {
+                d.held = want;
+                d.pending = f32::NAN;
+                d.pending_secs = 0.0;
+            }
+        }
+    }
+
+    // Emit the middle of the held cell so the shader lands on it unambiguously.
+    ((d.held + 0.5 - spec.bias) / spec.steps).clamp(0.0, 1.0)
 }
 
 struct WalkRng(u64);
@@ -609,7 +694,7 @@ fn walked_speed(base: f32, offset: f32, amount: f32) -> f32 {
 
 /// Apply a layer's walk offsets around its configured values. The user's slider
 /// value is the center; `walk_amount` scales the wander radius per parameter.
-fn walked_layer(l: &crate::layers::LayerCfg, w: &LayerWalk) -> crate::layers::LayerCfg {
+fn walked_layer(l: &crate::layers::LayerCfg, w: &mut LayerWalk, dt: f32) -> crate::layers::LayerCfg {
     let a = l.walk_amount;
     let mut out = l.clone();
     out.speed = walked_speed(l.speed, w.offsets[0], a);
@@ -620,6 +705,20 @@ fn walked_layer(l: &crate::layers::LayerCfg, w: &LayerWalk) -> crate::layers::La
     out.param_a = (l.param_a + w.offsets[5] * 0.2 * a).clamp(0.0, 1.0);
     out.param_b = (l.param_b + w.offsets[6] * 0.2 * a).clamp(0.0, 1.0);
     out.param_c = (l.param_c + w.offsets[7] * 0.2 * a).clamp(0.0, 1.0);
+    // Params the shader will floor() must step, not dither.
+    for spec in l.kind.discrete_params() {
+        let (base, walked) = match spec.index {
+            0 => (l.param_a, out.param_a),
+            1 => (l.param_b, out.param_b),
+            _ => (l.param_c, out.param_c),
+        };
+        let v = walked_discrete(&mut w.discrete[spec.index], base, walked, spec, dt);
+        match spec.index {
+            0 => out.param_a = v,
+            1 => out.param_b = v,
+            _ => out.param_c = v,
+        }
+    }
     out
 }
 
@@ -1595,9 +1694,14 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             if !l.enabled {
                 continue;
             }
+            let level = audio[(l.audio_source as usize).min(MAX_AUDIO_SOURCES - 1)].level;
             if layer_env[i] < 0.005 {
                 // Fully faded out by the walk — keep its phase moving, skip the GPU.
-                layer_phases[i] += (l.speed * render_master_speed * dt) as f64;
+                layer_phases[i] +=
+                    (l.phase_rate(level) * l.speed * render_master_speed * dt) as f64;
+                if let Some(p) = l.phase_period() {
+                    layer_phases[i] = layer_phases[i].rem_euclid(p);
+                }
                 continue;
             }
             let mut l = if render_walk_enabled && l.walk_amount > 0.0 {
@@ -1605,12 +1709,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 // Global depth scales how far every layer wanders from its sliders.
                 let mut scaled = l.clone();
                 scaled.walk_amount = (l.walk_amount * render_walk_depth).clamp(0.0, 3.0);
-                walked_layer(&scaled, &layer_walks[i])
+                walked_layer(&scaled, &mut layer_walks[i], dt)
             } else {
                 l.clone()
             };
             l.opacity *= layer_env[i];
-            layer_phases[i] += (l.speed * render_master_speed * dt) as f64;
+            layer_phases[i] += (l.phase_rate(level) * l.speed * render_master_speed * dt) as f64;
+            if let Some(p) = l.phase_period() {
+                layer_phases[i] = layer_phases[i].rem_euclid(p);
+            }
             if recording {
                 effective_layers.push(l.clone());
             }
@@ -2139,4 +2246,128 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         s.send_terminate();
     }
     state.sacn_terminated.store(true, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layers::{DiscreteParam, LayerCfg, LayerKind};
+
+    /// The layer shader has no other automated check — this is what catches a
+    /// typo in `gate.wgsl` without a GPU.
+    #[test]
+    fn gate_wgsl_validates_with_naga() {
+        let src = shader_source();
+        let module = naga::front::wgsl::parse_str(&src)
+            .unwrap_or_else(|e| panic!("gate.wgsl failed to parse: {e}"));
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        );
+        validator
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("gate.wgsl failed validation: {e:?}"));
+    }
+
+    /// Spiral's arm count: `floor(param_a * 12)`.
+    const ARMS: DiscreteParam = DiscreteParam {
+        index: 0,
+        steps: 12.0,
+        bias: 0.0,
+    };
+
+    fn arms_of(v: f32) -> f32 {
+        (v * ARMS.steps).floor()
+    }
+
+    #[test]
+    fn discrete_walk_ignores_dithering_across_a_boundary() {
+        // param_a = 0.51 sits 0.12 of a cell above the 6-arm boundary, which is
+        // well inside the walk's wander radius — the case from the field report.
+        let mut d = DiscreteWalk::default();
+        let mut jitter = 0.0f32;
+        for _ in 0..600 {
+            jitter = -jitter;
+            let walked = 0.51 + jitter * 0.015;
+            let v = walked_discrete(&mut d, 0.51, walked, &ARMS, 1.0 / 60.0);
+            assert_eq!(arms_of(v), 6.0, "walked {walked} escaped the held cell");
+            jitter = if jitter == 0.0 { 1.0 } else { jitter };
+        }
+    }
+
+    #[test]
+    fn discrete_walk_steps_once_the_excursion_is_committed() {
+        let mut d = DiscreteWalk::default();
+        assert_eq!(arms_of(walked_discrete(&mut d, 0.51, 0.51, &ARMS, 0.0)), 6.0);
+
+        // A clear excursion into the 5-arm cell, but not yet held long enough.
+        for _ in 0..60 {
+            let v = walked_discrete(&mut d, 0.51, 0.44, &ARMS, 1.0 / 60.0);
+            assert_eq!(arms_of(v), 6.0, "stepped before serving the dwell");
+        }
+        // Past the dwell it commits.
+        for _ in 0..120 {
+            walked_discrete(&mut d, 0.51, 0.44, &ARMS, 1.0 / 60.0);
+        }
+        let v = walked_discrete(&mut d, 0.51, 0.44, &ARMS, 1.0 / 60.0);
+        assert_eq!(arms_of(v), 5.0, "never stepped despite a sustained excursion");
+    }
+
+    #[test]
+    fn discrete_walk_follows_the_operator_without_waiting() {
+        let mut d = DiscreteWalk::default();
+        walked_discrete(&mut d, 0.51, 0.51, &ARMS, 1.0 / 60.0);
+        // Operator drags the slider to 3 arms: no dwell, it lands this frame.
+        let v = walked_discrete(&mut d, 0.29, 0.29, &ARMS, 1.0 / 60.0);
+        assert_eq!(arms_of(v), 3.0);
+    }
+
+    #[test]
+    fn discrete_walk_round_mode_lands_on_the_intended_cell() {
+        // Video mirrors: floor(param_b * 10 + 0.5) — boundaries offset by half a cell.
+        let spec = DiscreteParam {
+            index: 1,
+            steps: 10.0,
+            bias: 0.5,
+        };
+        for base in [0.0, 0.21, 0.5, 0.77, 1.0] {
+            let mut d = DiscreteWalk::default();
+            let v = walked_discrete(&mut d, base, base, &spec, 0.0);
+            assert_eq!(
+                (v * 10.0 + 0.5).floor(),
+                (base * 10.0 + 0.5).floor(),
+                "base {base} did not round-trip"
+            );
+        }
+    }
+
+    fn layer(kind: LayerKind) -> LayerCfg {
+        LayerCfg {
+            kind,
+            audio_amount: 0.0,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn phase_rate_reproduces_the_shader_expressions() {
+        // SpokeChase at the defaults: (0.2 + 0.5*1.5) * 0.2, running outward.
+        let mut l = layer(LayerKind::SpokeChase);
+        l.param_b = 0.25; // dir = +1
+        assert!((l.phase_rate(0.0) - 0.19).abs() < 1e-6);
+        l.param_b = 0.75; // dir = -1
+        assert!((l.phase_rate(0.0) + 0.19).abs() < 1e-6);
+
+        // Audio speeds the comets up rather than teleporting them.
+        l.param_b = 0.25;
+        l.audio_amount = 1.0;
+        assert!(l.phase_rate(1.0) > l.phase_rate(0.0));
+
+        assert!((layer(LayerKind::Sparkle).phase_rate(0.0) - 14.0).abs() < 1e-6);
+        assert!((layer(LayerKind::Meteors).phase_rate(0.0) - 0.75).abs() < 1e-6);
+        assert!((layer(LayerKind::Warp).phase_rate(0.0) - 1.5).abs() < 1e-6);
+        // Everything else integrates plain time.
+        assert_eq!(layer(LayerKind::Fire).phase_rate(1.0), 1.0);
+        assert_eq!(layer(LayerKind::Spiral).phase_rate(1.0), 1.0);
+    }
 }
