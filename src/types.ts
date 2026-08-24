@@ -346,6 +346,14 @@ export interface RuntimeStatus {
   sacn_universes: number;
   sacn_pps: number;
   sacn_error: string | null;
+  /** Our configured sACN priority, for comparing against a peer's. */
+  sacn_priority: number;
+  /** Other sACN sources heard right now; worst problem first. */
+  sacn_peers: SacnPeer[];
+  /** How many of our universes the watcher actually holds memberships for. */
+  sacn_watched_universes: number;
+  /** Why the watcher sees less than it wants to. */
+  sacn_watch_error: string | null;
   fps_history: number[];
   pps_history: number[];
   clients: number;
@@ -441,6 +449,34 @@ export interface FoundController {
   temperature_c: number | null;
   dhcp: boolean | null;
   expected: boolean;
+}
+
+/**
+ * Another sACN source on the wire, seen by the always-on watcher. Distinct from
+ * {@link SacnSourceSeen}, which is a one-shot result of the Test tab's scan and
+ * carries no priority.
+ */
+export interface SacnPeer {
+  cid: string;
+  source_name: string;
+  from_ip: string;
+  /** Universes we have heard real data packets from it on. */
+  universes: number[];
+  /** Universes it advertises in its E1.31 discovery packets. */
+  announced: number[];
+  /** The intersection with our own output plan — the universes in dispute. */
+  overlapping: number[];
+  /** Its priority on a shared universe; null when only discovery told us it exists. */
+  priority: number | null;
+  our_priority: number;
+  packets_per_sec: number;
+  /** Everything it sends is Preview_Data: a visualiser, not a rival. */
+  preview_only: boolean;
+  /** Beats us on a shared universe — the receiver discards our frames. */
+  wins: boolean;
+  /** Equal priority on a shared universe: receivers merge HTP and the rig does
+   *  what neither source asked for. */
+  ties: boolean;
 }
 
 export interface SacnSourceSeen {

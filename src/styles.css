@@ -69,12 +69,30 @@ body {
   -webkit-user-select: none;
 }
 
-input,
+/* Only fields that hold TEXT opt back in. A bare `input` selector also matched
+   every `<input type="range">`, which put the Live tab's sliders back into
+   selectable mode — dragging one on iOS could raise the selection magnifier over
+   the show surface instead of setting brightness. */
+input[type="text"],
+input[type="search"],
+input[type="number"],
+input[type="password"],
+input[type="email"],
+input[type="url"],
+input:not([type]),
 textarea,
 code,
 .join-url {
   user-select: text;
   -webkit-user-select: text;
+}
+
+/* The play surface is never selectable, whatever else lands on it later. */
+.live-page,
+.live-page * {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .topbar {
@@ -128,6 +146,14 @@ code,
   flex: 1;
 }
 
+/* The corner menu is a narrow-screen device only; the wide topbar shows all of
+   this inline. Both halves stay out of the DOM's way here rather than being
+   parked off-screen, which tests/layout.spec.ts counts as a bug. */
+.topbar-menu-toggle,
+.topbar-menu-backdrop {
+  display: none;
+}
+
 .gpu-name {
   color: var(--muted);
   font-size: 12px;
@@ -172,6 +198,72 @@ code,
   color: #ffd6de;
   border-bottom: 1px solid var(--danger);
   letter-spacing: 0.04em;
+}
+
+/* Something else is driving our universes. Banner treatment for the same reason
+   test mode gets it: the rig stops obeying this app, and the cause is off-screen.
+   Three tiers, because the operator's next move differs — outranked (they win),
+   merging (nobody wins), or merely present (we still win, for now). */
+.banner.sacn-peer-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: #33280f;
+  color: #ffe9a8;
+  border-bottom: 1px solid #6b5518;
+}
+
+.banner.sacn-peer-banner.overridden,
+.banner.sacn-peer-banner.merging {
+  background: #4a1020;
+  color: #ffd6de;
+  border-bottom-color: var(--danger);
+}
+
+.sacn-peer-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.sacn-peer-banner.overridden .sacn-peer-dot,
+.sacn-peer-banner.merging .sacn-peer-dot {
+  background: var(--danger);
+  animation: test-pulse 1.4s ease-in-out infinite;
+}
+
+.sacn-peer-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sacn-peer-body ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sacn-peer-name {
+  font-weight: 600;
+}
+
+/* Test tab list: the verdict carries the colour, so a glance down the list sorts
+   "breaking the show" from "just also there". */
+.controller-item.sacn-peer.wins,
+.controller-item.sacn-peer.ties {
+  border-color: var(--danger);
+}
+
+.controller-item.sacn-peer.wins .controller-name,
+.controller-item.sacn-peer.ties .controller-name {
+  color: #ffb3c2;
 }
 
 .testmode-banner .testmode-summary {
@@ -277,10 +369,13 @@ main {
   display: flex;
   padding: 8px;
   gap: 8px;
-  /* The whole live surface swallows pan gestures, not just the canvas: a stray
-     contact landing on the padding beside a pen button used to start a scroll
-     and cancel the stroke that a second finger was drawing. */
-  touch-action: none;
+  /* The array swallows pan gestures (see `.live-canvas-wrap`); the page around it
+     must NOT. This used to be `none` for the whole surface, which on a phone —
+     the one layout where the Live tab is a scrolling column — meant a finger could
+     not reach any control below the array. An ancestor `none` also vetoed the
+     `pan-y` on `.live-side`, so the wide layout's overflow escape hatch was dead
+     on a touch screen too. */
+  touch-action: pan-y;
 }
 
 
@@ -299,6 +394,12 @@ main {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Everything inside the array's square swallows pan gestures, not just the
+     canvas element: a stray contact landing on the padding beside a corner
+     cluster used to start a scroll and cancel the stroke a second finger was
+     drawing. Scoping it here rather than to the whole page is what lets a phone
+     scroll down to its controls. */
+  touch-action: none;
 }
 
 .gate-canvas {
@@ -650,6 +751,54 @@ main {
 
 .ring-center .spark-label {
   font-size: clamp(7px, 1.15cqw, 11px);
+}
+
+/* Output state in the ring. Deliberately NOT the filled red slab this used to be
+   (`.live-pill`, still used in Settings): red is this app's error colour, and the
+   output doing its job is the least alarming thing on the screen. A quiet teal
+   outline says "transmitting"; the red is saved for the one case that earns it,
+   another source fighting us for the same universes. */
+.ring-output {
+  display: inline-flex;
+  align-items: center;
+  gap: clamp(3px, 0.6cqw, 6px);
+  max-width: 100%;
+  padding: clamp(1px, 0.25cqw, 3px) clamp(5px, 0.9cqw, 10px);
+  border: 1px solid rgba(56, 209, 194, 0.4);
+  border-radius: 999px;
+  color: var(--accent2);
+  background: rgba(56, 209, 194, 0.08);
+  font-size: clamp(7px, 1.15cqw, 11px);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ring-output .ring-output-dot {
+  width: clamp(4px, 0.7cqw, 6px);
+  height: clamp(4px, 0.7cqw, 6px);
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Nothing on the wire while output is enabled: the operator's problem, not ours. */
+.ring-output.stalled {
+  border-color: rgba(255, 233, 168, 0.45);
+  background: rgba(255, 233, 168, 0.08);
+  color: #ffe9a8;
+}
+
+/* Another source is transmitting on our universes. */
+.ring-output.contended {
+  border-color: var(--danger);
+  background: rgba(255, 92, 122, 0.16);
+  color: #ffb3c2;
+  font-weight: 700;
+}
+
+.ring-output.contended .ring-output-dot {
+  animation: test-pulse 1.4s ease-in-out infinite;
 }
 
 .tempo-time-grid {
@@ -3537,18 +3686,125 @@ button:disabled {
   .topbar > .ghost.report-btn .btn-label {
     display: none;
   }
-  .topbar nav {
-    width: 100%;
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 3px;
+  /* Seven tabs across a phone wrapped onto two 42px rows and still cropped their
+     own labels. They move into the corner menu; the row they cost goes back to
+     the array. */
+  .topbar > nav {
+    display: none;
   }
-  .topbar nav button {
-    min-width: 0;
-    min-height: 42px;
-    padding: 8px 3px;
+
+  /* Beats the `.topbar > .ghost { display: none }` cull three lines up — the
+     whole point of this button is to be what survives it. */
+  .topbar > .ghost.topbar-menu-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: auto;
+    padding: 6px 12px;
     font-size: 13px;
+  }
+
+  .topbar-menu-here {
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+
+  .topbar-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: block;
+    background: rgba(6, 4, 14, 0.6);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+  }
+
+  .topbar-menu {
+    position: absolute;
+    top: calc(6px + env(safe-area-inset-top));
+    left: 8px;
+    width: min(280px, calc(100vw - 16px));
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid #2a2445;
+    border-radius: 12px;
+    background-color: rgba(15, 12, 28, 0.97);
+    background-image: var(--surface-grad);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+  }
+
+  .topbar-menu-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .topbar-menu-head h2 {
+    flex: 1;
+    margin: 0;
+    font-size: 14px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .topbar-menu-head button {
+    min-width: 40px;
+    min-height: 40px;
+    font-size: 20px;
     line-height: 1;
+  }
+
+  .topbar-menu-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .topbar-menu-tabs button {
+    min-height: 46px;
+    padding: 8px 6px;
+    font-size: 14px;
+  }
+
+  .topbar-menu-tabs button.active {
+    color: #fff;
+    border-color: var(--accent2);
+    background: rgba(124, 92, 255, 0.35);
+  }
+
+  .topbar-menu-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding-top: 10px;
+    border-top: 1px solid #2a2445;
+  }
+
+  .topbar-menu-actions button {
+    min-height: 44px;
+    text-align: left;
+  }
+
+  .topbar-menu-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid #2a2445;
+  }
+
+  .topbar-menu-foot .version-chip {
+    display: inline-flex;
   }
 
   .live-page {

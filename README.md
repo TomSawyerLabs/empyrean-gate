@@ -14,9 +14,13 @@ sources) drives the patterns via beat tracking and band energies.
 
 ![Live tab — the array with pens and effect pads beside it](docs/live-wide.png)
 
-| Squarish window — corner controls | Phone / portrait | Control | Settings |
+| Squarish window — corner controls | Tablet / portrait | Control | Settings |
 |---|---|---|---|
 | ![Live tab in a square window with controls in the corners](docs/live-square.png) | ![Live tab in portrait](docs/live-tall.png) | ![Control tab](docs/control.png) | ![Settings tab](docs/settings.png) |
+
+| Phone — array on top, controls below | Phone — the corner menu |
+|---|---|
+| ![Live tab on a phone](docs/live-phone.png) | ![The corner menu open on a phone, showing every tab and the top-bar actions](docs/phone-menu.png) |
 
 The Live surface adapts to the window: the array view stays as large as possible and
 the controls flow into whatever space is left — side columns, top/bottom bars, or the
@@ -32,6 +36,13 @@ queries, so it is correct at first paint with nothing to arrange or maintain.
 the app chrome so the array fills the display; Esc or the corner pill brings it back.
 The state persists, so the app reopens the way it was closed — including across
 self-updates.
+
+**On a phone** the top bar is one row: a ☰ corner menu naming the current tab, and
+Report. The tabs and every other top-bar action — show mode, connect a device, new
+window, the connection state, the version chip — live inside that menu, which is a
+row of chrome the array gets back and, more to the point, the only way those controls
+are reachable at that width. Live is a scrolling column there: a drag on the array
+draws (it swallows pan gestures), a drag anywhere else scrolls to the controls below.
 
 ## Architecture
 
@@ -224,18 +235,25 @@ scrollbar, and then a drag scrolls the page instead of drawing on the array.
 every tab at eight viewports (the 1080p show display, the 900px minimum window, a
 square aux window, ultrawide, both iPad orientations, a phone). It fails when anything
 extends past the viewport horizontally, when any box clips its own content, or when the
-Live tab needs to scroll vertically. Anything deliberately parked off-screen must
-declare `data-layout-exempt`. It runs on every push and on release tags.
+Live tab needs to scroll vertically (below the 700px breakpoint Live is a scrolling
+column on purpose, so only the horizontal rule applies there). It also covers the two
+overlays that only exist in a particular state: the phone's corner menu, and the sACN
+contention banner — the mock backend takes a per-client status patch on
+`POST /mock/status?client=<id>` so a state the real backend only reaches with another
+console on the wire can still be laid out and checked. Anything deliberately parked
+off-screen must declare `data-layout-exempt`. It runs on every push and on release tags.
 
 `bun run test:behavior` covers what the gate structurally cannot see: a control can be
 laid out perfectly and still be unusable. It asserts that the master sliders never
 shrink below a width you could actually aim at, that brightness survives a drag to 0
-**and back**, that the colour wheel's compass points are the right way round, and that
-quick-setting shortcuts migrate off the removed control decks. These run on **both**
-Chromium and WebKit — the iPads are first-class clients, and range-input rendering,
-pointer capture and canvas are not portable the way box geometry is. The layout gate
-itself stays Chromium-only; that all 47 of its cases pass identically under WebKit was
-checked rather than assumed.
+**and back**, that the colour wheel's compass points are the right way round, that
+quick-setting shortcuts migrate off the removed control decks, and that a phone can
+actually reach every tab and every control on Live — the corner menu holds all of
+them, the page scrolls, the array does not, and nothing on the surface is selectable.
+These run on **both** Chromium and WebKit — the iPads are first-class clients, and
+range-input rendering, pointer capture and canvas are not portable the way box
+geometry is. The layout gate itself stays Chromium-only; that all of its cases pass
+identically under WebKit was checked rather than assumed.
 
 ## Production build
 
@@ -349,10 +367,25 @@ controller's spokes, or auto-cycling.
 frame, so "output enabled" never tells you a PixLite is listening. The tab asks them
 directly: a broadcast probe on UDP 49150 for Mk1/Mk2, the multicast "DiscProt"
 exchange on 49151 for Mk3/Mk4, and a passive listen on the E1.31 discovery group for
-*other* sACN sources — a second console on your universes is otherwise invisible and
-the rig ends up doing what neither source says. Replies are reconciled against the
-controller list in Settings into found / missing / unexpected. Scanning is read-only
-and safe during a show.
+*other* sACN sources. Replies are reconciled against the controller list in Settings
+into found / missing / unexpected. Scanning is read-only and safe during a show.
+
+**Detecting a rival source.** Separately from that one-shot scan, the backend listens
+continuously for other E1.31 sources on the universes we transmit, and compares their
+priority against ours. Three verdicts, because the operator's next move differs:
+*higher* priority means the receiver discards our frames and the rig is following
+something else; *equal* priority means E1.31 merges the two sources highest-takes-
+precedence, so the rig does what **neither** of them asked for — the nastiest case,
+and the one most easily mistaken for a bug in the show; *lower* is harmless for now
+but is still someone else's console in our patch. Anything competing raises a banner
+on every tab and in show mode, turns the ring's `sACN` chip red, and is listed with
+its name, address, universes and packet rate under **Test → Other sACN sources**.
+Sources flagged `Preview_Data` (a visualiser) are shown but never raise an alarm.
+
+Two honest limits, which the UI states too: this hears **multicast only**, so a rival
+that unicasts straight at the controllers is invisible to any passive listener on a
+switched network; and multicast memberships are a bounded OS resource, so a large
+patch is sampled rather than watched in full (the panel says how many universes).
 
 Safety, because this drives the actual rig from any device on the LAN:
 

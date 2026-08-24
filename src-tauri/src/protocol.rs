@@ -480,6 +480,37 @@ pub struct TestModeStatus {
     pub blocked_by_show: Option<String>,
 }
 
+/// Another sACN source heard on the wire, and what it means for our output.
+/// Produced continuously by `sacnwatch`, unlike `DiscoveryResult::other_sources`
+/// which is a one-shot from the Test tab's scan.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct SacnPeer {
+    pub cid: String,
+    pub source_name: String,
+    pub from_ip: String,
+    /// Universes we have heard actual data packets from it on.
+    pub universes: Vec<u16>,
+    /// Universes it advertises in its E1.31 discovery packets. Can be far wider
+    /// than `universes` — we only listen to a bounded number of groups.
+    pub announced: Vec<u16>,
+    /// The intersection with our own output plan: the universes in dispute.
+    pub overlapping: Vec<u16>,
+    /// Its priority on a shared universe, when a data packet has told us. `None`
+    /// means we know it is there (from discovery) but not at what priority.
+    pub priority: Option<u8>,
+    /// Ours, so a client can explain the comparison without reading config.
+    pub our_priority: u8,
+    pub packets_per_sec: u32,
+    /// Everything it sends is flagged Preview_Data — a visualiser, not a rival.
+    pub preview_only: bool,
+    /// Higher priority than ours on a shared universe: it wins and our frames
+    /// are discarded by the receiver.
+    pub wins: bool,
+    /// Equal priority on a shared universe: E1.31 receivers merge the two HTP,
+    /// so the rig does what neither source asked for.
+    pub ties: bool,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeStatus {
     /// Set when Vulkan init failed — the UI shows this prominently. No fallbacks.
@@ -495,6 +526,20 @@ pub struct RuntimeStatus {
     /// Output-path problem the operator must see (interface bind failed, socket
     /// unavailable). Packets may still flow — via the WRONG network interface.
     pub sacn_error: Option<String>,
+    /// Our configured sACN priority, mirrored here so a client can compare it
+    /// against a peer's without holding the config.
+    pub sacn_priority: u8,
+    /// Other sACN sources currently heard on the wire (see `sacnwatch`). Loudest
+    /// problem first: outright winners, then equal-priority merges, then sources
+    /// that are merely present.
+    pub sacn_peers: Vec<SacnPeer>,
+    /// How many of our universes the contention watcher actually holds multicast
+    /// memberships for. Fewer than `sacn_universes` on a large patch, and the UI
+    /// says so rather than implying full coverage.
+    pub sacn_watched_universes: u16,
+    /// Why the watcher can see less than it wants to (bind refused, membership
+    /// limit reached).
+    pub sacn_watch_error: Option<String>,
     /// Frames rendered in each of the last ~30 one-second buckets (oldest first).
     pub fps_history: Vec<u32>,
     /// sACN packets sent in each of the last ~30 one-second buckets (oldest first).

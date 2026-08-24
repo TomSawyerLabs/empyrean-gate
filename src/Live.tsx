@@ -24,6 +24,7 @@ import {
   type LiveColor,
 } from "./liveColors";
 import { loadQuickSettings, saveQuickSettings } from "./quickSettings";
+import { contenders } from "./sacnPeers";
 import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
 import ToolIcon, { type ToolKind } from "./ToolIcon";
@@ -366,6 +367,12 @@ export default function Live() {
     </div>
   );
 
+  // Ring chip state: contention outranks "enabled but nothing on the wire",
+  // which outranks the ordinary healthy case.
+  const contested = contenders(status?.sacn_peers ?? []);
+  const outputLevel =
+    contested.length > 0 ? "contended" : status?.sacn_pps === 0 ? "stalled" : "live";
+
   const canvas = (
     <div className="live-canvas-wrap">
       <GateCanvas
@@ -427,7 +434,21 @@ export default function Live() {
             warn={status.sacn_pps === 0}
           />
         )}
-        {status?.sacn_enabled && <span className="live-pill">sACN LIVE</span>}
+        {status?.sacn_enabled && (
+          // Quiet when everything is fine, loud only when something else is
+          // driving the rig. The detail lives in the app-wide banner; there is
+          // room for a verdict here, not an explanation.
+          <span className={`ring-output ${outputLevel}`}>
+            <span className="ring-output-dot" />
+            {outputLevel === "contended"
+              ? contested.length === 1
+                ? "1 rival source"
+                : `${contested.length} rival sources`
+              : outputLevel === "stalled"
+                ? "sACN idle"
+                : "sACN"}
+          </span>
+        )}
       </div>
       {/* Square-ish windows: controls float in the corners the circle never
           reaches. Visibility is pure CSS (aspect-ratio media queries), so the

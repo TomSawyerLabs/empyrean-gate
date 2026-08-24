@@ -8,6 +8,7 @@ import Replay from "./Replay";
 import ReportModal from "./Report";
 import Settings from "./Settings";
 import Test from "./Test";
+import { contenders, peerLabel, peerVerdict, severity } from "./sacnPeers";
 import { useGate } from "./state";
 
 // The patch editor pulls in React Flow; lazy so phones on the play surfaces
@@ -268,6 +269,151 @@ function CloseGuard() {
   );
 }
 
+/// Another sACN source is driving universes we drive.
+///
+/// This gets banner treatment for the same reason test mode does: it changes what
+/// the rig is doing, the cause is off-screen, and every second spent looking for
+/// the bug in the show is a second wasted. Shown on every tab and in show mode —
+/// being mid-performance is exactly when it matters.
+function SacnContentionBanner() {
+  const { status } = useGate();
+  const peers = status?.sacn_peers ?? [];
+  const level = severity(peers);
+  if (level === "clear") return null;
+  const rivals = contenders(peers);
+  const headline =
+    level === "overridden"
+      ? "Another sACN source is overriding this one"
+      : level === "merging"
+        ? "Another sACN source is merging with this one"
+        : "Another sACN source shares these universes";
+
+  return (
+    <div className={`banner sacn-peer-banner ${level}`}>
+      <span className="sacn-peer-dot" />
+      <div className="sacn-peer-body">
+        <strong>{headline}</strong>
+        <ul>
+          {rivals.slice(0, 3).map((p) => (
+            <li key={p.cid}>
+              <span className="sacn-peer-name">{peerLabel(p)}</span>
+              {p.from_ip && p.source_name ? <span className="hint"> at {p.from_ip}</span> : null}
+              {" — "}
+              {peerVerdict(p)}
+            </li>
+          ))}
+        </ul>
+        {rivals.length > 3 && (
+          <span className="hint">and {rivals.length - 3} more — see Test → Controllers</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/// Everything the ≤700px topbar cannot show, behind one corner button.
+///
+/// A phone has room for a single row of chrome, and the Live tab wants every pixel
+/// under it. The old narrow breakpoint spent that row on a two-line grid of seven
+/// tabs and simply `display: none`d Show mode, Connect, New window, the connection
+/// state and the version chip — which made them unreachable rather than merely
+/// small. They all live in here now, and the tab row's height goes back to the
+/// array.
+function TopbarMenu({
+  tab,
+  onSelectTab,
+  onClose,
+  onShowMode,
+  onConnect,
+  onNewWindow,
+}: {
+  tab: TabId;
+  onSelectTab: (t: TabId) => void;
+  onClose: () => void;
+  onShowMode: () => void;
+  onConnect: () => void;
+  onNewWindow: () => void;
+}) {
+  const { connected, status } = useGate();
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="topbar-menu-backdrop" onClick={onClose}>
+      <div className="topbar-menu" onClick={(e) => e.stopPropagation()}>
+        {/* The backdrop covers the topbar, so the button that opened this is not
+            available to close it. Tapping outside works but is not discoverable;
+            an explicit × is. The app name comes back with it — the narrow topbar
+            has no room for the title. */}
+        <div className="topbar-menu-head">
+          <h2>Empyrean Gate</h2>
+          <button className="ghost" aria-label="Close menu" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <nav className="topbar-menu-tabs">
+          {NAV_TABS.map((t) => (
+            <button
+              key={t.id}
+              className={tab === t.id ? "active" : ""}
+              onClick={() => {
+                onSelectTab(t.id);
+                onClose();
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </nav>
+        <div className="topbar-menu-actions">
+          <button
+            onClick={() => {
+              onShowMode();
+              onClose();
+            }}
+          >
+            ⛶ Show mode
+          </button>
+          <button
+            onClick={() => {
+              onConnect();
+              onClose();
+            }}
+          >
+            ⊕ Connect a device
+          </button>
+          {IN_TAURI && (
+            <button
+              onClick={() => {
+                onNewWindow();
+                onClose();
+              }}
+            >
+              ⧉ New window
+            </button>
+          )}
+        </div>
+        <div className="topbar-menu-foot">
+          <span className={connected ? "conn ok" : "conn bad"}>
+            {connected ? "connected" : "reconnecting…"}
+          </span>
+          {status && <span className="gpu-name">{status.gpu_name}</span>}
+          <VersionChip />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { connected, status, errors, dismissError, client, denied, savedPulse } = useGate();
   const [tab, setTab] = useState<TabId>(tabFromHash);
@@ -275,6 +421,7 @@ export default function App() {
   const [showReport, setShowReport] = useState(false);
   const [savedVisible, setSavedVisible] = useState(false);
   const [showMode, setShowMode] = useShowMode();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // Flash "saved" whenever the backend confirms a config change (from any client).
   useEffect(() => {
@@ -347,6 +494,16 @@ export default function App() {
         </div>
       )}
       <header className="topbar">
+        {/* Narrow screens only (CSS). The current tab's name rides along, because a
+            bare hamburger leaves you with no idea where you already are. */}
+        <button
+          className="ghost topbar-menu-toggle"
+          aria-label="Menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          ☰ <span className="topbar-menu-here">{TABS.find((t) => t.id === tab)?.label}</span>
+        </button>
         <h1>Empyrean Gate</h1>
         <nav>
           {NAV_TABS.map((t) => (
@@ -405,6 +562,7 @@ export default function App() {
           </button>
         </div>
       )}
+      <SacnContentionBanner />
       {status?.gpu_error && (
         <div className="banner error">
           <strong>GPU error:</strong> {status.gpu_error}
@@ -461,6 +619,16 @@ export default function App() {
         {tab === "settings" && <Settings />}
       </main>
 
+      {menuOpen && (
+        <TopbarMenu
+          tab={tab}
+          onSelectTab={selectTab}
+          onClose={() => setMenuOpen(false)}
+          onShowMode={() => setShowMode(true)}
+          onConnect={() => setShowConnect(true)}
+          onNewWindow={() => void openNewWindow(tab)}
+        />
+      )}
       {showConnect && <ConnectModal onClose={() => setShowConnect(false)} />}
       {showReport && <ReportModal onClose={() => setShowReport(false)} />}
       <CloseGuard />

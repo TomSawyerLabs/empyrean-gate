@@ -20,6 +20,8 @@ interface Shot {
   height: number;
   /** Enter show mode first: fullscreen, no chrome — how the Gate machine runs. */
   showMode?: boolean;
+  /** Open the phone's corner menu, which is where its tabs and actions live. */
+  menu?: boolean;
 }
 
 const SHOTS: Shot[] = [
@@ -27,6 +29,8 @@ const SHOTS: Shot[] = [
   { file: "live-show-1080p.png", hash: "live", width: 1920, height: 1080, showMode: true },
   { file: "live-square.png", hash: "live", width: 900, height: 900 },
   { file: "live-tall.png", hash: "live", width: 820, height: 1180 },
+  { file: "live-phone.png", hash: "live", width: 390, height: 844 },
+  { file: "phone-menu.png", hash: "live", width: 390, height: 844, menu: true },
   { file: "control.png", hash: "control", width: 1400, height: 900 },
   { file: "settings.png", hash: "settings", width: 1400, height: 1200 },
 ];
@@ -43,6 +47,10 @@ for (const shot of SHOTS) {
     }
     // Let the preview stream paint a few frames so the array is lit.
     await page.waitForTimeout(1200);
+    if (shot.menu) {
+      await page.locator(".topbar-menu-toggle").click();
+      await page.locator(".topbar-menu").waitFor();
+    }
     await page.screenshot({ path: `docs/${shot.file}` });
   });
 }

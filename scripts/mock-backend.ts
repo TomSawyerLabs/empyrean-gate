@@ -99,6 +99,10 @@ const MIME: Record<string, string> = {
 };
 
 const timers = new WeakMap<object, ReturnType<typeof setInterval>>();
+/// Per-client status patches from `POST /mock/status` (see the route below).
+const overrides = new Map<string, Record<string, unknown>>();
+/// Which client id each open socket said hello as.
+const clients = new WeakMap<object, string>();
 
 const server = Bun.serve({
   port: PORT,
@@ -109,6 +113,21 @@ const server = Bun.serve({
     }
     // No reports exist in a fresh test run; the UI must cope with that.
     if (url.pathname === "/reports") return Response.json([]);
+    // Test-only lever for states the backend reaches on its own but a mock never
+    // will (the sACN contention banner needs something else to be on the wire).
+    // POST a `RuntimeStatus` fragment with `?client=<empyrean-client-id>`; the
+    // socket that says hello with that id gets the patched status.
+    //
+    // Keyed by client rather than applied globally on purpose: the gate runs
+    // fully parallel against ONE mock, and a shared mutation would leak a
+    // contention banner into whatever else happened to be loading.
+    if (url.pathname === "/mock/status" && req.method === "POST") {
+      const client = url.searchParams.get("client") ?? "";
+      return req.json().then((patch) => {
+        overrides.set(client, { ...(overrides.get(client) ?? {}), ...(patch as object) });
+        return Response.json({ ok: true });
+      });
+    }
     if (url.pathname === "/qr.svg") {
       return new Response(
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1" fill="#fff"/></svg>',
@@ -131,7 +150,7 @@ const server = Bun.serve({
       ws.send(JSON.stringify({ type: "state", config, status }));
     },
     message(ws, raw) {
-      let msg: { type?: string };
+      let msg: { type?: string; client_id?: string };
       try {
         msg = JSON.parse(String(raw));
       } catch {
@@ -139,9 +158,14 @@ const server = Bun.serve({
       }
       switch (msg.type) {
         case "hello":
-        case "get_state":
-          ws.send(JSON.stringify({ type: "state", config, status }));
+        case "get_state": {
+          // `hello` is the first thing a client sends and it carries the id a
+          // test can address, so this is where an override lands.
+          if (msg.client_id) clients.set(ws, msg.client_id);
+          const patch = overrides.get(clients.get(ws) ?? "") ?? {};
+          ws.send(JSON.stringify({ type: "state", config, status: { ...status, ...patch } }));
           break;
+        }
         case "subscribe_preview": {
           ws.send(
             JSON.stringify({

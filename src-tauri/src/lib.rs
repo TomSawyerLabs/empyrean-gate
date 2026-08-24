@@ -18,6 +18,7 @@ pub mod protocol;
 pub mod report;
 pub mod rhythm;
 pub mod sacn;
+pub mod sacnwatch;
 pub mod server;
 pub mod session;
 pub mod state;
@@ -128,6 +129,10 @@ pub fn start_backend() -> Backend {
     rhythm::spawn(state.clone());
     engine::spawn(state.clone());
     power::spawn(state.clone());
+    // Read-only listener; safe to start before the takeover dance, and useful
+    // during it — the instance we are displacing is a peer on our own universes
+    // and gets filtered out by CID like any other copy of us.
+    sacnwatch::spawn(state.clone());
 
     if takeover {
         // Two-phase takeover. Phase 1 (old instance keeps sending): fetch its

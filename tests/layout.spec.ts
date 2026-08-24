@@ -25,7 +25,8 @@ import { expect, test } from "@playwright/test";
  *
  * `mobile` marks the app's own <=700px breakpoint, where Live deliberately
  * becomes a scrolling column (canvas on top, control cards stacked below) and
- * the topbar sheds everything but the tabs and Report. There, vertical scrolling
+ * the topbar sheds everything but Report and the corner-menu button — the tabs
+ * and the rest of the actions move inside that menu. There, vertical scrolling
  * is the design, so only the horizontal rule applies.
  */
 const VIEWPORTS = [
@@ -210,10 +211,87 @@ for (const viewport of VIEWPORTS) {
       });
     }
 
+    // The banner that appears when another sACN source is driving our universes.
+    // It is the tallest thing that can push into <main> uninvited, on every tab
+    // and in show mode, so Live still has to fit underneath it.
+    test("live tab fits with the sACN contention banner", async ({ page }) => {
+      // Address the patch to this page alone: the gate runs fully parallel
+      // against one mock backend, and a global override would leak a banner
+      // into whichever other case happened to be connecting.
+      const clientId = `layout-${viewport.name}`;
+      await page.addInitScript(
+        (id) => localStorage.setItem("empyrean-client-id", id),
+        clientId,
+      );
+      await page.request.post(`/mock/status?client=${clientId}`, {
+        data: {
+          sacn_priority: 100,
+          sacn_watched_universes: 24,
+          sacn_peers: [
+            {
+              cid: "1b2f4c6e-0000-4000-8000-00000000beef",
+              source_name: "FOH Console",
+              from_ip: "10.255.0.31",
+              universes: [1, 2, 3, 4],
+              announced: [1, 2, 3, 4, 5, 6],
+              overlapping: [1, 2, 3, 4],
+              priority: 150,
+              our_priority: 100,
+              packets_per_sec: 1320,
+              preview_only: false,
+              wins: true,
+              ties: false,
+            },
+            {
+              cid: "1b2f4c6e-0000-4000-8000-00000000cafe",
+              source_name: "Capture rig",
+              from_ip: "10.255.0.44",
+              universes: [3],
+              announced: [],
+              overlapping: [3],
+              priority: 100,
+              our_priority: 100,
+              packets_per_sec: 44,
+              preview_only: false,
+              wins: false,
+              ties: true,
+            },
+          ],
+        },
+      });
+      await page.goto("/#live");
+      await expect(page.locator('.app[data-connected="yes"]')).toBeAttached();
+      await expect(page.locator(".sacn-peer-banner")).toBeVisible();
+      await page.waitForTimeout(250);
+
+      const problems = await overflows(page, MUST_FIT_VERTICALLY.has("live") && !viewport.mobile);
+      expect(
+        problems,
+        `Clipped or overflowing regions with the contention banner at ${viewport.width}x${viewport.height}:\n` +
+          problems.map((p) => `  [${p.axis}] ${p.element} — ${p.detail}`).join("\n"),
+      ).toEqual([]);
+    });
+
+    test("the corner menu fits", async ({ page }) => {
+      test.skip(!viewport.mobile, "the corner menu only exists below the 700px breakpoint");
+      await page.goto("/#live");
+      await expect(page.locator('.app[data-connected="yes"]')).toBeAttached();
+      await page.locator(".topbar-menu-toggle").click();
+      await expect(page.locator(".topbar-menu")).toBeVisible();
+      await page.waitForTimeout(250);
+
+      const problems = await overflows(page, false);
+      expect(
+        problems,
+        `Clipped or overflowing regions with the corner menu open at ${viewport.width}x${viewport.height}:\n` +
+          problems.map((p) => `  [${p.axis}] ${p.element} — ${p.detail}`).join("\n"),
+      ).toEqual([]);
+    });
+
     test("show mode fits", async ({ page }) => {
-      // Show mode is a desktop/tablet control: a PWA on a phone is already
-      // fullscreen, and the narrow topbar has no room for the toggle.
-      test.skip(viewport.mobile, "show mode is not offered below the 700px breakpoint");
+      // A PWA on a phone is already fullscreen, so the toggle earns nothing
+      // there — it is in the corner menu for parity, not because it is needed.
+      test.skip(viewport.mobile, "show mode is not worth a case below the 700px breakpoint");
       await page.goto("/#live");
       await expect(page.locator('.app[data-connected="yes"]')).toBeAttached();
       await page.getByRole("button", { name: /Show mode/ }).click();

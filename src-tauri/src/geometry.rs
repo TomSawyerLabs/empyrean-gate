@@ -38,6 +38,28 @@ pub fn total_universes(geo: &GeometryConfig, out: &OutputConfig) -> u16 {
     universes_per_spoke(geo, out) * geo.spokes as u16
 }
 
+/// Every universe we actually put pixels on, ascending. Mirrors the plan
+/// `sacn::SacnSender::configure` builds — reserved-but-unused universes inside a
+/// spoke's block are skipped, because nothing is sent on them and nothing else
+/// using them is competing with us.
+pub fn universe_list(geo: &GeometryConfig, out: &OutputConfig) -> Vec<u16> {
+    let ppu = out.pixels_per_universe.max(1) as u32;
+    let ups = universes_per_spoke(geo, out) as u32;
+    let stride = universe_stride(geo, out) as u32;
+    let mut universes = Vec::new();
+    for spoke in 0..geo.spokes {
+        for u in 0..ups {
+            if u * ppu >= geo.pixels_per_spoke {
+                break;
+            }
+            universes.push(out.start_universe + (spoke * stride + u) as u16);
+        }
+    }
+    universes.sort_unstable();
+    universes.dedup();
+    universes
+}
+
 /// The unicast destination (controller IP) for a given spoke, if configured.
 pub fn controller_for_spoke(out: &OutputConfig, spoke: u32) -> Option<&str> {
     let idx = (spoke / out.strings_per_controller.max(1)) as usize;

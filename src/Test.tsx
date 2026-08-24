@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import GateCanvas from "./GateCanvas";
+import { contenders, peerLabel, peerVerdict, universeRange } from "./sacnPeers";
 import { useGate, useThrottled } from "./state";
 import type {
   DiscoveryResult,
@@ -602,8 +603,90 @@ export default function Test() {
         )}
       </section>
 
+      <OtherSources />
       <Discovery />
     </div>
+  );
+}
+
+/// Live view of the always-on contention watcher. The scan panel below is a
+/// one-shot; this is what is on the wire right now, with the priority comparison
+/// that decides who the rig actually obeys.
+function OtherSources() {
+  const { status } = useGate();
+  const peers = status?.sacn_peers ?? [];
+  const rivals = contenders(peers);
+  const watched = status?.sacn_watched_universes ?? 0;
+  const total = status?.sacn_universes ?? 0;
+
+  return (
+    <section className="panel sacn-detection">
+      <h2>Other sACN sources</h2>
+      <p className="hint">
+        Always listening, no scan needed. E1.31 lets any number of sources drive the
+        same universe: the highest priority wins outright, and <em>equal</em> priorities
+        are merged highest-takes-precedence — so two sources at the same priority make
+        the rig follow neither of them. Ours is priority{" "}
+        <strong>{status?.sacn_priority ?? "—"}</strong>.
+      </p>
+      <p className="hint">
+        This hears multicast only. A source that unicasts straight at the controllers
+        is invisible from here, so an empty list means "nothing heard", not "nothing
+        there".
+        {total > 0 && watched < total
+          ? ` Watching ${watched} of ${total} universes — multicast memberships are a limited OS resource, so a large patch is sampled.`
+          : ""}
+      </p>
+      {status?.sacn_watch_error && <div className="error-box">{status.sacn_watch_error}</div>}
+
+      {peers.length === 0 ? (
+        <p className="ok">✓ Nothing else is transmitting on this network.</p>
+      ) : (
+        <ul className="controller-grid">
+          {peers.map((peer) => (
+            <li
+              key={peer.cid}
+              className={`controller-item sacn-peer ${peer.wins ? "wins" : peer.ties ? "ties" : ""}`}
+            >
+              <span className="controller-name">
+                {peer.wins ? "⛔" : peer.ties ? "⚠" : peer.preview_only ? "👁" : "•"}{" "}
+                {peerLabel(peer)}
+                {peer.source_name && peer.from_ip ? ` — ${peer.from_ip}` : ""}
+              </span>
+              <span className="universe-range">{peerVerdict(peer)}</span>
+              <span className="universe-range hint">
+                {[
+                  peer.packets_per_sec > 0 && `${peer.packets_per_sec} pkt/s`,
+                  peer.universes.length > 0 &&
+                    `heard on ${universeRange(peer.universes)}`,
+                  peer.announced.length > 0 &&
+                    `announces ${universeRange(peer.announced)}`,
+                  `CID ${peer.cid}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {/* Both can be true at once — one source outranking us and another tied
+          with us are different problems with different fixes, so neither hides
+          the other. */}
+      {rivals.some((p) => p.wins) && (
+        <div className="error-box">
+          <strong>The rig is not following this app.</strong> Stop the other source, or
+          raise our priority above it in Settings → sACN output.
+        </div>
+      )}
+      {rivals.some((p) => p.ties) && (
+        <div className="error-box">
+          <strong>Two sources at the same priority are being merged.</strong> Whatever
+          the rig is doing is neither source's intent. Stop the other source, or move
+          the two apart in priority so one of them wins cleanly.
+        </div>
+      )}
+    </section>
   );
 }
 
