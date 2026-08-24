@@ -61,7 +61,13 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   layers: **Waveform** (the PCM bent into a circular oscilloscope) and **Spectrum**
   (spoke-per-bin circular analyzer), plus **Video** (live browser-decoded texture,
   radial/kaleidoscope mapping and color treatment) —
-  stacked with blend modes, each bound to an audio source.
+  stacked with blend modes, each bound to an audio source. **Hold or right-click a
+  layer** anywhere it is listed — the Live cluster, the Control faders — and its
+  parameters open in a popover anchored to it: mix, motion, colour, audio, and
+  whatever the layer kind's own four params are actually called ("Arms", "Twist",
+  "Sharpness" for a Spiral). The array stays lit and undimmed behind it, because
+  the point is to watch what the slider does. Reordering and deleting stay in
+  Settings, one button away.
 - **Effects**: transients that fire over the whole stack. Eight of them *move* —
   burst / strobe / swoosh / collapse / bloom / pinwheel / twinkle / wipe — from the
   keyboard (1–8), a pad, or a remote client. Six are **shapes** — star / heart /

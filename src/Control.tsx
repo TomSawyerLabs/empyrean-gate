@@ -4,6 +4,8 @@
 
 import { useEffect, useState } from "react";
 import { CENTERED_SHAPE, EFFECTS, GROW_MODES, growValue, SHAPES, type GrowMode } from "./effects";
+import LayerQuickEdit, { type QuickEditAnchor } from "./LayerQuickEdit";
+import { useHoldMenu } from "./longPress";
 import { SCENE_PRESETS, type ScenePreset } from "./scenes";
 import ShapeIcon from "./ShapeIcon";
 import Sparkbars from "./Sparkbars";
@@ -91,6 +93,7 @@ export default function Control() {
   const [brightness, setBrightnessLocal] = useState(1);
   const [speed, setSpeedLocal] = useState(1);
   const [growMode, setGrowMode] = useState<GrowMode>("static");
+  const [quickEdit, setQuickEdit] = useState<QuickEditAnchor | null>(null);
   useEffect(() => {
     if (config) {
       setBrightnessLocal(config.render.master_brightness);
@@ -285,10 +288,26 @@ export default function Control() {
       {!status?.patch_active && (
         <section className="panel">
           <h2>Layers</h2>
+          <p className="hint">
+            Hold or right-click a layer for the rest of its parameters, without leaving
+            this tab.
+          </p>
           {config?.layers.map((l, i) => (
-            <LayerFader key={i} index={i} name={l.name || LAYER_LABELS[l.kind]} />
+            <LayerFader
+              key={i}
+              index={i}
+              name={l.name || LAYER_LABELS[l.kind]}
+              onQuickEdit={(x, y) => setQuickEdit({ index: i, x, y })}
+            />
           ))}
         </section>
+      )}
+      {quickEdit !== null && (
+        <LayerQuickEdit
+          anchor={quickEdit}
+          onClose={() => setQuickEdit(null)}
+          onOpenFullEditor={() => (location.hash = "settings")}
+        />
       )}
     </div>
   );
@@ -973,7 +992,15 @@ function AutopilotForecast() {
   );
 }
 
-function LayerFader({ index, name }: { index: number; name: string }) {
+function LayerFader({
+  index,
+  name,
+  onQuickEdit,
+}: {
+  index: number;
+  name: string;
+  onQuickEdit: (x: number, y: number) => void;
+}) {
   const { client, config } = useGate();
   const layer = config?.layers[index];
   const [value, setValue] = useState(layer?.opacity ?? 1);
@@ -991,7 +1018,17 @@ function LayerFader({ index, name }: { index: number; name: string }) {
   });
   if (!layer) return null;
   return (
-    <label className="slider-row">
+    <label
+      className="slider-row layer-fader"
+      // Right-click anywhere on the row, including the fader. The hold gesture
+      // is on the name alone: a careful slider nudge can sit inside the movement
+      // slop for longer than the hold, and a popover opening mid-drag is worse
+      // than a gesture nobody finds.
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onQuickEdit(e.clientX, e.clientY);
+      }}
+    >
       <input
         type="checkbox"
         checked={enabled}
@@ -1000,7 +1037,7 @@ function LayerFader({ index, name }: { index: number; name: string }) {
           send({ enabled: e.target.checked, opacity: value });
         }}
       />
-      <span>{name}</span>
+      <LayerFaderName name={name} onQuickEdit={onQuickEdit} />
       <input
         type="range"
         min={0}
@@ -1015,5 +1052,23 @@ function LayerFader({ index, name }: { index: number; name: string }) {
       />
       <span className="slider-val">{value.toFixed(2)}</span>
     </label>
+  );
+}
+
+/** The layer's name, as the handle for its parameters. A plain tap opens them
+ *  here — on this tab the name has no other job, and a touch surface should not
+ *  make you discover a hold to reach the thing the row is named after. */
+function LayerFaderName({
+  name,
+  onQuickEdit,
+}: {
+  name: string;
+  onQuickEdit: (x: number, y: number) => void;
+}) {
+  const hold = useHoldMenu({ onOpen: onQuickEdit, openOnClick: true });
+  return (
+    <button type="button" className="layer-fader-name" {...hold}>
+      {name}
+    </button>
   );
 }

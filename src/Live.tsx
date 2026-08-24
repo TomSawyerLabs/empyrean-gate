@@ -14,6 +14,8 @@
 import { useEffect, useRef, useState } from "react";
 import { EFFECTS, GROW_MODES, growValue, isShape, SHAPES, type GrowMode } from "./effects";
 import GateCanvas from "./GateCanvas";
+import LayerQuickEdit, { type QuickEditAnchor } from "./LayerQuickEdit";
+import { useHoldMenu } from "./longPress";
 import CustomColorPicker from "./CustomColorPicker";
 import { QuickSettingsEditor, QuickSettingsPanel } from "./LiveQuickSettings";
 import {
@@ -30,7 +32,28 @@ import ShapeIcon from "./ShapeIcon";
 import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
 import ToolIcon, { type ToolKind } from "./ToolIcon";
-import type { RenderConfig, ShapeKind } from "./types";
+import type { LayerCfg, RenderConfig, ShapeKind } from "./types";
+
+/** One layer in the Live cluster: tap toggles it, hold or right-click edits it. */
+function LayerChip({
+  layer,
+  index,
+  onToggle,
+  onQuickEdit,
+}: {
+  layer: LayerCfg;
+  index: number;
+  onToggle: () => void;
+  onQuickEdit: (x: number, y: number) => void;
+}) {
+  const hold = useHoldMenu({ onOpen: onQuickEdit, onClick: onToggle });
+  return (
+    <button className={layer.enabled ? "active" : ""} {...hold}>
+      <span className="live-layer-dot" />
+      <span>{layer.name || `Layer ${index + 1}`}</span>
+    </button>
+  );
+}
 
 /** What a press on the array does: fire a burst, draw with a pen, or stamp a
  *  shape. One tool at a time — the canvas has no gesture guessing. */
@@ -51,6 +74,7 @@ export default function Live() {
   const { client, config, status, beatAt } = useGate();
   const [tool, setTool] = useState<LiveTool>("tap");
   const [growMode, setGrowMode] = useState<GrowMode>("static");
+  const [quickEdit, setQuickEdit] = useState<QuickEditAnchor | null>(null);
   const [color, setColor] = useState<LiveColor>(loadSelectedLiveColor);
   const [customColors, setCustomColors] = useState<LiveColor[]>(loadCustomLiveColors);
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -398,17 +422,21 @@ export default function Live() {
   );
 
   const layers = config ? (
-    <div className="cluster live-layer-list">
-      {config.layers.map((layer, index) => (
-        <button
-          key={`${layer.name}-${index}`}
-          className={layer.enabled ? "active" : ""}
-          onClick={() => client.updateLayer(index, { ...layer, enabled: !layer.enabled })}
-        >
-          <span className="live-layer-dot" />
-          <span>{layer.name || `Layer ${index + 1}`}</span>
-        </button>
-      ))}
+    <div className="cluster live-layer-list-wrap">
+      <div className="live-layer-list">
+        {config.layers.map((layer, index) => (
+          <LayerChip
+            key={`${layer.name}-${index}`}
+            layer={layer}
+            index={index}
+            onToggle={() => client.updateLayer(index, { ...layer, enabled: !layer.enabled })}
+            onQuickEdit={(x, y) => setQuickEdit({ index, x, y })}
+          />
+        ))}
+      </div>
+      {/* The gesture is invisible without this, and a `title=` tooltip would be
+          invisible on the touch screen this is mostly used from. */}
+      <p className="cluster-hint">Hold or right-click a layer to edit it</p>
     </div>
   ) : null;
 
@@ -558,6 +586,13 @@ export default function Live() {
           {showStatus}
         </div>
       </div>
+      {quickEdit !== null && (
+        <LayerQuickEdit
+          anchor={quickEdit}
+          onClose={() => setQuickEdit(null)}
+          onOpenFullEditor={() => (location.hash = "settings")}
+        />
+      )}
       {shortcutEditorId !== null && (
         <QuickSettingsEditor
           shortcuts={shortcuts}
