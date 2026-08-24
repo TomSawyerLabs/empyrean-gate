@@ -48,6 +48,17 @@ export default defineConfig({
       // by the reasoning above, and `screenshots.spec.ts` WRITES files, so a
       // second project running it would race the first over docs/*.png.
       testMatch: /(quick-settings|live-controls|color-wheel)\.spec\.ts/,
+      // Three times Chromium's budget, and it is the environment, not the app.
+      // Playwright waits for an element's box to hold still across two animation
+      // frames before it will click. Live runs a WebGL2 preview every frame, and
+      // headless WebKit renders it in software — measured here, a click on Live
+      // costs ~2x the same click on a canvas-free page, and CI runners have no
+      // GPU at all, so it is worse there than on a workstation. The v0.7.1
+      // release build died on exactly this: six sequential interactions did not
+      // fit in 30s on an Ubuntu runner.
+      // Chromium deliberately keeps the tighter default — a real hang on the
+      // engine we ship to the show machine should still fail fast.
+      timeout: 90_000,
     },
   ],
   webServer: {
