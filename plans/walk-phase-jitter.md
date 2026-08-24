@@ -94,8 +94,8 @@ At that already-modest phase:
 The jitter is ~4× the intended step, uncorrelated frame to frame — a comet that
 vibrates more than it travels. Measured 10 Hz displacement bears this out: rms
 1.56 px/frame against an intended 0.90 px/frame, with the head running
-**backwards** on 12 of 49 frame pairs, each reversal lining up with a negative
-`Δparam_a`.
+**backwards** on 9 of 49 frame pairs (and standing still on 7 more), each
+reversal lining up with a negative `Δparam_a`.
 
 It gets worse the longer a layer stays in the stack: at 10 minutes of phase the
 artefact is ~18× the intended motion; at an hour it is noise.
@@ -292,6 +292,33 @@ This is the one place in the codebase that needs a real timezone rather than the
 hand-rolled UTC in `report.rs`, hence a direct dependency on `chrono` — which was
 already in the tree, so it costs one crate to compile and nothing else.
 
+## Verification (2026-08-24, this workstation)
+
+Both signatures were re-measured against the fixed build, using the same two
+analyses that found them. Method: an isolated headless backend
+(`EMPYREAN_CONFIG` in a temp dir, port 9521, bind 127.0.0.1, **sACN output
+disabled** so nothing reaches real hardware), one layer in the stack with the
+parameters the operator had, autopilot on at `walk_amount` 0.25, left running
+60 s, then a 10 s report filed over the WebSocket API and analysed offline.
+Harness: `C:\Users\camer\AppData\Local\Temp\empyrean-verify\capture.ts`.
+
+| measurement | original report | fixed build |
+| --- | --- | --- |
+| SpokeChase: `Δparam_a` coefficient | 432.6 px per unit | **0.2 px per unit** |
+| …implied layer phase in the artefact | 33 | **0** |
+| …measured vs intended advance | 1.56 vs 0.90 px/frame | **1.00 vs 1.01 px/frame** |
+| …frame pairs running backwards | 9 of 49 (7 more stalled) | **0 of 99** |
+| Spiral: arm flips | 2 in 5 s | **0 in 10 s** |
+| Spiral: `param_a` as rendered | dithering 0.498–0.525 | **pinned at 0.5416667** |
+
+That last row is `walked_discrete` working exactly as designed: 0.5416667 is
+6.5/12, the centre of cell 6, so the walk has to commit a real excursion before
+the arm count can change at all.
+
+Caveat: this ran on the workstation's Intel UHD, not the Gate's Iris Xe, and for
+a minute rather than a night. It confirms the mechanisms are gone, not that a
+long show is clean.
+
 ## Known remaining instances (deliberately not changed)
 
 ### The patch node graph has a weaker version of class A
@@ -328,11 +355,13 @@ if anyone reports it, or next time that codegen is opened.
 - [x] Phase hygiene (§4): wrap where a period is exact, split epoch/fraction for
       the hash-indexed kinds, scheduled daily reset for the noise-driven ones.
       `cargo test` 137 pass; `engine-smoke` runs the shader on Vulkan.
-- [ ] **Next:** build, deploy to `empyreangate`, re-file a report with Spiral and
-      SpokeChase enabled after a long uptime, and confirm the head-tracking and
-      angular-DFT signatures are gone. Open questions for the room: whether
-      `DISCRETE_DWELL` of 2 s feels right, and whether 12:00 local is the right
-      hour for the phase reset (it is a visible jump on the noise layers).
+- [x] Verified locally: both signatures gone on an isolated headless instance
+      driven with the operators' own layer parameters — see "Verification".
+- [ ] **Next (needs you):** cut a release through CI and let `empyreangate`
+      update onto it, then re-file a report from the rig after a long uptime.
+      Open questions for the room: whether `DISCRETE_DWELL` of 2 s feels right,
+      and whether 12:00 local is the right hour for the phase reset (it is a
+      visible jump on the noise layers).
 
 ## Things not to do
 
