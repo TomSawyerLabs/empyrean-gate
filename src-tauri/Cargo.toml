@@ -26,6 +26,10 @@ path = "src/bin/sacn_listen.rs"
 anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["ws"] }
 bytemuck = { version = "1.25.2", features = ["derive"] }
+# Local wall-clock time for the daily phase reset (`RenderConfig::phase_reset_at`).
+# Everything else in here is UTC and hand-rolled (see `report.rs`), but "noon where
+# the Gate stands" needs the platform's timezone database, DST rules and all.
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 cpal = "0.18.2"
 crossbeam-channel = "0.5.16"
 dirs = "6.0.0"

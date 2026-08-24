@@ -315,6 +315,18 @@ pub struct RenderConfig {
     /// Global multiplier on every layer's walk amount: how FAR parameters wander.
     /// 1.0 = subtle; 2-3 = clearly visible evolution.
     pub walk_depth: f32,
+    /// Local wall-clock time, `"HH:MM"`, at which every layer's accumulated
+    /// phase is zeroed once a day. `None` never resets.
+    ///
+    /// Phase grows for as long as a layer stays in the stack, and crosses to the
+    /// GPU as an f32, so the per-frame step eventually quantizes into visible
+    /// stepping. Most kinds dodge that via `phase_period` or `split_phase`, but
+    /// the noise-driven ones (Fire, NoiseField, NoiseColor) have no period to
+    /// wrap to and no integer to split off — for those the only cure is to start
+    /// the clock over, which is a visible jump. So it is scheduled for an hour
+    /// when nobody can see the array: the Gate is outdoors and washed out by
+    /// daylight roughly 09:00–17:00.
+    pub phase_reset_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -349,6 +361,7 @@ impl Default for RenderConfig {
             walk_min_layers: 2,
             walk_speed: 1.0,
             walk_depth: 1.0,
+            phase_reset_at: Some("12:00".into()),
         }
     }
 }

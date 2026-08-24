@@ -420,9 +420,9 @@ fn make_inputs(scenario: &Scenario, spokes: u32, pixels: u32) -> FrameInputs {
             param_d: 0.5,
             ..Default::default()
         }
-        .to_gpu(0.0)]
+        .to_gpu(0.0, 0)]
     } else {
-        cfg.layers.iter().map(|layer| layer.to_gpu(0.0)).collect()
+        cfg.layers.iter().map(|layer| layer.to_gpu(0.0, 0)).collect()
     };
     while layers.len() < scenario.layers {
         let kind = LayerKind::ALL[layers.len() % LayerKind::ALL.len()];
@@ -431,7 +431,7 @@ fn make_inputs(scenario: &Scenario, spokes: u32, pixels: u32) -> FrameInputs {
                 kind,
                 ..Default::default()
             }
-            .to_gpu(0.0),
+            .to_gpu(0.0, 0),
         );
     }
     layers.truncate(scenario.layers);

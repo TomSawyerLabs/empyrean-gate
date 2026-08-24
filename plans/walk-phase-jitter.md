@@ -14,7 +14,7 @@ autopilot walk feeding parameters into the shader in places where a small
 parameter change is *not* a small visual change. Nothing is wrong with the frame
 pipeline.
 
-**Status: fixed in the working tree, not yet verified on the gate.** The
+**Status: fixed and shipped (v0.7.1+), not yet verified on the gate.** The
 diagnosis below is confirmed against the recorded pixels; the fixes are the
 recommended options of each class, implemented as described in "Fixes applied".
 
@@ -164,12 +164,18 @@ This is the direct answer to "sometimes it looks like they go backwards": with
 
 ### 4. Latent, low priority: phase is f32 at the GPU boundary
 
-`mod.rs:1620` sends `layer_phases[i] as f32` and nothing wraps it. Accumulating
-in f64 is right, but the f32 hand-off quantizes motion once the value is large:
-at ~1 hour of layer phase the f32 step is 2.4e-4 (harmless), at ~28 hours it is
-~8e-3, i.e. only a couple of representable steps per frame at speed 1 — visible
-stepping for an installation left running. Not what these two reports are about;
-worth fixing when the phase plumbing is touched.
+The engine sends `layer_phases[i] as f32` and originally nothing wrapped it.
+Accumulating in f64 is right, but the f32 hand-off quantizes motion once the
+value is large: at ~1 hour of layer phase the f32 step is 2.4e-4 (harmless), at
+~28 hours it is ~8e-3, i.e. only a couple of representable steps per frame at
+speed 1 — visible stepping for an installation left running.
+
+Folding the rate into the accumulator (§ "Fixes applied") made this *sooner* for
+three kinds, because their phase now grows at the rate rather than at `speed`.
+Sparkle at its fastest runs 24 units/s, which reaches the point where a frame's
+0.4 advance rounds to no motion at all in ~3.8 hours — inside a single evening,
+not a multi-day run. So this stopped being latent and got fixed; see
+"Phase hygiene" below.
 
 ## Fixes applied
 
@@ -233,6 +239,59 @@ across scene transitions.
 Also verified against a real device: `cargo run --bin engine-smoke` compiles and
 runs the shader on Vulkan (Intel UHD), 1.07 ms mean, 0/120 misses.
 
+## Phase hygiene (the §4 follow-up)
+
+Three mechanisms, applied per kind, so nothing relies on phase staying small:
+
+**Wrap, where a period is exactly invisible.** `LayerCfg::phase_period` now
+claims one for every kind whose every use of phase sits inside a trig function
+(or a `fract`) with a *constant* multiplier — the period is the smallest value
+making each multiplier a whole number of turns:
+
+| kind | multipliers | period |
+| --- | --- | --- |
+| SpokeChase | `fract(h + phase)` | 1 |
+| Spiral | 1 | τ |
+| RadialWaves | 1.2 … 2.4 (`1 + 0.2h`, h = 1..=7) | 5τ |
+| Plasma | 1, 0.7, 1.3, −1 | 10τ |
+| Interference | 0.31, 0.23, 1, 0.8 | 100τ |
+| Video | 0.08 | 25τ |
+
+`phase_periods_are_whole_turns_for_every_multiplier` checks the arithmetic rather
+than trusting the table.
+
+**Split, where phase is an integer index.** Sparkle, Meteors and Warp hash
+`u32(phase)`, so any wrap re-rolls every twinkle, meteor and star at the moment
+it happens. `LayerCfg::split_phase` sends the fraction in the existing f32 (full
+24-bit resolution, permanently) and the whole number in a new `phase_epoch: u32`
+field, taken from the `_pad2` the layer struct already carried — so no change in
+size or protocol. Each shader adds its own small per-spoke offset to the
+fraction and carries into the epoch, which is exact because both terms are tiny:
+
+```wgsl
+let t = L.phase + h0 * 7.0;          // meteors
+let epoch = L.phase_epoch + u32(t);
+```
+
+Good until the epoch itself overflows u32 — 5.7 years at Sparkle's fastest.
+Negative phase (an operator-inverted speed) clamps to zero, which is what the
+shaders' `max(t, 0.0)` did before.
+
+**Reset, for the ones with neither.** Fire, NoiseField and NoiseColor feed phase
+to fBm/simplex as a z coordinate: no period, no integer to split. The only cure
+is to zero the clock, which is a visible jump for every layer at once — so it is
+scheduled for an hour when the array cannot be seen. The Gate is outdoors and
+washed out by daylight roughly 09:00–17:00, so `render.phase_reset_at` defaults
+to local `"12:00"`; `null` disables it, and so does a value that doesn't parse.
+The wall clock is consulted once a second, not once a frame, the reset is skipped
+while a scene crossfade is in flight (it juggles phases between layer slots), and
+a run that starts *after* the hour records the day as done rather than resetting
+phases that are seconds old.
+
+This is the one place in the codebase that needs a real timezone rather than the
+hand-rolled UTC in `report.rs`, hence a direct dependency on `chrono` — which was
+already in the tree, so it costs one crate to compile and nothing else.
+
 ## Known remaining instances (deliberately not changed)
 
 ### The patch node graph has a weaker version of class A
@@ -253,21 +312,7 @@ so the "gets worse over time" failure needs a deliberate patch to provoke, and
 the fix would change the semantics of a user-facing node parameter. Worth doing
 if anyone reports it, or next time that codegen is opened.
 
-### §4's f32 hand-off is now a slightly tighter budget for three kinds
-
-Folding the rate into the accumulator means Sparkle/Meteors/Warp phases grow at
-the *rate* rather than at `speed` — Sparkle up to ~24 units/s. The precision
-picture is close to what it was (previously the shader multiplied a smaller f32
-by the rate, which preserves relative precision, so this is mildly worse, not
-newly broken), and both versions degrade over a multi-day run rather than a show.
-
-The clean fix is a per-kind `phase_period()` wrap, which is already the mechanism
-SpokeChase uses. It isn't free for these three: they do `u32(t)` epoch/cell
-lookups keyed into a hash, so wrapping at period *P* re-rolls every twinkle,
-meteor or star for one frame when it wraps. At P = 2^16 that is one invisible
-frame every ~45 min (Sparkle, rate 24), ~7 h (Warp), ~24 h (Meteors). Probably
-fine, but it is a real visual tradeoff and it is not what the two reports are
-about, so it needs a decision rather than a quiet commit.
+### Nothing on the layer path — see "Phase hygiene" above
 
 ## Progress log
 
@@ -280,11 +325,14 @@ about, so it needs a decision rather than a quiet commit.
       Meteors direction flips, which are what "goes backwards" refers to.
 - [x] Implemented class A (rate integrated CPU-side) and class B (grid snap with
       margin + dwell), with tests and the first naga check on `gate.wgsl`.
+- [x] Phase hygiene (§4): wrap where a period is exact, split epoch/fraction for
+      the hash-indexed kinds, scheduled daily reset for the noise-driven ones.
+      `cargo test` 137 pass; `engine-smoke` runs the shader on Vulkan.
 - [ ] **Next:** build, deploy to `empyreangate`, re-file a report with Spiral and
       SpokeChase enabled after a long uptime, and confirm the head-tracking and
-      angular-DFT signatures are gone. Open question: whether `DISCRETE_DWELL`
-      of 2 s feels right in the room or wants to be longer.
-- [ ] Decide on the §4 phase wrap for Sparkle/Meteors/Warp (see above).
+      angular-DFT signatures are gone. Open questions for the room: whether
+      `DISCRETE_DWELL` of 2 s feels right, and whether 12:00 local is the right
+      hour for the phase reset (it is a visible jump on the noise layers).
 
 ## Things not to do
 

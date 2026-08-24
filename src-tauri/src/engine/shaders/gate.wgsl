@@ -68,7 +68,10 @@ struct Layer {
     param_b: f32,
     param_c: f32,
     param_d: f32,
-    _pad2a: f32,
+    // Whole-number part of `phase` for the kinds that index a hash by it; those
+    // read `phase` as the fraction alone. Zero everywhere else. See
+    // `LayerCfg::split_phase`.
+    phase_epoch: u32,
     _pad2b: f32,
     _pad2c: f32,
 }
@@ -411,9 +414,10 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
         case 8u: {
             let idx = ctx.spoke * G.pixels + ctx.i;
             // Re-roll rate (param_b) is integrated into L.phase — see phase_rate.
-            let clock = max(L.phase, 0.0);
-            let cell = u32(clock);
-            let f = fract(clock);
+            // The clock arrives pre-split: whole twinkles in phase_epoch, the
+            // fraction of the current one in phase. See split_phase.
+            let cell = L.phase_epoch;
+            let f = L.phase;
             let rnd0 = hash01(idx * 2654435761u + cell * 40503u);
             let rnd1 = hash01(idx * 2654435761u + (cell + 1u) * 40503u);
             let density = L.param_a * (0.3 + aud * A.treble * 1.5);
@@ -501,9 +505,11 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
         // Meteors — random radial shooting stars with trails
         case 15u: {
             // Launch rate (param_b) is integrated into L.phase — see phase_rate.
+            // Phase arrives pre-split (see split_phase), so the per-spoke offset
+            // is the only thing that can carry into the epoch here.
             let h0 = hash01(ctx.spoke * 4099u);
-            let t = max(L.phase + h0 * 7.0, 0.0);
-            let epoch = u32(t);
+            let t = L.phase + h0 * 7.0;
+            let epoch = L.phase_epoch + u32(t);
             let t_ep = fract(t);
             let current = meteor_event(L, ctx, epoch, t_ep);
             var previous = vec4f(0.0);
@@ -517,9 +523,10 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
             let cells = 6.0 + L.param_a * 20.0;
             let u = ctx.r01 * cells + hash01(ctx.spoke * 7919u) * 13.0;
             // Flow rate (param_b, audio level) is integrated into L.phase — see
-            // phase_rate. r01 grows inward, so +phase streams outward.
+            // phase_rate. r01 grows inward, so +phase streams outward. Phase
+            // arrives pre-split, so only `u` can carry into the cell index.
             let flow = u + L.phase;
-            let cell = u32(flow);
+            let cell = L.phase_epoch + u32(flow);
             let f = fract(flow);
             let threshold = 1.0 - (0.15 + L.param_a * 0.2);
             let star0 = step(threshold, hash01(cell * 6151u + ctx.spoke * 389u));

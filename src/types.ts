@@ -182,6 +182,12 @@ export interface RenderConfig {
   walk_min_layers: number;
   walk_speed: number;
   walk_depth: number;
+  /**
+   * Local "HH:MM" at which layer phases are zeroed daily, or null for never.
+   * Scheduled for daylight because the reset is a visible jump — see
+   * `RenderConfig::phase_reset_at` in config.rs.
+   */
+  phase_reset_at: string | null;
 }
 
 export interface UpdateConfig {

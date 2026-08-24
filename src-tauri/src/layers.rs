@@ -130,6 +130,18 @@ impl LayerKind {
             _ => &[],
         }
     }
+
+    /// Kinds whose shader reads phase as an integer index into a hash —
+    /// `cell = u32(clock)` and friends — rather than as a smooth angle. They
+    /// take their phase pre-split; see `LayerCfg::split_phase`. Keep in step
+    /// with `gate.wgsl`.
+    pub fn phase_uses_epoch(self) -> bool {
+        matches!(
+            self,
+            // case 8 twinkle cells, case 15 meteor epochs, case 16 star cells.
+            LayerKind::Sparkle | LayerKind::Meteors | LayerKind::Warp
+        )
+    }
 }
 
 /// One shader-quantized layer parameter. The shader's cell index is
@@ -383,7 +395,10 @@ pub struct GpuLayer {
     pub param_b: f32,
     pub param_c: f32,
     pub param_d: f32,
-    pub _pad2: [f32; 3],
+    /// Whole-number part of the phase, for the kinds that index a hash by it.
+    /// Zero for every other kind — see `LayerCfg::split_phase`.
+    pub phase_epoch: u32,
+    pub _pad2: [f32; 2],
 }
 
 #[repr(C)]
@@ -453,16 +468,62 @@ impl LayerCfg {
     /// phase, if it has one. Phase accumulates in f64 but crosses to the GPU as
     /// f32, which quantizes the per-frame step once the value gets large — so
     /// wrap wherever it costs nothing. Only claim a period here when the wrap is
-    /// invisible; the other kinds are addressed in `plans/walk-phase-jitter.md`.
+    /// invisible.
+    ///
+    /// A kind qualifies when every use of phase is inside a trig function (or a
+    /// `fract`) with a *constant* multiplier: the period is then the smallest
+    /// value that turns each multiplier into a whole number of turns. Kinds that
+    /// index a hash by phase are handled by `split_phase` instead; kinds that
+    /// feed it to noise (Fire, NoiseField, NoiseColor) have no period at all and
+    /// rely on the scheduled reset in `engine/mod.rs`.
     pub fn phase_period(&self) -> Option<f64> {
+        use std::f64::consts::TAU;
         match self.kind {
             // case 7 — the only use is fract(h + phase).
             LayerKind::SpokeChase => Some(1.0),
+            // case 5 — sin(arms·θ + twist·rn·TAU - phase).
+            LayerKind::Spiral => Some(TAU),
+            // case 4 — multipliers 1 + 0.2·h for h = 1..=7, i.e. 1.2 … 2.4.
+            // TAU·5 turns every one of them into whole turns (6 … 12).
+            LayerKind::RadialWaves => Some(TAU * 5.0),
+            // case 6 — multipliers 1, 0.7, 1.3, -1. TAU·10 clears all four.
+            LayerKind::Plasma => Some(TAU * 10.0),
+            // case 13 — multipliers 0.31, 0.23, 1, 0.8. TAU·100 clears all four.
+            LayerKind::Interference => Some(TAU * 100.0),
+            // case 19 — the only use is a rotation of phase·0.08.
+            LayerKind::Video => Some(TAU / 0.08),
             _ => None,
         }
     }
 
-    pub fn to_gpu(&self, phase: f32) -> GpuLayer {
+    /// Split accumulated phase for the GPU into `(fraction, epoch)`.
+    ///
+    /// Sparkle, Meteors and Warp turn phase into an integer index and hash it,
+    /// so they cannot use `phase_period`: any wrap re-rolls every twinkle,
+    /// meteor and star at the moment it happens. Splitting instead keeps the
+    /// f32 in [0, 1) — full 24-bit resolution, forever — and hands the whole
+    /// number over as its own `u32` field, which the shader adds back after it
+    /// has applied its own small per-spoke offset. Exact until the epoch itself
+    /// overflows: ~5.7 years at Sparkle's fastest rate.
+    ///
+    /// Every other kind gets its phase unchanged, and an epoch of zero.
+    ///
+    /// Negative phase — a layer whose speed the operator inverted — clamps to
+    /// zero for the split kinds, which is what the shaders' `max(t, 0.0)` did
+    /// before the epoch existed.
+    pub fn split_phase(&self, phase: f64) -> (f32, u32) {
+        if !self.kind.phase_uses_epoch() {
+            return (phase as f32, 0);
+        }
+        let clamped = phase.max(0.0);
+        let epoch = clamped.floor();
+        (
+            (clamped - epoch) as f32,
+            (epoch % (u32::MAX as f64 + 1.0)) as u32,
+        )
+    }
+
+    pub fn to_gpu(&self, phase: f32, phase_epoch: u32) -> GpuLayer {
         GpuLayer {
             kind: self.kind.gpu_id(),
             blend: self.blend.gpu_id(),
@@ -481,7 +542,8 @@ impl LayerCfg {
             param_b: self.param_b,
             param_c: self.param_c,
             param_d: self.param_d,
-            _pad2: [0.0; 3],
+            phase_epoch,
+            _pad2: [0.0; 2],
         }
     }
 }

@@ -104,7 +104,17 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   DRM/login-gated sources remain unsupported.
 - **Autopilot**: a slow mean-reverting random walk drifts layer parameters around
   wherever the sliders are set (per-layer "Walk" amount = wander radius), so an
-  unattended show evolves for hours without repeating.
+  unattended show evolves for hours without repeating. Parameters the shaders
+  quantize (spiral arm count, wedge count, direction flips) step deliberately
+  rather than dithering across the boundary, and parameters that set a *rate* are
+  integrated rather than multiplied into the elapsed phase, so a drifting speed
+  stays a speed instead of jumping the pattern.
+- **Runs for days**: layer phase accumulates in f64 and is wrapped, split or
+  reset before it reaches the resolution limit of the f32 the GPU is handed —
+  motion stays smooth on an installation nobody restarts. The one cure that
+  is visible (zeroing the clock outright, for the noise-driven layers) is
+  scheduled for a configurable hour of the day, `render.phase_reset_at`,
+  defaulting to local noon when daylight has the array washed out anyway.
 - **Set-and-forget shows**: saved playlists embed complete scene snapshots with a
   dwell time and smooth crossfade per cue. The backend advances them without an
   open browser, loops indefinitely when requested, persists the active cue across
@@ -278,9 +288,34 @@ git tag v0.2.0 && git push origin v0.2.0
 
 Grab binaries from https://github.com/cinderblock/empyrean-gate/releases.
 
+### The WebView2 runtime (Windows)
+
+The desktop window is drawn by Microsoft's Evergreen WebView2 runtime. Windows 11 ships
+it; **Windows 10 often does not**, and a portable exe has no installer to bootstrap it.
+
+On startup the app asks the WebView2 loader whether a runtime exists before it builds a
+window. If none does, a dialog says so and offers to fetch Microsoft's ~2 MB
+bootstrapper, which installs per-user and needs no administrator rights. Install it and
+restart; the window comes back.
+
+Whatever you answer, **the show is unaffected**. The backend is the app: sACN is already
+sending and the web UI is already served by the time this check runs, so a missing
+runtime costs you the desktop window and nothing else. The app carries on headless and
+tells you to open `http://localhost:9520`. It never exits over this. (It also remembers
+to stay headless across a self-update, since the next launch would hit the same wall.)
+
+Before this check the failure was silent: the process started, the lights ran, and no
+window ever appeared.
+
 ## Self-update
 
-No installer needed. The app checks GitHub Releases (startup + every 6 h; toggle in
+No installer needed — and that is a design decision, not an omission. An MSI would put
+the binary somewhere that needs elevation, which would turn step 3 below into a UAC
+prompt on every update, and would replace the one-frame live handover with a
+kill-and-reinstall. On Linux the AppImage keeps the same property a bare binary has:
+one file, which is what makes promotion a plain copy.
+
+The app checks GitHub Releases (startup + every 6 h; toggle in
 Settings → Updates) and shows a lit version chip in the top bar when a newer release
 exists — click it (or use Settings) to update. Mid-show updates cost about one frame.
 Auto-install is available but off by default.

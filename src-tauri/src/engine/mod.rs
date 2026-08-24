@@ -681,6 +681,13 @@ fn walk_step(walk: &mut LayerWalk, rng: &mut WalkRng, dt: f32, tau: f32) {
     }
 }
 
+/// `"HH:MM"` local wall-clock time, or `None` if it doesn't parse — a typo in the
+/// config disables the reset rather than firing it at midnight.
+fn parse_hhmm(s: &str) -> Option<chrono::NaiveTime> {
+    let (h, m) = s.split_once(':')?;
+    chrono::NaiveTime::from_hms_opt(h.trim().parse().ok()?, m.trim().parse().ok()?, 0)
+}
+
 /// Wander around the authored speed without cancelling it or flipping direction.
 /// Slow ambient layers previously used an additive offset large enough to stall;
 /// exponential scaling keeps the same sign and a useful fraction of base motion.
@@ -1082,6 +1089,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut layer_target: Vec<bool> = Vec::new();
     let mut layer_env: Vec<f32> = Vec::new();
     let mut next_flip = Instant::now();
+
+    // Daily phase reset (`RenderConfig::phase_reset_at`): the wall clock is only
+    // consulted once a second, and `primed` distinguishes a run that started
+    // before today's reset hour from one that started after it.
+    let mut next_phase_reset_check = Instant::now();
+    let mut phase_reset_day: Option<chrono::NaiveDate> = None;
+    let mut phase_reset_primed = false;
 
     // The active node-graph patch, compiled: (patch id, patch epoch) keys the
     // rebuild. See plans/node-graph.md.
@@ -1673,6 +1687,36 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             }
         }
 
+        // Phase hygiene: zero every layer's accumulated phase once a day, at an
+        // hour when the array cannot be seen. Kinds that can wrap or split their
+        // phase don't need this; the noise-driven ones have no other cure. See
+        // `RenderConfig::phase_reset_at` and `plans/walk-phase-jitter.md`.
+        if now >= next_phase_reset_check {
+            next_phase_reset_check = now + Duration::from_secs(1);
+            if let Some(at) = cfg.render.phase_reset_at.as_deref().and_then(parse_hhmm) {
+                let local = chrono::Local::now();
+                let today = local.date_naive();
+                let due = local.time() >= at;
+                if !phase_reset_primed {
+                    phase_reset_primed = true;
+                    // A run that started after the hour has nothing to reset.
+                    if due {
+                        phase_reset_day = Some(today);
+                    }
+                } else if due && phase_reset_day != Some(today) && !render_transition_active {
+                    // Skipped during a crossfade, which juggles phases between
+                    // layer slots; the next tick is a second away.
+                    layer_phases.iter_mut().for_each(|p| *p = 0.0);
+                    phase_reset_day = Some(today);
+                    log::info!(
+                        "phase reset at {}: zeroed {} layer phases",
+                        local.format("%H:%M:%S"),
+                        layer_phases.len()
+                    );
+                }
+            }
+        }
+
         // Feedback capture (10 Hz): the config on disk is NOT what is rendering
         // once autopilot, the layer walk and scene transitions are in play, so the
         // recorder wants the effective parameters, collected only on the frames it
@@ -1724,7 +1768,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             if render_transition_active && i < render_transition_split {
                 gpu_transition_split += 1;
             }
-            layers.push(l.to_gpu(layer_phases[i] as f32));
+            let (gpu_phase, gpu_epoch) = l.split_phase(layer_phases[i]);
+            layers.push(l.to_gpu(gpu_phase, gpu_epoch));
         }
         *state.layer_phases.lock() = layer_phases.clone();
 
@@ -2251,6 +2296,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::NaiveTime;
     use crate::layers::{DiscreteParam, LayerCfg, LayerKind};
 
     /// The layer shader has no other automated check — this is what catches a
@@ -2369,5 +2415,103 @@ mod tests {
         // Everything else integrates plain time.
         assert_eq!(layer(LayerKind::Fire).phase_rate(1.0), 1.0);
         assert_eq!(layer(LayerKind::Spiral).phase_rate(1.0), 1.0);
+    }
+
+    #[test]
+    fn split_phase_keeps_full_resolution_at_long_uptime() {
+        // A week of Sparkle at its fastest: 24/s for 7 days.
+        let l = layer(LayerKind::Sparkle);
+        let phase = 24.0 * 7.0 * 86_400.0 + 0.375;
+        let (frac, epoch) = l.split_phase(phase);
+        assert_eq!(epoch, 14_515_200);
+        assert_eq!(frac, 0.375, "the fraction must survive exactly");
+
+        // Every frame of motion still lands, which is the whole point. A frame
+        // at 60 fps advances this layer by 0.4.
+        let step = 24.0 / 60.0;
+        let split: Vec<f64> = (0..5)
+            .map(|i| {
+                let (f, e) = l.split_phase(phase + step * i as f64);
+                e as f64 + f as f64
+            })
+            .collect();
+        for pair in split.windows(2) {
+            assert!(
+                (pair[1] - pair[0] - step).abs() < 1e-6,
+                "split lost a frame of motion: {pair:?}"
+            );
+        }
+
+        // Handed over as a bare f32 it would not: at this magnitude the gap
+        // between representable f32s is 1.0, so most frames round to no motion
+        // at all and the rest jump by a whole twinkle.
+        let bare: Vec<f32> = (0..5).map(|i| (phase + step * i as f64) as f32).collect();
+        assert!(
+            bare.windows(2).any(|p| p[0] == p[1]),
+            "expected the unsplit f32 to swallow a frame: {bare:?}"
+        );
+
+        // Kinds that read phase as an angle are handed it untouched.
+        let (p, e) = layer(LayerKind::Fire).split_phase(1234.5);
+        assert_eq!((p, e), (1234.5, 0));
+
+        // A layer running backwards clamps, as the shaders' max(t, 0) did.
+        assert_eq!(l.split_phase(-5.25), (0.0, 0));
+    }
+
+    #[test]
+    fn phase_periods_are_whole_turns_for_every_multiplier() {
+        // Each claimed period must turn every phase multiplier in that kind's
+        // shader body into a whole number of turns, or the wrap is visible.
+        use std::f64::consts::TAU;
+        let whole = |period: f64, mult: f64| {
+            let turns = period * mult / TAU;
+            (turns - turns.round()).abs() < 1e-9
+        };
+        let check = |kind: LayerKind, mults: &[f64]| {
+            let p = layer(kind).phase_period().expect("kind should claim a period");
+            for m in mults {
+                assert!(whole(p, *m), "{kind:?}: multiplier {m} is not whole at {p}");
+            }
+        };
+        // case 5, case 6, case 13, case 19 — see gate.wgsl.
+        check(LayerKind::Spiral, &[1.0]);
+        check(LayerKind::Plasma, &[1.0, 0.7, 1.3]);
+        check(LayerKind::Interference, &[0.31, 0.23, 1.0, 0.8]);
+        check(LayerKind::Video, &[0.08]);
+        // case 4 — harmonics 1..=7 give multipliers 1 + 0.2*h.
+        let radial: Vec<f64> = (1..=7).map(|h| 1.0 + 0.2 * h as f64).collect();
+        check(LayerKind::RadialWaves, &radial);
+        // case 7 is fract(), not a turn: period 1.
+        assert_eq!(layer(LayerKind::SpokeChase).phase_period(), Some(1.0));
+
+        // The hash-indexed kinds must NOT claim one — wrapping re-rolls them.
+        for kind in LayerKind::ALL {
+            if kind.phase_uses_epoch() {
+                assert_eq!(layer(kind).phase_period(), None, "{kind:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn phase_reset_time_parses_or_disables_itself() {
+        assert_eq!(parse_hhmm("12:00"), NaiveTime::from_hms_opt(12, 0, 0));
+        assert_eq!(parse_hhmm("09:30"), NaiveTime::from_hms_opt(9, 30, 0));
+        assert_eq!(parse_hhmm("0:05"), NaiveTime::from_hms_opt(0, 5, 0));
+        // A typo disables the reset rather than firing it at midnight.
+        assert_eq!(parse_hhmm("noon"), None);
+        assert_eq!(parse_hhmm("25:00"), None);
+        assert_eq!(parse_hhmm("12:60"), None);
+        assert_eq!(parse_hhmm(""), None);
+        // The shipped default is inside the daylight window the Gate is invisible in.
+        let at = parse_hhmm(
+            crate::config::RenderConfig::default()
+                .phase_reset_at
+                .as_deref()
+                .expect("a default reset time"),
+        )
+        .expect("the default must parse");
+        assert!(at >= NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+        assert!(at <= NaiveTime::from_hms_opt(17, 0, 0).unwrap());
     }
 }

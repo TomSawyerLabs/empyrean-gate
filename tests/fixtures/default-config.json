@@ -63,7 +63,8 @@
     "walk_layers": false,
     "walk_min_layers": 2,
     "walk_speed": 1.0,
-    "walk_depth": 1.0
+    "walk_depth": 1.0,
+    "phase_reset_at": "12:00"
   },
   "update": {
     "auto_check": true,
