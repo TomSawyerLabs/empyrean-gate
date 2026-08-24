@@ -24,7 +24,21 @@ export type LayerKind =
 
 export type BlendMode = "add" | "multiply" | "screen" | "alpha_over" | "max";
 
-export type EffectKind = "burst" | "strobe" | "swoosh" | "collapse";
+/// Motion effects travel across the array; shapes are figures stamped where they
+/// are tapped. Order is the GPU id — see `EffectKind::ALL` in layers.rs.
+export type MotionEffectKind =
+  | "burst"
+  | "strobe"
+  | "swoosh"
+  | "collapse"
+  | "bloom"
+  | "pinwheel"
+  | "twinkle"
+  | "wipe";
+
+export type ShapeKind = "star" | "heart" | "flower" | "diamond" | "triangle" | "moon";
+
+export type EffectKind = MotionEffectKind | ShapeKind;
 
 export type PenKind = "glow" | "ripple" | "sparkle" | "comet" | "ring" | "beam" | "ember";
 
@@ -93,6 +107,10 @@ export interface EffectCfg {
   saturation: number;
   brightness: number;
   duration: number;
+  /** Shapes: the figure's own rotation, radians. `angle`/`radius` place it. */
+  rotation: number;
+  /** Shapes: scale drift over the life, -1 (shrinks away) .. 1 (doubles). */
+  grow: number;
 }
 
 export interface GeometryConfig {

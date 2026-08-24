@@ -251,18 +251,67 @@ pub enum EffectKind {
     Swoosh,
     /// Wave collapsing from the outer edge to the center.
     Collapse,
+    /// Iris opening from the center outward, petal-modulated, with a trailing glow.
+    Bloom,
+    /// Spiral arms that whip up to speed and fade.
+    Pinwheel,
+    /// Glitter storm over the whole array, swelling then decaying.
+    Twinkle,
+    /// A straight bar sweeping across the disc, lit wake behind it.
+    Wipe,
+    // --- Shapes: recognizable figures stamped center-array. `angle` is the
+    // shape's rotation rather than an origin, and `radius` is unused. ---
+    /// Five-pointed star, slowly spinning.
+    Star,
+    /// Heart, pulsing twice as it fades.
+    Heart,
+    /// Six-petal rosette that opens from a circle as it lands.
+    Flower,
+    /// Rhombus.
+    Diamond,
+    /// Equilateral triangle, point up.
+    Triangle,
+    /// Crescent moon.
+    Moon,
 }
 
 impl EffectKind {
-    pub const ALL: [EffectKind; 4] = [
+    /// Order is the GPU id — the `case` arms in `gate.wgsl` are literal numbers.
+    /// Append only.
+    pub const ALL: [EffectKind; 14] = [
         EffectKind::Burst,
         EffectKind::Strobe,
         EffectKind::Swoosh,
         EffectKind::Collapse,
+        EffectKind::Bloom,
+        EffectKind::Pinwheel,
+        EffectKind::Twinkle,
+        EffectKind::Wipe,
+        EffectKind::Star,
+        EffectKind::Heart,
+        EffectKind::Flower,
+        EffectKind::Diamond,
+        EffectKind::Triangle,
+        EffectKind::Moon,
+    ];
+
+    /// The figures — stamped center-array, `angle` is their rotation. Everything
+    /// else is a motion effect that travels across the array.
+    pub const SHAPES: [EffectKind; 6] = [
+        EffectKind::Star,
+        EffectKind::Heart,
+        EffectKind::Flower,
+        EffectKind::Diamond,
+        EffectKind::Triangle,
+        EffectKind::Moon,
     ];
 
     pub fn gpu_id(self) -> u32 {
         Self::ALL.iter().position(|k| *k == self).unwrap() as u32
+    }
+
+    pub fn is_shape(self) -> bool {
+        Self::SHAPES.contains(&self)
     }
 
     pub fn default_duration(self) -> f32 {
@@ -271,6 +320,17 @@ impl EffectKind {
             EffectKind::Strobe => 0.25,
             EffectKind::Swoosh => 1.0,
             EffectKind::Collapse => 1.5,
+            EffectKind::Bloom => 1.4,
+            EffectKind::Pinwheel => 1.6,
+            EffectKind::Twinkle => 1.1,
+            EffectKind::Wipe => 1.0,
+            // Stamps hold long enough to be read across a dance floor.
+            EffectKind::Star
+            | EffectKind::Heart
+            | EffectKind::Flower
+            | EffectKind::Diamond
+            | EffectKind::Triangle
+            | EffectKind::Moon => 1.8,
         }
     }
 }
@@ -294,6 +354,14 @@ pub struct EffectCfg {
     pub brightness: f32,
     /// Seconds; 0 = use the kind's default.
     pub duration: f32,
+    /// Shapes only: the figure's own rotation in radians. Separate from `angle`,
+    /// which is where the figure is stamped — a tapped heart wants the tap's
+    /// position and its own upright.
+    pub rotation: f32,
+    /// Shapes only: how the stamp's scale moves over its life — it is multiplied
+    /// by `1 + grow * age/duration`. 0 holds the size it was tapped at, +1
+    /// doubles it by the end, -1 collapses it to nothing. Clamped to ±1.
+    pub grow: f32,
 }
 
 impl Default for EffectCfg {
@@ -308,6 +376,8 @@ impl Default for EffectCfg {
             saturation: 0.85,
             brightness: 1.0,
             duration: 0.0,
+            rotation: 0.0,
+            grow: 0.0,
         }
     }
 }
@@ -431,7 +501,8 @@ pub struct GpuEffect {
     pub hue: f32,
     pub saturation: f32,
     pub brightness: f32,
-    pub _pad: [f32; 2],
+    pub rotation: f32,
+    pub grow: f32,
 }
 
 impl LayerCfg {
@@ -544,6 +615,63 @@ impl LayerCfg {
             param_d: self.param_d,
             phase_epoch,
             _pad2: [0.0; 2],
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The position in `ALL` is the GPU id, and `gate.wgsl` matches on it as a
+    /// literal. Reordering would silently repaint every effect as another one.
+    #[test]
+    fn effect_gpu_ids_are_stable_and_dense() {
+        assert_eq!(EffectKind::Burst.gpu_id(), 0);
+        assert_eq!(EffectKind::Strobe.gpu_id(), 1);
+        assert_eq!(EffectKind::Swoosh.gpu_id(), 2);
+        assert_eq!(EffectKind::Collapse.gpu_id(), 3);
+        for (i, kind) in EffectKind::ALL.iter().enumerate() {
+            assert_eq!(kind.gpu_id(), i as u32, "{kind:?} moved in ALL");
+            assert!(kind.default_duration() > 0.0, "{kind:?} has no duration");
+        }
+    }
+
+    /// A kind with no shader arm is a silent no-op on the rig — the switch just
+    /// falls through to `default`. Catch it here instead of at the show.
+    #[test]
+    fn every_effect_kind_has_a_shader_case() {
+        let src = include_str!("engine/shaders/gate.wgsl");
+        let after = src
+            .split_once("fn effect_color(")
+            .expect("effect_color missing from gate.wgsl")
+            .1;
+        let body = after.split_once("\nfn ").map_or(after, |(head, _)| head);
+        for kind in EffectKind::ALL {
+            let arm = format!("case {}u:", kind.gpu_id());
+            assert!(
+                body.contains(&arm),
+                "{kind:?} has no `{arm}` arm in effect_color"
+            );
+        }
+    }
+
+    #[test]
+    fn shapes_are_a_subset_of_all_kinds() {
+        for kind in EffectKind::SHAPES {
+            assert!(EffectKind::ALL.contains(&kind), "{kind:?} missing from ALL");
+            assert!(kind.is_shape());
+        }
+        assert!(!EffectKind::Burst.is_shape());
+    }
+
+    /// Serde names are what reports, the WebSocket protocol and the UI all speak.
+    #[test]
+    fn effect_kinds_round_trip_through_snake_case_json() {
+        for kind in EffectKind::ALL {
+            let json = serde_json::to_string(&kind).unwrap();
+            assert_eq!(json, json.to_lowercase(), "{kind:?} is not snake_case");
+            assert_eq!(serde_json::from_str::<EffectKind>(&json).unwrap(), kind);
         }
     }
 }

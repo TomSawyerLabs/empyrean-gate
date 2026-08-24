@@ -1259,6 +1259,7 @@ fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
         saturation: 0.9,
         brightness: 1.0,
         duration,
+        ..Default::default()
     };
 
     let (event_name, visual_effects) = match event {

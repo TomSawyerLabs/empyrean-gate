@@ -2,7 +2,8 @@
 // window allows; the controls flow into whatever space the aspect ratio leaves —
 // side columns when wide, top/bottom bars when tall, and tucked into the corners
 // (which the circle never reaches) when squarish. The empty ring center carries
-// the title and live status. Tap anywhere = burst; drag = draw with the pen.
+// the title and live status. Tap anywhere = burst, or the selected shape stamped
+// where it landed; drag = draw with the pen.
 //
 // v0.5.0 through v0.5.7 replaced this with a drag-and-resize "control deck" grid.
 // It was more layout to maintain than it was worth, and the circle stopped being
@@ -11,7 +12,7 @@
 // observer to get wrong.
 
 import { useEffect, useRef, useState } from "react";
-import { EFFECTS } from "./effects";
+import { EFFECTS, GROW_MODES, growValue, isShape, SHAPES, type GrowMode } from "./effects";
 import GateCanvas from "./GateCanvas";
 import CustomColorPicker from "./CustomColorPicker";
 import { QuickSettingsEditor, QuickSettingsPanel } from "./LiveQuickSettings";
@@ -25,10 +26,15 @@ import {
 } from "./liveColors";
 import { loadQuickSettings, saveQuickSettings } from "./quickSettings";
 import { contenders } from "./sacnPeers";
+import ShapeIcon from "./ShapeIcon";
 import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
 import ToolIcon, { type ToolKind } from "./ToolIcon";
-import type { RenderConfig } from "./types";
+import type { RenderConfig, ShapeKind } from "./types";
+
+/** What a press on the array does: fire a burst, draw with a pen, or stamp a
+ *  shape. One tool at a time — the canvas has no gesture guessing. */
+type LiveTool = ToolKind | ShapeKind;
 
 const TOOLS: { kind: ToolKind; label: string }[] = [
   { kind: "tap", label: "Tap" },
@@ -43,7 +49,8 @@ const TOOLS: { kind: ToolKind; label: string }[] = [
 
 export default function Live() {
   const { client, config, status, beatAt } = useGate();
-  const [tool, setTool] = useState<ToolKind>("tap");
+  const [tool, setTool] = useState<LiveTool>("tap");
+  const [growMode, setGrowMode] = useState<GrowMode>("static");
   const [color, setColor] = useState<LiveColor>(loadSelectedLiveColor);
   const [customColors, setCustomColors] = useState<LiveColor[]>(loadCustomLiveColors);
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -140,6 +147,14 @@ export default function Live() {
       ) {
         return;
       }
+      // A shape key arms the array the same way its pad does, rather than firing
+      // one somewhere arbitrary — where a figure lands is the whole point of it.
+      const shape = SHAPES.find((s) => s.key === e.key.toLowerCase());
+      if (shape) {
+        e.preventDefault();
+        setTool((current) => (current === shape.kind ? "tap" : shape.kind));
+        return;
+      }
       const beatTime =
         e.key === "-" || e.code === "NumpadSubtract"
           ? "half"
@@ -155,6 +170,9 @@ export default function Live() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [config, client]);
+
+  const shapeTool: ShapeKind | null = isShape(tool) ? tool : null;
+  const penTool = tool === "tap" || isShape(tool) ? null : tool;
 
   const pens = (
     <div className="cluster pens">
@@ -189,6 +207,42 @@ export default function Live() {
           <span className="key-hint">{e.key}</span>
         </button>
       ))}
+    </div>
+  );
+
+  // Shapes are placed, not fired: picking one arms the array so every press
+  // stamps that figure where it lands, at the Size slider's size.
+  const shapes = (
+    <div className="cluster shapes" aria-label="Shapes">
+      <div className="shape-grid">
+        {SHAPES.map((s) => (
+          <button
+            key={s.kind}
+            className={`shape-btn ${tool === s.kind ? "active" : ""}`}
+            onClick={() => setTool(s.kind)}
+            aria-pressed={tool === s.kind}
+          >
+            <ShapeIcon kind={s.kind} />
+            {s.label}
+            <span className="key-hint">{s.key}</span>
+          </button>
+        ))}
+      </div>
+      <div className="shape-grow-row" role="group" aria-label="Stamp size over time">
+        {GROW_MODES.map((m) => (
+          <button
+            key={m.mode}
+            className={growMode === m.mode ? "active" : ""}
+            onClick={() => setGrowMode(m.mode)}
+            aria-pressed={growMode === m.mode}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+      <p className="cluster-hint">
+        {shapeTool ? "Tap the array to stamp" : "Pick a shape, then tap the array"}
+      </p>
     </div>
   );
 
@@ -376,8 +430,8 @@ export default function Live() {
   const canvas = (
     <div className="live-canvas-wrap">
       <GateCanvas
-        drawPen={tool === "tap" ? undefined : {
-          pen: tool,
+        drawPen={penTool === null ? undefined : {
+          pen: penTool,
           hue: color.hue,
           saturation: color.saturation,
           brightness: color.brightness,
@@ -385,16 +439,19 @@ export default function Live() {
           intensity: 1,
         }}
         onTap={
-          tool === "tap"
+          tool === "tap" || shapeTool
             ? (angle, radius) =>
                 client.triggerEffect({
-                  kind: "burst",
+                  kind: shapeTool ?? "burst",
                   angle,
                   radius,
                   hue: color.hue,
                   saturation: color.saturation,
                   brightness: color.brightness,
+                  // The slider is a pen radius; 0.12 is its default, so a
+                  // centred slider means "1×" for everything triggered by a tap.
                   size: size / 0.12,
+                  grow: shapeTool ? growValue(growMode) : 0,
                 })
             : undefined
         }
@@ -453,14 +510,17 @@ export default function Live() {
       {/* Square-ish windows: controls float in the corners the circle never
           reaches. Visibility is pure CSS (aspect-ratio media queries), so the
           layout is right at first paint with no resize-observer fragility. */}
-      <div className="corner tl">{pens}</div>
+      <div className="corner-stack tl">
+        <div className="corner-card">{pens}</div>
+        <div className="corner-card">{shapes}</div>
+      </div>
       <div className="corner-stack tr">
         <div className="corner-card">{effects}</div>
         <div className="corner-card">{tempoCtl}</div>
       </div>
       <div className="corner bl">{colors}</div>
       <div className="corner br">{sizeCtl}</div>
-      {/* Squarish only: four corners cannot hold nine clusters, so this reveals
+      {/* Squarish only: four corners cannot hold ten clusters, so this reveals
           the side columns as an overlay sheet instead of duplicating them. */}
       <button
         className="live-more-toggle"
@@ -479,6 +539,7 @@ export default function Live() {
           an iPad in landscape. */}
       <div className="live-side a">
         {pens}
+        {shapes}
         {sizeCtl}
         {effects}
         {tempoCtl}

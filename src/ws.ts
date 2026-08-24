@@ -338,6 +338,8 @@ export class GateClient {
         saturation: 0.85,
         brightness: 1,
         duration: 0,
+        rotation: 0,
+        grow: 0,
         ...effect,
       },
     });

@@ -102,8 +102,8 @@ struct Dab {
     dir: f32,     // stroke motion direction, for directional pens
     saturation: f32,
     brightness: f32,
-    _pad0: f32,
-    _pad1: f32,
+    rotation: f32,  // shapes: the figure's own spin, independent of `angle`
+    grow: f32,      // shapes: scale drift over the life, -1 .. 1
 }
 
 @group(0) @binding(0) var<uniform> G: Globals;
@@ -634,6 +634,147 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
     } else {
         col = hsv2rgb(E.hue, E.saturation, E.brightness);
     }
+// ---------------------------------------------------------------------------
+// Shape stamps
+//
+// The figure effects (star, heart, â€¦) are drawn from exact signed distance
+// fields â€” Inigo Quilez's, ported â€” rather than polar radius functions. An exact
+// Euclidean distance gives the outline a constant width the whole way round; a
+// radial `rn - R(theta)` proxy fattens the rim wherever the edge runs steeply in
+// r, which on a star is most of it.
+//
+// Three GLSL-isms do not survive the port: `vec2 - float` does not broadcast in
+// WGSL, `%` truncates instead of flooring (hence `fmod_pos`), and iq writes
+// `atan(x, y)` for what WGSL spells `atan2(x, y)`.
+// ---------------------------------------------------------------------------
+
+/// Floor-based modulo â€” GLSL `mod`, which WGSL's `%` is not.
+fn fmod_pos(x: f32, y: f32) -> f32 { return x - y * floor(x / y); }
+
+fn rot2(p: vec2f, a: f32) -> vec2f {
+    let c = cos(a);
+    let s = sin(a);
+    return vec2f(c * p.x + s * p.y, c * p.y - s * p.x);
+}
+
+/// Regular `n`-pointed star of outer radius `r`. `m` in (2, n) sets how deep the
+/// notches cut: 3 is the classic five-point star.
+fn sd_star(p_in: vec2f, r: f32, n: f32, m: f32) -> f32 {
+    let an = PI / n;
+    let en = PI / m;
+    let acs = vec2f(cos(an), sin(an));
+    let ecs = vec2f(cos(en), sin(en));
+    let bn = fmod_pos(atan2(p_in.x, p_in.y), 2.0 * an) - an;
+    var p = length(p_in) * vec2f(cos(bn), abs(sin(bn)));
+    p -= r * acs;
+    p += ecs * clamp(-dot(p, ecs), 0.0, r * acs.y / ecs.y);
+    return length(p) * sign(p.x);
+}
+
+/// The classic polar heart, as a radius about the notch between the lobes. In
+/// heart units the curve is 4.64 tall and 4.48 wide, the tip is 4.0 below the
+/// notch and the figure's middle is 1.68 below it.
+///
+/// iq also has an exact heart SDF, and it was the first thing tried here. Its
+/// cleft is only 9% of the figure's height, which on 64 spokes under a 0.11-wide
+/// rim glow is not a cleft at all â€” it rendered as a disc. This curve's notch
+/// goes all the way to the origin, which is the one feature that makes a heart
+/// read as a heart. Every ray from the notch crosses the boundary exactly once,
+/// so `length - r(angle)` is a sound inside/outside test.
+fn heart_r(a: f32) -> f32 {
+    let s = sin(a);
+    return 2.0 - 2.0 * s + s * sqrt(abs(cos(a))) / (s + 1.4);
+}
+
+/// Rhombus with both half-diagonals `r`.
+fn sd_diamond(p: vec2f, r: f32) -> f32 {
+    return (abs(p.x) + abs(p.y) - r) * 0.70710678;
+}
+
+/// Equilateral triangle of circumradius `r`, point up. (iq's parameter is half
+/// the side length; converted here so every shape below is sized the same way.)
+fn sd_triangle(p_in: vec2f, r: f32) -> f32 {
+    let k = sqrt(3.0);
+    let h = r * 0.86602540;
+    var p = vec2f(abs(p_in.x) - h, p_in.y + h / k);
+    if p.x + k * p.y > 0.0 {
+        p = vec2f(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+    }
+    p.x -= clamp(p.x, -2.0 * h, 0.0);
+    return -length(p) * sign(p.y);
+}
+
+/// Crescent: a disc of radius `ra` with a disc of radius `rb`, offset by `d`,
+/// taken out of it. Opens toward +x.
+fn sd_moon(p_in: vec2f, d: f32, ra: f32, rb: f32) -> f32 {
+    let p = vec2f(p_in.x, abs(p_in.y));
+    let a = (ra * ra - rb * rb + d * d) / (2.0 * d);
+    let b = sqrt(max(ra * ra - a * a, 0.0));
+    if d * (p.x * b - p.y * a) > d * d * max(b - p.y, 0.0) {
+        return length(p - vec2f(a, b));
+    }
+    return max(length(p) - ra, -(length(p - vec2f(d, 0.0)) - rb));
+}
+
+/// World radius of a shape stamped at `size` 1 â€” the Live size slider's default.
+/// Shapes have to be generous: 64 spokes is 5.6 degrees of arc, so a small figure
+/// is just a blob.
+const SHAPE_UNIT: f32 = 0.38;
+
+/// Arrival envelope for a stamp: snaps to full size in the first fifth with a
+/// small overshoot. A figure that eased in over its whole life never reads as one
+/// thing. Any drift after that is the trigger's `grow`, not ours.
+fn shape_scale(t: f32) -> f32 {
+    let g = clamp(t / 0.18, 0.0, 1.0);
+    let settle = 1.0 - pow(1.0 - g, 3.0);
+    let overshoot = sin(PI * g) * 0.12;
+    return settle + overshoot;
+}
+
+/// A stamp's local frame: the point relative to where the figure was tapped, with
+/// the figure's own rotation undone, plus the radius it should be right now.
+struct Stamp {
+    p: vec2f,
+    r: f32,
+}
+
+fn stamp_frame(E: Effect, ctx: Ctx, t: f32, spin: f32) -> Stamp {
+    let origin = E.radius * vec2f(cos(E.angle), sin(E.angle));
+    var s: Stamp;
+    s.p = rot2(ctx.pos - origin, E.rotation + spin);
+    // Arrive, then hold / grow / shrink as the trigger asked. Floored rather than
+    // clamped at zero: a `grow` of -1 closes the figure to a point exactly as it
+    // ends, and the crescent's construction divides by its own offset.
+    let drift = max(1.0 + E.grow * t, 0.0);
+    s.r = max(SHAPE_UNIT * clamp(E.size, 0.1, 4.0) * shape_scale(t) * drift, 1e-3);
+    return s;
+}
+
+/// Turn a signed distance into brightness: a bright rim of width `rim` on the
+/// outline, plus a dimmer interior. Rim-first is deliberate â€” the array is a ring
+/// with a 32% hole, so a stamp's middle is missing whatever we do, and a fill
+/// bright enough to carry the figure on its own would swamp the layer stack the
+/// effect is supposed to sit on top of.
+fn shape_stamp(sd: f32, radius: f32) -> f32 {
+    // The rim tracks the stamp's size, but only within a band: the array's
+    // resolution does not change with the figure, so a full-array star wants the
+    // same ~0.1 of outline a small one does. Under about a spoke pitch it reads
+    // as a dotted line rather than a line; over 0.11 a five-pointed star's
+    // notches fill in and it is just a disc. The floor also covers the frame it
+    // is born on, where the radius is still zero.
+    let w = clamp(0.14 * radius, 0.035, 0.11);
+    let edge = exp(-(sd * sd) / (w * w));
+    let interior = clamp(-sd / w, 0.0, 1.0);
+    return edge + interior * 0.35;
+}
+
+/// Brightness envelope for a stamp: full while it is being read, then away. The
+/// motion effects' `(1-t)^2` starts decaying immediately, which is right for a
+/// wavefront and wrong for a figure.
+fn shape_hold(t: f32) -> f32 {
+    return 1.0 - smoothstep(0.45, 1.0, t);
+}
+
 
     switch E.kind {
         // Burst — circular shockwave expanding from a point
@@ -677,6 +818,102 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
 fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
     let fade = (1.0 - D.age) * (1.0 - D.age);
     let origin = D.radius * vec2f(cos(D.angle), sin(D.angle));
+        // Bloom â€” an iris opening from the center out, petalled, with a wake
+        case 4u: {
+            let s = max(E.size, 0.2);
+            let front = t * 1.15;
+            let d = ctx.rn - front;
+            let w = 0.09 * s;
+            let ring = exp(-(d * d) / (w * w));
+            // Only behind the front, or the wake lights the whole array.
+            let behind = front - ctx.rn;
+            let wake = select(0.0, exp(-behind / (0.32 * s)) * 0.4, behind > 0.0);
+            let petals = 0.7 + 0.3 * cos(6.0 * (ctx.theta - E.angle));
+            return col * (ring + wake) * petals * fade * E.intensity * 1.7;
+        }
+        // Pinwheel â€” spiral arms whipping up to speed, then gone
+        case 5u: {
+            let spin = E.angle + TAU * 1.75 * t * t;
+            let sharp = clamp(8.0 / max(E.size, 0.25), 1.0, 40.0);
+            let arm = pow(max(cos(5.0 * (ctx.theta - spin) + ctx.rn * 3.0), 0.0), sharp);
+            return col * arm * fade * E.intensity * 1.7;
+        }
+        // Twinkle â€” glitter storm swelling across the whole array
+        case 6u: {
+            // Rise and fall, so the storm arrives rather than starting at full tilt.
+            let swell = sin(PI * clamp(t * 1.1, 0.0, 1.0));
+            let seed = u32(abs(E.angle) * 1024.0);
+            let idx = ctx.spoke * G.pixels + ctx.i;
+            let cell = u32(t * 26.0);
+            let rnd = hash01(idx * 2654435761u + cell * 40503u + seed * 7919u);
+            // Glitter, not a wash: even at the top of the size range barely a
+            // third of the array is alight at the peak of the swell.
+            let density = clamp(0.07 * E.size, 0.02, 0.35) * swell;
+            let lit = step(1.0 - density, rnd);
+            let vary = 0.55 + 0.45 * hash01(idx * 97u + cell * 26699u + seed);
+            return col * lit * vary * swell * E.intensity * 1.8;
+        }
+        // Wipe â€” a straight bar crossing the disc, lit wake behind it
+        case 7u: {
+            let s = max(E.size, 0.2);
+            let dir = vec2f(cos(E.angle), sin(E.angle));
+            let along = dot(ctx.pos, dir);
+            let front = mix(-1.2, 1.2, t);
+            let w = 0.09 * s;
+            let bar = exp(-((along - front) * (along - front)) / (w * w));
+            let behind = front - along;
+            let wake = select(
+                0.0,
+                (1.0 - clamp(behind / (0.5 * s), 0.0, 1.0)) * 0.45,
+                behind > 0.0
+            );
+            return col * (bar + wake) * fade * E.intensity * 1.6;
+        }
+        // Star â€” turning slowly on its own axis
+        case 8u: {
+            let s = stamp_frame(E, ctx, t, t * 0.5);
+            let sd = sd_star(s.p, s.r, 5.0, 3.0);
+            return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
+        }
+        // Heart â€” beats twice while it fades
+        case 9u: {
+            let s = stamp_frame(E, ctx, t, 0.0);
+            let beat = 1.0 + 0.07 * sin(TAU * 2.0 * t) * (1.0 - t);
+            // Heart units -> world, so the figure's half-height is `s.r`; the
+            // curve is measured from the notch, which sits 1.68 above the middle.
+            let unit = s.r * beat / 2.32;
+            let q = s.p - vec2f(0.0, 1.68 * unit);
+            let sd = length(q) - heart_r(atan2(q.y, q.x)) * unit;
+            return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
+        }
+        // Flower â€” a circle that unfolds into six petals as it lands
+        case 10u: {
+            let s = stamp_frame(E, ctx, t, t * 0.4);
+            let open = smoothstep(0.0, 0.35, t);
+            let lobe = pow(abs(cos(3.0 * atan2(s.p.y, s.p.x))), 0.6);
+            // The one shape with no closed-form SDF; its edges are smooth enough
+            // in r that the radial proxy does not show.
+            let sd = length(s.p) - s.r * mix(1.0, 0.5 + 0.5 * lobe, open);
+            return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
+        }
+        // Diamond
+        case 11u: {
+            let s = stamp_frame(E, ctx, t, 0.0);
+            return col * shape_stamp(sd_diamond(s.p, s.r), s.r)
+                * shape_hold(t) * E.intensity * 1.5;
+        }
+        // Triangle
+        case 12u: {
+            let s = stamp_frame(E, ctx, t, 0.0);
+            return col * shape_stamp(sd_triangle(s.p, s.r), s.r)
+                * shape_hold(t) * E.intensity * 1.5;
+        }
+        // Moon â€” crescent, tilted to read the way the glyph does
+        case 13u: {
+            let s = stamp_frame(E, ctx, t, 0.35);
+            let sd = sd_moon(s.p, 0.41 * s.r, s.r, 0.98 * s.r);
+            return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
+        }
     let d = distance(ctx.pos, origin);
     var col: vec3f;
     if D.hue < 0.0 {

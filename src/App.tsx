@@ -442,10 +442,22 @@ export default function App() {
     setTab(t);
   };
 
-  // Global keyboard: 1-4 fire effects.
+  // Global keyboard: 1-8 fire the motion effects. The shape keys are Live's,
+  // because there they pick what a press on the array stamps.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (
+        // Ctrl+1 and friends belong to the browser and the window, not to us.
+        e.metaKey ||
+        e.ctrlKey ||
+        e.altKey ||
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement ||
+        (e.target instanceof HTMLElement && e.target.isContentEditable)
+      ) {
+        return;
+      }
       const fx = EFFECTS.find((f) => f.key === e.key);
       if (fx) {
         const color = loadSelectedLiveColor();

@@ -1818,6 +1818,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             next_phase_reset_check = now + Duration::from_secs(1);
             if let Some(at) = cfg.render.phase_reset_at.as_deref().and_then(parse_hhmm) {
                 let local = chrono::Local::now();
+                        ..Default::default()
                 let today = local.date_naive();
                 let due = local.time() >= at;
                 if !phase_reset_primed {
@@ -1945,7 +1946,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     dir: d.dir,
                     saturation: d.saturation,
                     brightness: d.brightness,
-                    _pad: [0.0; 2],
+                    rotation: e.cfg.rotation,
+                    grow: e.cfg.grow.clamp(-1.0, 1.0),
                 })
                 .collect()
         };

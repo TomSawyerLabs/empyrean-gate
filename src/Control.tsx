@@ -3,8 +3,9 @@
 // targets), works everywhere.
 
 import { useEffect, useState } from "react";
-import { EFFECTS } from "./effects";
+import { CENTERED_SHAPE, EFFECTS, GROW_MODES, growValue, SHAPES, type GrowMode } from "./effects";
 import { SCENE_PRESETS, type ScenePreset } from "./scenes";
+import ShapeIcon from "./ShapeIcon";
 import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
 import {
@@ -89,6 +90,7 @@ export default function Control() {
   // Local mirror of master sliders so they track remote changes when idle.
   const [brightness, setBrightnessLocal] = useState(1);
   const [speed, setSpeedLocal] = useState(1);
+  const [growMode, setGrowMode] = useState<GrowMode>("static");
   useEffect(() => {
     if (config) {
       setBrightnessLocal(config.render.master_brightness);
@@ -111,6 +113,42 @@ export default function Control() {
             >
               {e.label}
               <span className="key-hint">{e.key}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>Shapes</h2>
+        {/* No array to aim at on this tab, so a shape lands in the middle at a
+            size that fills the ring. Placing one is the Live tab's job. */}
+        <div className="shape-grid big">
+          {SHAPES.map((s) => (
+            <button
+              key={s.kind}
+              className="shape-btn"
+              onClick={() =>
+                client.triggerEffect({
+                  kind: s.kind,
+                  ...CENTERED_SHAPE,
+                  grow: growValue(growMode),
+                })
+              }
+            >
+              <ShapeIcon kind={s.kind} />
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <div className="shape-grow-row" role="group" aria-label="Stamp size over time">
+          {GROW_MODES.map((m) => (
+            <button
+              key={m.mode}
+              className={growMode === m.mode ? "active" : ""}
+              onClick={() => setGrowMode(m.mode)}
+              aria-pressed={growMode === m.mode}
+            >
+              {m.label}
             </button>
           ))}
         </div>

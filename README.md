@@ -12,7 +12,7 @@ sources) drives the patterns via beat tracking and band energies.
 
 ## Screenshots
 
-![Live tab — the array with pens and effect pads beside it](docs/live-wide.png)
+![Live tab — the array with pens, shape and effect pads beside it](docs/live-wide.png)
 
 | Squarish window — corner controls | Tablet / portrait | Control | Settings |
 |---|---|---|---|
@@ -61,9 +61,16 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   layers: **Waveform** (the PCM bent into a circular oscilloscope) and **Spectrum**
   (spoke-per-bin circular analyzer), plus **Video** (live browser-decoded texture,
   radial/kaleidoscope mapping and color treatment) —
-  stacked with blend modes, each bound to an audio source. Effects (burst / strobe /
-  swoosh / collapse) fire from keyboard (1–4), clicks/taps on the preview, or remote
-  clients.
+  stacked with blend modes, each bound to an audio source.
+- **Effects**: transients that fire over the whole stack. Eight of them *move* —
+  burst / strobe / swoosh / collapse / bloom / pinwheel / twinkle / wipe — from the
+  keyboard (1–8), a pad, or a remote client. Six are **shapes** — star / heart /
+  flower / diamond / triangle / moon — figures drawn from exact signed-distance
+  fields and *stamped where you tap*: pick one (pad, or `s h f d t m`), then every
+  press on the array plants that figure there, at the Size slider's size, holding
+  its size or growing or shrinking away over its life. On Control, which has no
+  array to aim at, a shape pad plants one centre-array instead. A tap with no shape
+  selected is still a burst, and a drag still draws with the current pen.
 - **Six UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Media
   (image/video intake), Patch (node-graph editor), Archive (recorded-show replay),
   Control (touch-sized effect pads + master/layer faders), and Settings. In the
