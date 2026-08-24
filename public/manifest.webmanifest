@@ -13,6 +13,7 @@
   ],
   "shortcuts": [
     { "name": "Live", "url": "/#live", "icons": [{ "src": "/pwa-192.png", "sizes": "192x192" }] },
-    { "name": "Control", "url": "/#control", "icons": [{ "src": "/pwa-192.png", "sizes": "192x192" }] }
+    { "name": "Control", "url": "/#control", "icons": [{ "src": "/pwa-192.png", "sizes": "192x192" }] },
+    { "name": "Games", "url": "/#games", "icons": [{ "src": "/pwa-192.png", "sizes": "192x192" }] }
   ]
 }

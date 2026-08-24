@@ -18,7 +18,18 @@ const GAMES: { kind: GameKind; name: string; blurb: string }[] = [
       "Species forever eating each other in rotating spiral fronts — it never " +
       "settles and never ends. Pick a species and tap the array to seed it.",
   },
+  {
+    kind: "life",
+    name: "Primordial",
+    blurb:
+      "Game of Life in color: your taps splat living soup in your color, and " +
+      "newborn cells inherit blended hues where colonies meet. Generations " +
+      "advance on the beat; a drizzle of soup keeps a quiet world moving.",
+  },
 ];
+
+/** Life's erase input — matches `game::life::ERASE` on the backend. */
+const ERASE_SPECIES = 0xff;
 
 /// Approximate chip colors for the species picker. The backend rotates the
 /// palette slowly over minutes so no species permanently owns a hue; the chips
@@ -42,8 +53,13 @@ export default function Games() {
 
   const [mySpecies, setMySpecies] = useState(0);
   useEffect(() => {
-    if (mySpecies >= species) setMySpecies(0);
-  }, [species, mySpecies]);
+    if (mySpecies === ERASE_SPECIES) {
+      // The eraser only exists in Life.
+      if (active !== "life") setMySpecies(0);
+    } else if (mySpecies >= species) {
+      setMySpecies(0);
+    }
+  }, [species, mySpecies, active]);
 
   // Taps batch on the same ~33 ms cadence the drawing path uses, so a burst of
   // excited tapping is one message per frame, not one per finger.
@@ -147,6 +163,14 @@ export default function Games() {
                   {s + 1}
                 </button>
               ))}
+              {active === "life" && (
+                <button
+                  className={`games-chip erase ${mySpecies === ERASE_SPECIES ? "active" : ""}`}
+                  onClick={() => setMySpecies(ERASE_SPECIES)}
+                >
+                  ✕
+                </button>
+              )}
             </div>
           </>
         ) : (

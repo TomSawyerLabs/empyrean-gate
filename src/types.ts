@@ -82,6 +82,8 @@ export interface ShowPlaylistEntry {
   stack: SavedStack;
   duration_secs: number;
   transition_secs: number;
+  /** Present = this cue runs a game world (absent in older configs). */
+  game?: GameCue | null;
 }
 
 export interface SavedPlaylist {
@@ -463,7 +465,13 @@ export interface TestModeStatus {
 
 // --- game mode (mirrors src-tauri/src/game/mod.rs, plans/game-mode.md) ---
 
-export type GameKind = "rps";
+export type GameKind = "rps" | "life";
+
+/** A playlist entry that runs a game world over its scene. */
+export interface GameCue {
+  game: GameKind;
+  species: number;
+}
 
 export interface GameModeStatus {
   active: GameKind | null;

@@ -489,11 +489,11 @@ impl SharedState {
 
     /// Queue player injections for the running game. Collaborative like
     /// `paint`: inputs from all clients merge, oldest dropped under flood.
+    /// No active-game check here: a playlist game cue runs without touching
+    /// `active`, and the engine drains this queue every frame regardless — an
+    /// input with no game to land in simply evaporates.
     pub fn game_input(&self, species: u8, points: &[crate::layers::DabPoint]) {
         let mut g = self.game.lock();
-        if g.active.is_none() {
-            return;
-        }
         for p in points {
             if g.inputs.len() >= crate::game::MAX_QUEUED_INPUTS {
                 g.inputs.remove(0);

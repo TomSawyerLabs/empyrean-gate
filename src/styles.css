@@ -4642,6 +4642,19 @@ button:disabled {
   border-color: #fff;
 }
 
+/* Life's eraser: visibly "no color" among the colored chips. */
+.games-chip.erase {
+  background: transparent;
+  border-color: #4a4466;
+  border-style: dashed;
+  color: #b9b3d6;
+}
+
+.games-chip.erase.active {
+  border-color: #fff;
+  border-style: solid;
+}
+
 .games-canvas-wrap {
   display: flex;
   justify-content: center;

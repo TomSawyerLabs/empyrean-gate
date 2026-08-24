@@ -4,6 +4,7 @@
 //! prerequisites. This module holds the pure simulation cores; engine/protocol
 //! wiring lives with the rest of the frame loop.
 
+pub mod life;
 pub mod rps;
 
 use serde::{Deserialize, Serialize};
@@ -16,12 +17,107 @@ use std::time::Instant;
 pub enum GameKind {
     /// Cyclic predator–prey cellular automaton (see `rps`).
     Rps,
+    /// Multi-color Conway's Life; players paint soup, colors are lineage.
+    Life,
 }
 
 impl GameKind {
     pub fn label(self) -> &'static str {
         match self {
             GameKind::Rps => "Ecosystem",
+            GameKind::Life => "Primordial",
+        }
+    }
+}
+
+/// One simulation, whichever game it is. Enum dispatch instead of a trait so
+/// the engine's `GameRuntime` needs no boxing and the match is exhaustive —
+/// adding a game without wiring every arm is a compile error.
+pub enum GameSim {
+    Rps(rps::RpsSim),
+    Life(life::LifeSim),
+}
+
+impl GameSim {
+    pub fn new(kind: GameKind, theta: usize, radial: usize, species: u8, seed: u64) -> Self {
+        match kind {
+            GameKind::Rps => GameSim::Rps(rps::RpsSim::new(theta, radial, species, seed)),
+            GameKind::Life => GameSim::Life(life::LifeSim::new(theta, radial, species, seed)),
+        }
+    }
+
+    pub fn theta(&self) -> usize {
+        match self {
+            GameSim::Rps(s) => s.theta(),
+            GameSim::Life(s) => s.theta(),
+        }
+    }
+
+    pub fn radial(&self) -> usize {
+        match self {
+            GameSim::Rps(s) => s.radial(),
+            GameSim::Life(s) => s.radial(),
+        }
+    }
+
+    /// The "species" admin knob: species count for the ecosystem, palette
+    /// slots for Life. One knob, per-game meaning.
+    pub fn set_species(&mut self, species: u8) {
+        match self {
+            GameSim::Rps(s) => s.set_species_count(species),
+            GameSim::Life(s) => s.set_palette(species),
+        }
+    }
+
+    pub fn tick(&mut self) {
+        match self {
+            GameSim::Rps(s) => s.tick(),
+            GameSim::Life(s) => s.tick(),
+        }
+    }
+
+    pub fn watchdog(&mut self) {
+        match self {
+            GameSim::Rps(s) => s.watchdog(),
+            GameSim::Life(s) => s.watchdog(),
+        }
+    }
+
+    pub fn inject(&mut self, it: i32, ir: i32, half_theta: f32, half_r: f32, species: u8) {
+        match self {
+            GameSim::Rps(s) => s.inject(it, ir, half_theta, half_r, species % s.species_count()),
+            GameSim::Life(s) => s.inject(it, ir, half_theta, half_r, species),
+        }
+    }
+
+    /// Bake the grid into packed RGB (`r | g<<8 | b<<16`) for the shader,
+    /// which is a dumb lookup and never knows species or palettes. `time`
+    /// drives the ecosystem's slow palette rotation; Life's palette is player
+    /// identity and never rotates.
+    pub fn pack_cells(&self, time: f32) -> Vec<u32> {
+        match self {
+            GameSim::Rps(s) => {
+                let species = s.species_count() as f32;
+                s.cells()
+                    .iter()
+                    .map(|c| {
+                        let hue = c.species as f32 / species + time * 0.0015;
+                        let value = 0.30 + 0.70 * (c.vigor as f32 / 255.0);
+                        hsv_to_packed_rgb(hue, 0.85, value)
+                    })
+                    .collect()
+            }
+            GameSim::Life(s) => s
+                .cells()
+                .iter()
+                .map(|c| {
+                    if !c.alive {
+                        return 0;
+                    }
+                    let value = 0.35 + 0.65 * (c.vigor as f32 / 255.0);
+                    hsv_to_packed_rgb(c.hue as f32 / 256.0, 0.85, value)
+                })
+                .collect(),
         }
     }
 }

@@ -26,18 +26,27 @@ GAME MODE banner. Commits `c7f3bb6`, `608a85d`, `f0b7a6b`.
 - [x] Frontend: Games tab (admin card + species chips + tap-to-inject via the
       preview canvas), banner, types/ws wrappers, layout-gate + nav-count
       test updates.
-- [ ] Run `bun run test:layout` / `test:behavior` (blocked mid-session on a
-      concurrent session's WIP breaking `tsc`; vite-only build walk pending).
-- [ ] Playlist **game cue** (decision #3 says design in from day one): add
-      `#[serde(default)] game: Option<GameCue>` to `ShowPlaylistEntry`, engine
-      branch in the scheduler, entry type in Control's playlist editor. The
-      shader mix is already orthogonal to the scene crossfade, so this is
-      additive.
-- [ ] Attract-mode polish: idle autoplay injections so the world stays varied
-      over hours (watchdog alone keeps it alive but not dramatic).
-- [ ] PWA manifest shortcut for `/#games`.
-- [ ] Next games: Life (same grid substrate), then Spokewar (particle
-      substrate; needs player slots/colors — see roster).
+- [x] `bun run test:layout` (64 cases) / `test:behavior` (36, Chromium+WebKit)
+      pass — run from a clean worktree at HEAD when the concurrent session's
+      WIP was mid-edit.
+- [x] **Primordial (Life)**: `game/life.rs` — B3/S23 with hue-as-lineage
+      (circular-mean parent hues), soup injection (solid ink dies of
+      overcrowding — taps splat sparse soup), ERASE species 0xff, watchdog
+      revives starvation AND drizzles soup when population goes static.
+      `GameSim` enum dispatch keeps the engine game-agnostic.
+- [x] Playlist **game cue** backend: `GameCue { game, species }` on
+      `ShowPlaylistEntry` (`skip_serializing_if` keeps old configs/fixture
+      byte-identical), engine merges cue with the manual path (manual is
+      refused during shows, so they can never fight), cue species wins,
+      status summary says "scheduled". `state.game_input` no longer gates on
+      the manual `active` flag so taps land during scheduled games too.
+- [x] PWA manifest shortcut for `/#games`; Games tab has the Primordial card
+      and Life's eraser chip.
+- [ ] Playlist editor UI for game cues in Control's playlist panel — waiting
+      on the concurrent session to finish its Control.tsx work (layer
+      quick-edit); the types (`GameCue` in types.ts) are ready.
+- [ ] Next game: Spokewar (particle substrate; needs player slots/colors —
+      see roster).
 
 ## Handover notes for a fresh session
 

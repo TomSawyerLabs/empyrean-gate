@@ -1115,7 +1115,7 @@ const GAME_FADE_SECS: f32 = 2.0;
 /// (like `patch_rt`); `SharedState::game` is only the control surface.
 struct GameRuntime {
     kind: crate::game::GameKind,
-    sim: crate::game::rps::RpsSim,
+    sim: crate::game::GameSim,
     prev: Vec<u32>,
     next: Vec<u32>,
     last_tick: Instant,
@@ -1127,8 +1127,9 @@ struct GameRuntime {
 
 impl GameRuntime {
     fn new(kind: crate::game::GameKind, theta: usize, species: u8, seed: u64, time: f32) -> Self {
-        let sim = crate::game::rps::RpsSim::new(theta, crate::game::GRID_RINGS, species, seed);
-        let cells = Self::pack_cells(&sim, time);
+        let sim =
+            crate::game::GameSim::new(kind, theta, crate::game::GRID_RINGS, species, seed);
+        let cells = sim.pack_cells(time);
         Self {
             kind,
             sim,
@@ -1138,21 +1139,6 @@ impl GameRuntime {
             interval: 0.35,
             dirty: true,
         }
-    }
-
-    /// Bake species colors + vigor into packed RGB, so the shader is a dumb
-    /// lookup and never needs the species count or palette. The palette
-    /// rotates over minutes so no species permanently owns a hue.
-    fn pack_cells(sim: &crate::game::rps::RpsSim, time: f32) -> Vec<u32> {
-        let species = sim.species_count() as f32;
-        sim.cells()
-            .iter()
-            .map(|c| {
-                let hue = c.species as f32 / species + time * 0.0015;
-                let value = 0.30 + 0.70 * (c.vigor as f32 / 255.0);
-                crate::game::hsv_to_packed_rgb(hue, 0.85, value)
-            })
-            .collect()
     }
 }
 
@@ -1998,7 +1984,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // step with it, and drive the crossfade. Ticks follow the beat when
         // the tracker is confident, else a fixed cadence; the shader
         // interpolates between generations so nothing strobes.
-        let (game_desired, game_species, game_overlay, game_inputs) = {
+        let (manual_game, manual_species, game_overlay, game_inputs) = {
             let mut g = state.game.lock();
             (
                 g.active,
@@ -2007,6 +1993,17 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 std::mem::take(&mut g.inputs),
             )
         };
+        // A playlist game cue enters here rather than through `set_game_mode`:
+        // the manual path is refused while a show runs, so the cue is the only
+        // writer during one and the two can never fight over the mode.
+        let cue_game = cfg.running_show().and_then(|p| {
+            let index = (cfg.show_scheduler.current_index as usize).min(p.entries.len() - 1);
+            p.entries[index].game
+        });
+        let game_desired = manual_game.or(cue_game.map(|c| c.game));
+        // The cue's species wins while it drives; each sim clamps to its own
+        // valid range.
+        let game_species = cue_game.map(|c| c.species).unwrap_or(manual_species);
         let game_now = state.started.elapsed().as_secs_f32();
         if let Some(kind) = game_desired {
             let theta = (cfg.geometry.spokes as usize).clamp(8, crate::game::GRID_MAX_THETA);
@@ -2031,7 +2028,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let mut game_alpha = 1.0f32;
         let mut game_cells: Option<Vec<u32>> = None;
         let (game_theta, game_rings) = if let Some(rt) = game_rt.as_mut() {
-            rt.sim.set_species_count(game_species);
+            rt.sim.set_species(game_species);
             // Player injections: polar (angle, 0..1 disc radius) → cell
             // coordinates. Cells cover the strip only; a tap in the hole
             // clamps to the innermost ring.
@@ -2047,7 +2044,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             if !game_inputs.is_empty() {
                 // Repack "next" so the blob blends in over the rest of this
                 // generation instead of waiting a beat to exist.
-                rt.next = GameRuntime::pack_cells(&rt.sim, game_now);
+                rt.next = rt.sim.pack_cells(game_now);
                 rt.dirty = true;
             }
             let bpm_ok = audio[0].bpm_conf > 0.3 && audio[0].bpm > 20.0;
@@ -2070,7 +2067,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 rt.sim.tick();
                 rt.sim.watchdog();
                 std::mem::swap(&mut rt.prev, &mut rt.next);
-                rt.next = GameRuntime::pack_cells(&rt.sim, game_now);
+                rt.next = rt.sim.pack_cells(game_now);
                 rt.last_tick = Instant::now();
                 rt.dirty = true;
             }
@@ -2521,6 +2518,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                             game_species,
                             started.elapsed().as_secs() / 60
                         ),
+                        // A playlist cue is driving; there is no manual start time.
+                        (Some(kind), None) => {
+                            format!("{} · {} species · scheduled", kind.label(), game_species)
+                        }
                         _ => String::new(),
                     },
                     species: game_species,

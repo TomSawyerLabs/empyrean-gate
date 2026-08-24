@@ -491,6 +491,28 @@ pub struct SavedStack {
     pub walk_depth: f32,
 }
 
+/// A playlist entry that runs a game world instead of (strictly: on top of) a
+/// scene — "2am: twenty minutes of Ecosystem". The zero-player attract mode is
+/// what makes an unattended game segment viable (plans/game-mode.md). The
+/// entry's stack still crossfades in underneath and is what the array reveals
+/// when the game fades out at the next cue.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GameCue {
+    pub game: crate::game::GameKind,
+    /// Species count / palette slots for the sim.
+    pub species: u8,
+}
+
+impl Default for GameCue {
+    fn default() -> Self {
+        Self {
+            game: crate::game::GameKind::Rps,
+            species: 3,
+        }
+    }
+}
+
 /// One timed composition in a saved unattended show. The stack is embedded rather
 /// than referenced by id so a playlist remains intact if its source scene is later
 /// edited or deleted.
@@ -504,6 +526,10 @@ pub struct ShowPlaylistEntry {
     pub duration_secs: f32,
     /// Crossfade time when entering this scene.
     pub transition_secs: f32,
+    /// Present = this cue runs a game world over its scene. Skipped when
+    /// absent so existing configs and the fixture serialize unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub game: Option<GameCue>,
 }
 
 impl Default for ShowPlaylistEntry {
@@ -514,6 +540,7 @@ impl Default for ShowPlaylistEntry {
             stack: SavedStack::default(),
             duration_secs: 1_800.0,
             transition_secs: 20.0,
+            game: None,
         }
     }
 }
@@ -979,6 +1006,7 @@ mod tests {
                 stack,
                 duration_secs: 2_100.0,
                 transition_secs: 20.0,
+                game: None,
             }],
             repeat: true,
         });
