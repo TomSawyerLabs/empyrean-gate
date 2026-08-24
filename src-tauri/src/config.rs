@@ -839,6 +839,36 @@ mod tests {
         assert_ne!(normalize_lines("a\nb"), normalize_lines("a\nc"));
     }
 
+    /// A config written by an older build has no `phase_reset_at`, and what it
+    /// deserializes to decides whether an installation that has been running for
+    /// months suddenly starts resetting its layer phases at noon. Container-level
+    /// `#[serde(default)]` fills missing fields from `RenderConfig::default()`,
+    /// not from `Option::default()`, so it does — which is intended, but it is a
+    /// behaviour change on upgrade and belongs pinned rather than assumed.
+    #[test]
+    fn an_older_config_inherits_the_daily_phase_reset() {
+        let older = serde_json::json!({
+            "fps": 60.0,
+            "master_brightness": 1.0,
+            "master_speed": 1.0,
+            "manual_bpm": null,
+            "beat_time": "normal",
+            "walk_enabled": true,
+            "walk_layers": false,
+            "walk_min_layers": 2,
+            "walk_speed": 1.0,
+            "walk_depth": 1.0,
+        });
+        let cfg: RenderConfig = serde_json::from_value(older).expect("older render config");
+        assert_eq!(cfg.phase_reset_at.as_deref(), Some("12:00"));
+        // …and an explicit null still means never.
+        let opted_out = serde_json::json!({ "phase_reset_at": null });
+        let cfg: RenderConfig = serde_json::from_value(opted_out).expect("opted-out config");
+        assert_eq!(cfg.phase_reset_at, None);
+        // Unchanged fields keep coming from Default, not from zero.
+        assert_eq!(cfg.fps, 60.0);
+    }
+
     /// The web UI's layout tests drive a mock backend that replays a committed
     /// snapshot of the default config (no GPU, no audio device, deterministic).
     /// A fixture that silently drifts from the real defaults would test a UI
