@@ -81,16 +81,41 @@ jobs:
         working-directory: src-tauri
         run: cargo test --release --bin engine-smoke
 
+      # Linux only, and IN ADDITION to the bare binary. The bare one needs
+      # libwebkit2gtk already installed; the AppImage carries it. Both are still
+      # a single executable file, which is what the updater's promotion step
+      # depends on — see `asset_name` for how a running copy picks its own shape.
+      # No `|| true` here: the manual build workflow is where this gets proven,
+      # and a release that silently drops an asset is worse than a failed one.
+      - name: Build AppImage (Linux)
+        if: runner.os == 'Linux'
+        run: bun tauri build --bundles appimage
+
       - name: Stage release asset
         shell: bash
         run: |
           mkdir -p release-assets
           cp "${{ matrix.binary }}" "release-assets/${{ matrix.asset }}"
 
+      - name: Stage the AppImage (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          # Tauri names it "Empyrean Gate_<version>_amd64.AppImage" — spaces and
+          # a version that would break the updater's exact-name asset lookup.
+          src=$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' | head -1)
+          if [ -z "$src" ]; then
+            echo "::error::AppImage build produced nothing"
+            exit 1
+          fi
+          cp "$src" "release-assets/${{ matrix.asset }}.AppImage"
+          ls -lh release-assets/
+
       - uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact }}
-          path: release-assets/${{ matrix.asset }}
+          # The directory, not one named file: Linux stages two assets.
+          path: release-assets/*
           if-no-files-found: error
 
   release:

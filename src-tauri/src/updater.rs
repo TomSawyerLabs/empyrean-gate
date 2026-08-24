@@ -49,7 +49,20 @@ fn asset_name() -> Option<&'static str> {
     if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         Some("empyrean-gate-windows-x64.exe")
     } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        Some("empyrean-gate-linux-x64")
+        // Linux ships two shapes of the same release: a bare binary, which needs
+        // libwebkit2gtk already on the machine, and an AppImage that carries it.
+        // Whichever one is running has to update to its OWN shape — promotion
+        // copies the download over the launcher path, so handing an AppImage the
+        // bare binary would strip the bundled libraries and leave behind a file
+        // that is no longer an AppImage at all.
+        //
+        // The AppImage runtime exports APPIMAGE with the path to the bundle it
+        // launched from; nothing else sets it.
+        if std::env::var_os("APPIMAGE").is_some() {
+            Some("empyrean-gate-linux-x64.AppImage")
+        } else {
+            Some("empyrean-gate-linux-x64")
+        }
     } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         Some("empyrean-gate-macos-arm64")
     } else {
