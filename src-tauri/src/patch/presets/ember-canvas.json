@@ -1,0 +1,34 @@
+{
+  "format": 1,
+  "id": "builtin-ember-canvas",
+  "name": "Ember Canvas",
+  "description": "Slow breathing fire beneath live finger painting and show effects, each routed as an independent layer with its own scale and gain.",
+  "nodes": [
+    { "id": "breath", "kind": "lfo", "name": "slow breath", "params": { "rate": 0.055, "min": 0.34, "max": 0.76 }, "pos": [20, 30] },
+    { "id": "fire", "kind": "fire", "name": "ember bed", "params": { "reach": 0.5, "stretch": 0.66, "scale": 0.72, "speed": 0.34, "hue": 0.025, "saturation": 0.96, "brightness": 0.72 }, "pos": [270, 30] },
+    { "id": "touch", "kind": "touch_dabs", "name": "live drawing", "params": {}, "pos": [20, 280] },
+    { "id": "paint", "kind": "render_points", "name": "paint layer", "params": { "pen": 0, "size": 1.18, "intensity": 0.9 }, "pos": [270, 280] },
+    { "id": "mixpaint", "kind": "blend", "name": "paint over embers", "params": { "mode": 3, "opacity": 0.92 }, "pos": [530, 150] },
+    { "id": "fx", "kind": "effects_in", "name": "live effects", "params": {}, "pos": [270, 500] },
+    { "id": "renderfx", "kind": "render_effects", "name": "effect layer", "params": { "size": 1.0, "intensity": 0.8 }, "pos": [530, 500] },
+    { "id": "mixfx", "kind": "blend", "name": "effects over canvas", "params": { "mode": 0, "opacity": 0.72 }, "pos": [790, 250] },
+    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.94 }, "pos": [1030, 250] }
+  ],
+  "edges": [
+    { "from": { "node": "breath", "port": "out" }, "to": { "node": "fire", "port": "reach" } },
+    { "from": { "node": "touch", "port": "points" }, "to": { "node": "paint", "port": "points" } },
+    { "from": { "node": "fire", "port": "out" }, "to": { "node": "mixpaint", "port": "base" } },
+    { "from": { "node": "paint", "port": "out" }, "to": { "node": "mixpaint", "port": "over" } },
+    { "from": { "node": "fx", "port": "effects" }, "to": { "node": "renderfx", "port": "effects" } },
+    { "from": { "node": "mixpaint", "port": "out" }, "to": { "node": "mixfx", "port": "base" } },
+    { "from": { "node": "renderfx", "port": "out" }, "to": { "node": "mixfx", "port": "over" } },
+    { "from": { "node": "mixfx", "port": "out" }, "to": { "node": "out", "port": "in" } }
+  ],
+  "exposed": [
+    { "node": "breath", "param": "rate", "label": "Breath rate" },
+    { "node": "paint", "param": "size", "label": "Paint size" },
+    { "node": "paint", "param": "intensity", "label": "Paint energy" },
+    { "node": "renderfx", "param": "intensity", "label": "Effect energy" },
+    { "node": "out", "param": "master", "label": "Master" }
+  ]
+}

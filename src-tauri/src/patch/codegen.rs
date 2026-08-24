@@ -84,6 +84,8 @@ fn is_gpu_kind(kind: &str) -> bool {
             | "transform"
             | "colorize"
             | "blend"
+            | "effects_in"
+            | "render_effects"
             | "touch_dabs"
             | "render_points"
             | "video_in"
@@ -193,9 +195,9 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         wires: &wires,
         slot_of: &slot_of,
     };
-    // Reverse reachability from the output: a Render points node wired into
-    // the result takes ownership of the dabs (the epilogue must not draw them
-    // a second time); a dangling one changes nothing.
+    // Reverse reachability from the output: explicit stream renderers wired
+    // into the result take ownership of their stream so the epilogue does not
+    // composite it a second time. Dangling nodes change nothing.
     let mut reachable = vec![false; doc.nodes.len()];
     let mut stack = vec![output];
     reachable[output] = true;
@@ -212,6 +214,11 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         .iter()
         .enumerate()
         .any(|(i, n)| n.kind == "render_points" && reachable[i]);
+    let auto_effects = !doc
+        .nodes
+        .iter()
+        .enumerate()
+        .any(|(i, n)| n.kind == "render_effects" && reachable[i]);
 
     let mut code = String::new();
     code.push_str(PRELUDE);
@@ -222,7 +229,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         }
         g.node_fn(&mut code, i)?;
     }
-    g.main_fn(&mut code, output, auto_dabs)?;
+    g.main_fn(&mut code, output, auto_effects, auto_dabs)?;
 
     Ok(Program {
         wgsl: code,
@@ -401,8 +408,9 @@ impl Gen<'_> {
                 format!(
                     "    let base = {base};\n\
                      \x20   let over = {over};\n\
-                     \x20   let op = {op};\n\
-                     \x20   return vec4f(apply_blend(base.rgb, over, op, {mode}u), max(base.a, clamp(over.a * op, 0.0, 1.0)));",
+                     \x20   let op = clamp({op}, 0.0, 1.0);\n\
+                     \x20   let over_a = clamp(over.a * op, 0.0, 1.0);\n\
+                     \x20   return vec4f(apply_blend(base.rgb, over, op, {mode}u), over_a + base.a * (1.0 - over_a));",
                     base = self.color_input(i, "base", "c"),
                     over = self.color_input(i, "over", "c"),
                     op = self.p(i, "opacity"),
@@ -690,6 +698,9 @@ impl Gen<'_> {
             // No function of its own: it marks the live-draw dab stream as a
             // Points source for Render points (which reads DABS directly).
             "touch_dabs" => return Ok(()),
+            // Marker for the live triggered-effect stream. Render effects reads
+            // the bounded FX buffer directly.
+            "effects_in" => return Ok(()),
             // Likewise: marks the live video frame as a Texture source.
             "video_in" => return Ok(()),
             "texture_sample" => {
@@ -741,6 +752,24 @@ impl Gen<'_> {
                     )
                 }
             }
+            "render_effects" => {
+                if self.upstream(i, "effects").is_none() {
+                    "    return vec4f(0.0);".to_string()
+                } else {
+                    format!(
+                        "    var acc = vec3f(0.0);\n\
+                         \x20   for (var e = 0u; e < G.effect_count; e++) {{\n\
+                         \x20       var E = FX[e];\n\
+                         \x20       E.size = E.size * {size};\n\
+                         \x20       E.intensity = E.intensity * {intensity};\n\
+                         \x20       acc += effect_color(E, c);\n\
+                         \x20   }}\n\
+                         \x20   return vec4f(acc, clamp(max(acc.r, max(acc.g, acc.b)), 0.0, 1.0));",
+                        size = self.p(i, "size"),
+                        intensity = self.p(i, "intensity"),
+                    )
+                }
+            }
             other => return Err(format!("no GPU codegen for node kind \"{other}\"")),
         };
 
@@ -764,9 +793,16 @@ impl Gen<'_> {
         Ok(())
     }
 
-    fn main_fn(&self, code: &mut String, output: usize, auto_dabs: bool) -> Result<(), String> {
+    fn main_fn(
+        &self,
+        code: &mut String,
+        output: usize,
+        auto_effects: bool,
+        auto_dabs: bool,
+    ) -> Result<(), String> {
         let root = self.color_input(output, "in", "ctx");
         let master = self.p(output, "master");
+        let auto_effects = if auto_effects { "true" } else { "false" };
         let auto_dabs = if auto_dabs { "true" } else { "false" };
         write!(
             code,
@@ -790,7 +826,7 @@ impl Gen<'_> {
              \x20   ctx.rn = rn;\n\
              \x20   ctx.pos = rn * vec2f(cos(theta), sin(theta));\n\
              \x20   let root = {root};\n\
-             \x20   finish(ctx, idx, root.rgb * {master}, {auto_dabs});\n\
+             \x20   finish(ctx, idx, root.rgb * {master}, {auto_effects}, {auto_dabs});\n\
              }}\n",
         )
         .unwrap();
@@ -1028,7 +1064,7 @@ mod tests {
         };
         let prog = compile(&d).expect("compiles");
         assert!(
-            prog.wgsl.contains(", false);"),
+            prog.wgsl.contains(", true, false);"),
             "wired render_points disables the epilogue's auto-dab pass"
         );
         let module = naga::front::wgsl::parse_str(&prog.wgsl)
@@ -1045,8 +1081,45 @@ mod tests {
         dangling.edges.retain(|e| e.from.node != "rp");
         let prog = compile(&dangling).expect("compiles");
         assert!(
-            prog.wgsl.contains(", true);"),
+            prog.wgsl.contains(", true, true);"),
             "dangling node leaves auto-dabs on"
+        );
+    }
+
+    #[test]
+    fn render_effects_takes_effect_ownership_and_validates() {
+        let d = PatchDoc {
+            nodes: vec![
+                node("fx", "effects_in"),
+                node("render", "render_effects"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("fx", "effects", "render", "effects"),
+                edge("render", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let prog = compile(&d).expect("compiles");
+        assert!(
+            prog.wgsl.contains(", false, true);"),
+            "wired render_effects disables only the automatic effect pass"
+        );
+        let module = naga::front::wgsl::parse_str(&prog.wgsl)
+            .unwrap_or_else(|e| panic!("parse: {e}\n{}", prog.wgsl));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .expect("validates");
+
+        let mut dangling = d.clone();
+        dangling.edges.retain(|e| e.from.node != "render");
+        let prog = compile(&dangling).expect("compiles");
+        assert!(
+            prog.wgsl.contains(", true, true);"),
+            "a dangling renderer leaves automatic effects on"
         );
     }
 

@@ -7,6 +7,7 @@
 
 use super::PatchDoc;
 use super::codegen::Program;
+use super::registry::{self, ParamKind};
 use crate::engine::AudioUniform;
 use crate::layers::MAX_AUDIO_SOURCES;
 use std::collections::HashMap;
@@ -88,15 +89,31 @@ impl Runtime {
     /// recompile — the next `eval` picks the value up from the doc.
     pub fn set_param(&mut self, node_id: &str, param: &str, value: f32) {
         if let Some(n) = self.doc.nodes.iter_mut().find(|n| n.id == node_id) {
-            n.params.insert(param.to_string(), value);
+            if let Some(def) = registry::lookup(&n.kind).and_then(|ty| ty.param(param)) {
+                n.params
+                    .insert(param.to_string(), sanitize_param(def, value));
+            }
         }
+    }
+
+    fn param(&self, node: usize, param: &str) -> f32 {
+        let inst = &self.doc.nodes[node];
+        let Some(def) = registry::lookup(&inst.kind).and_then(|ty| ty.param(param)) else {
+            return 0.0;
+        };
+        sanitize_param(def, inst.param(param))
     }
 
     /// A CPU node's input: the wired upstream output, else the knob value.
     fn input(&self, node: usize, port: &str) -> f32 {
-        match self.prog.wires.get(&(node, port.to_string())) {
+        let raw = match self.prog.wires.get(&(node, port.to_string())) {
             Some((from, from_port)) => self.outputs[*from].get(from_port).copied().unwrap_or(0.0),
-            None => self.doc.nodes[node].param(port),
+            None => self.param(node, port),
+        };
+        let inst = &self.doc.nodes[node];
+        match registry::lookup(&inst.kind).and_then(|ty| ty.param(port)) {
+            Some(def) => sanitize_param(def, raw),
+            None => finite_or(raw, 0.0),
         }
     }
 
@@ -109,8 +126,8 @@ impl Runtime {
 
     /// Evaluate one frame; returns the parameter slab for the GPU.
     pub fn eval(&mut self, inp: &EvalInputs) -> &[f32] {
-        let dt = inp.dt.clamp(0.0, 0.5);
-        let ms = inp.master_speed.max(0.0);
+        let dt = finite_or(inp.dt, 0.0).clamp(0.0, 0.5);
+        let ms = finite_or(inp.master_speed, 0.0).max(0.0);
 
         for i in 0..self.prog.cpu_order.len() {
             let node = self.prog.cpu_order[i];
@@ -124,12 +141,12 @@ impl Runtime {
                     self.outputs[node].insert("out".into(), v);
                 }
                 "slider" => {
-                    let v = self.doc.nodes[node].param("value");
+                    let v = self.input(node, "value");
                     self.outputs[node].insert("out".into(), v);
                 }
                 "audio" => {
-                    let src = (self.doc.nodes[node].param("source").round() as usize)
-                        .min(MAX_AUDIO_SOURCES - 1);
+                    let src =
+                        (self.param(node, "source").round() as usize).min(MAX_AUDIO_SOURCES - 1);
                     let a = &inp.audio[src];
                     let o = &mut self.outputs[node];
                     o.insert("level".into(), a.level);
@@ -161,7 +178,7 @@ impl Runtime {
                 "scalar_math" => {
                     let a = self.input(node, "a");
                     let b = self.input(node, "b");
-                    let v = match self.doc.nodes[node].param("op").round() as u32 {
+                    let v = match self.param(node, "op").round() as u32 {
                         0 => a + b,
                         1 => a - b,
                         2 => a * b,
@@ -174,7 +191,7 @@ impl Runtime {
                     let rate = self.input(node, "rate").max(0.0);
                     self.state[node].acc += (rate * ms * dt) as f64;
                     let ph = self.state[node].acc.fract() as f32;
-                    let w = match self.doc.nodes[node].param("wave").round() as u32 {
+                    let w = match self.param(node, "wave").round() as u32 {
                         0 => 0.5 + 0.5 * (TAU * ph).sin(),
                         1 => 1.0 - (2.0 * ph - 1.0).abs(),
                         2 => f32::from(ph < 0.5),
@@ -222,10 +239,20 @@ impl Runtime {
 
         // Fill the slab: wired value (or knob), integrated where flagged.
         for (k, slot) in self.prog.slots.iter().enumerate() {
-            let v = match (&slot.wired, &slot.param) {
+            let raw = match (&slot.wired, &slot.param) {
                 (Some((from, port)), _) => self.outputs[*from].get(port).copied().unwrap_or(0.0),
-                (None, Some(param)) => self.doc.nodes[slot.node].param(param),
+                (None, Some(param)) => self.param(slot.node, param),
                 (None, None) => 0.0,
+            };
+            let v = match &slot.param {
+                Some(param) => {
+                    let inst = &self.doc.nodes[slot.node];
+                    registry::lookup(&inst.kind)
+                        .and_then(|ty| ty.param(param))
+                        .map(|def| sanitize_param(def, raw))
+                        .unwrap_or_else(|| finite_or(raw, 0.0))
+                }
+                None => finite_or(raw, 0.0),
             };
             if slot.integrate {
                 self.slot_acc[k] += (v * ms * dt) as f64;
@@ -235,6 +262,18 @@ impl Runtime {
             }
         }
         &self.slab
+    }
+}
+
+fn finite_or(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() { value } else { fallback }
+}
+
+fn sanitize_param(def: &registry::ParamDef, value: f32) -> f32 {
+    let value = finite_or(value, def.default).clamp(def.min, def.max);
+    match def.kind {
+        ParamKind::Number => value,
+        ParamKind::Select(_) => value.round(),
     }
 }
 
@@ -321,6 +360,50 @@ mod tests {
             .unwrap()
             .slot;
         assert_eq!(slab[master_slot], 1.0, "knob/default fallback");
+    }
+
+    #[test]
+    fn wired_and_saved_params_are_bounded_and_finite() {
+        let mut slider = node("slider", "slider");
+        slider.params.insert("value".into(), 9.0);
+        let mut output = node("o", "output");
+        output.params.insert("master".into(), f32::NAN);
+        let doc = PatchDoc {
+            nodes: vec![slider, node("mix", "blend"), output],
+            edges: vec![
+                edge("slider", "out", "mix", "opacity"),
+                edge("mix", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let mut rt = runtime(doc);
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let slab = rt.eval(&inputs(&audio)).to_vec();
+        let opacity = rt
+            .prog
+            .slots
+            .iter()
+            .find(|s| s.param.as_deref() == Some("opacity"))
+            .unwrap()
+            .slot;
+        let master = rt
+            .prog
+            .slots
+            .iter()
+            .find(|s| s.param.as_deref() == Some("master"))
+            .unwrap()
+            .slot;
+        assert_eq!(slab[opacity], 1.0, "wired values clamp to the target knob");
+        assert_eq!(
+            slab[master], 1.0,
+            "non-finite values use the registry default"
+        );
+
+        rt.set_param("o", "master", 99.0);
+        rt.eval(&inputs(&audio));
+        assert_eq!(rt.slab[master], 2.0, "live values clamp to registry bounds");
+        rt.set_param("o", "not_a_param", 1.0);
+        assert!(!rt.doc.nodes[2].params.contains_key("not_a_param"));
     }
 
     #[test]

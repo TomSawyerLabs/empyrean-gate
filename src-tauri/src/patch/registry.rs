@@ -316,6 +316,17 @@ pub const TYPES: &[NodeType] = &[
         params: &[],
     },
     NodeType {
+        id: "effects_in",
+        label: "Triggered effects",
+        category: Category::Input,
+        inputs: &[],
+        outputs: &[PortDef {
+            name: "effects",
+            shape: Shape::Effects,
+        }],
+        params: &[],
+    },
+    NodeType {
         id: "video_in",
         label: "Video in",
         category: Category::Input,
@@ -760,6 +771,20 @@ pub const TYPES: &[NodeType] = &[
                     "as drawn", "glow", "ripple", "sparkle", "comet", "ring", "beam", "ember",
                 ],
             ),
+            num("size", "Size ×", 0.1, 4.0, 1.0),
+            num("intensity", "Intensity ×", 0.0, 2.0, 1.0),
+        ],
+    },
+    NodeType {
+        id: "render_effects",
+        label: "Render effects",
+        category: Category::FieldOp,
+        inputs: &[PortDef {
+            name: "effects",
+            shape: Shape::Effects,
+        }],
+        outputs: COLOR_OUT,
+        params: &[
             num("size", "Size ×", 0.1, 4.0, 1.0),
             num("intensity", "Intensity ×", 0.0, 2.0, 1.0),
         ],

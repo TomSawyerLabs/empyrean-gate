@@ -364,6 +364,8 @@ function PatchEditor() {
     }
   }, []);
 
+  const activeId = config?.active_patch ?? null;
+
   // Patch protocol messages.
   useEffect(() => {
     return client.onMessage((msg) => {
@@ -391,6 +393,14 @@ function PatchEditor() {
       }
     });
   }, [client, openDoc]);
+
+  // Reopen the live patch when returning to this tab. Subscribe first so a
+  // fast local response cannot arrive before the editor is listening.
+  useEffect(() => {
+    if (!connected || !activeId || docRef.current || requestedId.current) return;
+    requestedId.current = activeId;
+    client.patchGet(activeId);
+  }, [activeId, client, connected]);
 
   // Registry may arrive after the doc was opened.
   useEffect(() => {
@@ -542,7 +552,6 @@ function PatchEditor() {
 
   // --- toolbar actions ---
 
-  const activeId = config?.active_patch ?? null;
   const isActive = doc !== null && doc.id !== "" && activeId === doc.id;
 
   const grouped = useMemo(() => {

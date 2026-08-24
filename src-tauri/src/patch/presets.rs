@@ -10,6 +10,8 @@ const SOURCES: &[&str] = &[
     include_str!("presets/beat-pulse.json"),
     include_str!("presets/lava-breathing.json"),
     include_str!("presets/rainbow-sparkle.json"),
+    include_str!("presets/event-horizon.json"),
+    include_str!("presets/ember-canvas.json"),
     include_str!("presets/scope.json"),
     include_str!("presets/finger-paint.json"),
     include_str!("presets/video-kaleido.json"),
@@ -49,8 +51,16 @@ mod tests {
                 "{} should expose play knobs",
                 doc.name
             );
-            codegen::compile(doc)
+            let program = codegen::compile(doc)
                 .unwrap_or_else(|e| panic!("preset \"{}\" fails to compile: {e}", doc.name));
+            let module = naga::front::wgsl::parse_str(&program.wgsl)
+                .unwrap_or_else(|e| panic!("preset \"{}\" emits invalid WGSL: {e}", doc.name));
+            naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::all(),
+            )
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("preset \"{}\" fails WGSL validation: {e}", doc.name));
         }
     }
 

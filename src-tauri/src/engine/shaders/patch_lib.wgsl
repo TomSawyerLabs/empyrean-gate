@@ -276,11 +276,12 @@ fn gray(v: f32) -> vec4f {
 
 /// Blend an (rgb, alpha) field over an accumulator — same modes as the stack.
 fn apply_blend(acc: vec3f, c: vec4f, opacity: f32, mode: u32) -> vec3f {
-    let a = clamp(c.a * opacity, 0.0, 1.0);
-    let rgb = c.rgb * opacity;
+    let op = clamp(opacity, 0.0, 1.0);
+    let a = clamp(c.a * op, 0.0, 1.0);
+    let rgb = c.rgb * op;
     switch mode {
         case 0u: { return acc + rgb; }                                    // Add
-        case 1u: { return acc * mix(vec3f(1.0), c.rgb, opacity); }        // Multiply
+        case 1u: { return acc * mix(vec3f(1.0), c.rgb, op); }             // Multiply
         case 2u: { return 1.0 - (1.0 - acc) * (1.0 - clamp(rgb, vec3f(0.0), vec3f(1.0))); } // Screen
         case 3u: { return mix(acc, c.rgb, a); }                           // AlphaOver
         case 4u: { return max(acc, rgb); }                                // Max
@@ -407,13 +408,15 @@ fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
 }
 
 /// Shared epilogue: effects + dabs composite, master, soft-clip, pack.
-/// `auto_dabs` is false when the graph contains a Render points node — the
-/// node owns the dabs then, otherwise they'd draw twice.
-fn finish(ctx: Ctx, idx: u32, patch_rgb: vec3f, auto_dabs: bool) {
+/// An explicitly wired stream renderer takes ownership of that stream and
+/// disables its automatic pass here, avoiding double rendering.
+fn finish(ctx: Ctx, idx: u32, patch_rgb: vec3f, auto_effects: bool, auto_dabs: bool) {
     var acc = patch_rgb;
 
-    for (var e = 0u; e < G.effect_count; e++) {
-        acc += effect_color(FX[e], ctx);
+    if auto_effects {
+        for (var e = 0u; e < G.effect_count; e++) {
+            acc += effect_color(FX[e], ctx);
+        }
     }
     if auto_dabs {
         for (var d = 0u; d < G.dab_count; d++) {

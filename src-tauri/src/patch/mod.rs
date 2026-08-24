@@ -38,6 +38,8 @@ pub enum Shape {
     FieldColor,
     /// Bounded GPU array of point sprites (touch dabs, particles).
     Points,
+    /// Bounded stream of triggered show effects (burst, strobe, sweep, pulse).
+    Effects,
     /// Materialized 2D RGBA buffer (video frames, feedback).
     Texture,
     /// The sink: final per-pixel RGB mapped to the fixtures → sACN + preview.
@@ -210,5 +212,7 @@ mod tests {
         assert!(!FieldColor.accepts(Scalar), "no transitive adapter");
         assert!(!Scalar.accepts(Event));
         assert!(!Points.accepts(Texture));
+        assert!(Effects.accepts(Effects));
+        assert!(!FieldColor.accepts(Effects));
     }
 }

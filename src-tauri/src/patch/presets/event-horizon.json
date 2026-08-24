@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "id": "builtin-event-horizon",
+  "name": "Event Horizon",
+  "description": "A restrained indigo star flight with triggered effects explicitly routed through a rotating, intensity-controlled effect layer.",
+  "nodes": [
+    { "id": "space", "kind": "warp", "name": "deep star field", "params": { "density": 0.32, "speed": 0.28, "hue": 0.64, "hue_range": 0.12, "saturation": 0.82, "brightness": 0.62 }, "pos": [40, 80] },
+    { "id": "fx", "kind": "effects_in", "name": "live effects", "params": {}, "pos": [40, 330] },
+    { "id": "render", "kind": "render_effects", "name": "effect layer", "params": { "size": 0.82, "intensity": 0.72 }, "pos": [280, 330] },
+    { "id": "drift", "kind": "transform", "name": "slow orbit", "params": { "rotate": 0.0, "spin": -0.018, "zoom": 1.0, "kaleido": 0.0 }, "pos": [520, 330] },
+    { "id": "mix", "kind": "blend", "name": "effects over space", "params": { "mode": 3, "opacity": 0.86 }, "pos": [760, 170] },
+    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.94 }, "pos": [1000, 170] }
+  ],
+  "edges": [
+    { "from": { "node": "fx", "port": "effects" }, "to": { "node": "render", "port": "effects" } },
+    { "from": { "node": "render", "port": "out" }, "to": { "node": "drift", "port": "in" } },
+    { "from": { "node": "space", "port": "out" }, "to": { "node": "mix", "port": "base" } },
+    { "from": { "node": "drift", "port": "out" }, "to": { "node": "mix", "port": "over" } },
+    { "from": { "node": "mix", "port": "out" }, "to": { "node": "out", "port": "in" } }
+  ],
+  "exposed": [
+    { "node": "space", "param": "speed", "label": "Flight speed" },
+    { "node": "space", "param": "hue", "label": "Space hue" },
+    { "node": "render", "param": "size", "label": "Effect size" },
+    { "node": "render", "param": "intensity", "label": "Effect energy" },
+    { "node": "mix", "param": "opacity", "label": "Effect mix" }
+  ]
+}

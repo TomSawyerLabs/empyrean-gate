@@ -1066,8 +1066,11 @@ async fn handle_msg(
             // is legitimate state to persist. Activation is where validity bites.
             match patch::store::save(&dir, &mut doc) {
                 Ok(_) => {
-                    // The engine rebuilds the active patch's pipeline off this.
-                    state.patch_epoch.fetch_add(1, Ordering::SeqCst);
+                    // Only the active patch needs an engine rebuild. Saving a
+                    // different draft must not interrupt the live renderer.
+                    if state.config.read().active_patch.as_deref() == Some(doc.id.as_str()) {
+                        state.patch_epoch.fetch_add(1, Ordering::SeqCst);
+                    }
                     // Echo (the editor learns an assigned id), then refresh
                     // everyone's palette.
                     let _ = send_json(tx, &ServerMsg::Patch { patch: Box::new(doc) }).await;
@@ -1087,8 +1090,8 @@ async fn handle_msg(
             let dir = patch::store::patches_dir();
             match patch::store::delete(&dir, &id) {
                 Ok(()) => {
-                    state.patch_epoch.fetch_add(1, Ordering::SeqCst);
                     if state.config.read().active_patch.as_deref() == Some(id.as_str()) {
+                        state.request_render_transition();
                         state.update_config(|c| c.active_patch = None);
                     }
                     let _ = state.events.send(ServerMsg::Patches {
@@ -1157,7 +1160,10 @@ async fn handle_msg(
                 .find(|n| n.id == node)
                 .and_then(|n| patch::registry::lookup(&n.kind))
                 .and_then(|t| t.param(&param))
-                .map(|p| value.clamp(p.min, p.max))
+                .map(|p| {
+                    let finite = if value.is_finite() { value } else { p.default };
+                    finite.clamp(p.min, p.max)
+                })
                 .unwrap_or(value);
             if let Some(n) = doc.nodes.iter_mut().find(|n| n.id == node) {
                 n.params.insert(param.clone(), clamped);

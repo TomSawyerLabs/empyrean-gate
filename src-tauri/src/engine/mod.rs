@@ -1155,6 +1155,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut patch_rt: Option<crate::patch::eval::Runtime> = None;
     let mut patch_key: Option<(String, u32)> = None;
     let mut patch_wgsl: Option<String> = None;
+    let mut live_patch_id: Option<String> = None;
 
     // Hardware test mode: a CPU-generated frame that replaces the rendered one
     // on its way to sACN and the preview. See `testmode.rs`.
@@ -1252,20 +1253,25 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             }
         }
         // Compile (or drop) the active node-graph patch when it changes — either
-        // a different id, or a patch-file edit (patch_epoch bump). Errors surface
-        // to the UI and the loop falls back to the layer stack.
+        // a different id, or a patch-file edit (patch_epoch bump). A bad live
+        // edit keeps the last good pipeline for that same patch on screen.
         let patch_epoch = state.patch_epoch.load(Ordering::Relaxed);
         let wanted = cfg.active_patch.clone().map(|id| (id, patch_epoch));
         if wanted != patch_key {
             patch_key = wanted.clone();
-            patch_rt = None;
-            patch_wgsl = None;
             let mut patch_error = None;
             match &wanted {
                 None => {
+                    patch_rt = None;
+                    patch_wgsl = None;
+                    live_patch_id = None;
                     let _ = engine.set_patch_shader(None);
                 }
                 Some((id, _)) => {
+                    // A topology rebuild invalidates queued values from the old
+                    // Runtime. New values will be delivered on following frames.
+                    state.patch_params.lock().clear();
+                    let retain_last_good = live_patch_id.as_deref() == Some(id.as_str());
                     let result = crate::patch::store::load(&crate::patch::store::patches_dir(), id)
                         .and_then(|doc| {
                             crate::patch::codegen::compile(&doc).map(|prog| (doc, prog))
@@ -1275,10 +1281,27 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                             Ok(()) => {
                                 patch_wgsl = Some(prog.wgsl.clone());
                                 patch_rt = Some(crate::patch::eval::Runtime::new(doc, prog));
+                                live_patch_id = Some(id.clone());
                             }
-                            Err(e) => patch_error = Some(format!("patch pipeline failed: {e:#}")),
+                            Err(e) => {
+                                patch_error = Some(format!("patch pipeline failed: {e:#}"));
+                                if !retain_last_good {
+                                    patch_rt = None;
+                                    patch_wgsl = None;
+                                    live_patch_id = None;
+                                    let _ = engine.set_patch_shader(None);
+                                }
+                            }
                         },
-                        Err(e) => patch_error = Some(format!("patch compile failed: {e}")),
+                        Err(e) => {
+                            patch_error = Some(format!("patch compile failed: {e}"));
+                            if !retain_last_good {
+                                patch_rt = None;
+                                patch_wgsl = None;
+                                live_patch_id = None;
+                                let _ = engine.set_patch_shader(None);
+                            }
+                        }
                     }
                 }
             }
