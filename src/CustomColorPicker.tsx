@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { liveColor, type LiveColor } from "./liveColors";
+import ColorWheel from "./ColorWheel";
+import { hsvToHex, liveColor, type LiveColor } from "./liveColors";
 
 export default function CustomColorPicker({
   colors,
@@ -24,16 +25,28 @@ export default function CustomColorPicker({
         <div className="custom-color-title-row">
           <div>
             <h2 id="custom-color-title">Choose a live color</h2>
-            <p className="hint">Open the color wheel, then save it into your quick swatches.</p>
+            <p className="hint">Drag the wheel, then save it into your quick swatches.</p>
           </div>
           <button aria-label="Close color picker" onClick={onClose}>×</button>
         </div>
-        <label className="custom-color-wheel">
-          <input type="color" value={hex} onChange={(event) => setHex(event.target.value)} aria-label="Custom RGB color" />
-          <span>
-            <strong>{hex.toUpperCase()}</strong>
-            <small>Click the color to open the RGB picker</small>
-          </span>
+        <ColorWheel
+          hue={preview.hue}
+          saturation={preview.saturation}
+          value={preview.brightness}
+          onChange={(hue, saturation, value) => setHex(hsvToHex(hue, saturation, value))}
+        />
+        <label className="custom-color-hex">
+          <span>Hex</span>
+          <input
+            value={hex.toUpperCase()}
+            onChange={(event) => {
+              const next = event.target.value.trim();
+              setHex(/^#?[0-9a-f]{6}$/i.test(next) ? (next.startsWith("#") ? next : `#${next}`) : hex);
+            }}
+            aria-label="Colour as a hex code"
+            spellCheck={false}
+          />
+          <span className="custom-color-preview" style={{ background: hex }} />
         </label>
         {colors.length > 0 && (
           <div className="saved-custom-colors">

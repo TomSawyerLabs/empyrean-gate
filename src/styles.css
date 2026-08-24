@@ -2936,8 +2936,7 @@ button:disabled {
 }
 
 .custom-color-title-row,
-.custom-color-actions,
-.custom-color-wheel {
+.custom-color-actions {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -2960,37 +2959,121 @@ button:disabled {
   font-size: 22px;
 }
 
-.custom-color-wheel {
-  margin: 18px 0;
-  padding: 12px;
-  border: 1px solid #3b3060;
-  border-radius: 12px;
-  background: rgba(8, 7, 16, 0.46);
-  cursor: pointer;
-}
-
-.custom-color-wheel input[type="color"] {
-  width: 78px;
-  height: 78px;
-  flex: 0 0 auto;
-  padding: 4px;
-  cursor: pointer;
-}
-
-.custom-color-wheel span {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.custom-color-wheel strong {
-  font-size: 18px;
-  letter-spacing: 0.06em;
-}
-
-.custom-color-wheel small,
 .saved-custom-colors > span {
   color: var(--muted);
+}
+
+/* ---- Colour wheel ---- */
+
+.color-wheel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+/* Hue around the rim, saturation from the centre. The three stacked gradients
+   are, top to bottom: the value overlay, the white saturation falloff, and the
+   hue ring. `touch-action: none` so a drag picks a colour instead of scrolling
+   the modal out from under the finger. */
+.color-wheel-disc {
+  position: relative;
+  width: min(260px, 62vw);
+  aspect-ratio: 1;
+  align-self: center;
+  border-radius: 50%;
+  border: 1px solid #3b3060;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.color-wheel-marker {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.75), 0 2px 8px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.color-wheel-value,
+.color-wheel-fields label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.color-wheel-value > span:first-child,
+.color-wheel-fields label > span {
+  width: 78px;
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.color-wheel-value input[type="range"],
+.color-wheel-fields input[type="range"] {
+  flex: 1;
+  min-width: 88px;
+}
+
+.color-wheel-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.color-wheel-harmonies {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr));
+  gap: 8px;
+}
+
+.color-wheel-harmonies button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  font-size: 12px;
+}
+
+.color-wheel-chip {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.custom-color-hex {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.custom-color-hex > span:first-child {
+  width: 78px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.custom-color-hex input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+  letter-spacing: 0.08em;
+}
+
+.custom-color-preview {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  border: 1px solid #3b3060;
 }
 
 .saved-custom-colors > div {

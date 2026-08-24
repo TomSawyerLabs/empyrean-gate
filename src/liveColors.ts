@@ -47,6 +47,58 @@ export function liveColor(id: string, label: string, hex: string): LiveColor {
   };
 }
 
+/// HSV → hex. The inverse of what `liveColor` derives, so a colour can survive a
+/// round trip through the wheel without drifting.
+export function hsvToHex(hue: number, saturation: number, value: number): string {
+  const h = ((hue % 1) + 1) % 1;
+  const s = Math.min(1, Math.max(0, saturation));
+  const v = Math.min(1, Math.max(0, value));
+  const i = Math.floor(h * 6);
+  const f = h * 6 - i;
+  const p = v * (1 - s);
+  const q = v * (1 - f * s);
+  const t = v * (1 - (1 - f) * s);
+  const [r, g, b] = [
+    [v, t, p],
+    [q, v, p],
+    [p, v, t],
+    [p, q, v],
+    [t, p, v],
+    [v, p, q],
+  ][i % 6];
+  const channel = (c: number) => Math.round(c * 255).toString(16).padStart(2, "0");
+  return `#${channel(r)}${channel(g)}${channel(b)}`;
+}
+
+export function liveColorFromHsv(
+  id: string,
+  label: string,
+  hue: number,
+  saturation: number,
+  value: number,
+): LiveColor {
+  return liveColor(id, label, hsvToHex(hue, saturation, value));
+}
+
+/// Colour-theory offsets in turns, applied to a hue. `complement` is the
+/// straight 180°; the rest are the harmonies that stay in key with it.
+export const HUE_HARMONIES = {
+  same: 0,
+  complement: 0.5,
+  split_a: 150 / 360,
+  split_b: 210 / 360,
+  triad_a: 120 / 360,
+  triad_b: 240 / 360,
+  analogous_a: 30 / 360,
+  analogous_b: -30 / 360,
+} as const;
+
+export type HueHarmony = keyof typeof HUE_HARMONIES;
+
+export function harmonize(hue: number, harmony: HueHarmony): number {
+  return (((hue + HUE_HARMONIES[harmony]) % 1) + 1) % 1;
+}
+
 export function loadCustomLiveColors(): LiveColor[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]") as unknown;
