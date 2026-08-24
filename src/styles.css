@@ -323,21 +323,31 @@ main {
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
-  /* How wide a column ends up is a property of the window's aspect ratio, which
-     no width media query can express. The clusters that care ask the column
-     directly. */
-  container-type: inline-size;
-  container-name: live-column;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  align-content: center;
-  align-items: start;
+  /* 300px, not 140px. A 440px column split into three 140px tracks left the
+     master cluster ~10px of actual slider between its label and its readout —
+     wide enough to set brightness to 0 and not wide enough to get back off it.
+     Wide tracks also stop the column spreading sideways while its height sits
+     empty. `min(…, 100%)` so a column narrower than the floor collapses to one
+     track instead of overflowing it. */
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+  /* Share the leftover height out among the rows rather than banking it above
+     and below a centred huddle. Clusters grow, and the button grids inside them
+     grow with the row — bigger targets on a surface poked in the dark. */
+  align-content: stretch;
+  align-items: stretch;
+  grid-auto-rows: minmax(min-content, 1fr);
   gap: 12px;
   /* Last resort on a short window: the COLUMN scrolls, never the document. A
      scrollbar on <main> would mean a touch drag pans the page instead of
-     drawing, which is the bug tests/layout.spec.ts exists to catch. */
+     drawing, which is the bug tests/layout.spec.ts exists to catch.
+     `pan-y` re-permits the one gesture that makes this reachable: the page sets
+     `touch-action: none` to protect the canvas from stray pans, which also made
+     an overflowing column impossible to scroll with a finger — the controls
+     below the fold were simply gone on a touch screen. */
   overflow-y: auto;
   overflow-x: hidden;
+  touch-action: pan-y;
 }
 
 
@@ -403,6 +413,118 @@ main {
   border: 1px solid #2a2445;
   border-radius: 10px;
   background: rgba(20, 16, 36, 0.6);
+  /* The container is the CLUSTER, not the column. How wide a cluster ends up
+     depends on how many tracks the column split into, which no ancestor's width
+     predicts — asking the column was the bug that produced a 10px slider. */
+  container-type: inline-size;
+  container-name: live-cluster;
+}
+
+/* Button grids absorb the height the row was given. Slider and readout clusters
+   have nothing to grow, so they centre in theirs instead of hanging off the top. */
+.live-side .cluster.pens,
+.live-side .cluster.effects,
+.live-side .cluster.swatches,
+.live-side .quick-settings-grid,
+.live-side .live-layer-list,
+.live-side .live-status-grid {
+  height: 100%;
+}
+
+/* `min-content`, not a pixel floor. The buttons already carry their own
+   min-heights; adding a second floor on the row only inflated the column's
+   minimum until it overflowed an iPad in landscape. This grows into spare height
+   and gives it back when there is none. */
+.live-side .cluster.pens,
+.live-side .cluster.effects,
+.live-side .cluster.swatches,
+.live-side .live-layer-list,
+.live-side .live-status-grid {
+  grid-auto-rows: minmax(min-content, 1fr);
+}
+
+.live-side .quick-settings-grid {
+  grid-auto-rows: minmax(min-content, var(--quick-button-height));
+  align-content: stretch;
+}
+
+/* Give the panel's height to what is inside it. Without this the cluster grew
+   and its contents did not, so a taller Master panel just meant more empty
+   panel under the Speed slider. Grid-based clusters ignore flex-grow and stretch
+   their own items instead. */
+.live-side .cluster > * {
+  flex-grow: 1;
+}
+
+/* Exception: an edit/add strip is chrome, not a control worth a third of the
+   panel. */
+.live-side .quick-settings-actions {
+  flex-grow: 0;
+}
+
+/* The deck sized these to a fixed pixel tile. In a column that stretches, the
+   cap just left a hole under the last shortcut. */
+.live-side .quick-settings-grid {
+  grid-auto-rows: minmax(min-content, 1fr);
+  /* `1fr`, not the deck's fixed 176px track — one shortcut in a 400px panel
+     should be a 400px target, not a tile with 220px of nothing beside it. */
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
+}
+
+.live-side .quick-setting-button,
+.live-side .quick-setting-empty {
+  max-height: none;
+}
+
+.live-side .tempo-time-grid,
+.live-side .tempo-mode-row {
+  height: 100%;
+}
+
+/* The swatch's fixed 30px left its stretched row half empty, and a colour chip
+   is exactly the thing that wants to be a big target. */
+.live-side .cluster.swatches .swatch {
+  height: 100%;
+  min-height: 30px;
+}
+
+/* Row spans are how a grid says "this one deserves more of the height". Equal
+   1fr rows gave a single Size slider the same share as an eight-button pen pad,
+   which is where the acre of empty panel came from. Roughly proportional to how
+   many rows of content each actually holds. */
+.live-side .cluster.pens { grid-row: span 4; }
+.live-side .cluster.effects,
+.live-side .cluster.swatches,
+.live-side .cluster.tempo-menu,
+.live-side .cluster.master-ctl,
+.live-side .cluster.quick-ctl,
+.live-side .cluster.live-layer-list,
+.live-side .cluster.live-status-grid { grid-row: span 2; }
+
+/* A show surface is poked with a finger in the dark. Pad the hit area out to
+   ~26px without fattening the track — `background-clip` keeps the painted groove
+   inside the content box. */
+.live-side input[type="range"],
+.corner input[type="range"],
+.live-extras input[type="range"] {
+  height: 6px;
+  padding-block: 10px;
+  background-clip: content-box;
+}
+
+.live-side input[type="range"]::-webkit-slider-thumb,
+.corner input[type="range"]::-webkit-slider-thumb,
+.live-extras input[type="range"]::-webkit-slider-thumb {
+  width: 20px;
+  height: 20px;
+}
+
+/* Fail loudly, not silently. A slider narrower than this is not a control, it is
+   a trap — you can reach 0 and not get back. Overflow here trips the layout gate
+   instead of shipping something unusable. */
+.live-side .slider-row input[type="range"],
+.corner .slider-row input[type="range"] {
+  min-width: 88px;
 }
 
 /* Transparent by default: master, quick settings, layers and status are ordinary
@@ -1067,10 +1189,6 @@ main {
      labels past their own panel. */
   .live-side {
     flex: 0 0 auto;
-    /* Drop the containment with the container: `container-type` implies layout
-       containment, which would make the column — not the page — the containing
-       block for the absolutely positioned "All controls" sheet below. */
-    container-type: normal;
     display: flex;
     flex-flow: row wrap;
     align-items: flex-start;
@@ -2919,7 +3037,7 @@ button:disabled {
 /* A 900x600 window in show mode leaves 142px a side. "Brightness", a usable
    slider and a "1.00×" readout do not fit on one line in that, so the label and
    the value take the top line and the slider takes the whole width below. */
-@container live-column (max-width: 230px) {
+@container live-cluster (max-width: 250px) {
   .master-ctl .slider-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;

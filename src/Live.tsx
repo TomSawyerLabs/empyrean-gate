@@ -453,15 +453,18 @@ export default function Live() {
 
   return (
     <div className={`live-page ${showMore ? "more-open" : ""}`}>
+      {/* Brush size sits with the brushes, not with the palette — and it evens
+          the two columns out, which is what keeps column B from overflowing on
+          an iPad in landscape. */}
       <div className="live-side a">
         {pens}
+        {sizeCtl}
         {effects}
         {tempoCtl}
       </div>
       {canvas}
       <div className="live-side b">
         {colors}
-        {sizeCtl}
         {/* `display: contents` wherever there is room, so these sit in the column
             grid like any other cluster. Where there isn't — a portrait tablet,
             a squarish window — they collapse into the "All controls" sheet
