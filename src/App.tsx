@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import Control from "./Control";
+import Games from "./Games";
 import { EFFECTS } from "./effects";
 import Live from "./Live";
 import { loadSelectedLiveColor } from "./liveColors";
@@ -21,6 +22,7 @@ const TABS = [
   { id: "patch", label: "Patch" },
   { id: "replay", label: "Archive" },
   { id: "control", label: "Control" },
+  { id: "games", label: "Games" },
   { id: "test", label: "Test" },
   { id: "settings", label: "Settings" },
 ] as const;
@@ -574,6 +576,22 @@ export default function App() {
           </button>
         </div>
       )}
+      {/* Game mode replaces the scene with a game world; like test mode the
+          state is unmissable everywhere, but stopping is Gate-machine-only so
+          the button only shows where it will actually work. */}
+      {status?.game?.active && (
+        <div className="banner game-banner">
+          <span className="game-dot" />
+          <strong>GAME MODE</strong>
+          <span className="testmode-summary">{status.game.summary}</span>
+          {(client.httpBase.startsWith("http://127.0.0.1") ||
+            client.httpBase.startsWith("http://localhost")) && (
+            <button className="ghost" onClick={() => client.setGameMode(null)}>
+              Stop
+            </button>
+          )}
+        </div>
+      )}
       <SacnContentionBanner />
       {status?.gpu_error && (
         <div className="banner error">
@@ -627,6 +645,7 @@ export default function App() {
           </Suspense>
         )}
         {tab === "control" && <Control />}
+        {tab === "games" && <Games />}
         {tab === "test" && <Test />}
         {tab === "settings" && <Settings />}
       </main>

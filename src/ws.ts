@@ -4,6 +4,7 @@
 import type {
   AppConfig,
   EffectCfg,
+  GameKind,
   LayerCfg,
   PatchDoc,
   PreviewFrame,
@@ -313,6 +314,19 @@ export class GateClient {
   /** Probe the lighting network for pixel controllers. Read-only. */
   discoverControllers() {
     this.send({ type: "discover_controllers" });
+  }
+  /** Start (kind) or stop (null) game mode. Gate machine only — the backend
+   *  refuses it from remote clients, and while a show playlist is running. */
+  setGameMode(game: GameKind | null) {
+    this.send({ type: "set_game_mode", game });
+  }
+  /** Live game parameters (species count, effects overlay). Gate machine only. */
+  setGameConfig(cfg: { species?: number; effects_overlay?: boolean }) {
+    this.send({ type: "set_game_config", ...cfg });
+  }
+  /** Inject into the running game. Open to every client; inputs merge. */
+  gameInput(species: number, points: { angle: number; radius: number }[]) {
+    this.send({ type: "game_input", species, points });
   }
   addLayer(layer: LayerCfg) {
     this.send({ type: "add_layer", layer });

@@ -410,6 +410,7 @@ export interface RuntimeStatus {
   patch_error: string | null;
   show: ScheduledShowStatus;
   test: TestModeStatus;
+  game: GameModeStatus;
   /** True while a controller scan is in flight. */
   discovery_running: boolean;
 }
@@ -457,6 +458,20 @@ export interface TestModeStatus {
   expires_secs: number;
   config: TestConfig;
   /** Name of the playlist blocking arming, when a show is running. */
+  blocked_by_show: string | null;
+}
+
+// --- game mode (mirrors src-tauri/src/game/mod.rs, plans/game-mode.md) ---
+
+export type GameKind = "rps";
+
+export interface GameModeStatus {
+  active: GameKind | null;
+  /** One line naming the game and how long it has been running. */
+  summary: string;
+  species: number;
+  effects_overlay: boolean;
+  /** Name of the playlist blocking a manual start, when a show is running. */
   blocked_by_show: string | null;
 }
 

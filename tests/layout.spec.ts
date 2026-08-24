@@ -40,7 +40,7 @@ const VIEWPORTS = [
   { name: "phone-portrait", width: 390, height: 844, mobile: true },
 ];
 
-const TABS = ["live", "media", "control", "test", "settings"] as const;
+const TABS = ["live", "media", "control", "games", "test", "settings"] as const;
 
 /// Tabs required to fit on screen with no scrolling at all.
 ///

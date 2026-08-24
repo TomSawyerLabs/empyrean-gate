@@ -45,7 +45,7 @@ test("the corner menu carries every tab and the actions the narrow topbar drops"
 
   const menu = page.locator(".topbar-menu");
   await expect(menu).toBeVisible();
-  await expect(menu.locator(".topbar-menu-tabs button")).toHaveCount(7);
+  await expect(menu.locator(".topbar-menu-tabs button")).toHaveCount(8);
   // The three actions `@media (max-width: 700px)` hides from the topbar. New
   // window is Tauri-only and legitimately absent in a browser.
   await expect(menu.getByRole("button", { name: /Show mode/ })).toBeVisible();

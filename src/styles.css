@@ -200,6 +200,37 @@ code,
   letter-spacing: 0.04em;
 }
 
+/* Game mode: the array is a game world, not the show. Same unmissable banner
+   treatment as test mode, in its own color so the two states never read as
+   each other from across the booth. */
+.banner.game-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #123a2a;
+  color: #c8ffe3;
+  border-bottom: 1px solid #1f8f5f;
+  letter-spacing: 0.04em;
+}
+
+.game-banner .testmode-summary {
+  letter-spacing: normal;
+}
+
+.game-banner button {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.game-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #2fd98a;
+  flex-shrink: 0;
+  animation: test-pulse 1.4s ease-in-out infinite;
+}
+
 /* Something else is driving our universes. Banner treatment for the same reason
    test mode gets it: the rig stops obeying this app, and the cause is off-screen.
    Three tiers, because the operator's next move differs — outranked (they win),
@@ -4546,6 +4577,78 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* Games tab: same centered panel column as Test — it's a control surface,
+   scrolling is fine, and one layout works from phone to show display. */
+.games-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.games-control,
+.games-play {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.games-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #2a2445;
+  border-radius: 10px;
+}
+
+.games-card.active {
+  border-color: #1f8f5f;
+  background: #10231b;
+}
+
+.games-card-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.games-card-text .hint {
+  margin: 4px 0 0;
+}
+
+.games-species {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Species chips: the color IS the label (the array can't show text), so the
+   chip is mostly swatch. Sized for fingers. */
+.games-chip {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  background: var(--chip);
+  color: #0b0917;
+  font-weight: 700;
+}
+
+.games-chip.active {
+  border-color: #fff;
+}
+
+.games-canvas-wrap {
+  display: flex;
+  justify-content: center;
+  /* Square, height-driven canvas in a bounded box, like the Test preview —
+     and the tap surface must never scroll the page out from under a finger. */
+  height: min(46vh, 380px);
+  touch-action: none;
 }
 
 .test-mode-control {
