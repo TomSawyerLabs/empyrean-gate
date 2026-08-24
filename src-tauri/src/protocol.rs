@@ -637,6 +637,10 @@ pub struct RuntimeStatus {
     pub update_available: Option<String>,
     /// Updater progress / result note ("up to date", "downloading…", errors).
     pub update_state: String,
+    /// The newer release is already downloaded and sitting beside the running exe,
+    /// so installing it is a process spawn rather than a download. Lets the UI
+    /// promise "Update now" instead of "Download and update".
+    pub update_staged: bool,
     pub video: VideoSourceStatus,
     /// True while a compiled node-graph patch is rendering instead of the
     /// layer stack.

@@ -340,6 +340,23 @@ prompt on every update, and would replace the one-frame live handover with a
 kill-and-reinstall. On Linux the AppImage keeps the same property a bare binary has:
 one file, which is what makes promotion a plain copy.
 
+**In show mode**, where the top bar and its version chip are hidden, an available
+update surfaces its own controls beside ⚑ Report — an install button and an
+**Auto-update** checkbox — and only when there is actually an update to act on. So a
+mid-set update is something you can see coming and decline, rather than something that
+either happens to you or cannot be reached at all. Installing mid-show stays allowed on
+purpose: the handover below is what makes it cost about a frame.
+
+Because "not tonight" should not quietly mean "not ever", a client sitting in show mode
+**leaves it once a day** at `update.leave_show_at` (default 09:00 local, blank to
+disable) — an hour when the Gate is washed out by daylight anyway. Same reasoning as
+`render.phase_reset_at`.
+
+Updates are also **downloaded as soon as they are found**, even with auto-install off, so
+taking one between sets is a tap rather than a tap and a 40 MB wait. That does mean a
+release is pulled without being asked for; the staged copy sits beside the running binary
+and is cleaned up at the next startup.
+
 The app checks GitHub Releases (startup + every 6 h; toggle in
 Settings → Updates) and shows a lit version chip in the top bar when a newer release
 exists — click it (or use Settings) to update. Mid-show updates cost about one frame.

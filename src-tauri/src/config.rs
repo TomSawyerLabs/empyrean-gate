@@ -453,6 +453,17 @@ pub struct UpdateConfig {
     /// Install updates as soon as they are found. The swap is a seamless takeover,
     /// but taking an update mid-show is the operator's call — off by default.
     pub auto_install: bool,
+    /// Local wall-clock `"HH:MM"` at which a client sitting in show mode leaves it,
+    /// or `None` to never.
+    ///
+    /// Show mode hides the chrome an update is offered through, so a rig left in it
+    /// with `auto_install` switched off for the night would never take an update
+    /// again. Dropping out of show mode each morning is what makes "suppress it for
+    /// tonight" mean tonight rather than forever.
+    ///
+    /// Same shape and the same reasoning as `RenderConfig::phase_reset_at`: pick an
+    /// hour when the Gate is washed out by daylight and nobody is watching it.
+    pub leave_show_at: Option<String>,
 }
 
 impl Default for UpdateConfig {
@@ -460,6 +471,7 @@ impl Default for UpdateConfig {
         Self {
             auto_check: true,
             auto_install: false,
+            leave_show_at: Some("09:00".into()),
         }
     }
 }

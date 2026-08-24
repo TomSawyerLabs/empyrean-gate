@@ -343,7 +343,38 @@ main {
   right: 8px;
   z-index: 60;
   display: flex;
+  align-items: flex-start;
   gap: 6px;
+}
+
+/* Only rendered when an update exists, so it can afford to be more than a pill. */
+.show-update {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--accent2);
+  border-radius: 10px;
+  background: rgba(12, 10, 24, 0.88);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.show-update-install {
+  min-height: 34px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #fff;
+  border-color: var(--accent2);
+  background: rgba(56, 209, 194, 0.18);
+}
+
+.show-update-auto {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .show-exit,

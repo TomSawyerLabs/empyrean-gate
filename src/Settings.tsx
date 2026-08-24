@@ -371,6 +371,19 @@ function UpdatesPanel({ config }: { config: AppConfig }) {
         />
         Install automatically when found
       </label>
+      <label className="field-row">
+        <span>Leave show mode at</span>
+        <input
+          type="time"
+          value={config.update.leave_show_at ?? ""}
+          onChange={(e) => commit({ leave_show_at: e.target.value || null })}
+        />
+        <span className="hint">
+          Show mode hides the update controls, so a rig left in it overnight would never
+          take one. Dropping out daily — at an hour the Gate is washed out by daylight
+          anyway — is what makes &ldquo;not tonight&rdquo; mean tonight. Blank = never.
+        </span>
+      </label>
       <label className="toggle-row">
         <input
           type="checkbox"

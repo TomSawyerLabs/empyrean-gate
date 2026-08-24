@@ -47,7 +47,7 @@ export default defineConfig({
       // Explicitly listed rather than an ignore list: the gate is Chromium-only
       // by the reasoning above, and `screenshots.spec.ts` WRITES files, so a
       // second project running it would race the first over docs/*.png.
-      testMatch: /(quick-settings|live-controls|color-wheel|mobile-nav)\.spec\.ts/,
+      testMatch: /(quick-settings|live-controls|color-wheel|mobile-nav|show-mode-updates).spec.ts/,
       // Three times Chromium's budget, and it is the environment, not the app.
       // Playwright waits for an element's box to hold still across two animation
       // frames before it will click. Live runs a WebGL2 preview every frame, and

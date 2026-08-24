@@ -12,7 +12,7 @@
     "typecheck": "tsc -b",
     "mock-backend": "bun scripts/mock-backend.ts",
     "test:layout": "bun run build && playwright test layout",
-    "test:behavior": "playwright test quick-settings live-controls color-wheel mobile-nav",
+    "test:behavior": "playwright test quick-settings live-controls color-wheel mobile-nav layer-quick-edit show-mode-updates",
     "screenshots": "bun run build && UPDATE_SCREENSHOTS=1 playwright test screenshots"
   },
   "dependencies": {

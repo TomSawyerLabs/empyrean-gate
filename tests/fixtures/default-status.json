@@ -44,6 +44,7 @@
   "version": "",
   "update_available": null,
   "update_state": "",
+  "update_staged": false,
   "video": {
     "active": false,
     "owner_id": "",

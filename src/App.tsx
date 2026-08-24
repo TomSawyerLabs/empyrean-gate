@@ -41,6 +41,8 @@ function tabFromHash(): TabId {
 const IN_TAURI = "__TAURI_INTERNALS__" in window;
 
 const SHOW_MODE_KEY = "empyrean-show-mode";
+/// Date (local) that the scheduled show-mode exit last fired, so it fires once a day.
+const SHOW_MODE_LEFT_KEY = "empyrean-show-mode-left-on";
 
 /// Show mode: the native window goes real fullscreen AND the app chrome is
 /// hidden, so the array fills the display edge to edge. The preference lives in
@@ -48,13 +50,53 @@ const SHOW_MODE_KEY = "empyrean-show-mode";
 /// webview data folder is keyed by the app identifier), and is re-applied on
 /// mount — so the app comes back in whatever state it was closed in. Browser
 /// clients get the chrome-hiding half; only Tauri can take a window fullscreen.
-function useShowMode(): [boolean, (on: boolean) => void] {
+function useShowMode(leaveAt: string | null | undefined): [boolean, (on: boolean) => void] {
   const [on, setOn] = useState(() => localStorage.getItem(SHOW_MODE_KEY) === "1");
 
   const set = useCallback((next: boolean) => {
     setOn(next);
     localStorage.setItem(SHOW_MODE_KEY, next ? "1" : "0");
   }, []);
+
+  // Drop out of show mode once a day, at a local hour when the Gate is washed
+  // out by daylight anyway.
+  //
+  // Show mode hides the chrome an update is offered through, so a rig left in it
+  // with auto-install switched off for the night would never take an update
+  // again. This is what makes "not tonight" mean tonight rather than forever.
+  //
+  // Keyed on the DATE it last fired, not on "is it 09:00 right now": a machine
+  // asleep or a tab throttled across the boundary still leaves show mode on its
+  // next tick instead of silently missing the day.
+  useEffect(() => {
+    if (!on || !leaveAt) return;
+    const match = /^(\d{1,2}):(\d{2})$/.exec(leaveAt.trim());
+    if (!match) return;
+    const dueMinutes = Number(match[1]) * 60 + Number(match[2]);
+
+    const check = () => {
+      const now = new Date();
+      const today = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+      if (localStorage.getItem(SHOW_MODE_LEFT_KEY) === today) return;
+      if (now.getHours() * 60 + now.getMinutes() < dueMinutes) return;
+      localStorage.setItem(SHOW_MODE_LEFT_KEY, today);
+      set(false);
+    };
+
+    // Mark today as already handled when show mode is turned on AFTER the hour
+    // has passed — otherwise entering show mode at 21:00 would immediately kick
+    // you back out, having "crossed" 09:00 twelve hours ago.
+    const now = new Date();
+    if (now.getHours() * 60 + now.getMinutes() >= dueMinutes) {
+      const today = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+      if (localStorage.getItem(SHOW_MODE_LEFT_KEY) !== today) {
+        localStorage.setItem(SHOW_MODE_LEFT_KEY, today);
+      }
+    }
+
+    const timer = window.setInterval(check, 30_000);
+    return () => window.clearInterval(timer);
+  }, [on, leaveAt, set]);
 
   useEffect(() => {
     if (!IN_TAURI) return;
@@ -132,6 +174,54 @@ function DisconnectedOverlay({ disabled = false }: { disabled?: boolean }) {
           you on the same network?
         </p>
       </div>
+    </div>
+  );
+}
+
+/// The update controls that show mode gets, since it hides the top bar the
+/// version chip lives in. Renders nothing at all until there is an update to
+/// act on — the show surface is deliberately near-empty.
+///
+/// Installing mid-show is allowed on purpose: the two-phase handover costs about
+/// a frame, which is the whole reason it exists. What was missing was any way to
+/// see it coming or to say "not during this set".
+function ShowModeUpdate() {
+  const { client, status, config } = useGate();
+  const [busy, setBusy] = useState(false);
+  const next = status?.update_available;
+  if (!next || !config) return null;
+
+  const auto = config.update.auto_install;
+  const note = status?.update_state;
+  return (
+    <div className="show-update">
+      <button
+        className="show-update-install"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          client.send({ type: "install_update" });
+        }}
+      >
+        {busy || note === "handing over…"
+          ? `Updating to v${next}…`
+          : status?.update_staged
+            ? `⤓ Update to v${next} now`
+            : `⤓ Get v${next}`}
+      </button>
+      <label className="show-update-auto">
+        <input
+          type="checkbox"
+          checked={auto}
+          onChange={(event) =>
+            client.setConfig({
+              ...config,
+              update: { ...config.update, auto_install: event.target.checked },
+            })
+          }
+        />
+        <span>Auto-update</span>
+      </label>
     </div>
   );
 }
@@ -417,12 +507,12 @@ function TopbarMenu({
 }
 
 export default function App() {
-  const { connected, status, errors, dismissError, client, denied, savedPulse } = useGate();
+  const { connected, status, errors, dismissError, client, config, denied, savedPulse } = useGate();
   const [tab, setTab] = useState<TabId>(tabFromHash);
   const [showConnect, setShowConnect] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [savedVisible, setSavedVisible] = useState(false);
-  const [showMode, setShowMode] = useShowMode();
+  const [showMode, setShowMode] = useShowMode(config?.update.leave_show_at);
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Flash "saved" whenever the backend confirms a config change (from any client).
@@ -505,6 +595,10 @@ export default function App() {
           <button className="show-exit" onClick={() => setShowMode(false)}>
             ⤢ Exit show mode <span className="chip-key">Esc</span>
           </button>
+          {/* Only when there is actually an update. Show mode is meant to be
+              nearly empty, so a control that is always there costs more than it
+              earns — but an update you cannot see or refuse is worse. */}
+          <ShowModeUpdate />
         </div>
       )}
       <header className="topbar">

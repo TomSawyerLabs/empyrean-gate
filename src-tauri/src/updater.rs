@@ -77,12 +77,32 @@ fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
 }
 
 fn set_update_status(state: &SharedState, available: Option<String>, note: &str) {
+    set_update_status_staged(state, available, note, false);
+}
+
+fn set_update_status_staged(
+    state: &SharedState,
+    available: Option<String>,
+    note: &str,
+    staged: bool,
+) {
     let mut st = state.status.lock();
     st.update_available = available;
     st.update_state = note.to_string();
+    st.update_staged = staged;
     drop(st);
     // Nudge clients so the panel refreshes promptly (status also ticks at 2 Hz).
     state.broadcast_state();
+}
+
+/// True when `target` already holds a plausible copy of the release.
+///
+/// Survives a restart: the versioned sibling from a previous session's staging is
+/// still there, so an operator who declined last night gets an instant install this
+/// morning rather than a second 40 MB download. The size floor is the same guard
+/// `stage` applies — a truncated or error-page download must not read as ready.
+fn already_staged(target: &std::path::Path) -> bool {
+    std::fs::metadata(target).is_ok_and(|m| m.is_file() && m.len() > 1_000_000)
 }
 
 pub fn spawn(state: Arc<SharedState>) {
@@ -110,10 +130,29 @@ fn updater_thread(state: Arc<SharedState>) {
                 Ok(Some((version, url))) => {
                     if is_newer(&version) {
                         log::info!("update available: v{version} (running v{})", effective_version());
-                        latest = Some((version.clone(), url));
-                        set_update_status(&state, Some(version), "");
+                        latest = Some((version.clone(), url.clone()));
+                        set_update_status(&state, Some(version.clone()), "");
+
                         if state.config.read().update.auto_install {
                             state.update_install_requested.store(true, Ordering::SeqCst);
+                        } else {
+                            // Stage it anyway. With auto-install off the operator
+                            // still has to be able to take the update on one tap
+                            // between sets — and downloading 40 MB at that moment
+                            // is the part that would make them not bother.
+                            match stage(&version, &url, &state) {
+                                Ok(_) => set_update_status_staged(
+                                    &state,
+                                    Some(version),
+                                    "ready to install",
+                                    true,
+                                ),
+                                Err(e) => {
+                                    // Not fatal: the install path downloads on demand.
+                                    log::warn!("could not pre-stage v{version}: {e:#}");
+                                    set_update_status(&state, Some(version), "update available");
+                                }
+                            }
                         }
                     } else {
                         latest = None;
@@ -198,10 +237,26 @@ fn versioned_path(version: &str) -> anyhow::Result<PathBuf> {
     Ok(dir.join(format!("empyrean-gate-v{version}{ext}")))
 }
 
-/// Download the new binary next to the current one and launch it; the successor
+/// Download the new binary next to the current one, then launch it; the successor
 /// takes over via the standard two-phase handover and this process exits.
+///
+/// Two steps rather than one so that staging can happen at check time and the
+/// install can be a spawn — see `stage`.
 fn download_and_launch(version: &str, url: &str, state: &SharedState) -> anyhow::Result<()> {
+    let target = stage(version, url, state)?;
+    launch(&target, state)
+}
+
+/// Put the release on disk beside the running exe and return where it landed.
+///
+/// Idempotent: an existing plausible copy is left alone, so repeated checks and
+/// restarts do not re-download it.
+fn stage(version: &str, url: &str, _state: &SharedState) -> anyhow::Result<PathBuf> {
     let target = versioned_path(version)?;
+    if already_staged(&target) {
+        log::info!("v{version} is already staged at {}", target.display());
+        return Ok(target);
+    }
     let tmp = target.with_extension("download");
 
     log::info!("downloading v{version} from {url}");
@@ -229,9 +284,15 @@ fn download_and_launch(version: &str, url: &str, state: &SharedState) -> anyhow:
         std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
     }
     std::fs::rename(&tmp, &target)?;
-    log::info!("downloaded {} ({bytes} bytes); launching successor", target.display());
+    log::info!("staged {} ({bytes} bytes)", target.display());
+    Ok(target)
+}
 
-    let mut cmd = std::process::Command::new(&target);
+/// Start the staged successor. It takes the port via the two-phase handover and
+/// this process exits when it commits.
+fn launch(target: &std::path::Path, state: &SharedState) -> anyhow::Result<()> {
+    log::info!("launching successor {}", target.display());
+    let mut cmd = std::process::Command::new(target);
     if state.headless.load(Ordering::Relaxed) {
         cmd.arg("--headless");
     }

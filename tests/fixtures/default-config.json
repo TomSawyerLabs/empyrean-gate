@@ -69,7 +69,8 @@
   },
   "update": {
     "auto_check": true,
-    "auto_install": false
+    "auto_install": false,
+    "leave_show_at": "09:00"
   },
   "windows": {
     "aux_open": []

@@ -214,6 +214,8 @@ export interface RenderConfig {
 export interface UpdateConfig {
   auto_check: boolean;
   auto_install: boolean;
+  /** Local "HH:MM" at which a client sitting in show mode leaves it; null = never. */
+  leave_show_at: string | null;
 }
 
 export interface WindowsConfig {
@@ -405,6 +407,8 @@ export interface RuntimeStatus {
   version: string;
   update_available: string | null;
   update_state: string;
+  /** The release is already downloaded, so installing it is a spawn, not a wait. */
+  update_staged: boolean;
   video: VideoSourceStatus;
   /** True while a compiled node-graph patch renders instead of the layer stack. */
   patch_active: boolean;
