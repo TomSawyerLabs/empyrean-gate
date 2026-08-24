@@ -9,7 +9,48 @@ worlds, not rounds** — every game is a simulation that runs forever with zero
 players; humans are perturbations, not prerequisites. Joining should feel like
 stepping into weather that was already happening. Cap ~10 simultaneous players.
 
-Status: **ideation / design**. Nothing built yet.
+Status: **phase 1 built** (2026-08-24). RPS ecosystem runs end to end: sim core
+(`src-tauri/src/game/`), engine integration (tick beside the patch runtime,
+storage binding 9, `game_color` mix in `gate.wgsl`), protocol
+(`SetGameMode`/`SetGameConfig` loopback-only, `GameInput` open), Games tab +
+GAME MODE banner. Commits `c7f3bb6`, `608a85d`, `f0b7a6b`.
+
+## Progress log
+
+- [x] Sim core: `RpsSim` (threshold CA, vigor, inject, watchdog) + 8 unit tests.
+- [x] Engine: `GameRuntime` in the frame loop, beat-synced ticks (free-run
+      backstop), prev/next packed-RGB snapshots, 2 s crossfade orthogonal to
+      the playlist transition, effects/dabs suppression with overlay override.
+- [x] Protocol/state/server: control surface in `SharedState` (never in
+      config), loopback gate mirrors patch editing, timeline recording arms.
+- [x] Frontend: Games tab (admin card + species chips + tap-to-inject via the
+      preview canvas), banner, types/ws wrappers, layout-gate + nav-count
+      test updates.
+- [ ] Run `bun run test:layout` / `test:behavior` (blocked mid-session on a
+      concurrent session's WIP breaking `tsc`; vite-only build walk pending).
+- [ ] Playlist **game cue** (decision #3 says design in from day one): add
+      `#[serde(default)] game: Option<GameCue>` to `ShowPlaylistEntry`, engine
+      branch in the scheduler, entry type in Control's playlist editor. The
+      shader mix is already orthogonal to the scene crossfade, so this is
+      additive.
+- [ ] Attract-mode polish: idle autoplay injections so the world stays varied
+      over hours (watchdog alone keeps it alive but not dramatic).
+- [ ] PWA manifest shortcut for `/#games`.
+- [ ] Next games: Life (same grid substrate), then Spokewar (particle
+      substrate; needs player slots/colors — see roster).
+
+## Handover notes for a fresh session
+
+- Grid cells are packed RGB (colors baked CPU-side in
+  `GameRuntime::pack_cells`) — the shader never knows species counts.
+- `Globals` grew 8 fields (2×16 B groups); keep `gate.wgsl` in field-for-field
+  step and sizes multiple of 16 (guard test:
+  `game::tests::globals_struct_is_uniform_aligned`).
+- Game state is deliberately NOT in `AppConfig` and NOT transplanted on
+  handover — a self-update mid-game reseeds the world.
+- A concurrent session was active in this worktree (effects/shapes, then
+  layer-quick-edit); commit `648f8f9` repaired a staging race. Check
+  `git status` before assuming the tree is yours alone.
 
 ## Environment / context
 

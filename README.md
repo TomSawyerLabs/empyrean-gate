@@ -71,11 +71,21 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   its size or growing or shrinking away over its life. On Control, which has no
   array to aim at, a shape pad plants one centre-array instead. A tap with no shape
   selected is still a burst, and a drag still draws with the current pen.
-- **Six UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Media
+- **Seven UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Media
   (image/video intake), Patch (node-graph editor), Archive (recorded-show replay),
-  Control (touch-sized effect pads + master/layer faders), and Settings. In the
-  desktop app, "New window" pops the current tab out into its own window. Old
-  `/#view` and `/#draw` links redirect to Live.
+  Control (touch-sized effect pads + master/layer faders), Games, and Settings.
+  In the desktop app, "New window" pops the current tab out into its own window.
+  Old `/#view` and `/#draw` links redirect to Live.
+- **Game mode (early)**: the Games tab turns the array into a continuous game
+  world — first game is **Ecosystem**, a cyclic predator-prey cellular automaton
+  whose spiral fronts advance on the beat and never converge. Starting/stopping
+  a game is Gate-machine-only (and refused while a playlist runs); playing is
+  open to every connected phone — pick a species, tap the array, and your blob
+  joins a simulation that runs fine with zero players, so there is nothing to
+  wait for and nothing to ruin by leaving. Effects and drawing are suppressed
+  during a game unless the operator overlays them. A green GAME MODE banner
+  sits on every device while a world is live. Design notes and the game roster:
+  `plans/game-mode.md`.
 - **Patches (early)**: a node-graph alternative to the layer stack — wire
   generators, transforms, blends, and inputs (audio features, beats, LFOs,
   envelopes, IMU) into a typed dataflow whose sink is the array. Graphs compile
