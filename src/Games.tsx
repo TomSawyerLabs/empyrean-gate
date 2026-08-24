@@ -10,13 +10,24 @@ import { useGate } from "./state";
 import GateCanvas from "./GateCanvas";
 import type { GameKind } from "./types";
 
-const GAMES: { kind: GameKind; name: string; blurb: string }[] = [
+const GAMES: {
+  kind: GameKind;
+  name: string;
+  blurb: string;
+  /** The one admin knob, with its per-game meaning and bounds. */
+  knob: { label: string; min: number; max: number };
+  playHint: string;
+}[] = [
   {
     kind: "rps",
     name: "Ecosystem",
     blurb:
       "Species forever eating each other in rotating spiral fronts — it never " +
       "settles and never ends. Pick a species and tap the array to seed it.",
+    knob: { label: "Species", min: 3, max: 5 },
+    playHint:
+      "Pick a species, then tap the array to seed it. Hold nothing back — " +
+      "inputs from everyone merge.",
   },
   {
     kind: "life",
@@ -25,6 +36,23 @@ const GAMES: { kind: GameKind; name: string; blurb: string }[] = [
       "Game of Life in color: your taps splat living soup in your color, and " +
       "newborn cells inherit blended hues where colonies meet. Generations " +
       "advance on the beat; a drizzle of soup keeps a quiet world moving.",
+    knob: { label: "Colors", min: 2, max: 8 },
+    playHint:
+      "Pick a color and tap to splat living soup — or take the ✕ and erase. " +
+      "Newborns blend their parents' colors where colonies meet.",
+  },
+  {
+    kind: "spokewar",
+    name: "Spokewar",
+    blurb:
+      "Rim bases at war: tap anywhere and your base fires a squad of army " +
+      "particles at it, painting territory that always slowly fades. Every " +
+      "base fights for itself until a player picks up its color — leaving " +
+      "just hands it back.",
+    knob: { label: "Bases", min: 2, max: 8 },
+    playHint:
+      "Pick a base color, then tap where its squads should fly. Strong enemy " +
+      "paint grinds squads down — soften a sector before pushing through it.",
   },
 ];
 
@@ -42,7 +70,11 @@ export default function Games() {
   const { client, status } = useGate();
   const game = status?.game;
   const active = game?.active ?? null;
-  const species = game?.species ?? 3;
+  const activeGame = GAMES.find((g) => g.kind === active);
+  const knob = activeGame?.knob ?? { label: "Species", min: 3, max: 5 };
+  // The knob value is shared across games; show it clamped to the running
+  // game's own bounds (the sim clamps the same way).
+  const species = Math.min(Math.max(game?.species ?? 3, knob.min), knob.max);
   const blockedBy = game?.blocked_by_show ?? null;
 
   // Same admin inference the Patch tab uses: the Gate machine's own window or
@@ -120,11 +152,11 @@ export default function Games() {
         )}
         {isAdmin && active && (
           <label className="row">
-            <span>Species</span>
+            <span>{knob.label}</span>
             <input
               type="range"
-              min={3}
-              max={5}
+              min={knob.min}
+              max={knob.max}
               step={1}
               value={species}
               onChange={(e) => client.setGameConfig({ species: Number(e.target.value) })}
@@ -148,10 +180,7 @@ export default function Games() {
         <h3>Play</h3>
         {active ? (
           <>
-            <p className="hint">
-              Pick a species, then tap the array to seed it. Hold nothing back —
-              inputs from everyone merge.
-            </p>
+            <p className="hint">{activeGame?.playHint}</p>
             <div className="games-species">
               {Array.from({ length: species }, (_, s) => (
                 <button

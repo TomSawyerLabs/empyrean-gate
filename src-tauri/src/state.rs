@@ -478,7 +478,10 @@ impl SharedState {
         {
             let mut g = self.game.lock();
             if let Some(s) = species {
-                g.species = s.clamp(crate::game::rps::MIN_SPECIES, crate::game::rps::MAX_SPECIES);
+                // The union of every game's knob range; each sim clamps to its
+                // own (rps 3–5, life/spokewar 2–8), and the UI slider carries
+                // the per-game bounds.
+                g.species = s.clamp(2, 8);
             }
             if let Some(o) = effects_overlay {
                 g.effects_overlay = o;

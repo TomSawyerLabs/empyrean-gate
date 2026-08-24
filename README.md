@@ -83,15 +83,19 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   In the desktop app, "New window" pops the current tab out into its own window.
   Old `/#view` and `/#draw` links redirect to Live.
 - **Game mode (early)**: the Games tab turns the array into a continuous game
-  world — first game is **Ecosystem**, a cyclic predator-prey cellular automaton
-  whose spiral fronts advance on the beat and never converge. Starting/stopping
-  a game is Gate-machine-only (and refused while a playlist runs); playing is
-  open to every connected phone — pick a species, tap the array, and your blob
-  joins a simulation that runs fine with zero players, so there is nothing to
-  wait for and nothing to ruin by leaving. Effects and drawing are suppressed
-  during a game unless the operator overlays them. A green GAME MODE banner
-  sits on every device while a world is live. Design notes and the game roster:
-  `plans/game-mode.md`.
+  world. Three so far — **Ecosystem** (cyclic predator-prey cellular automaton
+  whose spiral fronts advance on the beat and never converge), **Primordial**
+  (Game of Life where color is lineage: taps splat living soup, newborns blend
+  their parents' hues), and **Spokewar** (rim bases firing army-particle squads
+  wherever their players tap, painting territory that always slowly fades —
+  every base is AI-run until someone picks up its color). Starting/stopping a
+  game is Gate-machine-only (and refused while a playlist runs, though a
+  playlist cue can itself *schedule* a game); playing is open to every
+  connected phone, and every world runs fine with zero players, so there is
+  nothing to wait for and nothing to ruin by leaving. Effects and drawing are
+  suppressed during a game unless the operator overlays them. A green GAME
+  MODE banner sits on every device while a world is live. Design notes and the
+  game roster: `plans/game-mode.md`.
 - **Patches (early)**: a node-graph alternative to the layer stack — wire
   generators, transforms, blends, and inputs (audio features, beats, LFOs,
   envelopes, IMU) into a typed dataflow whose sink is the array. Graphs compile

@@ -6,6 +6,7 @@
 
 pub mod life;
 pub mod rps;
+pub mod spokewar;
 
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -19,6 +20,8 @@ pub enum GameKind {
     Rps,
     /// Multi-color Conway's Life; players paint soup, colors are lineage.
     Life,
+    /// Rim bases firing army particles; territory war (see `spokewar`).
+    Spokewar,
 }
 
 impl GameKind {
@@ -26,6 +29,7 @@ impl GameKind {
         match self {
             GameKind::Rps => "Ecosystem",
             GameKind::Life => "Primordial",
+            GameKind::Spokewar => "Spokewar",
         }
     }
 }
@@ -36,6 +40,7 @@ impl GameKind {
 pub enum GameSim {
     Rps(rps::RpsSim),
     Life(life::LifeSim),
+    Spokewar(spokewar::SpokewarSim),
 }
 
 impl GameSim {
@@ -43,6 +48,9 @@ impl GameSim {
         match kind {
             GameKind::Rps => GameSim::Rps(rps::RpsSim::new(theta, radial, species, seed)),
             GameKind::Life => GameSim::Life(life::LifeSim::new(theta, radial, species, seed)),
+            GameKind::Spokewar => {
+                GameSim::Spokewar(spokewar::SpokewarSim::new(theta, radial, species, seed))
+            }
         }
     }
 
@@ -50,6 +58,7 @@ impl GameSim {
         match self {
             GameSim::Rps(s) => s.theta(),
             GameSim::Life(s) => s.theta(),
+            GameSim::Spokewar(s) => s.theta(),
         }
     }
 
@@ -57,15 +66,26 @@ impl GameSim {
         match self {
             GameSim::Rps(s) => s.radial(),
             GameSim::Life(s) => s.radial(),
+            GameSim::Spokewar(s) => s.radial(),
         }
     }
 
     /// The "species" admin knob: species count for the ecosystem, palette
-    /// slots for Life. One knob, per-game meaning.
+    /// slots for Life, base count for Spokewar. One knob, per-game meaning.
     pub fn set_species(&mut self, species: u8) {
         match self {
             GameSim::Rps(s) => s.set_species_count(species),
             GameSim::Life(s) => s.set_palette(species),
+            GameSim::Spokewar(s) => s.set_bases(species),
+        }
+    }
+
+    /// `None` = generations follow the beat (the grid games); `Some(secs)` =
+    /// fixed step, for sims whose motion should not care about the music.
+    pub fn cadence(&self) -> Option<f32> {
+        match self {
+            GameSim::Rps(_) | GameSim::Life(_) => None,
+            GameSim::Spokewar(_) => Some(spokewar::TICK_SECS),
         }
     }
 
@@ -73,6 +93,7 @@ impl GameSim {
         match self {
             GameSim::Rps(s) => s.tick(),
             GameSim::Life(s) => s.tick(),
+            GameSim::Spokewar(s) => s.tick(),
         }
     }
 
@@ -80,6 +101,7 @@ impl GameSim {
         match self {
             GameSim::Rps(s) => s.watchdog(),
             GameSim::Life(s) => s.watchdog(),
+            GameSim::Spokewar(s) => s.watchdog(),
         }
     }
 
@@ -87,6 +109,7 @@ impl GameSim {
         match self {
             GameSim::Rps(s) => s.inject(it, ir, half_theta, half_r, species % s.species_count()),
             GameSim::Life(s) => s.inject(it, ir, half_theta, half_r, species),
+            GameSim::Spokewar(s) => s.inject(it, ir, species),
         }
     }
 
@@ -118,6 +141,7 @@ impl GameSim {
                     hsv_to_packed_rgb(c.hue as f32 / 256.0, 0.85, value)
                 })
                 .collect(),
+            GameSim::Spokewar(s) => s.pack_cells(),
         }
     }
 }

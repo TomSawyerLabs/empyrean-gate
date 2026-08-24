@@ -46,8 +46,24 @@ GAME MODE banner. Commits `c7f3bb6`, `608a85d`, `f0b7a6b`.
       grew a Games optgroup; a game cue lands with an empty stack (black under
       the world, and what the next cue fades in from), 20 min default, and a
       green "game" chip on its row.
-- [ ] Next game: Spokewar (particle substrate; needs player slots/colors —
-      see roster).
+- [x] **Spokewar** (`game/spokewar.rs`): first particle-substrate game.
+      Key design shortcut: player slots ARE the species chips — picking a chip
+      aims that base, every base is AI-run until a human holds its chip, and
+      the AI keeps firing under a player (the garrison fights alongside you),
+      so 0→1 players is seamless by construction. Fixed 50 ms tick via a new
+      `GameSim::cadence()` hook (None = beat-synced grid games, Some = fixed);
+      the engine's pack interpolation smooths steps into continuous flight.
+      Combat: painting is capture, defended cells (strength > 30) attrit —
+      burn 90 strength, lose the particle; 3-ring fresh walls stop a 7-squad,
+      1-ring walls partially breach (intended feel). Bases indestructible; the
+      hole eats armies; territory decays ~22 s. The species knob is per-game
+      now (label + bounds in the Games tab list: Species 3–5 / Colors 2–8 /
+      Bases 2–8), and the backend control clamp widened to the union 2–8.
+- [ ] Spokewar boss mode (co-op, thing in the hole with tendrils) — roster
+      design exists; needs a mode toggle story first (second knob or a
+      per-game variant field on GameCue).
+- [ ] Next games: pick from tier 2 (Comets wants IMU steering; Flak reuses
+      Burst; Pulse wants the beat grid).
 
 ## Handover notes for a fresh session
 

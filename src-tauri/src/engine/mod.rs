@@ -2047,11 +2047,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 rt.next = rt.sim.pack_cells(game_now);
                 rt.dirty = true;
             }
-            let bpm_ok = audio[0].bpm_conf > 0.3 && audio[0].bpm > 20.0;
-            rt.interval = if bpm_ok {
-                (60.0 / audio[0].bpm).clamp(0.12, 0.75)
-            } else {
-                0.35
+            // Grid games step on the beat; particle sims (cadence = Some) run
+            // a fixed fast step so motion is smooth regardless of the music.
+            let fixed = rt.sim.cadence();
+            let bpm_ok =
+                fixed.is_none() && audio[0].bpm_conf > 0.3 && audio[0].bpm > 20.0;
+            rt.interval = match fixed {
+                Some(secs) => secs,
+                None if bpm_ok => (60.0 / audio[0].bpm).clamp(0.12, 0.75),
+                None => 0.35,
             };
             let beat_wrapped = audio[0].beat_phase < game_prev_beat - 0.5;
             let since_tick = rt.last_tick.elapsed().as_secs_f32();

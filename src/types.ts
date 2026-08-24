@@ -469,7 +469,7 @@ export interface TestModeStatus {
 
 // --- game mode (mirrors src-tauri/src/game/mod.rs, plans/game-mode.md) ---
 
-export type GameKind = "rps" | "life";
+export type GameKind = "rps" | "life" | "spokewar";
 
 /** A playlist entry that runs a game world over its scene. */
 export interface GameCue {
