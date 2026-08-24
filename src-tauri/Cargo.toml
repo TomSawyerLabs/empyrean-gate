@@ -1,6 +1,6 @@
 [package]
 name = "empyrean-gate"
-version = "0.6.0"
+version = "0.7.0"
 description = "GPU pattern generator and sACN output for the Empyrean Gate"
 edition = "2024"
 # Two binaries exist (app + engine-smoke); `tauri dev`'s bare `cargo run` needs this.
