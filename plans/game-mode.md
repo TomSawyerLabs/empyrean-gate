@@ -42,9 +42,10 @@ GAME MODE banner. Commits `c7f3bb6`, `608a85d`, `f0b7a6b`.
       the manual `active` flag so taps land during scheduled games too.
 - [x] PWA manifest shortcut for `/#games`; Games tab has the Primordial card
       and Life's eraser chip.
-- [ ] Playlist editor UI for game cues in Control's playlist panel — waiting
-      on the concurrent session to finish its Control.tsx work (layer
-      quick-edit); the types (`GameCue` in types.ts) are ready.
+- [x] Playlist editor UI: the "Add a scene…" picker in Control's show panel
+      grew a Games optgroup; a game cue lands with an empty stack (black under
+      the world, and what the next cue fades in from), 20 min default, and a
+      green "game" chip on its row.
 - [ ] Next game: Spokewar (particle substrate; needs player slots/colors —
       see roster).
 

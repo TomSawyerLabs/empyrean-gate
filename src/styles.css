@@ -4642,6 +4642,18 @@ button:disabled {
   border-color: #fff;
 }
 
+/* Marks a playlist cue that runs a game world instead of a scene. */
+.show-cue-game {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border: 1px solid #1f8f5f;
+  border-radius: 999px;
+  color: #7fe6b4;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 /* Life's eraser: visibly "no color" among the colored chips. */
 .games-chip.erase {
   background: transparent;

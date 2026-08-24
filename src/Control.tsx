@@ -12,6 +12,7 @@ import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
 import {
   LAYER_LABELS,
+  type GameKind,
   type PatchDoc,
   type PatchNodeType,
   type PatchParamDef,
@@ -44,6 +45,35 @@ function playlistEntry(stack: SavedStack): ShowPlaylistEntry {
     stack: { ...stack, layers: stack.layers.map((layer) => ({ ...layer })) },
     duration_secs: 35 * 60,
     transition_secs: 20,
+  };
+}
+
+const GAME_CUES: { kind: GameKind; name: string }[] = [
+  { kind: "rps", name: "Ecosystem" },
+  { kind: "life", name: "Primordial" },
+];
+
+/// A cue that runs a game world (plans/game-mode.md). The underlying stack is
+/// empty — black under the game while it runs, and what the array fades to for
+/// a beat when the next cue takes over.
+function gameCueEntry(kind: GameKind, name: string): ShowPlaylistEntry {
+  return {
+    id: newId("cue"),
+    name,
+    stack: {
+      id: newId("stack"),
+      name,
+      layers: [],
+      master_speed: 1,
+      walk_enabled: false,
+      walk_layers: false,
+      walk_min_layers: 1,
+      walk_speed: 1,
+      walk_depth: 0,
+    },
+    duration_secs: 20 * 60,
+    transition_secs: 20,
+    game: { game: kind, species: 3 },
   };
 }
 
@@ -544,6 +574,7 @@ function ShowSchedulerPanel() {
                   <div key={entry.id} className={`show-cue ${runningHere && show?.index === index ? "active" : ""}`}>
                     <span className="show-cue-number">{index + 1}</span>
                     <strong>{entry.name}</strong>
+                    {entry.game && <span className="show-cue-game">game</span>}
                     <label><span>minutes</span><input type="number" min={1} max={1440} step={1}
                       value={Math.round(entry.duration_secs / 60)}
                       onChange={(event) => updateActive((playlist) => ({ ...playlist, entries: playlist.entries.map((item) =>
@@ -570,8 +601,13 @@ function ShowSchedulerPanel() {
                 const value = event.target.value;
                 const builtIn = SCENE_PRESETS.find((scene) => `built:${scene.id}` === value);
                 const saved = config.saved_stacks.find((stack) => `saved:${stack.id}` === value);
+                const game = GAME_CUES.find((cue) => `game:${cue.kind}` === value);
                 const stack = builtIn ? stackFromScene(builtIn) : saved;
                 if (stack) updateActive((playlist) => ({ ...playlist, entries: [...playlist.entries, playlistEntry(stack)] }));
+                else if (game) updateActive((playlist) => ({
+                  ...playlist,
+                  entries: [...playlist.entries, gameCueEntry(game.kind, game.name)],
+                }));
                 event.target.value = "";
               }}>
                 <option value="">＋ Add a scene…</option>
@@ -581,6 +617,9 @@ function ShowSchedulerPanel() {
                 {config.saved_stacks.length > 0 && <optgroup label="Your saved stacks">
                   {config.saved_stacks.map((stack) => <option key={stack.id} value={`saved:${stack.id}`}>{stack.name}</option>)}
                 </optgroup>}
+                <optgroup label="Games (the world runs itself — see the Games tab)">
+                  {GAME_CUES.map((game) => <option key={game.kind} value={`game:${game.kind}`}>{game.name}</option>)}
+                </optgroup>
               </select>
             </>
           )}
