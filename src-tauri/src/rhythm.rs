@@ -1744,18 +1744,29 @@ mod tests {
         );
         assert!(wrapped.contains(&PioneerVisualEvent::LoopWrap(2)));
 
+        let advanced = clock.receive_status(
+            &link_status_state(2, true, 14, true, true, true),
+            start + Duration::from_millis(700),
+        );
+        assert!(!advanced.contains(&PioneerVisualEvent::LoopWrap(2)));
+        let wrapped_again = clock.receive_status(
+            &link_status_state(2, true, 10, true, true, true),
+            start + Duration::from_millis(1_000),
+        );
+        assert!(wrapped_again.contains(&PioneerVisualEvent::LoopWrap(2)));
+
         let loop_ended = clock.receive_status(
             &link_status_state(2, true, 11, true, true, false),
-            start + Duration::from_millis(700),
+            start + Duration::from_millis(1_100),
         );
         assert!(loop_ended.contains(&PioneerVisualEvent::LoopEnded(2)));
         let jumped = clock.receive_status(
             &link_status_state(2, true, 40, true, true, false),
-            start + Duration::from_millis(800),
+            start + Duration::from_millis(1_200),
         );
         assert!(jumped.contains(&PioneerVisualEvent::Jump(2)));
 
-        let visual = clock.visual_snapshot(start + Duration::from_millis(800));
+        let visual = clock.visual_snapshot(start + Duration::from_millis(1_200));
         assert!(visual.active);
         assert!(!visual.deck_1_on_air);
         assert!(visual.deck_2_on_air);
@@ -1781,6 +1792,10 @@ mod tests {
         let released = clock.receive_status(&status, start + Duration::from_millis(150));
         assert!(released.contains(&PioneerVisualEvent::CueEnded(1)));
         assert!(!clock.devices(start + Duration::from_millis(150))[0].cued);
+
+        status[0x7b] = 0x06;
+        let cued_again = clock.receive_status(&status, start + Duration::from_millis(200));
+        assert!(cued_again.contains(&PioneerVisualEvent::CueStarted(1)));
     }
 
     #[test]

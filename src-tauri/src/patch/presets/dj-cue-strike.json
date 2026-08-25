@@ -2,10 +2,14 @@
   "format": 1,
   "id": "builtin-dj-cue-strike",
   "name": "DJ Cue Strike",
-  "description": "Hot-cue and seek jumps crack open angular color shards; cue presses flash the active deck side while beats keep the bed moving.",
+  "description": "Hot-cue and seek jumps crack open angular color shards; cue presses flash the active deck side while BPM drives motion and master audio drives brightness.",
   "nodes": [
     { "id": "link", "kind": "dj_link", "name": "deck events", "params": {}, "pos": [40, 60] },
     { "id": "aud", "kind": "audio", "name": "master beat", "params": {}, "pos": [40, 330] },
+    { "id": "level_gain", "kind": "scalar_math", "name": "fast master brightness", "params": { "op": 2, "b": 0.82 }, "pos": [280, 550] },
+    { "id": "level_floor", "kind": "scalar_math", "name": "brightness floor", "params": { "op": 0, "b": 0.18 }, "pos": [500, 550] },
+    { "id": "bed_tempo", "kind": "scalar_math", "name": "bed BPM motion", "params": { "op": 2, "b": 0.18 }, "pos": [280, 440] },
+    { "id": "shard_tempo", "kind": "scalar_math", "name": "shard BPM motion", "params": { "op": 2, "b": 0.20 }, "pos": [500, 440] },
     { "id": "jump_env", "kind": "envelope", "name": "jump crack", "params": { "attack": 0.0, "decay": 0.62, "peak": 1.0 }, "pos": [280, 40] },
     { "id": "cue_env", "kind": "envelope", "name": "cue flash", "params": { "attack": 0.0, "decay": 0.24, "peak": 0.9 }, "pos": [280, 150] },
     { "id": "flash", "kind": "scalar_math", "name": "combined strike", "params": { "op": 0 }, "pos": [500, 90] },
@@ -23,7 +27,13 @@
     { "from": { "node": "cue_env", "port": "out" }, "to": { "node": "flash", "port": "b" } },
     { "from": { "node": "flash", "port": "out" }, "to": { "node": "shards", "port": "flash" } },
     { "from": { "node": "link", "port": "event_side" }, "to": { "node": "side_scale", "port": "a" } },
-    { "from": { "node": "aud", "port": "beat_phase" }, "to": { "node": "bed", "port": "speed" } },
+    { "from": { "node": "aud", "port": "tempo" }, "to": { "node": "bed_tempo", "port": "a" } },
+    { "from": { "node": "bed_tempo", "port": "out" }, "to": { "node": "bed", "port": "speed" } },
+    { "from": { "node": "aud", "port": "tempo" }, "to": { "node": "shard_tempo", "port": "a" } },
+    { "from": { "node": "shard_tempo", "port": "out" }, "to": { "node": "shards", "port": "speed" } },
+    { "from": { "node": "aud", "port": "level" }, "to": { "node": "level_gain", "port": "a" } },
+    { "from": { "node": "level_gain", "port": "out" }, "to": { "node": "level_floor", "port": "a" } },
+    { "from": { "node": "level_floor", "port": "out" }, "to": { "node": "out", "port": "master" } },
     { "from": { "node": "shards", "port": "out" }, "to": { "node": "deck_side", "port": "in" } },
     { "from": { "node": "side_scale", "port": "out" }, "to": { "node": "deck_side", "port": "rotate" } },
     { "from": { "node": "bed", "port": "out" }, "to": { "node": "mix", "port": "base" } },
@@ -34,6 +44,8 @@
     { "node": "jump_env", "param": "decay", "label": "Jump decay" },
     { "node": "shards", "param": "slices", "label": "Shard count" },
     { "node": "shards", "param": "hue", "label": "Strike hue" },
-    { "node": "out", "param": "master", "label": "Master" }
+    { "node": "bed_tempo", "param": "b", "label": "BPM motion" },
+    { "node": "level_gain", "param": "b", "label": "Music brightness" },
+    { "node": "level_floor", "param": "b", "label": "Brightness floor" }
   ]
 }

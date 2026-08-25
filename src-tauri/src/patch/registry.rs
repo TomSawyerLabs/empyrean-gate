@@ -262,6 +262,14 @@ pub const TYPES: &[NodeType] = &[
                 shape: Shape::Scalar,
             },
             PortDef {
+                name: "bpm",
+                shape: Shape::Scalar,
+            },
+            PortDef {
+                name: "tempo",
+                shape: Shape::Scalar,
+            },
+            PortDef {
                 name: "beat",
                 shape: Shape::Event,
             },

@@ -1,21 +1,24 @@
 {
   "format": 1,
-  "id": "builtin-dj-loop-tunnel",
-  "name": "DJ Loop Tunnel",
-  "description": "Loop state tightens the original six-arm spiral and each wrap launches a beat-synchronized ring; master audio drives brightness quickly and LINK BPM drives motion speed.",
+  "id": "builtin-dj-link-spiral-performance",
+  "name": "DJ LINK Spiral Performance",
+  "description": "The original DJ Loop Tunnel spiral, unchanged, with honest LINK transport visuals, fast master-audio brightness, and BPM-tracked motion.",
   "nodes": [
-    { "id": "link", "kind": "dj_link", "name": "loop and mixer state", "params": {}, "pos": [40, 50] },
+    { "id": "link", "kind": "dj_link", "name": "PRO DJ LINK transport", "params": {}, "pos": [40, 50] },
     { "id": "aud", "kind": "audio", "name": "master beat", "params": {}, "pos": [40, 310] },
-    { "id": "level_gain", "kind": "scalar_math", "name": "fast master brightness", "params": { "op": 2, "b": 0.82 }, "pos": [270, 470] },
-    { "id": "level_floor", "kind": "scalar_math", "name": "brightness floor", "params": { "op": 0, "b": 0.18 }, "pos": [500, 470] },
+    { "id": "fx", "kind": "effects_in", "name": "transport effects", "params": {}, "pos": [40, 520] },
+    { "id": "level_gain", "kind": "scalar_math", "name": "fast master brightness", "params": { "op": 2, "b": 0.82 }, "pos": [280, 680] },
+    { "id": "level_floor", "kind": "scalar_math", "name": "brightness floor", "params": { "op": 0, "b": 0.18 }, "pos": [520, 680] },
     { "id": "tempo", "kind": "scalar_math", "name": "BPM motion", "params": { "op": 2, "b": 0.34 }, "pos": [280, 260] },
     { "id": "wrap_env", "kind": "envelope", "name": "loop wrap pulse", "params": { "attack": 0.0, "decay": 0.42, "peak": 1.35 }, "pos": [280, 40] },
     { "id": "tunnel_light", "kind": "scalar_math", "name": "loop tunnel level", "params": { "op": 0, "b": 0.28 }, "pos": [280, 150] },
+    { "id": "render_fx", "kind": "render_effects", "name": "PRO DJ LINK events", "params": { "size": 0.9, "intensity": 0.82 }, "pos": [280, 520] },
     { "id": "tunnel", "kind": "spiral", "name": "loop tunnel", "params": { "arms": 6, "twist": 2.8, "speed": 0.34, "sharpness": 0.82, "hue": 0.76, "saturation": 0.84, "brightness": 0.34 }, "pos": [520, 150] },
     { "id": "ring", "kind": "beat_rings", "name": "wrap ring", "params": { "front": 0.0, "width": 0.055, "direction": 0, "hue": 0.52, "hue_range": 0.16, "saturation": 0.55, "brightness": 0.0 }, "pos": [520, 350] },
     { "id": "mix", "kind": "blend", "name": "wrap over tunnel", "params": { "mode": 0, "opacity": 0.94 }, "pos": [760, 250] },
     { "id": "handoff", "kind": "transform", "name": "mixer handoff", "params": { "rotate": 0.0, "spin": 0.025, "zoom": 1.0 }, "pos": [980, 250] },
-    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.94 }, "pos": [1200, 250] }
+    { "id": "performance", "kind": "blend", "name": "transport over spiral", "params": { "mode": 2, "opacity": 0.88 }, "pos": [1200, 300] },
+    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.94 }, "pos": [1420, 300] }
   ],
   "edges": [
     { "from": { "node": "link", "port": "loop_wrap" }, "to": { "node": "wrap_env", "port": "trigger" } },
@@ -28,11 +31,14 @@
     { "from": { "node": "tunnel_light", "port": "out" }, "to": { "node": "tunnel", "port": "brightness" } },
     { "from": { "node": "aud", "port": "beat_phase" }, "to": { "node": "ring", "port": "front" } },
     { "from": { "node": "wrap_env", "port": "out" }, "to": { "node": "ring", "port": "brightness" } },
+    { "from": { "node": "fx", "port": "effects" }, "to": { "node": "render_fx", "port": "effects" } },
     { "from": { "node": "tunnel", "port": "out" }, "to": { "node": "mix", "port": "base" } },
     { "from": { "node": "ring", "port": "out" }, "to": { "node": "mix", "port": "over" } },
     { "from": { "node": "mix", "port": "out" }, "to": { "node": "handoff", "port": "in" } },
     { "from": { "node": "link", "port": "mix" }, "to": { "node": "handoff", "port": "rotate" } },
-    { "from": { "node": "handoff", "port": "out" }, "to": { "node": "out", "port": "in" } }
+    { "from": { "node": "handoff", "port": "out" }, "to": { "node": "performance", "port": "base" } },
+    { "from": { "node": "render_fx", "port": "out" }, "to": { "node": "performance", "port": "over" } },
+    { "from": { "node": "performance", "port": "out" }, "to": { "node": "out", "port": "in" } }
   ],
   "exposed": [
     { "node": "tunnel", "param": "arms", "label": "Tunnel arms" },
@@ -40,6 +46,9 @@
     { "node": "wrap_env", "param": "decay", "label": "Wrap decay" },
     { "node": "tempo", "param": "b", "label": "BPM motion" },
     { "node": "level_gain", "param": "b", "label": "Music brightness" },
-    { "node": "level_floor", "param": "b", "label": "Brightness floor" }
+    { "node": "level_floor", "param": "b", "label": "Brightness floor" },
+    { "node": "render_fx", "param": "size", "label": "Event size" },
+    { "node": "render_fx", "param": "intensity", "label": "Event energy" },
+    { "node": "performance", "param": "opacity", "label": "Event mix" }
   ]
 }
