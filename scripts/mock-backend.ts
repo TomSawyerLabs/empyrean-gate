@@ -113,6 +113,27 @@ const server = Bun.serve({
     }
     // No reports exist in a fresh test run; the UI must cope with that.
     if (url.pathname === "/reports") return Response.json([]);
+    if (url.pathname === "/patch/registry") {
+      return Response.json([
+        {
+          id: "noise_field",
+          label: "Noise",
+          category: "generator",
+          inputs: [],
+          outputs: [{ name: "out", shape: "field_scalar" }],
+          params: [],
+        },
+        {
+          id: "output",
+          label: "Output",
+          category: "sink",
+          inputs: [{ name: "in", shape: "field_scalar" }],
+          outputs: [],
+          params: [],
+        },
+      ]);
+    }
+    if (url.pathname === "/patch/presets") return Response.json([]);
     // Test-only lever for states the backend reaches on its own but a mock never
     // will (the sACN contention banner needs something else to be on the wire).
     // POST a `RuntimeStatus` fragment with `?client=<empyrean-client-id>`; the

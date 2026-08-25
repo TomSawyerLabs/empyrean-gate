@@ -695,6 +695,8 @@ function PatchEditor() {
               nodesConnectable={canEdit}
               elementsSelectable
               deleteKeyCode={canEdit ? ["Backspace", "Delete"] : []}
+              zoomOnScroll
+              zoomOnPinch
               fitView
               proOptions={{ hideAttribution: true }}
               colorMode="dark"

@@ -32,8 +32,8 @@
 html,
 body {
   /* Touch-screen show surface: no double-tap zoom, no pull-to-refresh or
-     rubber-band, no long-press selection callout. Pinch-zoom is refused at the
-     webview level as well (`--disable-pinch`, see tauri.conf.json). */
+     rubber-band, no long-press selection callout. JavaScript blocks page-level
+     pinch zoom while allowing the Patch graph to consume the gesture locally. */
   touch-action: manipulation;
   overscroll-behavior: none;
   -webkit-touch-callout: none;

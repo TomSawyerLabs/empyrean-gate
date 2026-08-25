@@ -19,6 +19,10 @@ function inTextField(target: EventTarget | null): boolean {
   );
 }
 
+function inPatchCanvas(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(".patch-canvas") !== null;
+}
+
 export function installTouchHardening(): () => void {
   const offs: (() => void)[] = [];
   const on = <K extends keyof WindowEventMap>(
@@ -46,13 +50,16 @@ export function installTouchHardening(): () => void {
     { capture: true },
   );
 
-  // Ctrl/⌘ + wheel is the pinch-zoom gesture a trackpad or touch screen sends,
-  // and it survives `user-scalable=no`. Non-modified wheel is left alone so the
-  // Settings page still scrolls with a mouse.
+  // Ctrl/⌘ + wheel is the pinch-zoom gesture a trackpad or touch screen sends.
+  // The Patch graph owns that gesture; elsewhere it must not resize the show UI.
+  // Non-modified wheel is left alone so pages and the Patch graph can scroll or
+  // zoom according to their own local behavior.
   on(
     "wheel",
     (e) => {
-      if (e.ctrlKey || e.metaKey) e.preventDefault();
+      if ((e.ctrlKey || e.metaKey) && !inPatchCanvas(e.target)) {
+        e.preventDefault();
+      }
     },
     { passive: false, capture: true },
   );

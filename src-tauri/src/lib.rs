@@ -641,12 +641,14 @@ fn open_aux_window(app: &tauri::AppHandle, tab: &str) -> tauri::Result<()> {
             // white window if the page never loads at all.
             .background_color(tauri::window::Color(0x0A, 0x08, 0x14, 0xFF))
             .initialization_script(format!("if (!location.hash) location.hash = '#{tab}';"));
-    // Same gesture suppression the main window gets from tauri.conf.json (the
+    // Same browser hardening the main window gets from tauri.conf.json (the
     // first group is wry's own default, which passing this option replaces).
+    // Pinch input stays enabled so the Patch graph can consume trackpad zoom;
+    // src/touch.ts prevents page-level zoom everywhere else.
     #[cfg(target_os = "windows")]
     let builder = builder.additional_browser_args(
         "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
-         --disable-pinch --overscroll-history-navigation=0",
+         --overscroll-history-navigation=0",
     );
     builder.build()?;
     harden_touch_visuals(app);
