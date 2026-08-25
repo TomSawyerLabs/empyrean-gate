@@ -552,3 +552,12 @@ its backing square under a tap.
 - Batched UDP I/O (`sendmmsg`/RIO) for 100k+ pixel scales.
 - PRO DJ LINK/TCNet track, cue, and phrase metadata. Direct beat/master timing is
   implemented; richer metadata follows validation with the production deck model.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+One caveat if you plan to redistribute builds: the `prodjlink-rs` git dependency
+carries no license of its own (no `license` field, no LICENSE file), which leaves it
+all-rights-reserved by default. That doesn't affect this repository's own terms, but a
+distributed binary linking it needs that resolved upstream first.

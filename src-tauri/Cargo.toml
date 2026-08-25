@@ -2,6 +2,7 @@
 name = "empyrean-gate"
 version = "0.10.1"
 description = "GPU pattern generator and sACN output for the Empyrean Gate"
+license = "MIT"
 edition = "2024"
 # Two binaries exist (app + engine-smoke); `tauri dev`'s bare `cargo run` needs this.
 default-run = "empyrean-gate"
