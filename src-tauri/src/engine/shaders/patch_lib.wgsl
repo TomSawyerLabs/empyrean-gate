@@ -337,6 +337,13 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
             let v = exp(-(d * d) / 0.003);
             return col * v * fade * E.intensity * 1.8;
         }
+        case 14u: {
+            let front = t * 1.12;
+            let width = (0.035 + t * 0.045) * max(E.size, 0.2);
+            let d = ctx.rn - front;
+            let ring = exp(-(d * d) / (width * width));
+            return col * ring * fade * E.intensity * 2.0;
+        }
         default: {
             return vec3f(0.0);
         }

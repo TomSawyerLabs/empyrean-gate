@@ -5,7 +5,7 @@
   "description": "The original DJ Loop Tunnel spiral, with a visible LINK-connected floor, microphone-free rekordbox waveform brightness, honest transport visuals, and BPM-tracked motion.",
   "nodes": [
     { "id": "link", "kind": "dj_link", "name": "PRO DJ LINK transport", "params": {}, "pos": [40, 50] },
-    { "id": "aud", "kind": "audio", "name": "master beat", "params": {}, "pos": [40, 310] },
+    { "id": "aud", "kind": "audio", "name": "music input", "params": {}, "pos": [40, 310] },
     { "id": "fx", "kind": "effects_in", "name": "transport effects", "params": {}, "pos": [40, 520] },
     { "id": "level_gain", "kind": "scalar_math", "name": "LINK waveform energy", "params": { "op": 2, "b": 0.47 }, "pos": [280, 680] },
     { "id": "link_gain", "kind": "scalar_math", "name": "LINK connected brightness", "params": { "op": 2, "b": 0.35 }, "pos": [280, 790] },
@@ -49,6 +49,7 @@
     { "node": "tunnel", "param": "arms", "label": "Tunnel arms" },
     { "node": "tunnel", "param": "twist", "label": "Tunnel twist" },
     { "node": "wrap_env", "param": "decay", "label": "Wrap decay" },
+    { "node": "aud", "param": "source", "label": "Audio source" },
     { "node": "tempo", "param": "b", "label": "BPM motion" },
     { "node": "level_gain", "param": "b", "label": "LINK energy brightness" },
     { "node": "level_floor", "param": "b", "label": "Brightness floor" },

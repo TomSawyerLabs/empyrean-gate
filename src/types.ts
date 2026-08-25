@@ -34,7 +34,8 @@ export type MotionEffectKind =
   | "bloom"
   | "pinwheel"
   | "twinkle"
-  | "wipe";
+  | "wipe"
+  | "ring";
 
 export type ShapeKind = "star" | "heart" | "flower" | "diamond" | "triangle" | "moon";
 

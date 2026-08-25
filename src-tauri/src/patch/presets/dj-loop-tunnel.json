@@ -5,7 +5,7 @@
   "description": "Loop state tightens the original six-arm spiral and each wrap launches a beat-synchronized ring; LINK keeps it visible, rekordbox waveform energy adds brightness, and LINK BPM drives motion speed without a microphone.",
   "nodes": [
     { "id": "link", "kind": "dj_link", "name": "loop and mixer state", "params": {}, "pos": [40, 50] },
-    { "id": "aud", "kind": "audio", "name": "master beat", "params": {}, "pos": [40, 310] },
+    { "id": "aud", "kind": "audio", "name": "music input", "params": {}, "pos": [40, 310] },
     { "id": "level_gain", "kind": "scalar_math", "name": "LINK waveform energy", "params": { "op": 2, "b": 0.47 }, "pos": [270, 470] },
     { "id": "link_gain", "kind": "scalar_math", "name": "LINK connected brightness", "params": { "op": 2, "b": 0.35 }, "pos": [270, 580] },
     { "id": "level_floor", "kind": "scalar_math", "name": "brightness floor", "params": { "op": 0, "b": 0.18 }, "pos": [500, 470] },
@@ -43,6 +43,7 @@
     { "node": "tunnel", "param": "arms", "label": "Tunnel arms" },
     { "node": "tunnel", "param": "twist", "label": "Tunnel twist" },
     { "node": "wrap_env", "param": "decay", "label": "Wrap decay" },
+    { "node": "aud", "param": "source", "label": "Audio source" },
     { "node": "tempo", "param": "b", "label": "BPM motion" },
     { "node": "level_gain", "param": "b", "label": "LINK energy brightness" },
     { "node": "level_floor", "param": "b", "label": "Brightness floor" },

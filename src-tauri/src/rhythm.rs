@@ -1378,10 +1378,10 @@ fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
         PioneerVisualEvent::CueEnded(_) => ("cue released", "collapse"),
         PioneerVisualEvent::OnAirChanged(_, true) => ("on air", "swoosh"),
         PioneerVisualEvent::OnAirChanged(_, false) => ("off air", "collapse"),
-        PioneerVisualEvent::LoopStarted(_) => ("loop started", "collapse + strobe"),
-        PioneerVisualEvent::LoopWrap(_) => ("loop wrapped", "burst"),
-        PioneerVisualEvent::LoopEnded(_) => ("loop ended", "swoosh"),
-        PioneerVisualEvent::Jump(_) => ("hot cue / seek inferred", "burst + strobe"),
+        PioneerVisualEvent::LoopStarted(_) => ("loop started", "ring"),
+        PioneerVisualEvent::LoopWrap(_) => ("loop wrapped", "ring"),
+        PioneerVisualEvent::LoopEnded(_) => ("loop ended", "ring"),
+        PioneerVisualEvent::Jump(_) => ("hot cue / seek inferred", "burst"),
     };
     state.push_pioneer_debug(
         "visual",
@@ -1415,21 +1415,18 @@ fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
             state.trigger_effect(effect(EffectKind::Collapse, 1.1, 1.2, 0.8, 1.1));
         }
         PioneerVisualEvent::LoopStarted(_) => {
-            state.trigger_effect(effect(EffectKind::Collapse, 1.7, 1.4, 0.5, 1.6));
-            state.trigger_effect(effect(EffectKind::Strobe, 0.75, 1.0, 0.5, 0.18));
+            state.trigger_effect(effect(EffectKind::Ring, 1.7, 1.1, 0.5, 1.2));
         }
         PioneerVisualEvent::LoopWrap(_) => {
-            state.trigger_effect(effect(EffectKind::Burst, 1.45, 0.9, 0.25, 0.75));
+            state.trigger_effect(effect(EffectKind::Ring, 1.35, 0.85, 0.5, 0.75));
         }
         PioneerVisualEvent::LoopEnded(_) => {
-            state.trigger_effect(effect(EffectKind::Swoosh, 1.35, 2.0, 0.7, 1.0));
+            state.trigger_effect(effect(EffectKind::Ring, 1.15, 1.2, 0.5, 0.9));
         }
         PioneerVisualEvent::Jump(_) => {
             // A large analyzed-beat discontinuity is our first-version Hot Cue
-            // signal. Pair a side-origin shockwave with a short full-array flash
-            // so the jump remains obvious even in a busy scene.
+            // signal. Keep its visual vocabulary deliberately singular.
             state.trigger_effect(effect(EffectKind::Burst, 2.0, 1.5, 0.85, 1.25));
-            state.trigger_effect(effect(EffectKind::Strobe, 1.0, 1.0, 0.5, 0.22));
         }
     }
     // The renderer normally submits frame N while reading back N-1. That is
@@ -1959,13 +1956,12 @@ mod tests {
     }
 
     #[test]
-    fn pioneer_jump_fires_a_burst_and_strobe() {
+    fn pioneer_jump_fires_only_a_burst() {
         let state = SharedState::new(crate::config::AppConfig::default());
         trigger_pioneer_visual(&state, PioneerVisualEvent::Jump(2));
         let effects = state.effects.lock();
-        assert_eq!(effects.len(), 2);
+        assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].cfg.kind, crate::layers::EffectKind::Burst);
-        assert_eq!(effects[1].cfg.kind, crate::layers::EffectKind::Strobe);
         assert_eq!(
             effects[0].cfg.angle,
             std::f32::consts::FRAC_PI_2,
@@ -1974,7 +1970,22 @@ mod tests {
         assert_eq!(
             state.low_latency_render_seq.load(Ordering::Acquire),
             1,
-            "one deck event requests one immediate render even when it creates two effects"
+            "one deck event requests one immediate render"
         );
+    }
+
+    #[test]
+    fn pioneer_loop_transitions_fire_only_rings() {
+        for event in [
+            PioneerVisualEvent::LoopStarted(1),
+            PioneerVisualEvent::LoopWrap(1),
+            PioneerVisualEvent::LoopEnded(1),
+        ] {
+            let state = SharedState::new(crate::config::AppConfig::default());
+            trigger_pioneer_visual(&state, event);
+            let effects = state.effects.lock();
+            assert_eq!(effects.len(), 1, "{event:?} created extra effects");
+            assert_eq!(effects[0].cfg.kind, crate::layers::EffectKind::Ring);
+        }
     }
 }

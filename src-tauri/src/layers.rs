@@ -273,12 +273,14 @@ pub enum EffectKind {
     Triangle,
     /// Crescent moon.
     Moon,
+    /// Clean radial ring expanding from the center of the array.
+    Ring,
 }
 
 impl EffectKind {
     /// Order is the GPU id — the `case` arms in `gate.wgsl` are literal numbers.
     /// Append only.
-    pub const ALL: [EffectKind; 14] = [
+    pub const ALL: [EffectKind; 15] = [
         EffectKind::Burst,
         EffectKind::Strobe,
         EffectKind::Swoosh,
@@ -293,6 +295,7 @@ impl EffectKind {
         EffectKind::Diamond,
         EffectKind::Triangle,
         EffectKind::Moon,
+        EffectKind::Ring,
     ];
 
     /// The figures — stamped center-array, `angle` is their rotation. Everything
@@ -324,6 +327,7 @@ impl EffectKind {
             EffectKind::Pinwheel => 1.6,
             EffectKind::Twinkle => 1.1,
             EffectKind::Wipe => 1.0,
+            EffectKind::Ring => 1.0,
             // Stamps hold long enough to be read across a dance floor.
             EffectKind::Star
             | EffectKind::Heart

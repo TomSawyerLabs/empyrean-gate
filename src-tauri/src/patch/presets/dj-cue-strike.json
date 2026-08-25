@@ -5,7 +5,7 @@
   "description": "Hot-cue and seek jumps crack open angular color shards; cue presses flash the active deck side while BPM drives motion and master audio drives brightness.",
   "nodes": [
     { "id": "link", "kind": "dj_link", "name": "deck events", "params": {}, "pos": [40, 60] },
-    { "id": "aud", "kind": "audio", "name": "master beat", "params": {}, "pos": [40, 330] },
+    { "id": "aud", "kind": "audio", "name": "music input", "params": {}, "pos": [40, 330] },
     { "id": "level_gain", "kind": "scalar_math", "name": "fast master brightness", "params": { "op": 2, "b": 0.82 }, "pos": [280, 550] },
     { "id": "level_floor", "kind": "scalar_math", "name": "brightness floor", "params": { "op": 0, "b": 0.18 }, "pos": [500, 550] },
     { "id": "bed_tempo", "kind": "scalar_math", "name": "bed BPM motion", "params": { "op": 2, "b": 0.18 }, "pos": [280, 440] },
@@ -44,6 +44,7 @@
     { "node": "jump_env", "param": "decay", "label": "Jump decay" },
     { "node": "shards", "param": "slices", "label": "Shard count" },
     { "node": "shards", "param": "hue", "label": "Strike hue" },
+    { "node": "aud", "param": "source", "label": "Audio source" },
     { "node": "bed_tempo", "param": "b", "label": "BPM motion" },
     { "node": "level_gain", "param": "b", "label": "Music brightness" },
     { "node": "level_floor", "param": "b", "label": "Brightness floor" }

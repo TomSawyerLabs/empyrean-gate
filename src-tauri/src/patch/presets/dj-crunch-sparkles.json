@@ -40,6 +40,7 @@
   "exposed": [
     { "node": "treble_scale", "param": "b", "label": "Crunch sensitivity" },
     { "node": "mix_scale", "param": "b", "label": "Mix-motion boost" },
+    { "node": "aud", "param": "source", "label": "Audio source" },
     { "node": "spark", "param": "hue", "label": "Spark hue" },
     { "node": "spiral_tempo", "param": "b", "label": "BPM motion" },
     { "node": "level_gain", "param": "b", "label": "Music brightness" },

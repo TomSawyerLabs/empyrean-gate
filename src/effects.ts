@@ -10,6 +10,7 @@ export const EFFECTS: { kind: MotionEffectKind; label: string; key: string }[] =
   { kind: "pinwheel", label: "Pinwheel", key: "6" },
   { kind: "twinkle", label: "Twinkle", key: "7" },
   { kind: "wipe", label: "Wipe", key: "8" },
+  { kind: "ring", label: "Ring", key: "9" },
 ];
 
 /** Figures stamped where they are tapped. Keys are mnemonic, not positional —

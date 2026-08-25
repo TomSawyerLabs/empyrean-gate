@@ -914,6 +914,14 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
             let sd = sd_moon(s.p, 0.41 * s.r, s.r, 0.98 * s.r);
             return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
         }
+        // Ring — a clean center-origin radial front without a bloom wake
+        case 14u: {
+            let front = t * 1.12;
+            let width = (0.035 + t * 0.045) * max(E.size, 0.2);
+            let d = ctx.rn - front;
+            let ring = exp(-(d * d) / (width * width));
+            return col * ring * fade * E.intensity * 2.0;
+        }
         default: {
             return vec3f(0.0);
         }
