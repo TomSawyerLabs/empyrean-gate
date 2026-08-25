@@ -5,6 +5,8 @@
 import { useEffect, useState } from "react";
 import { CENTERED_SHAPE, EFFECTS, GROW_MODES, growValue, SHAPES, type GrowMode } from "./effects";
 import LayerQuickEdit, { type QuickEditAnchor } from "./LayerQuickEdit";
+import ShapeQuickEdit, { type ShapeEditAnchor } from "./ShapeQuickEdit";
+import { loadShapeStyle, saveShapeStyle, type ShapeStyle } from "./shapeStyle";
 import { useHoldMenu } from "./longPress";
 import { SCENE_PRESETS, type ScenePreset } from "./scenes";
 import ShapeIcon from "./ShapeIcon";
@@ -13,6 +15,7 @@ import { useGate, useThrottled } from "./state";
 import {
   LAYER_LABELS,
   type GameKind,
+  type ShapeKind,
   type PatchDoc,
   type PatchNodeType,
   type PatchParamDef,
@@ -140,6 +143,8 @@ export default function Control() {
   const [speed, setSpeedLocal] = useState(1);
   const [growMode, setGrowMode] = useState<GrowMode>("static");
   const [quickEdit, setQuickEdit] = useState<QuickEditAnchor | null>(null);
+  const [shapeEdit, setShapeEdit] = useState<ShapeEditAnchor | null>(null);
+  const [shapeStyle, setShapeStyle] = useState<ShapeStyle>(loadShapeStyle);
   useEffect(() => {
     if (config) {
       setBrightnessLocal(config.render.master_brightness);
@@ -173,20 +178,19 @@ export default function Control() {
             size that fills the ring. Placing one is the Live tab's job. */}
         <div className="shape-grid big">
           {SHAPES.map((s) => (
-            <button
+            <ControlShapePad
               key={s.kind}
-              className="shape-btn"
-              onClick={() =>
+              shape={s}
+              onFire={() =>
                 client.triggerEffect({
                   kind: s.kind,
                   ...CENTERED_SHAPE,
                   grow: growValue(growMode),
+                  ...shapeStyle,
                 })
               }
-            >
-              <ShapeIcon kind={s.kind} />
-              {s.label}
-            </button>
+              onEditStyle={(x, y) => setShapeEdit({ kind: s.kind, x, y })}
+            />
           ))}
         </div>
         <div className="shape-grow-row" role="group" aria-label="Stamp size over time">
@@ -347,6 +351,17 @@ export default function Control() {
             />
           ))}
         </section>
+      )}
+      {shapeEdit !== null && (
+        <ShapeQuickEdit
+          anchor={shapeEdit}
+          style={shapeStyle}
+          onChange={(next) => {
+            setShapeStyle(next);
+            saveShapeStyle(next);
+          }}
+          onClose={() => setShapeEdit(null)}
+        />
       )}
       {quickEdit !== null && (
         <LayerQuickEdit
@@ -1142,6 +1157,26 @@ function LayerFader({
       />
       <span className="slider-val">{value.toFixed(2)}</span>
     </label>
+  );
+}
+
+/** A shape pad on Control: tap plants one centre-array, hold or right-click
+ *  opens how figures are drawn. */
+function ControlShapePad({
+  shape,
+  onFire,
+  onEditStyle,
+}: {
+  shape: { kind: ShapeKind; label: string };
+  onFire: () => void;
+  onEditStyle: (x: number, y: number) => void;
+}) {
+  const hold = useHoldMenu({ onOpen: onEditStyle, onClick: onFire });
+  return (
+    <button className="shape-btn" {...hold}>
+      <ShapeIcon kind={shape.kind} />
+      {shape.label}
+    </button>
   );
 }
 

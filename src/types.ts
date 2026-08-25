@@ -142,6 +142,11 @@ export interface EffectCfg {
   rotation: number;
   /** Shapes: scale drift over the life, -1 (shrinks away) .. 1 (doubles). */
   grow: number;
+  /** Shapes: outline thickness, 0 (hairline) .. 1 (fat). 0.5 is the pre-control
+   *  width; below ~0.3 the line is finer than the gap between spokes. */
+  edge: number;
+  /** Shapes: interior brightness, 0 (outline only) .. 1 (solid). */
+  fill: number;
 }
 
 export interface GeometryConfig {

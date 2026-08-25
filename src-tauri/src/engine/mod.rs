@@ -2406,6 +2406,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     brightness: e.cfg.brightness.clamp(0.0, 1.0),
                     rotation: e.cfg.rotation,
                     grow: e.cfg.grow.clamp(-1.0, 1.0),
+                    edge: e.cfg.edge.clamp(0.0, 1.0),
+                    fill: e.cfg.fill.clamp(0.0, 1.0),
                 })
                 .collect()
         };

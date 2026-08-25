@@ -77,6 +77,12 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   its size or growing or shrinking away over its life. On Control, which has no
   array to aim at, a shape pad plants one centre-array instead. A tap with no shape
   selected is still a burst, and a drag still draws with the current pen.
+  **Hold or right-click a shape pad** for the two controls that decide whether a
+  figure reads as a figure — outline thickness and interior brightness. The
+  default outline is ~0.077 of the array radius, just inside the 0.078 gap
+  between spokes at the rim: the thinnest continuous line 64 spokes can draw.
+  Going thinner is allowed and the readout warns you when the line will start
+  breaking into dashes.
 - **Seven UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Media
   (image/video intake), Patch (node-graph editor), Archive (recorded-show replay),
   Control (touch-sized effect pads + master/layer faders), Games, and Settings.

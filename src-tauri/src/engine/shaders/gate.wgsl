@@ -98,6 +98,8 @@ struct Effect {
     brightness: f32,
     rotation: f32,  // shapes: the figure's own spin, independent of `angle`
     grow: f32,      // shapes: scale drift over the life, -1 .. 1
+    edge: f32,      // shapes: outline thickness, 0 (hairline) .. 1 (fat)
+    fill: f32,      // shapes: interior brightness, 0 (outline only) .. 1 (solid)
 }
 
 struct Dab {
@@ -755,17 +757,34 @@ fn stamp_frame(E: Effect, ctx: Ctx, t: f32, spin: f32) -> Stamp {
 /// with a 32% hole, so a stamp's middle is missing whatever we do, and a fill
 /// bright enough to carry the figure on its own would swamp the layer stack the
 /// effect is supposed to sit on top of.
-fn shape_stamp(sd: f32, radius: f32) -> f32 {
-    // The rim tracks the stamp's size, but only within a band: the array's
-    // resolution does not change with the figure, so a full-array star wants the
-    // same ~0.1 of outline a small one does. Under about a spoke pitch it reads
-    // as a dotted line rather than a line; over 0.11 a five-pointed star's
-    // notches fill in and it is just a disc. The floor also covers the frame it
-    // is born on, where the radius is still zero.
-    let w = clamp(0.14 * radius, 0.035, 0.11);
-    let edge = exp(-(sd * sd) / (w * w));
+/// Outline + interior for a figure, given its signed distance and the two
+/// legibility controls.
+///
+/// `edge` scales the rim around what used to be the only width: 0.5 reproduces
+/// the old `clamp(0.14 * radius, 0.035, 0.11)` exactly, 0 is a hairline, 1 is
+/// roughly twice as fat. The rim still tracks the stamp's size — the array's
+/// resolution does not change with the figure, so a full-array star wants about
+/// the same outline a small one does — but the band it is clamped into is now
+/// wide enough at both ends to be worth a control.
+///
+/// Thin is allowed to be *too* thin. Below about 0.078 of the array radius the
+/// outline is finer than the gap between spokes and reads as a dotted line where
+/// the boundary runs tangentially. That is a real limit of 64 spokes and the
+/// point of exposing the knob; the 0.010 floor only stops the figure vanishing.
+///
+/// The interior ramp is deliberately tied to the rim width: a thin outline gives
+/// a hard-edged fill, which is most of what makes a figure read as a figure.
+fn shape_stamp(sd: f32, radius: f32, edge: f32, fill: f32) -> f32 {
+    // `base` is the width figures had before any of this was adjustable, clamp
+    // and all, so that `edge` of 0.5 renders exactly what it used to. Scaling
+    // the clamped value rather than the raw one is the whole trick: widening the
+    // outer clamp instead would have quietly fattened every full-size figure,
+    // because 0.14 * 0.91 overshoots the old 0.11 ceiling.
+    let base = clamp(0.14 * radius, 0.035, 0.11);
+    let w = clamp(base * mix(0.25, 1.75, clamp(edge, 0.0, 1.0)), 0.010, 0.20);
+    let rim = exp(-(sd * sd) / (w * w));
     let interior = clamp(-sd / w, 0.0, 1.0);
-    return edge + interior * 0.35;
+    return rim + interior * clamp(fill, 0.0, 1.0);
 }
 
 /// Brightness envelope for a stamp: full while it is being read, then away. The
@@ -873,7 +892,7 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
         case 8u: {
             let s = stamp_frame(E, ctx, t, t * 0.5);
             let sd = sd_star(s.p, s.r, 5.0, 3.0);
-            return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
+            return col * shape_stamp(sd, s.r, E.edge, E.fill) * shape_hold(t) * E.intensity * 1.5;
         }
         // Heart — beats twice while it fades
         case 9u: {
@@ -884,7 +903,7 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
             let unit = s.r * beat / 2.32;
             let q = s.p - vec2f(0.0, 1.68 * unit);
             let sd = length(q) - heart_r(atan2(q.y, q.x)) * unit;
-            return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
+            return col * shape_stamp(sd, s.r, E.edge, E.fill) * shape_hold(t) * E.intensity * 1.5;
         }
         // Flower — a circle that unfolds into six petals as it lands
         case 10u: {
@@ -894,25 +913,25 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
             // The one shape with no closed-form SDF; its edges are smooth enough
             // in r that the radial proxy does not show.
             let sd = length(s.p) - s.r * mix(1.0, 0.5 + 0.5 * lobe, open);
-            return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
+            return col * shape_stamp(sd, s.r, E.edge, E.fill) * shape_hold(t) * E.intensity * 1.5;
         }
         // Diamond
         case 11u: {
             let s = stamp_frame(E, ctx, t, 0.0);
-            return col * shape_stamp(sd_diamond(s.p, s.r), s.r)
+            return col * shape_stamp(sd_diamond(s.p, s.r), s.r, E.edge, E.fill)
                 * shape_hold(t) * E.intensity * 1.5;
         }
         // Triangle
         case 12u: {
             let s = stamp_frame(E, ctx, t, 0.0);
-            return col * shape_stamp(sd_triangle(s.p, s.r), s.r)
+            return col * shape_stamp(sd_triangle(s.p, s.r), s.r, E.edge, E.fill)
                 * shape_hold(t) * E.intensity * 1.5;
         }
         // Moon — crescent, tilted to read the way the glyph does
         case 13u: {
             let s = stamp_frame(E, ctx, t, 0.35);
             let sd = sd_moon(s.p, 0.41 * s.r, s.r, 0.98 * s.r);
-            return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
+            return col * shape_stamp(sd, s.r, E.edge, E.fill) * shape_hold(t) * E.intensity * 1.5;
         }
         // Ring — a clean center-origin radial front without a bloom wake
         case 14u: {

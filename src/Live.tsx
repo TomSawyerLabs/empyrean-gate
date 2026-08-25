@@ -15,6 +15,8 @@ import { useEffect, useRef, useState } from "react";
 import { EFFECTS, GROW_MODES, growValue, isShape, SHAPES, type GrowMode } from "./effects";
 import GateCanvas from "./GateCanvas";
 import LayerQuickEdit, { type QuickEditAnchor } from "./LayerQuickEdit";
+import ShapeQuickEdit, { type ShapeEditAnchor } from "./ShapeQuickEdit";
+import { loadShapeStyle, saveShapeStyle, type ShapeStyle } from "./shapeStyle";
 import { useHoldMenu } from "./longPress";
 import CustomColorPicker from "./CustomColorPicker";
 import { QuickSettingsEditor, QuickSettingsPanel } from "./LiveQuickSettings";
@@ -55,6 +57,29 @@ function LayerChip({
   );
 }
 
+/** A shape pad: tap arms the array with that figure, hold or right-click opens
+ *  how figures are drawn. Same gesture as the layer chips, different subject. */
+function ShapePad({
+  shape,
+  active,
+  onSelect,
+  onEditStyle,
+}: {
+  shape: { kind: ShapeKind; label: string; key: string };
+  active: boolean;
+  onSelect: () => void;
+  onEditStyle: (x: number, y: number) => void;
+}) {
+  const hold = useHoldMenu({ onOpen: onEditStyle, onClick: onSelect });
+  return (
+    <button className={`shape-btn ${active ? "active" : ""}`} aria-pressed={active} {...hold}>
+      <ShapeIcon kind={shape.kind} />
+      {shape.label}
+      <span className="key-hint">{shape.key}</span>
+    </button>
+  );
+}
+
 /** What a press on the array does: fire a burst, draw with a pen, or stamp a
  *  shape. One tool at a time — the canvas has no gesture guessing. */
 type LiveTool = ToolKind | ShapeKind;
@@ -75,6 +100,8 @@ export default function Live() {
   const [tool, setTool] = useState<LiveTool>("tap");
   const [growMode, setGrowMode] = useState<GrowMode>("static");
   const [quickEdit, setQuickEdit] = useState<QuickEditAnchor | null>(null);
+  const [shapeEdit, setShapeEdit] = useState<ShapeEditAnchor | null>(null);
+  const [shapeStyle, setShapeStyle] = useState<ShapeStyle>(loadShapeStyle);
   const [color, setColor] = useState<LiveColor>(loadSelectedLiveColor);
   const [customColors, setCustomColors] = useState<LiveColor[]>(loadCustomLiveColors);
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -107,6 +134,10 @@ export default function Live() {
   useEffect(() => {
     saveQuickSettings(shortcuts);
   }, [shortcuts]);
+
+  useEffect(() => {
+    saveShapeStyle(shapeStyle);
+  }, [shapeStyle]);
 
   useEffect(() => {
     if (!config) return;
@@ -240,16 +271,13 @@ export default function Live() {
     <div className="cluster shapes" aria-label="Shapes">
       <div className="shape-grid">
         {SHAPES.map((s) => (
-          <button
+          <ShapePad
             key={s.kind}
-            className={`shape-btn ${tool === s.kind ? "active" : ""}`}
-            onClick={() => setTool(s.kind)}
-            aria-pressed={tool === s.kind}
-          >
-            <ShapeIcon kind={s.kind} />
-            {s.label}
-            <span className="key-hint">{s.key}</span>
-          </button>
+            shape={s}
+            active={tool === s.kind}
+            onSelect={() => setTool(s.kind)}
+            onEditStyle={(x, y) => setShapeEdit({ kind: s.kind, x, y })}
+          />
         ))}
       </div>
       <div className="shape-grow-row" role="group" aria-label="Stamp size over time">
@@ -266,6 +294,7 @@ export default function Live() {
       </div>
       <p className="cluster-hint">
         {shapeTool ? "Tap the array to stamp" : "Pick a shape, then tap the array"}
+        {" · hold a shape for edge/fill"}
       </p>
     </div>
   );
@@ -480,6 +509,7 @@ export default function Live() {
                   // centred slider means "1×" for everything triggered by a tap.
                   size: size / 0.12,
                   grow: shapeTool ? growValue(growMode) : 0,
+                  ...(shapeTool ? shapeStyle : {}),
                 })
             : undefined
         }
@@ -586,6 +616,14 @@ export default function Live() {
           {showStatus}
         </div>
       </div>
+      {shapeEdit !== null && (
+        <ShapeQuickEdit
+          anchor={shapeEdit}
+          style={shapeStyle}
+          onChange={setShapeStyle}
+          onClose={() => setShapeEdit(null)}
+        />
+      )}
       {quickEdit !== null && (
         <LayerQuickEdit
           anchor={quickEdit}

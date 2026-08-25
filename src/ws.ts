@@ -1,6 +1,7 @@
 // WebSocket client for the Gate backend. Used identically by the Tauri webview,
 // LAN browsers, and phones. Text = JSON protocol; binary = preview frames.
 
+import { SHAPE_STYLE_DEFAULTS } from "./shapeStyle";
 import type {
   AppConfig,
   EffectCfg,
@@ -395,6 +396,7 @@ export class GateClient {
         duration: 0,
         rotation: 0,
         grow: 0,
+        ...SHAPE_STYLE_DEFAULTS,
         ...effect,
       },
     });

@@ -366,6 +366,16 @@ pub struct EffectCfg {
     /// by `1 + grow * age/duration`. 0 holds the size it was tapped at, +1
     /// doubles it by the end, -1 collapses it to nothing. Clamped to ±1.
     pub grow: f32,
+    /// Shapes only: how thick the figure's outline is, 0 (hairline) .. 1 (fat).
+    /// 0.5 is the width figures had before this was adjustable. Below about 0.3
+    /// the outline is thinner than the gap between spokes and will read as a
+    /// dotted line where the boundary runs tangentially — that is a real limit of
+    /// a 64-spoke array, and the control exposes it rather than hiding it.
+    pub edge: f32,
+    /// Shapes only: how brightly the figure's interior is lit, 0 (outline only)
+    /// .. 1 (solid). Low values are what make a figure read as a figure rather
+    /// than a blob; 0.35 is what they were fixed at before.
+    pub fill: f32,
 }
 
 impl Default for EffectCfg {
@@ -382,6 +392,15 @@ impl Default for EffectCfg {
             duration: 0.0,
             rotation: 0.0,
             grow: 0.0,
+            // Not the old look (0.5 / 0.35): that is the one being complained
+            // about — a 0.11-wide outline plus a lit interior is most of a disc,
+            // and the figures read as blobs. 0.3 puts the outline at ~0.077 of
+            // the array radius, just inside the 0.078 gap between spokes at the
+            // rim — the thinnest line 64 spokes can draw without it breaking up
+            // — and 0.15 leaves the interior as a hint rather than a wash.
+            // Verified with `bun scripts/shape-probe.ts`, not by eye over code.
+            edge: 0.3,
+            fill: 0.15,
         }
     }
 }
@@ -507,6 +526,8 @@ pub struct GpuEffect {
     pub brightness: f32,
     pub rotation: f32,
     pub grow: f32,
+    pub edge: f32,
+    pub fill: f32,
 }
 
 impl LayerCfg {
@@ -688,10 +709,35 @@ mod patch_transient_abi_tests {
 mod tests {
     use super::{GpuDab, GpuEffect};
 
+    /// `GpuEffect` and `GpuDab` are bytemuck'd straight into storage buffers
+    /// read by TWO shaders — `gate.wgsl` and `patch_lib.wgsl`, which carry
+    /// independent copies of the struct. A field added to one and not the other
+    /// silently misreads every subsequent field rather than failing to compile,
+    /// so the size is pinned here and both copies must move together.
+    /// 56 = 14 f32: the 12 originals plus `edge` and `fill`.
     #[test]
     fn patch_transient_abi_keeps_full_color_records() {
-        assert_eq!(std::mem::size_of::<GpuEffect>(), 48);
+        assert_eq!(std::mem::size_of::<GpuEffect>(), 56);
         assert_eq!(std::mem::size_of::<GpuDab>(), 48);
+
+        // Both shader copies declare the two shape controls, in the same order.
+        for shader in [
+            include_str!("engine/shaders/gate.wgsl"),
+            include_str!("engine/shaders/patch_lib.wgsl"),
+        ] {
+            let effect = shader
+                .split_once("struct Effect {")
+                .expect("Effect struct")
+                .1
+                .split_once('}')
+                .expect("Effect struct end")
+                .0;
+            let rotation = effect.find("rotation:").expect("rotation");
+            let grow = effect.find("grow:").expect("grow");
+            let edge = effect.find("edge:").expect("edge field missing");
+            let fill = effect.find("fill:").expect("fill field missing");
+            assert!(rotation < grow && grow < edge && edge < fill, "field order");
+        }
 
         let patch_shader = include_str!("engine/shaders/patch_lib.wgsl");
         assert!(patch_shader.contains("col = hsv2rgb(E.hue, E.saturation, E.brightness);"));

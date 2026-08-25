@@ -20,6 +20,8 @@ let url = "ws://127.0.0.1:9520/ws";
 let at = 0.35;
 let size = 2.4;
 let grow = 0;
+let edge = 0.5;
+let fill = 0.35;
 let radius = 0;
 const kinds: string[] = [];
 for (let i = 0; i < args.length; i++) {
@@ -28,11 +30,13 @@ for (let i = 0; i < args.length; i++) {
   else if (a === "--at") at = Number(args[++i]);
   else if (a === "--size") size = Number(args[++i]);
   else if (a === "--grow") grow = Number(args[++i]);
+  else if (a === "--edge") edge = Number(args[++i]);
+  else if (a === "--fill") fill = Number(args[++i]);
   else if (a === "--radius") radius = Number(args[++i]);
   else kinds.push(a);
 }
 if (kinds.length === 0) {
-  console.error("usage: bun scripts/shape-probe.ts [--url ws] [--at 0..1] [--size n] kind...");
+  console.error("usage: bun scripts/shape-probe.ts [--url ws] [--at 0..1] [--size n] [--edge 0..1] [--fill 0..1] kind...");
   process.exit(2);
 }
 
@@ -214,6 +218,8 @@ ws.onopen = async () => {
           duration,
           rotation: 0,
           grow,
+          edge,
+          fill,
         },
       }),
     );

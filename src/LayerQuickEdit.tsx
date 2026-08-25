@@ -8,7 +8,8 @@
 // Opened by long-press or right-click; see `longPress.ts` for the gesture and
 // `Live.tsx` / `Control.tsx` for the two surfaces that raise it.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import QuickPopover from "./QuickPopover";
 import { useGate, useThrottled } from "./state";
 import {
   LAYER_LABELS,
@@ -19,10 +20,6 @@ import {
 } from "./types";
 
 const BLEND_MODES: BlendMode[] = ["add", "multiply", "screen", "alpha_over", "max"];
-
-/** Below this the window has no room to anchor a popover; it becomes a sheet. */
-const SHEET_WIDTH = 700;
-const MARGIN = 8;
 
 export interface QuickEditAnchor {
   index: number;
@@ -72,9 +69,6 @@ export default function LayerQuickEdit({
 }) {
   const { client, config } = useGate();
   const layer = config?.layers[anchor.index];
-  const cardRef = useRef<HTMLDivElement>(null);
-  const [placed, setPlaced] = useState<{ left: number; top: number } | null>(null);
-  const sheet = typeof window !== "undefined" && window.innerWidth <= SHEET_WIDTH;
 
   const throttledUpdate = useThrottled(
     (l: LayerCfg) => client.updateLayer(anchor.index, l),
@@ -88,39 +82,6 @@ export default function LayerQuickEdit({
   useEffect(() => {
     if (!dragging.current && layer) setLocal(layer);
   }, [layer]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    // Capture, so this wins over the app's show-mode Escape handler.
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
-
-  // Anchor to the gesture, then pull back inside the window. Measured rather
-  // than guessed: the card's height depends on how many params the layer kind
-  // names, so there is no constant to clamp against.
-  useLayoutEffect(() => {
-    if (sheet) return;
-    const card = cardRef.current;
-    if (!card) return;
-    const { width, height } = card.getBoundingClientRect();
-    const left = Math.min(
-      Math.max(MARGIN, anchor.x - width / 2),
-      window.innerWidth - width - MARGIN,
-    );
-    // Prefer below the finger; flip above when that would run off the bottom.
-    const below = anchor.y + 14;
-    const top = below + height + MARGIN <= window.innerHeight
-      ? below
-      : Math.max(MARGIN, anchor.y - height - 14);
-    setPlaced({ left, top });
-  }, [anchor.x, anchor.y, sheet, local?.kind]);
 
   if (!local) return null;
 
@@ -141,31 +102,13 @@ export default function LayerQuickEdit({
     .filter((row) => row.label !== "");
 
   return (
-    <div
-      className="quick-edit-backdrop"
-      onPointerDown={onClose}
-      onContextMenu={(e) => {
-        // A second right-click anywhere dismisses rather than raising the
-        // browser menu the rest of the app is careful to suppress.
-        e.preventDefault();
-        onClose();
-      }}
+    <QuickPopover
+      anchor={anchor}
+      onClose={onClose}
+      label={`Quick edit ${local.name || LAYER_LABELS[local.kind]}`}
+      onPointerDownInside={() => (dragging.current = true)}
+      onPointerUpInside={() => (dragging.current = false)}
     >
-      <div
-        ref={cardRef}
-        className={`layer-quick-edit ${sheet ? "sheet" : "popover"}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Quick edit ${local.name || LAYER_LABELS[local.kind]}`}
-        style={sheet || !placed ? undefined : { left: placed.left, top: placed.top }}
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          dragging.current = true;
-        }}
-        onPointerUp={() => (dragging.current = false)}
-        onPointerCancel={() => (dragging.current = false)}
-        onContextMenu={(e) => e.stopPropagation()}
-      >
         <div className="quick-edit-head">
           <button
             className={`quick-edit-power ${local.enabled ? "on" : ""}`}
@@ -291,7 +234,6 @@ export default function LayerQuickEdit({
             Full editor →
           </button>
         </div>
-      </div>
-    </div>
+    </QuickPopover>
   );
 }

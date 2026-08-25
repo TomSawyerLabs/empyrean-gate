@@ -5441,3 +5441,45 @@ button:disabled {
 .live-side .cluster.live-layer-list-wrap > .cluster-hint {
   flex-grow: 0;
 }
+
+/* ---- Shape definition menu (hold / right-click a shape pad) ---- */
+
+.shape-quick-edit.popover {
+  width: min(360px, calc(100vw - 16px));
+}
+
+.shape-quick-glyph {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #332a55;
+  border-radius: 8px;
+  background: rgba(56, 209, 194, 0.08);
+}
+
+.shape-quick-glyph .tool-icon {
+  width: 24px;
+  height: 24px;
+}
+
+/* The width readout is the whole point of showing a number here — it turns
+   "is this too thin for the array" into something visible before the show. */
+.shape-quick-edit .cluster-hint {
+  text-align: left;
+}
+
+.shape-quick-edit .cluster-hint.warn {
+  color: #ffb3c2;
+}
+
+.shape-quick-edit .quick-edit-foot {
+  align-items: flex-end;
+}
+
+.shape-quick-edit .quick-edit-foot .cluster-hint {
+  flex: 1;
+  min-width: 0;
+}
