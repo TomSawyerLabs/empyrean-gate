@@ -645,18 +645,22 @@ mod patch_transient_abi_tests {
     /// falls through to `default`. Catch it here instead of at the show.
     #[test]
     fn every_effect_kind_has_a_shader_case() {
-        let src = include_str!("engine/shaders/gate.wgsl");
-        let after = src
-            .split_once("fn effect_color(")
-            .expect("effect_color missing from gate.wgsl")
-            .1;
-        let body = after.split_once("\nfn ").map_or(after, |(head, _)| head);
-        for kind in EffectKind::ALL {
-            let arm = format!("case {}u:", kind.gpu_id());
-            assert!(
-                body.contains(&arm),
-                "{kind:?} has no `{arm}` arm in effect_color"
-            );
+        for (name, src) in [
+            ("gate", include_str!("engine/shaders/gate.wgsl")),
+            ("patch", include_str!("engine/shaders/patch_lib.wgsl")),
+        ] {
+            let after = src
+                .split_once("fn effect_color(")
+                .unwrap_or_else(|| panic!("effect_color missing from {name} shader"))
+                .1;
+            let body = after.split_once("\nfn ").map_or(after, |(head, _)| head);
+            for kind in EffectKind::ALL {
+                let arm = format!("case {}u:", kind.gpu_id());
+                assert!(
+                    body.contains(&arm),
+                    "{kind:?} has no `{arm}` arm in {name} effect_color"
+                );
+            }
         }
     }
 

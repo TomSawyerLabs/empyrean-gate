@@ -54,8 +54,8 @@ struct Effect {
     hue: f32,
     saturation: f32,
     brightness: f32,
-    _pad0: f32,
-    _pad1: f32,
+    rotation: f32,
+    grow: f32,
 }
 
 struct Dab {
@@ -297,6 +297,89 @@ fn apply_blend(acc: vec3f, c: vec4f, opacity: f32, mode: u32) -> vec3f {
     }
 }
 
+fn fmod_pos(x: f32, y: f32) -> f32 { return x - y * floor(x / y); }
+
+fn rot2(p: vec2f, a: f32) -> vec2f {
+    let c = cos(a);
+    let s = sin(a);
+    return vec2f(c * p.x + s * p.y, c * p.y - s * p.x);
+}
+
+fn sd_star(p_in: vec2f, r: f32, n: f32, m: f32) -> f32 {
+    let an = PI / n;
+    let en = PI / m;
+    let acs = vec2f(cos(an), sin(an));
+    let ecs = vec2f(cos(en), sin(en));
+    let bn = fmod_pos(atan2(p_in.x, p_in.y), 2.0 * an) - an;
+    var p = length(p_in) * vec2f(cos(bn), abs(sin(bn)));
+    p -= r * acs;
+    p += ecs * clamp(-dot(p, ecs), 0.0, r * acs.y / ecs.y);
+    return length(p) * sign(p.x);
+}
+
+fn heart_r(a: f32) -> f32 {
+    let s = sin(a);
+    return 2.0 - 2.0 * s + s * sqrt(abs(cos(a))) / (s + 1.4);
+}
+
+fn sd_diamond(p: vec2f, r: f32) -> f32 {
+    return (abs(p.x) + abs(p.y) - r) * 0.70710678;
+}
+
+fn sd_triangle(p_in: vec2f, r: f32) -> f32 {
+    let k = sqrt(3.0);
+    let h = r * 0.86602540;
+    var p = vec2f(abs(p_in.x) - h, p_in.y + h / k);
+    if p.x + k * p.y > 0.0 {
+        p = vec2f(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+    }
+    p.x -= clamp(p.x, -2.0 * h, 0.0);
+    return -length(p) * sign(p.y);
+}
+
+fn sd_moon(p_in: vec2f, d: f32, ra: f32, rb: f32) -> f32 {
+    let p = vec2f(p_in.x, abs(p_in.y));
+    let a = (ra * ra - rb * rb + d * d) / (2.0 * d);
+    let b = sqrt(max(ra * ra - a * a, 0.0));
+    if d * (p.x * b - p.y * a) > d * d * max(b - p.y, 0.0) {
+        return length(p - vec2f(a, b));
+    }
+    return max(length(p) - ra, -(length(p - vec2f(d, 0.0)) - rb));
+}
+
+const SHAPE_UNIT: f32 = 0.38;
+
+fn shape_scale(t: f32) -> f32 {
+    let g = clamp(t / 0.18, 0.0, 1.0);
+    let settle = 1.0 - pow(1.0 - g, 3.0);
+    return settle + sin(PI * g) * 0.12;
+}
+
+struct Stamp {
+    p: vec2f,
+    r: f32,
+}
+
+fn stamp_frame(E: Effect, ctx: Ctx, t: f32, spin: f32) -> Stamp {
+    let origin = E.radius * vec2f(cos(E.angle), sin(E.angle));
+    var s: Stamp;
+    s.p = rot2(ctx.pos - origin, E.rotation + spin);
+    let drift = max(1.0 + E.grow * t, 0.0);
+    s.r = max(SHAPE_UNIT * clamp(E.size, 0.1, 4.0) * shape_scale(t) * drift, 1e-3);
+    return s;
+}
+
+fn shape_stamp(sd: f32, radius: f32) -> f32 {
+    let w = clamp(0.14 * radius, 0.035, 0.11);
+    let edge = exp(-(sd * sd) / (w * w));
+    let interior = clamp(-sd / w, 0.0, 1.0);
+    return edge + interior * 0.35;
+}
+
+fn shape_hold(t: f32) -> f32 {
+    return 1.0 - smoothstep(0.45, 1.0, t);
+}
+
 // ---------------------------------------------------------------------------
 // Triggered effects + live-draw dabs: verbatim from gate.wgsl so both stay
 // live while a patch renders (effect pads and drawing keep working).
@@ -336,6 +419,84 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
             let d = abs(ctx.rn - front);
             let v = exp(-(d * d) / 0.003);
             return col * v * fade * E.intensity * 1.8;
+        }
+        case 4u: {
+            let s = max(E.size, 0.2);
+            let front = t * 1.15;
+            let d = ctx.rn - front;
+            let w = 0.09 * s;
+            let ring = exp(-(d * d) / (w * w));
+            let behind = front - ctx.rn;
+            let wake = select(0.0, exp(-behind / (0.32 * s)) * 0.4, behind > 0.0);
+            let petals = 0.7 + 0.3 * cos(6.0 * (ctx.theta - E.angle));
+            return col * (ring + wake) * petals * fade * E.intensity * 1.7;
+        }
+        case 5u: {
+            let spin = E.angle + TAU * 1.75 * t * t;
+            let sharp = clamp(8.0 / max(E.size, 0.25), 1.0, 40.0);
+            let arm = pow(max(cos(5.0 * (ctx.theta - spin) + ctx.rn * 3.0), 0.0), sharp);
+            return col * arm * fade * E.intensity * 1.7;
+        }
+        case 6u: {
+            let swell = sin(PI * clamp(t * 1.1, 0.0, 1.0));
+            let seed = u32(abs(E.angle) * 1024.0);
+            let idx = ctx.spoke * G.pixels + ctx.i;
+            let cell = u32(t * 26.0);
+            let rnd = hash01(idx * 2654435761u + cell * 40503u + seed * 7919u);
+            let density = clamp(0.07 * E.size, 0.02, 0.35) * swell;
+            let lit = step(1.0 - density, rnd);
+            let vary = 0.55 + 0.45 * hash01(idx * 97u + cell * 26699u + seed);
+            return col * lit * vary * swell * E.intensity * 1.8;
+        }
+        case 7u: {
+            let s = max(E.size, 0.2);
+            let dir = vec2f(cos(E.angle), sin(E.angle));
+            let along = dot(ctx.pos, dir);
+            let front = mix(-1.2, 1.2, t);
+            let w = 0.09 * s;
+            let bar = exp(-((along - front) * (along - front)) / (w * w));
+            let behind = front - along;
+            let wake = select(
+                0.0,
+                (1.0 - clamp(behind / (0.5 * s), 0.0, 1.0)) * 0.45,
+                behind > 0.0
+            );
+            return col * (bar + wake) * fade * E.intensity * 1.6;
+        }
+        case 8u: {
+            let s = stamp_frame(E, ctx, t, t * 0.5);
+            return col * shape_stamp(sd_star(s.p, s.r, 5.0, 3.0), s.r)
+                * shape_hold(t) * E.intensity * 1.5;
+        }
+        case 9u: {
+            let s = stamp_frame(E, ctx, t, 0.0);
+            let beat = 1.0 + 0.07 * sin(TAU * 2.0 * t) * (1.0 - t);
+            let unit = s.r * beat / 2.32;
+            let q = s.p - vec2f(0.0, 1.68 * unit);
+            let sd = length(q) - heart_r(atan2(q.y, q.x)) * unit;
+            return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
+        }
+        case 10u: {
+            let s = stamp_frame(E, ctx, t, t * 0.4);
+            let open = smoothstep(0.0, 0.35, t);
+            let lobe = pow(abs(cos(3.0 * atan2(s.p.y, s.p.x))), 0.6);
+            let sd = length(s.p) - s.r * mix(1.0, 0.5 + 0.5 * lobe, open);
+            return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
+        }
+        case 11u: {
+            let s = stamp_frame(E, ctx, t, 0.0);
+            return col * shape_stamp(sd_diamond(s.p, s.r), s.r)
+                * shape_hold(t) * E.intensity * 1.5;
+        }
+        case 12u: {
+            let s = stamp_frame(E, ctx, t, 0.0);
+            return col * shape_stamp(sd_triangle(s.p, s.r), s.r)
+                * shape_hold(t) * E.intensity * 1.5;
+        }
+        case 13u: {
+            let s = stamp_frame(E, ctx, t, 0.35);
+            let sd = sd_moon(s.p, 0.41 * s.r, s.r, 0.98 * s.r);
+            return col * shape_stamp(sd, s.r) * shape_hold(t) * E.intensity * 1.5;
         }
         case 14u: {
             let front = t * 1.12;
