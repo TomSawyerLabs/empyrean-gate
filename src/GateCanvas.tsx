@@ -166,7 +166,13 @@ export default function GateCanvas({
     }
     const phone = window.innerWidth < 700;
     const decimate = phone ? 3 : 1;
-    const sub = () => client.subscribePreview(phone ? 24 : 30, decimate);
+    // The Gate machine's preview never crosses the venue network. Show it at
+    // render cadence so an already-low-latency deck reaction is not then held
+    // for a 30 fps preview interval. Remote devices retain their Wi-Fi caps.
+    const loopback =
+      client.httpBase.startsWith("http://127.0.0.1") ||
+      client.httpBase.startsWith("http://localhost");
+    const sub = () => client.subscribePreview(loopback ? 60 : phone ? 24 : 30, decimate);
     sub();
     const offStatus = client.onStatus((up) => up && sub());
     const offMsg = client.onMessage((m) => {

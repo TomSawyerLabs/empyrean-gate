@@ -303,6 +303,10 @@ pub struct SharedState {
     pub patch_params: Mutex<Vec<(String, String, f32)>>,
     /// Monotonic count of triggered effects; the patch Tap node edge-detects it.
     pub effect_seq: AtomicU64,
+    /// PRO DJ LINK transport events ask the renderer to bypass its normal
+    /// one-frame GPU readback pipeline once. Kept separate from `effect_seq` so
+    /// a busy touch surface does not double-dispatch every ordinary effect.
+    pub low_latency_render_seq: AtomicU64,
     pub effects: Mutex<Vec<ActiveEffect>>,
     pub dabs: Mutex<Vec<ActiveDab>>,
     pub audio: [Mutex<AudioFeatures>; MAX_AUDIO_SOURCES],
@@ -416,6 +420,7 @@ impl SharedState {
             render_transition_epoch: AtomicU64::new(0),
             patch_params: Mutex::new(Vec::new()),
             effect_seq: AtomicU64::new(0),
+            low_latency_render_seq: AtomicU64::new(0),
             effects: Mutex::new(Vec::new()),
             dabs: Mutex::new(Vec::new()),
             audio: Default::default(),

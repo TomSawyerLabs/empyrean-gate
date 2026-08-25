@@ -1256,6 +1256,20 @@ struct GameRuntime {
     dirty: bool,
 }
 
+/// Preserve the steady-state ping-pong renderer, but let an asynchronous
+/// transport event pay for one extra dispatch to receive the frame it just
+/// changed instead of the previous one.
+fn render_with_urgency<'a>(
+    engine: &'a mut Engine,
+    inputs: &FrameInputs,
+    urgent: bool,
+) -> anyhow::Result<Option<&'a [u8]>> {
+    if urgent {
+        let _ = engine.render(inputs)?;
+    }
+    engine.render(inputs)
+}
+
 impl GameRuntime {
     fn new(kind: crate::game::GameKind, theta: usize, species: u8, seed: u64, time: f32) -> Self {
         let sim =
@@ -1301,6 +1315,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut fps_ema = 0.0f32;
     let mut frame_ms_ema = 0.0f32;
     let mut frame_number: u64 = 0;
+    let mut low_latency_render_seq = state.low_latency_render_seq.load(Ordering::Acquire);
     let mut video_revision: u64 = u64::MAX;
     // A second independent render bus keeps the outgoing renderer alive during
     // arbitrary layer/patch handoffs. It owns its own GPU buffers/pipeline and
@@ -2261,6 +2276,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // below so nothing piles up for the moment the game ends.
         let game_suppress = game_fade > 0.0 && !game_overlay;
 
+        // Capture the urgency marker before the effect snapshot. The receiver
+        // publishes it only after inserting the effects; this ordering ensures
+        // we never consume an urgent request with a frame that narrowly missed
+        // the corresponding effect.
+        let requested_low_latency = state.low_latency_render_seq.load(Ordering::Acquire);
         let effects: Vec<GpuEffect> = {
             let mut fx = state.effects.lock();
             fx.retain(|e| {
@@ -2494,7 +2514,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         });
 
         let t0 = Instant::now();
-        let rgb = match engine.render(&inputs) {
+        let urgent = requested_low_latency != low_latency_render_seq;
+        // On an urgent tick the first dispatch writes the new effect while
+        // returning N-1; the second immediately reads that new frame back. The
+        // next regular tick receives the duplicate second dispatch, so the
+        // output stream stays continuous. This cost is paid only on a PRO DJ
+        // LINK event, not on every frame.
+        let rgb = match render_with_urgency(engine, &inputs, urgent) {
             Ok(r) => r,
             Err(e) => {
                 let msg = format!("render failed: {e:#}");
@@ -2503,6 +2529,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 return; // drop back to engine_thread for re-init
             }
         };
+        low_latency_render_seq = requested_low_latency;
         let frame_ms = t0.elapsed().as_secs_f32() * 1000.0;
 
         if let Some(rendered_rgb) = rgb {

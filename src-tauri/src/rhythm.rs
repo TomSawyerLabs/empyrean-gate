@@ -1352,6 +1352,14 @@ fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
             state.trigger_effect(effect(EffectKind::Strobe, 1.0, 1.0, 0.5, 0.22));
         }
     }
+    // The renderer normally submits frame N while reading back N-1. That is
+    // ideal steady-state throughput, but adds a visible 16.7 ms at 60 Hz to an
+    // event that arrived asynchronously just after a frame boundary. Mark only
+    // deck-transport reactions urgent; the engine will double-dispatch once so
+    // the newly-created effect is the frame delivered this tick.
+    state
+        .low_latency_render_seq
+        .fetch_add(1, Ordering::Release);
 }
 
 fn bind_link_socket(address: Ipv4Addr, port: u16) -> io::Result<UdpSocket> {
@@ -1815,6 +1823,11 @@ mod tests {
             effects[0].cfg.angle,
             std::f32::consts::FRAC_PI_2,
             "deck 2 originates at displayed right"
+        );
+        assert_eq!(
+            state.low_latency_render_seq.load(Ordering::Acquire),
+            1,
+            "one deck event requests one immediate render even when it creates two effects"
         );
     }
 }

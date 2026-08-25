@@ -2,6 +2,18 @@ import { expect, test } from "@playwright/test";
 
 test("Radial Tetris is selectable and exposes touch-sized play controls", async ({ page }) => {
   const clientId = `radial-tetris-${Date.now()}`;
+  await page.addInitScript(() => {
+    const sent: unknown[] = [];
+    Object.defineProperty(window, "__previewSubscriptions", { value: sent });
+    const original = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      if (typeof data === "string") {
+        const message = JSON.parse(data);
+        if (message.type === "subscribe_preview") sent.push(message);
+      }
+      return original.call(this, data);
+    };
+  });
   await page.addInitScript((id) => localStorage.setItem("empyrean-client-id", id), clientId);
   await page.request.post(`/mock/status?client=${clientId}`, {
     data: {
@@ -32,4 +44,12 @@ test("Radial Tetris is selectable and exposes touch-sized play controls", async 
     const box = await button.boundingBox();
     expect(box?.height).toBeGreaterThanOrEqual(48);
   }
+
+  const previewFps = await page.evaluate(() => {
+    const subscriptions = (
+      window as typeof window & { __previewSubscriptions: Array<{ fps: number }> }
+    ).__previewSubscriptions;
+    return subscriptions.at(-1)?.fps;
+  });
+  expect(previewFps, "the Gate machine preview should not add a 30 fps hold").toBe(60);
 });
