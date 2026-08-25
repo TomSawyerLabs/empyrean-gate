@@ -1,6 +1,5 @@
-// Show mode hides the top bar, which is where the version chip lives — so before
-// this, an update was invisible and unrefusable from the performance surface
-// while `auto_install` could still swap the binary underneath you.
+// Show mode keeps the top bar and also exposes the dedicated show update controls,
+// so an update remains visible and refusable from the performance surface.
 //
 // Installing mid-show stays allowed on purpose (the two-phase handover costs
 // about a frame). What is tested here is that you can SEE it coming, refuse it
@@ -38,8 +37,8 @@ test("an available update is visible and refusable without leaving show mode", a
   await page.goto("/#live");
   await ready(page);
 
-  // The top bar really is hidden — otherwise this test proves nothing.
-  await expect(page.locator(".topbar")).toBeHidden();
+  await expect(page.locator(".topbar")).toBeVisible();
+  await expect(page.locator(".topbar nav")).toBeVisible();
 
   // Staged, so the button promises an instant install rather than a download.
   const install = page.getByRole("button", { name: /Update to v9\.9\.9 now/ });
@@ -48,6 +47,17 @@ test("an available update is visible and refusable without leaving show mode", a
   const auto = page.getByRole("checkbox", { name: /Auto-update/ });
   await expect(auto).toBeVisible();
   await expect(auto).not.toBeChecked(); // auto_install defaults to false
+});
+
+test("the retained top bar can leave show mode", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await enterShowMode(page);
+  await page.goto("/#live");
+  await ready(page);
+
+  await page.locator(".topbar").getByRole("button", { name: "Exit show mode" }).click();
+  await expect(page.locator(".app.show-mode")).toHaveCount(0);
+  await expect(page.locator(".topbar")).toBeVisible();
 });
 
 test("nothing is added to show mode when there is no update", async ({ page }) => {
@@ -59,7 +69,7 @@ test("nothing is added to show mode when there is no update", async ({ page }) =
   // The show surface is deliberately near-empty; the update controls must not
   // be sitting there costing space on the ordinary path.
   await expect(page.locator(".show-update")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /Exit show mode/ })).toBeVisible();
+  await expect(page.locator(".show-exit")).toBeVisible();
 });
 
 test("show mode is left at the scheduled hour, on the following day", async ({ page }) => {

@@ -47,8 +47,8 @@ const SHOW_MODE_KEY = "empyrean-show-mode";
 /// Date (local) that the scheduled show-mode exit last fired, so it fires once a day.
 const SHOW_MODE_LEFT_KEY = "empyrean-show-mode-left-on";
 
-/// Show mode: the native window goes real fullscreen AND the app chrome is
-/// hidden, so the array fills the display edge to edge. The preference lives in
+/// Show mode: the native window goes real fullscreen while retaining the tab bar,
+/// so every performance surface stays reachable. The preference lives in
 /// localStorage (which survives restarts and self-update binary swaps, since the
 /// webview data folder is keyed by the app identifier), and is re-applied on
 /// mount — so the app comes back in whatever state it was closed in. Browser
@@ -590,8 +590,8 @@ export default function App() {
     >
       {showMode && (
         <div className="show-controls">
-          {/* Still reachable with the chrome hidden: a complaint is only worth
-              anything while it is still inside the capture window. */}
+          {/* Keep the performance shortcuts close to the surface even though the
+              normal top bar now remains available in fullscreen. */}
           <button className="show-report" onClick={() => setShowReport(true)}>
             ⚑ Report
           </button>
@@ -636,8 +636,12 @@ export default function App() {
         >
           ⚑ <span className="btn-label">Report</span>
         </button>
-        <button className="ghost" aria-label="Show mode" onClick={() => setShowMode(true)}>
-          ⛶ <span className="btn-label">Show mode</span>{" "}
+        <button
+          className="ghost"
+          aria-label={showMode ? "Exit show mode" : "Show mode"}
+          onClick={() => setShowMode(!showMode)}
+        >
+          ⛶ <span className="btn-label">{showMode ? "Exit show mode" : "Show mode"}</span>{" "}
           <span className="chip-key">F11</span>
         </button>
         <button className="ghost" aria-label="Connect a device" onClick={() => setShowConnect(true)}>

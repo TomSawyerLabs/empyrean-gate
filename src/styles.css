@@ -329,17 +329,12 @@ main {
 }
 
 /* ---- Show mode ----
-   Fullscreen (native window) plus no app chrome, so the array fills the display.
-   The way out stays visible: a hidden hot corner is undiscoverable in a dark
-   venue, and error banners deliberately still show through. */
-
-.app.show-mode > .topbar {
-  display: none;
-}
+   Native fullscreen keeps the normal top bar: switching Live/Media/Patch/etc.
+   is part of operating the show, not window chrome to hide. */
 
 .show-controls {
   position: fixed;
-  top: 8px;
+  top: 54px;
   right: 8px;
   z-index: 60;
   display: flex;
@@ -399,11 +394,11 @@ main {
   color: var(--text);
 }
 
-/* The Live tab's top-right cluster shares that corner — hand it the space the
-   hidden topbar freed up rather than letting the two overlap. */
+/* The Live tab's top-right cluster shares that corner with the fullscreen
+   shortcuts, below the retained top bar. */
 .app.show-mode .corner.tr,
 .app.show-mode .corner-stack.tr {
-  top: 44px;
+  top: 96px;
 }
 
 /* ---- Show readiness ---- */
