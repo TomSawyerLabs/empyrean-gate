@@ -190,6 +190,8 @@ impl Runtime {
                     o.insert("treble".into(), a.treble);
                     o.insert("onset".into(), a.onset);
                     o.insert("beat_phase".into(), a.beat_phase);
+                    o.insert("bpm".into(), a.bpm);
+                    o.insert("tempo".into(), a.bpm / 120.0);
                     let st = &mut self.state[node];
                     if a.bpm > 0.0 && a.beat_phase < st.prev_beat - 0.5 {
                         self.events[node].push("beat");
@@ -401,7 +403,13 @@ mod tests {
         let mut rt = runtime(doc);
         let mut audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
         audio[0].bass = 0.75;
+        audio[0].bpm = 128.0;
         let slab = rt.eval(&inputs(&audio)).to_vec();
+        assert_eq!(rt.outputs[0]["bpm"], 128.0, "selected clock BPM is exposed");
+        assert!(
+            (rt.outputs[0]["tempo"] - 128.0 / 120.0).abs() < 1e-6,
+            "tempo is normalized around 120 BPM"
+        );
 
         let opacity_slot = rt
             .prog
@@ -634,6 +642,85 @@ mod tests {
         rt.eval(&inp);
         rt.eval(&inp);
         assert!(rt.slab[brightness_slot] > 0.0, "jump fired the envelope");
+    }
+
+    #[test]
+    fn repeated_dj_link_events_retrigger_on_every_counter_increment() {
+        let doc = PatchDoc {
+            nodes: vec![
+                node("link", "dj_link"),
+                node("cue_env", "envelope"),
+                node("wrap_env", "envelope"),
+                node("cue", "beat_rings"),
+                node("wrap", "beat_rings"),
+                node("mix", "blend"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("link", "cue", "cue_env", "trigger"),
+                edge("link", "loop_wrap", "wrap_env", "trigger"),
+                edge("cue_env", "out", "cue", "brightness"),
+                edge("wrap_env", "out", "wrap", "brightness"),
+                edge("cue", "out", "mix", "base"),
+                edge("wrap", "out", "mix", "over"),
+                edge("mix", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let mut rt = runtime(doc);
+        rt.set_param("cue_env", "attack", 0.0);
+        rt.set_param("wrap_env", "attack", 0.0);
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let cue_slot = rt
+            .prog
+            .slots
+            .iter()
+            .find(|s| {
+                s.wired
+                    .as_ref()
+                    .is_some_and(|(node, port)| {
+                        rt.doc.nodes[*node].id == "cue_env" && port == "out"
+                    })
+            })
+            .expect("cue envelope slot")
+            .slot;
+        let wrap_slot = rt
+            .prog
+            .slots
+            .iter()
+            .find(|s| {
+                s.wired.as_ref().is_some_and(|(node, port)| {
+                    rt.doc.nodes[*node].id == "wrap_env" && port == "out"
+                })
+            })
+            .expect("wrap envelope slot")
+            .slot;
+
+        let mut inp = inputs(&audio);
+        inp.dj_link.event_seq[crate::state::DJ_EVENT_CUE] = 20;
+        inp.dj_link.event_seq[crate::state::DJ_EVENT_LOOP_WRAP] = 30;
+        rt.eval(&inp);
+        rt.eval(&inp);
+        assert_eq!(rt.slab[cue_slot], 0.0, "no startup cue event");
+        assert_eq!(rt.slab[wrap_slot], 0.0, "no startup wrap event");
+
+        for event_number in 1..=3 {
+            inp.dj_link.event_seq[crate::state::DJ_EVENT_CUE] += 1;
+            inp.dj_link.event_seq[crate::state::DJ_EVENT_LOOP_WRAP] += 1;
+            rt.eval(&inp);
+            assert!(
+                rt.slab[cue_slot] > 0.99,
+                "cue event {event_number} retriggered"
+            );
+            assert!(
+                rt.slab[wrap_slot] > 0.99,
+                "loop wrap event {event_number} retriggered"
+            );
+
+            rt.eval(&inp);
+            assert!(rt.slab[cue_slot] < 0.99, "cue envelope decayed");
+            assert!(rt.slab[wrap_slot] < 0.99, "loop wrap envelope decayed");
+        }
     }
 
     #[test]

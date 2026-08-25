@@ -2,10 +2,14 @@
   "format": 1,
   "id": "builtin-dj-crunch-sparkles",
   "name": "DJ Crunch Sparkles",
-  "description": "Treble and onset energy stand in for a crunchy filter while PRO DJ LINK mix motion sends bright particles around a beat-locked spiral.",
+  "description": "Treble energy and LINK mix motion send particles around a tempo-locked spiral; master audio drives the overall brightness without a slow envelope.",
   "nodes": [
     { "id": "link", "kind": "dj_link", "name": "deck motion", "params": {}, "pos": [40, 40] },
     { "id": "aud", "kind": "audio", "name": "music texture", "params": {}, "pos": [40, 260] },
+    { "id": "level_gain", "kind": "scalar_math", "name": "fast master brightness", "params": { "op": 2, "b": 0.82 }, "pos": [250, 620] },
+    { "id": "level_floor", "kind": "scalar_math", "name": "brightness floor", "params": { "op": 0, "b": 0.18 }, "pos": [470, 620] },
+    { "id": "spiral_tempo", "kind": "scalar_math", "name": "spiral BPM motion", "params": { "op": 2, "b": 0.16 }, "pos": [250, 410] },
+    { "id": "spark_tempo", "kind": "scalar_math", "name": "spark BPM motion", "params": { "op": 2, "b": 1.55 }, "pos": [650, 360] },
     { "id": "treble", "kind": "smooth", "name": "crunch energy", "params": { "seconds": 0.10 }, "pos": [250, 250] },
     { "id": "treble_scale", "kind": "scalar_math", "name": "treble weight", "params": { "op": 2, "b": 0.72 }, "pos": [450, 230] },
     { "id": "mix_scale", "kind": "scalar_math", "name": "mixer motion weight", "params": { "op": 2, "b": 0.42 }, "pos": [450, 80] },
@@ -22,7 +26,13 @@
     { "from": { "node": "treble_scale", "port": "out" }, "to": { "node": "density", "port": "a" } },
     { "from": { "node": "mix_scale", "port": "out" }, "to": { "node": "density", "port": "b" } },
     { "from": { "node": "density", "port": "out" }, "to": { "node": "spark", "port": "density" } },
-    { "from": { "node": "aud", "port": "beat_phase" }, "to": { "node": "spiral", "port": "speed" } },
+    { "from": { "node": "aud", "port": "tempo" }, "to": { "node": "spiral_tempo", "port": "a" } },
+    { "from": { "node": "spiral_tempo", "port": "out" }, "to": { "node": "spiral", "port": "speed" } },
+    { "from": { "node": "aud", "port": "tempo" }, "to": { "node": "spark_tempo", "port": "a" } },
+    { "from": { "node": "spark_tempo", "port": "out" }, "to": { "node": "spark", "port": "speed" } },
+    { "from": { "node": "aud", "port": "level" }, "to": { "node": "level_gain", "port": "a" } },
+    { "from": { "node": "level_gain", "port": "out" }, "to": { "node": "level_floor", "port": "a" } },
+    { "from": { "node": "level_floor", "port": "out" }, "to": { "node": "out", "port": "master" } },
     { "from": { "node": "spiral", "port": "out" }, "to": { "node": "mix", "port": "base" } },
     { "from": { "node": "spark", "port": "out" }, "to": { "node": "mix", "port": "over" } },
     { "from": { "node": "mix", "port": "out" }, "to": { "node": "out", "port": "in" } }
@@ -31,6 +41,8 @@
     { "node": "treble_scale", "param": "b", "label": "Crunch sensitivity" },
     { "node": "mix_scale", "param": "b", "label": "Mix-motion boost" },
     { "node": "spark", "param": "hue", "label": "Spark hue" },
-    { "node": "out", "param": "master", "label": "Master" }
+    { "node": "spiral_tempo", "param": "b", "label": "BPM motion" },
+    { "node": "level_gain", "param": "b", "label": "Music brightness" },
+    { "node": "level_floor", "param": "b", "label": "Brightness floor" }
   ]
 }
