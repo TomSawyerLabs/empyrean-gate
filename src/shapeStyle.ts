@@ -6,7 +6,8 @@
 // legibility for the room is tuning it for all of them at once.
 
 export interface ShapeStyle {
-  /** Outline thickness, 0 (hairline) .. 1 (fat). */
+  /** Outline thickness as a position between the array's resolution limit at
+   *  that radius (0) and a fat outline (1). See `shape_stamp` in gate.wgsl. */
   edge: number;
   /** Interior brightness, 0 (outline only) .. 1 (solid). */
   fill: number;
@@ -15,10 +16,11 @@ export interface ShapeStyle {
 /**
  * Must match `EffectCfg::default()` in `src-tauri/src/layers.rs`.
  *
- * 0.3 puts the outline at ~0.077 of the array radius, just inside the 0.078 gap
- * between spokes at the rim — the thinnest line 64 spokes can draw without it
- * breaking into dashes. 0.15 leaves the interior as a hint rather than a wash.
- * `edge: 0.5, fill: 0.35` is what figures looked like before this was a control.
+ * `edge` is a position between the array's own resolution limit at that radius
+ * (0) and a fat outline (1) — not an absolute width. The shader computes the
+ * limit per pixel from the local spoke pitch, so 0.3 sits comfortably above it
+ * everywhere: crisp near the hole, automatically wider near the rim where the
+ * spokes fan out. 0.15 leaves the interior as a hint rather than a wash.
  */
 export const SHAPE_STYLE_DEFAULTS: ShapeStyle = { edge: 0.3, fill: 0.15 };
 
@@ -51,15 +53,4 @@ export function saveShapeStyle(style: ShapeStyle): void {
   } catch {
     // Private browsing, quota — the style just won't persist.
   }
-}
-
-/** Roughly what the outline measures as a fraction of the array radius, for a
- *  full-size figure. Shown in the editor so "too thin to draw" is visible
- *  rather than something you discover on the rig. */
-export const SPOKE_PITCH = 0.078;
-
-export function edgeWidth(edge: number): number {
-  // Mirrors `shape_stamp`: base is the clamped pre-control width at full size.
-  const base = 0.11;
-  return Math.min(0.2, Math.max(0.01, base * (0.25 + 1.5 * Math.min(1, Math.max(0, edge)))));
 }

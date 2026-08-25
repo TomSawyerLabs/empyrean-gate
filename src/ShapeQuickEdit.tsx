@@ -5,19 +5,15 @@
 // stamp already has a home — size is the Size slider, hold/grow/shrink is the
 // strip under the pads.
 //
-// The preview is not decoration. Below about 0.3 the outline is finer than the
-// gap between spokes and will render as a dotted line on the real array; the
-// readout says so at the moment you cross it, rather than letting you find out
-// at the rig.
+// Edge is not an absolute width. The array samples 17x to 54x more finely along
+// a spoke than across spokes, and the tangential spacing grows with radius, so
+// the shader floors the outline at whatever that radius can actually resolve.
+// Edge picks a position above that floor, which is why there is no "too thin"
+// warning to give: the setting cannot ask for a line the array cannot draw.
 
 import QuickPopover, { type PopoverAnchor } from "./QuickPopover";
 import ShapeIcon from "./ShapeIcon";
-import {
-  edgeWidth,
-  SHAPE_STYLE_DEFAULTS,
-  SPOKE_PITCH,
-  type ShapeStyle,
-} from "./shapeStyle";
+import { SHAPE_STYLE_DEFAULTS, type ShapeStyle } from "./shapeStyle";
 import type { ShapeKind } from "./types";
 
 export interface ShapeEditAnchor extends PopoverAnchor {
@@ -35,8 +31,6 @@ export default function ShapeQuickEdit({
   onChange: (next: ShapeStyle) => void;
   onClose: () => void;
 }) {
-  const width = edgeWidth(style.edge);
-  const dotted = width < SPOKE_PITCH;
   const isDefault =
     style.edge === SHAPE_STYLE_DEFAULTS.edge && style.fill === SHAPE_STYLE_DEFAULTS.fill;
 
@@ -87,15 +81,12 @@ export default function ShapeQuickEdit({
         </label>
       </div>
 
-      <p className={`cluster-hint ${dotted ? "warn" : ""}`}>
-        {dotted
-          ? `Outline is ${width.toFixed(3)} wide — finer than the ${SPOKE_PITCH} gap between
-             spokes, so it will break into dashes where the edge runs sideways.`
-          : `Outline ${width.toFixed(3)} of the array radius; spokes are ${SPOKE_PITCH} apart.`}
-      </p>
-
       <div className="quick-edit-foot">
-        <span className="cluster-hint">Thinner and dimmer reads as a figure; fat reads as a blob.</span>
+        <span className="cluster-hint">
+          Edge 0 is as fine as the array can draw at each radius — it widens
+          itself near the rim, where the spokes fan out. Thin and dim reads as a
+          figure; fat reads as a blob.
+        </span>
         <button
           className="ghost"
           disabled={isDefault}

@@ -1,7 +1,6 @@
 // The shape pads carry two gestures: tap arms the figure, hold opens how figures
 // are drawn. These check they stay separate, that the style actually reaches the
-// backend on the next stamp, and that the too-thin-for-the-array warning fires
-// at the spoke pitch rather than at some round number.
+// backend on the next stamp, and that it persists.
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -44,17 +43,18 @@ test("a plain tap on a shape pad still arms it", async ({ page }) => {
   await expect(page.locator(".shape-quick-edit")).toHaveCount(0);
 });
 
-test("the warning appears exactly when the outline drops under the spoke pitch", async ({ page }) => {
+test("Edge stays usable across its whole range", async ({ page }) => {
   await openWithWire(page, "live");
   await hold(page, ".shape-btn");
   const card = page.locator(".shape-quick-edit");
   const edge = card.locator(".slider-row", { hasText: "Edge" }).locator("input[type=range]");
-
-  // 0.11 * (0.25 + 1.5 * edge) crosses 0.078 at edge ≈ 0.3.
-  await edge.fill("0.5");
+  // The shader floors the width at the local resolution limit, so there is no
+  // setting that draws nothing and none that needs a warning.
+  for (const v of ["0", "0.5", "1"]) {
+    await edge.fill(v);
+    await expect(edge).toHaveValue(v === "0" ? "0" : v);
+  }
   await expect(card.locator(".cluster-hint.warn")).toHaveCount(0);
-  await edge.fill("0.1");
-  await expect(card.locator(".cluster-hint.warn")).toContainText("break into dashes");
 });
 
 test("the style reaches the backend on the next stamp", async ({ page }) => {

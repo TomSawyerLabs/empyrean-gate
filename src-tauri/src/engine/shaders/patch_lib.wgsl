@@ -371,12 +371,18 @@ fn stamp_frame(E: Effect, ctx: Ctx, t: f32, spin: f32) -> Stamp {
     return s;
 }
 
-// Kept identical to gate.wgsl's copy on purpose — the patch renderer draws the
-// same figures and must answer the same controls. See the long note there for
-// why `base` is clamped before being scaled.
-fn shape_stamp(sd: f32, radius: f32, edge: f32, fill: f32) -> f32 {
-    let base = clamp(0.14 * radius, 0.035, 0.11);
-    let w = clamp(base * mix(0.25, 1.75, clamp(edge, 0.0, 1.0)), 0.010, 0.20);
+// Kept identical to gate.wgsl's copy on purpose — the patch renderer draws
+// the same figures and must answer the same controls. See the long note
+// there for why the width floor tracks the pixel's radius.
+fn shape_stamp(sd: f32, radius: f32, edge: f32, fill: f32, rn: f32) -> f32 {
+    // Tangential sample spacing at this pixel. 0.7 of it is about the narrowest
+    // Gaussian that still lands on every spoke it crosses.
+    let pitch = max(rn, 0.05) * TAU / max(f32(G.spokes), 1.0);
+    let thin = 0.7 * pitch;
+    // The old ceiling, and never below `thin` — a small stamp must not be told
+    // to draw an outline fatter than itself.
+    let fat = max(min(0.14 * radius, 0.11), thin);
+    let w = mix(thin, fat, clamp(edge, 0.0, 1.0));
     let rim = exp(-(sd * sd) / (w * w));
     let interior = clamp(-sd / w, 0.0, 1.0);
     return rim + interior * clamp(fill, 0.0, 1.0);
@@ -471,7 +477,7 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
         }
         case 8u: {
             let s = stamp_frame(E, ctx, t, t * 0.5);
-            return col * shape_stamp(sd_star(s.p, s.r, 5.0, 3.0), s.r, E.edge, E.fill)
+            return col * shape_stamp(sd_star(s.p, s.r, 5.0, 3.0), s.r, E.edge, E.fill, ctx.rn)
                 * shape_hold(t) * E.intensity * 1.5;
         }
         case 9u: {
@@ -480,29 +486,29 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
             let unit = s.r * beat / 2.32;
             let q = s.p - vec2f(0.0, 1.68 * unit);
             let sd = length(q) - heart_r(atan2(q.y, q.x)) * unit;
-            return col * shape_stamp(sd, s.r, E.edge, E.fill) * shape_hold(t) * E.intensity * 1.5;
+            return col * shape_stamp(sd, s.r, E.edge, E.fill, ctx.rn) * shape_hold(t) * E.intensity * 1.5;
         }
         case 10u: {
             let s = stamp_frame(E, ctx, t, t * 0.4);
             let open = smoothstep(0.0, 0.35, t);
             let lobe = pow(abs(cos(3.0 * atan2(s.p.y, s.p.x))), 0.6);
             let sd = length(s.p) - s.r * mix(1.0, 0.5 + 0.5 * lobe, open);
-            return col * shape_stamp(sd, s.r, E.edge, E.fill) * shape_hold(t) * E.intensity * 1.5;
+            return col * shape_stamp(sd, s.r, E.edge, E.fill, ctx.rn) * shape_hold(t) * E.intensity * 1.5;
         }
         case 11u: {
             let s = stamp_frame(E, ctx, t, 0.0);
-            return col * shape_stamp(sd_diamond(s.p, s.r), s.r, E.edge, E.fill)
+            return col * shape_stamp(sd_diamond(s.p, s.r), s.r, E.edge, E.fill, ctx.rn)
                 * shape_hold(t) * E.intensity * 1.5;
         }
         case 12u: {
             let s = stamp_frame(E, ctx, t, 0.0);
-            return col * shape_stamp(sd_triangle(s.p, s.r), s.r, E.edge, E.fill)
+            return col * shape_stamp(sd_triangle(s.p, s.r), s.r, E.edge, E.fill, ctx.rn)
                 * shape_hold(t) * E.intensity * 1.5;
         }
         case 13u: {
             let s = stamp_frame(E, ctx, t, 0.35);
             let sd = sd_moon(s.p, 0.41 * s.r, s.r, 0.98 * s.r);
-            return col * shape_stamp(sd, s.r, E.edge, E.fill) * shape_hold(t) * E.intensity * 1.5;
+            return col * shape_stamp(sd, s.r, E.edge, E.fill, ctx.rn) * shape_hold(t) * E.intensity * 1.5;
         }
         case 14u: {
             let front = t * 1.12;
