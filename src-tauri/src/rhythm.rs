@@ -278,6 +278,7 @@ struct PioneerDeckState {
     last_beat_packet: Option<Instant>,
     last_loop_wrap: Option<Instant>,
     last_jump: Option<Instant>,
+    pending_jump: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,6 +309,11 @@ pub struct PioneerClockState {
     beat_numbers: HashMap<u8, u64>,
     listen_error: String,
 }
+
+// Beat packets can announce a position discontinuity just before the slower
+// deck-status stream reports that a loop was engaged. Hold only that ambiguous
+// beat-only inference long enough for status to distinguish Loop from Hot Cue.
+const PIONEER_JUMP_STATUS_GRACE: Duration = Duration::from_millis(250);
 
 impl PioneerClockState {
     fn has_fresh_device(&self, number: u8, now: Instant) -> bool {
@@ -480,6 +486,7 @@ impl PioneerClockState {
                     last_beat_packet: None,
                     last_loop_wrap: None,
                     last_jump: None,
+                    pending_jump: None,
                 },
             );
             return Vec::new();
@@ -502,8 +509,10 @@ impl PioneerClockState {
             events.push(PioneerVisualEvent::OnAirChanged(player, on_air));
         }
         if !deck.looping && looping {
+            deck.pending_jump = None;
             events.push(PioneerVisualEvent::LoopStarted(player));
         } else if deck.looping && !looping {
+            deck.pending_jump = None;
             events.push(PioneerVisualEvent::LoopEnded(player));
         }
         if deck.playing
@@ -512,11 +521,15 @@ impl PioneerClockState {
             && previous > 0
             && current > 0
         {
-            if looping && current < previous {
+            // The position commonly jumps backward in the same status packet
+            // that first announces loop mode. LoopStarted already represents
+            // that button press; reserve LoopWrap for later laps.
+            if deck.looping && looping && current < previous {
                 let cooled_down = deck
                     .last_loop_wrap
                     .is_none_or(|last| now.duration_since(last) > Duration::from_millis(350));
                 if cooled_down {
+                    deck.pending_jump = None;
                     events.push(PioneerVisualEvent::LoopWrap(player));
                     deck.last_loop_wrap = Some(now);
                 }
@@ -526,6 +539,8 @@ impl PioneerClockState {
                 // The basic status stream does not name the pressed Hot Cue. A
                 // discontinuity in the analyzed beat counter is nevertheless a
                 // reliable first-version signal for Hot Cue and seek jumps.
+                deck.pending_jump = None;
+                deck.last_jump = Some(now);
                 events.push(PioneerVisualEvent::Jump(player));
             }
         }
@@ -578,6 +593,7 @@ impl PioneerClockState {
             last_beat_packet: None,
             last_loop_wrap: None,
             last_jump: None,
+            pending_jump: None,
         });
         deck.name = beat.name.clone();
         deck.seen = now;
@@ -639,7 +655,8 @@ impl PioneerClockState {
             Some(PioneerVisualEvent::LoopWrap(beat.player))
         } else if event_cooled_down && (early || (bar_discontinuity && recent)) {
             deck.last_jump = Some(now);
-            Some(PioneerVisualEvent::Jump(beat.player))
+            deck.pending_jump = Some(now);
+            None
         } else {
             None
         };
@@ -659,6 +676,24 @@ impl PioneerClockState {
             self.beat_count = self.beat_count.wrapping_add(1);
         }
         visual_event
+    }
+
+    fn take_due_visual_events(&mut self, now: Instant) -> Vec<PioneerVisualEvent> {
+        self.decks
+            .iter_mut()
+            .filter_map(|(&player, deck)| {
+                let pending = deck.pending_jump?;
+                if deck.looping {
+                    deck.pending_jump = None;
+                    return None;
+                }
+                if now.duration_since(pending) < PIONEER_JUMP_STATUS_GRACE {
+                    return None;
+                }
+                deck.pending_jump = None;
+                Some(PioneerVisualEvent::Jump(player))
+            })
+            .collect()
     }
 }
 
@@ -991,6 +1026,13 @@ fn pioneer_thread(state: Arc<SharedState>, metadata_tx: Sender<MetadataRequest>)
                 }
             }
         });
+        let pending_events = state
+            .pioneer_clock
+            .lock()
+            .take_due_visual_events(Instant::now());
+        for event in pending_events {
+            trigger_pioneer_visual(&state, event);
+        }
         std::thread::sleep(Duration::from_millis(2));
     }
 }
@@ -1327,9 +1369,8 @@ async fn fetch_track_info(request: MetadataRequest) -> Result<ProDjLinkTrackInfo
 fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
     use crate::layers::{EffectCfg, EffectKind};
     use crate::state::{
-        DJ_EVENT_CUE, DJ_EVENT_CUE_RELEASE, DJ_EVENT_JUMP, DJ_EVENT_LOOP_END,
-        DJ_EVENT_LOOP_START, DJ_EVENT_LOOP_WRAP, DJ_EVENT_OFF_AIR, DJ_EVENT_ON_AIR,
-        DJ_EVENT_PLAY,
+        DJ_EVENT_CUE, DJ_EVENT_CUE_RELEASE, DJ_EVENT_JUMP, DJ_EVENT_LOOP_END, DJ_EVENT_LOOP_START,
+        DJ_EVENT_LOOP_WRAP, DJ_EVENT_OFF_AIR, DJ_EVENT_ON_AIR, DJ_EVENT_PLAY,
     };
 
     let player = match event {
@@ -1445,9 +1486,7 @@ fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
     // event that arrived asynchronously just after a frame boundary. Mark only
     // deck-transport reactions urgent; the engine will double-dispatch once so
     // the newly-created effect is the frame delivered this tick.
-    state
-        .low_latency_render_seq
-        .fetch_add(1, Ordering::Release);
+    state.low_latency_render_seq.fetch_add(1, Ordering::Release);
 }
 
 fn bind_link_socket(address: Ipv4Addr, port: u16) -> io::Result<UdpSocket> {
@@ -1957,34 +1996,85 @@ mod tests {
                 .is_none()
         );
         assert!(
-            clock.receive_beat(
-                &link_beat(2, 120.0, 4),
-                2,
-                start + Duration::from_millis(1500)
-            )
-            .is_none()
+            clock
+                .receive_beat(
+                    &link_beat(2, 120.0, 4),
+                    2,
+                    start + Duration::from_millis(1500)
+                )
+                .is_none()
         );
     }
 
     #[test]
-    fn pioneer_beat_sequence_infers_an_early_hot_cue_without_position_status() {
+    fn pioneer_beat_sequence_defers_an_early_hot_cue_without_position_status() {
         let start = Instant::now();
         let mut clock = PioneerClockState::default();
-        assert!(clock.receive_beat(&link_beat(2, 120.0, 1), 2, start).is_none());
-        assert!(clock
-            .receive_beat(
-                &link_beat(2, 120.0, 2),
-                2,
-                start + Duration::from_millis(500)
-            )
-            .is_none());
+        assert!(
+            clock
+                .receive_beat(&link_beat(2, 120.0, 1), 2, start)
+                .is_none()
+        );
+        assert!(
+            clock
+                .receive_beat(
+                    &link_beat(2, 120.0, 2),
+                    2,
+                    start + Duration::from_millis(500)
+                )
+                .is_none()
+        );
+        assert!(
+            clock
+                .receive_beat(
+                    &link_beat(2, 120.0, 4),
+                    2,
+                    start + Duration::from_millis(650)
+                )
+                .is_none()
+        );
+        assert!(
+            clock
+                .take_due_visual_events(start + Duration::from_millis(899))
+                .is_empty()
+        );
         assert_eq!(
-            clock.receive_beat(
-                &link_beat(2, 120.0, 4),
-                2,
-                start + Duration::from_millis(650)
-            ),
-            Some(PioneerVisualEvent::Jump(2))
+            clock.take_due_visual_events(start + Duration::from_millis(900)),
+            vec![PioneerVisualEvent::Jump(2)]
+        );
+    }
+
+    #[test]
+    fn pioneer_loop_status_cancels_a_pending_beat_inferred_hot_cue() {
+        let start = Instant::now();
+        let mut clock = PioneerClockState::default();
+        clock.receive_status(&link_status_state(2, true, 20, true, true, false), start);
+        assert!(
+            clock
+                .receive_beat(&link_beat(2, 120.0, 1), 2, start)
+                .is_none()
+        );
+        assert!(
+            clock
+                .receive_beat(
+                    &link_beat(2, 120.0, 4),
+                    2,
+                    start + Duration::from_millis(100)
+                )
+                .is_none(),
+            "the ambiguous beat discontinuity must wait for deck status"
+        );
+
+        let loop_events = clock.receive_status(
+            &link_status_state(2, true, 16, true, true, true),
+            start + Duration::from_millis(180),
+        );
+        assert_eq!(loop_events, vec![PioneerVisualEvent::LoopStarted(2)]);
+        assert!(
+            clock
+                .take_due_visual_events(start + Duration::from_millis(500))
+                .is_empty(),
+            "loop status must cancel the pending Hot Cue inference"
         );
     }
 
