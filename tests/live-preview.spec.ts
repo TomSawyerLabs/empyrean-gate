@@ -27,3 +27,22 @@ test("the Gate machine preview subscribes at render cadence", async ({ page }) =
   });
   expect(previewFps, "the Gate machine preview should not add a 30 fps hold").toBe(60);
 });
+
+test("the fps and pkt/s meters line up with each other", async ({ page }) => {
+  // They used to be two independently-centred rows, so the bars landed wherever
+  // each row's own readout width put them — "60 fps" is much narrower than
+  // "11520 pkt/s", and the two histograms sat visibly offset in the ring.
+  await page.goto("/#live");
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+  const bars = page.locator(".ring-meters .sparkbars svg");
+  const values = page.locator(".ring-meters .spark-value");
+  await expect(bars).toHaveCount(2);
+
+  for (const [what, rows] of [
+    ["histograms", bars],
+    ["readouts", values],
+  ] as const) {
+    const lefts = await rows.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().left));
+    expect(Math.abs(lefts[0] - lefts[1]), `the ${what} should share a left edge`).toBeLessThan(0.5);
+  }
+});

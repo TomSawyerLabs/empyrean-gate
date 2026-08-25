@@ -960,20 +960,35 @@ main {
   flex: 0 0 auto;
 }
 
-.ring-center .sparkbars {
-  width: 100%;
+/* Both meters live in ONE grid: each Sparkbars goes `display: contents` so its
+   svg and its value become items of this grid directly. Two rows, two shared
+   columns — the bars line up with each other and so do the readouts, which a
+   pair of independently-centred rows can never manage while their labels are
+   different widths. The grid shrink-wraps, so the pair still sits centred in
+   the ring as a block. */
+.ring-meters {
+  display: grid;
+  grid-template-columns: auto auto;
   justify-content: center;
-  gap: clamp(3px, 0.7cqw, 6px);
+  align-items: end;
+  gap: clamp(2px, 0.7cqw, 6px) clamp(3px, 0.7cqw, 6px);
+}
+
+.ring-center .sparkbars {
+  display: contents;
 }
 
 .ring-center .sparkbars svg {
   width: clamp(42px, 11cqw, 90px);
   height: auto;
-  flex: 0 1 auto;
 }
 
+/* Left-aligned in its column — .ring-center sets text-align: center, and
+   inheriting that would undo the alignment the grid just bought, the two
+   readouts being different lengths. */
 .ring-center .spark-value {
   font-size: clamp(8px, 1.4cqw, 13px);
+  text-align: left;
 }
 
 .ring-center .spark-label {

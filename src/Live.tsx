@@ -684,22 +684,27 @@ export default function Live() {
                 : "no beat"}
           </span>
         </div>
+        {/* One grid for both meters, so the bars share a column and line up
+            with each other instead of each row centring itself around its own
+            label width ("60 fps" is a lot narrower than "11520 pkt/s"). */}
         {status && (
-          <Sparkbars
-            data={status.fps_history}
-            color="#38d1c2"
-            label="fps"
-            value={String(status.fps_history.at(-1) ?? 0)}
-          />
-        )}
-        {status?.sacn_enabled && (
-          <Sparkbars
-            data={status.pps_history}
-            color="#7c5cff"
-            label="pkt/s"
-            value={String(status.sacn_pps)}
-            warn={status.sacn_pps === 0}
-          />
+          <div className="ring-meters">
+            <Sparkbars
+              data={status.fps_history}
+              color="#38d1c2"
+              label="fps"
+              value={String(status.fps_history.at(-1) ?? 0)}
+            />
+            {status.sacn_enabled && (
+              <Sparkbars
+                data={status.pps_history}
+                color="#7c5cff"
+                label="pkt/s"
+                value={String(status.sacn_pps)}
+                warn={status.sacn_pps === 0}
+              />
+            )}
+          </div>
         )}
         {status?.sacn_enabled && (
           // Quiet when everything is fine, loud only when something else is
