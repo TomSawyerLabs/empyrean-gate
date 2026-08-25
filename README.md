@@ -83,7 +83,7 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   In the desktop app, "New window" pops the current tab out into its own window.
   Old `/#view` and `/#draw` links redirect to Live.
 - **Game mode (early)**: the Games tab turns the array into a continuous game
-  world. Five so far — **Ecosystem** (cyclic predator-prey cellular automaton
+  world. Four so far — **Ecosystem** (cyclic predator-prey cellular automaton
   whose spiral fronts advance on the beat and never converge), **Primordial**
   (Game of Life where color is lineage: taps splat living soup, newborns blend
   their parents' hues), **Spokewar** (rim bases firing army-particle squads
@@ -91,9 +91,7 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   every base is AI-run until someone picks up its color), and **Flak** (co-op
   inverted Missile Command: meteors stream toward the hole, taps detonate
   blooms that vaporize them in your color, and the storm's intensity follows
-  how hard the crowd is firing), and **Radial Tetris** (tetrominoes fall inward,
-  players steer the shared piece around the circumference, and complete rings
-  collapse). Starting/stopping a
+  how hard the crowd is firing). Starting/stopping a
   game is Gate-machine-only (and refused while a playlist runs, though a
   playlist cue can itself *schedule* a game); playing is open to every
   connected phone, and every world runs fine with zero players, so there is
