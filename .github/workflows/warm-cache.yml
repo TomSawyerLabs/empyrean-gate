@@ -86,9 +86,15 @@ jobs:
       # dependency artifacts land in target/, and build.rs writes a placeholder
       # dist for us. A plain cargo build compiles the same dependency graph in
       # the same profile, which is all the cache carries.
+      #
+      # `--features custom-protocol` is not optional: `tauri build` turns it on
+      # for release (see the note on it in Cargo.toml). Cargo keys artifacts by
+      # feature set, so warming without it would leave `tauri` and everything
+      # downstream of it to recompile during the release anyway — most of the
+      # point of this workflow, quietly lost.
       - name: Build dependencies (release profile)
         working-directory: src-tauri
-        run: cargo build --release --bins
+        run: cargo build --release --bins --features custom-protocol
 
       # The release also runs `cargo test --release`, which pulls dev-dependencies
       # (naga) that the build above never touches. --no-run compiles them without
