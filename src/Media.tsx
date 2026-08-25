@@ -3,6 +3,12 @@ import { startAudioFeatures } from "./sensors";
 import { defaultLayer, type PlaylistEntry } from "./types";
 import { useGate } from "./state";
 import type { ResolvedMedia } from "./ws";
+import {
+  MAX_VIDEO_PLAYBACK_RATE,
+  MIN_VIDEO_PLAYBACK_RATE,
+  videoPlaybackRate,
+  type VideoTempoMode,
+} from "./videoPlayback";
 
 function newEntryId(): string {
   return (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).replace(/-/g, "");
@@ -205,6 +211,9 @@ export default function Media() {
   const [audioMode, setAudioMode] = useState<AudioMode>("video");
   const [audioAmount, setAudioAmount] = useState(0.7);
   const [monitorSoundtrack, setMonitorSoundtrack] = useState(false);
+  const [videoBaseRate, setVideoBaseRate] = useState(1);
+  const [videoTempoMode, setVideoTempoMode] = useState<VideoTempoMode>("fixed");
+  const [videoReferenceBpm, setVideoReferenceBpm] = useState(120);
   const [imageMotion, setImageMotion] = useState<ImageMotion>("ambient");
   const [imageMotionAmount, setImageMotionAmount] = useState(0.65);
   const [imageCycleSeconds, setImageCycleSeconds] = useState(60);
@@ -232,6 +241,33 @@ export default function Media() {
     fit: imageFit,
     fadeWhite,
   };
+
+  const linkBpm = status?.rhythm.bpm ?? 0;
+  const linkActive = Boolean(
+    config?.rhythm.source === "pro_dj_link" &&
+    status?.rhythm.active &&
+    status.rhythm.running &&
+    !status.rhythm.using_fallback &&
+    status.rhythm.source === "pro_dj_link" &&
+    linkBpm > 0,
+  );
+  const effectiveVideoRate = videoPlaybackRate({
+    baseRate: videoBaseRate,
+    mode: videoTempoMode,
+    referenceBpm: videoReferenceBpm,
+    linkBpm,
+    linkActive,
+  });
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || media?.kind !== "video") return;
+    // The media clock remains continuous when playbackRate changes. Keeping
+    // pitch correction on also makes optional soundtrack monitoring tolerable.
+    video.preservesPitch = true;
+    video.defaultPlaybackRate = effectiveVideoRate;
+    video.playbackRate = effectiveVideoRate;
+  }, [effectiveVideoRate, media]);
 
   const pauseSoundtrack = () => {
     const graph = soundtrackRef.current;
@@ -912,6 +948,51 @@ export default function Media() {
                 <input type="checkbox" checked={fadeWhite} onChange={(e) => setFadeWhite(e.target.checked)} />
                 Fade white background
               </label>
+            </div>
+          )}
+          {media.kind === "video" && (
+            <div className="media-video-controls">
+              <label className="media-playback-rate">
+                Base speed <strong>{videoBaseRate.toFixed(2)}×</strong>
+                <input
+                  aria-label="Video base speed"
+                  type="range"
+                  min={MIN_VIDEO_PLAYBACK_RATE}
+                  max={MAX_VIDEO_PLAYBACK_RATE}
+                  step="0.05"
+                  value={videoBaseRate}
+                  onChange={(e) => setVideoBaseRate(Number(e.target.value))}
+                />
+              </label>
+              <label className="media-link-tempo-toggle">
+                <input
+                  type="checkbox"
+                  checked={videoTempoMode === "pro_dj_link"}
+                  onChange={(e) => setVideoTempoMode(e.target.checked ? "pro_dj_link" : "fixed")}
+                />
+                Follow PRO DJ LINK tempo
+              </label>
+              {videoTempoMode === "pro_dj_link" && (
+                <>
+                  <label>
+                    Video reference tempo
+                    <input
+                      aria-label="Video reference tempo"
+                      type="number"
+                      min="40"
+                      max="240"
+                      step="1"
+                      value={videoReferenceBpm}
+                      onChange={(e) => setVideoReferenceBpm(Number(e.target.value))}
+                    />
+                  </label>
+                  <span className={linkActive ? "ok" : "hint"}>
+                    {linkActive
+                      ? `${linkBpm.toFixed(1)} BPM LINK → ${effectiveVideoRate.toFixed(2)}× playback`
+                      : `${videoBaseRate.toFixed(2)}× playback · waiting for live LINK tempo`}
+                  </span>
+                </>
+              )}
             </div>
           )}
           <div className="media-audio-controls">
