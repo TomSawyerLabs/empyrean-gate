@@ -889,6 +889,23 @@ fn pioneer_visual_signal_active(
     selected && (clock_usable || visual_active || has_devices)
 }
 
+/// PRO DJ LINK owns musical timing, not the configured audio interface's
+/// amplitude. Keep real master audio when it is healthy; rekordbox waveform
+/// energy is only a graceful fallback for LINK-only installations.
+fn hybrid_audio_level(
+    audio_active: bool,
+    audio_level: f32,
+    pioneer_selected: bool,
+    link_usable: bool,
+    link_energy: f32,
+) -> f32 {
+    if pioneer_selected && link_usable && !audio_active {
+        link_energy
+    } else {
+        audio_level
+    }
+}
+
 /// Detects only a sustained, dramatic collapse in master audio energy. The
 /// reference follows rises quickly and falls slowly, so ordinary groove dynamics
 /// do not look like a fader cut. Once latched, darkness holds until sound returns.
@@ -1120,8 +1137,8 @@ fn transition_layers(
 #[cfg(test)]
 mod beat_time_tests {
     use super::{
-        MasterDropDetector, apply_stack_to_config, effective_beat_phase, stack_from_config,
-        pioneer_visual_signal_active, transition_layers, walked_speed,
+        MasterDropDetector, apply_stack_to_config, effective_beat_phase, hybrid_audio_level,
+        pioneer_visual_signal_active, stack_from_config, transition_layers, walked_speed,
     };
     use crate::config::{AppConfig, BeatTime, SavedStack};
     use crate::layers::MAX_LAYERS;
@@ -1145,6 +1162,25 @@ mod beat_time_tests {
         assert!(pioneer_visual_signal_active(true, false, true, false));
         assert!(!pioneer_visual_signal_active(true, false, false, false));
         assert!(!pioneer_visual_signal_active(false, true, true, true));
+    }
+
+    #[test]
+    fn link_timing_preserves_live_master_audio_and_falls_back_when_absent() {
+        assert_eq!(
+            hybrid_audio_level(true, 0.83, true, true, 0.21),
+            0.83,
+            "a healthy interface is the amplitude source in LINK mode"
+        );
+        assert_eq!(
+            hybrid_audio_level(false, 0.0, true, true, 0.21),
+            0.21,
+            "LINK waveform energy keeps interface-free rigs alive"
+        );
+        assert_eq!(
+            hybrid_audio_level(true, 0.83, false, false, 0.21),
+            0.83,
+            "ordinary audio mode is unchanged"
+        );
     }
 
     #[test]
@@ -1859,11 +1895,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let fallback_index =
             (cfg.rhythm.fallback_audio_source as usize).min(MAX_AUDIO_SOURCES.saturating_sub(1));
         let master_audio = &audio_inputs[fallback_index];
-        let master_level = if pioneer_selected && external_clock.usable {
-            link_energy
-        } else {
-            master_audio.level
-        };
+        let master_level = hybrid_audio_level(
+            master_audio.active,
+            master_audio.level,
+            pioneer_selected,
+            external_clock.usable,
+            link_energy,
+        );
         let (master_drop_brightness, master_drop_triggered) = master_drop.step(
             master_level,
             pioneer_selected && external_clock.usable,
@@ -1919,13 +1957,16 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 None => (a.beat_phase, raw_beat_count[i], a.bpm),
             };
             audio[i] = AudioUniform {
-                // In LINK mode this is analyzed-track energy, not a microphone:
-                // it keeps level-reactive shows viable across a large site.
-                level: if pioneer_selected && external_clock.usable {
-                    link_energy
-                } else {
-                    a.level
-                },
+                // LINK supplies phase/BPM below, but a configured interface
+                // remains the amplitude source. Fall back to analyzed-track
+                // energy only when that audio source is not live.
+                level: hybrid_audio_level(
+                    a.active,
+                    a.level,
+                    pioneer_selected,
+                    external_clock.usable,
+                    link_energy,
+                ),
                 bass: a.bass,
                 mid: a.mid,
                 treble: a.treble,
