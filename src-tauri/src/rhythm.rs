@@ -600,18 +600,28 @@ impl PioneerClockState {
         {
             return None;
         }
+        let period = Duration::from_secs_f32(60.0 / beat.bpm.max(20.0));
+        let since_last = deck.last_beat_packet.map(|last| now.duration_since(last));
+        // Advance the expectation by the number of elapsed beat periods, not
+        // merely one packet. UDP loss otherwise looks exactly like a Hot Cue:
+        // e.g. seeing bar beats 2 then 4 one second apart at 120 BPM is normal
+        // progression with beat 3 missing, not a seek.
+        let elapsed_beats = since_last
+            .map(|elapsed| {
+                (elapsed.as_secs_f32() / period.as_secs_f32())
+                    .round()
+                    .clamp(1.0, 16.0) as u8
+            })
+            .unwrap_or(1);
         let expected_bar_beat = if (1..=4).contains(&deck.last_beat_in_bar) {
-            deck.last_beat_in_bar % 4 + 1
+            ((deck.last_beat_in_bar - 1 + elapsed_beats) % 4) + 1
         } else {
             0
         };
-        let period = Duration::from_secs_f32(60.0 / beat.bpm.max(20.0));
         let early = deck
             .last_beat_packet
             .is_some_and(|last| now.duration_since(last) < period.mul_f32(0.45));
-        let timely = deck
-            .last_beat_packet
-            .is_some_and(|last| now.duration_since(last) < period.mul_f32(1.5));
+        let recent = since_last.is_some_and(|elapsed| elapsed < period.mul_f32(4.5));
         let bar_discontinuity = expected_bar_beat != 0
             && (1..=4).contains(&beat.beat_within_bar)
             && beat.beat_within_bar != expected_bar_beat;
@@ -627,7 +637,7 @@ impl PioneerClockState {
         {
             deck.last_loop_wrap = Some(now);
             Some(PioneerVisualEvent::LoopWrap(beat.player))
-        } else if event_cooled_down && (early || (bar_discontinuity && timely)) {
+        } else if event_cooled_down && (early || (bar_discontinuity && recent)) {
             deck.last_jump = Some(now);
             Some(PioneerVisualEvent::Jump(beat.player))
         } else {
@@ -1929,7 +1939,7 @@ mod tests {
     }
 
     #[test]
-    fn pioneer_beat_sequence_infers_a_hot_cue_jump_without_position_status() {
+    fn pioneer_beat_sequence_does_not_treat_a_lost_packet_as_a_hot_cue() {
         let start = Instant::now();
         let mut clock = PioneerClockState::default();
         assert!(
@@ -1946,11 +1956,33 @@ mod tests {
                 )
                 .is_none()
         );
+        assert!(
+            clock.receive_beat(
+                &link_beat(2, 120.0, 4),
+                2,
+                start + Duration::from_millis(1500)
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn pioneer_beat_sequence_infers_an_early_hot_cue_without_position_status() {
+        let start = Instant::now();
+        let mut clock = PioneerClockState::default();
+        assert!(clock.receive_beat(&link_beat(2, 120.0, 1), 2, start).is_none());
+        assert!(clock
+            .receive_beat(
+                &link_beat(2, 120.0, 2),
+                2,
+                start + Duration::from_millis(500)
+            )
+            .is_none());
         assert_eq!(
             clock.receive_beat(
                 &link_beat(2, 120.0, 4),
                 2,
-                start + Duration::from_millis(1000)
+                start + Duration::from_millis(650)
             ),
             Some(PioneerVisualEvent::Jump(2))
         );

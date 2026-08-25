@@ -208,6 +208,8 @@ export default function GateCanvas({
   }, [meta, previewSource]);
 
   useEffect(() => {
+    let pendingFrame: PreviewFrame | null = null;
+    let animationFrame = 0;
     const draw = (frame: PreviewFrame) => {
       const g = glRef.current;
       const canvas = canvasRef.current;
@@ -230,7 +232,25 @@ export default function GateCanvas({
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.POINTS, 0, n);
     };
-    return previewSource ? previewSource.subscribe(draw) : client.onFrame(draw);
+    // Network frames are not aligned with the monitor refresh and can arrive in
+    // small bursts. Keep only the newest one and upload it on the next browser
+    // animation frame so motion is evenly paced and obsolete frames never make
+    // the WebGL preview do duplicate work between two screen refreshes.
+    const enqueue = (frame: PreviewFrame) => {
+      pendingFrame = frame;
+      if (animationFrame !== 0) return;
+      animationFrame = requestAnimationFrame(() => {
+        animationFrame = 0;
+        const latest = pendingFrame;
+        pendingFrame = null;
+        if (latest) draw(latest);
+      });
+    };
+    const unsubscribe = previewSource ? previewSource.subscribe(enqueue) : client.onFrame(enqueue);
+    return () => {
+      unsubscribe();
+      if (animationFrame !== 0) cancelAnimationFrame(animationFrame);
+    };
   }, [client, previewSource]);
 
   // Flush accumulated stroke points ~30x/s.
