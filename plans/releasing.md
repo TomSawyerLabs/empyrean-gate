@@ -119,10 +119,27 @@ Two things to know about it:
 
 - What is cached is the dependency tree, not this crate — rust-cache prunes the
   workspace's own artifacts before saving. Dependencies change only when
-  `Cargo.lock` does, which is why a nightly warm is enough even though master
-  moves many times a day; a lockfile push also triggers a re-warm immediately.
-- **A dependency bump means the next release is cold again.** That is one slow
-  release, not a broken one.
+  `Cargo.lock` does, which is why the warm does not need to run on every push
+  even though master moves many times a day.
+- **A dependency bump does NOT mean the next release is cold.** rust-cache asks
+  for two keys, and the second is a prefix without the dependency hash:
+
+  ```
+  Cache Key:    v0-rust-release-build-Windows_NT-x64-368f6b88-068b9117
+  Restore Key:  v0-rust-release-build-Windows_NT-x64-368f6b88
+  ```
+
+  When a dependency change moves that trailing hash the exact key misses, the
+  restore key still matches the previous entry, and cargo recompiles only the
+  crates that actually changed plus their dependents. A release is therefore
+  never *slower* than it was before this workflow existed — worst case (no entry
+  at all: first run, or seven days with no release to refresh the expiry) is the
+  old ~22 minutes.
+- **Bumping the version does not invalidate anything.** v0.9.3 changed `version`
+  in both `Cargo.toml` and `Cargo.lock` and still took an exact hit on
+  `…-068b9117`, the hash warmed from master at 0.9.2. "Lockfiles considered"
+  lists both files, but what is hashed is the dependency graph inside them;
+  workspace members are excluded.
 
 ### Cache quota
 
