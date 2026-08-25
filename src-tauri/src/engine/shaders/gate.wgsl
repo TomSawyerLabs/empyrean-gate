@@ -41,6 +41,10 @@ struct Globals {
     game_beat: f32,    // beat envelope for the brightness pulse
     _pad_game0: f32,
     _pad_game1: f32,
+    rotation: f32,
+    _pad_rotation0: f32,
+    _pad_rotation1: f32,
+    _pad_rotation2: f32,
 }
 
 struct AudioU {
@@ -947,6 +951,11 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
             let ring = exp(-(d * d) / (width * width));
             return col * ring * fade * E.intensity * 2.0;
         }
+        // Rotate is handled as persistent CPU-side angular velocity. This arm
+        // preserves the dense/stable GPU effect ABI if one is ever packed.
+        case 15u: {
+            return vec3f(0.0);
+        }
         default: {
             return vec3f(0.0);
         }
@@ -1084,11 +1093,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
     let spoke = idx / G.pixels;
     let i = idx % G.pixels;
-    let theta = f32(spoke) / f32(G.spokes) * TAU;
+    let theta = f32(spoke) / f32(G.spokes) * TAU - G.rotation;
     let r01 = f32(i) / f32(max(G.pixels - 1u, 1u));
     let rn = mix(1.0, G.inner_over_outer, r01);
     var ctx: Ctx;
-    ctx.spoke = spoke;
+    ctx.spoke = u32(fract(theta / TAU + 1.0) * f32(G.spokes)) % G.spokes;
     ctx.i = i;
     ctx.theta = theta;
     ctx.r01 = r01;

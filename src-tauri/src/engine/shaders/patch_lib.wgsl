@@ -26,6 +26,26 @@ struct Globals {
     video_width: u32,
     video_height: u32,
     video_active: u32,
+    transition_split: u32,
+    transition_active: u32,
+    transition_progress: f32,
+    _pad_transition: f32,
+    dj_link_visual_active: u32,
+    dj_fade_position: f32,
+    dj_fade_activity: f32,
+    dj_looping: f32,
+    game_active: u32,
+    game_mix: f32,
+    game_theta: u32,
+    game_rings: u32,
+    game_alpha: f32,
+    game_beat: f32,
+    _pad_game0: f32,
+    _pad_game1: f32,
+    rotation: f32,
+    _pad_rotation0: f32,
+    _pad_rotation1: f32,
+    _pad_rotation2: f32,
 }
 
 struct AudioU {
@@ -516,6 +536,9 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
             let d = ctx.rn - front;
             let ring = exp(-(d * d) / (width * width));
             return col * ring * fade * E.intensity * 2.0;
+        }
+        case 15u: {
+            return vec3f(0.0);
         }
         default: {
             return vec3f(0.0);

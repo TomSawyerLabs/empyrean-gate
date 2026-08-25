@@ -900,11 +900,11 @@ impl Gen<'_> {
              \x20   }}\n\
              \x20   let spoke = idx / G.pixels;\n\
              \x20   let i = idx % G.pixels;\n\
-             \x20   let theta = f32(spoke) / f32(G.spokes) * TAU;\n\
+             \x20   let theta = f32(spoke) / f32(G.spokes) * TAU - G.rotation;\n\
              \x20   let r01 = f32(i) / f32(max(G.pixels - 1u, 1u));\n\
              \x20   let rn = mix(1.0, G.inner_over_outer, r01);\n\
              \x20   var ctx: Ctx;\n\
-             \x20   ctx.spoke = spoke;\n\
+             \x20   ctx.spoke = u32(fract(theta / TAU + 1.0) * f32(G.spokes)) % G.spokes;\n\
              \x20   ctx.i = i;\n\
              \x20   ctx.theta = theta;\n\
              \x20   ctx.r01 = r01;\n\

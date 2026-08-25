@@ -44,6 +44,10 @@ pub struct DjLinkInputs {
     pub mix: f32,
     pub mix_activity: f32,
     pub beat_in_bar: f32,
+    pub phrase_active: f32,
+    pub phrase_kind: f32,
+    pub phrase_progress: f32,
+    pub phrase_fill: f32,
     pub event_seq: [u64; DJ_EVENT_COUNT],
 }
 
@@ -57,6 +61,8 @@ const DJ_EVENT_PORTS: [&str; DJ_EVENT_COUNT] = [
     "loop_wrap",
     "loop_end",
     "jump",
+    "phrase_change",
+    "fill_in",
 ];
 
 #[derive(Clone)]
@@ -230,6 +236,10 @@ impl Runtime {
                     o.insert("mix".into(), dj.mix);
                     o.insert("mix_activity".into(), dj.mix_activity);
                     o.insert("beat_in_bar".into(), dj.beat_in_bar);
+                    o.insert("phrase_active".into(), dj.phrase_active);
+                    o.insert("phrase_kind".into(), dj.phrase_kind);
+                    o.insert("phrase_progress".into(), dj.phrase_progress);
+                    o.insert("phrase_fill".into(), dj.phrase_fill);
                     let st = &mut self.state[node];
                     for (event, port) in DJ_EVENT_PORTS.iter().enumerate() {
                         if st.prev_dj_seq[event] != u64::MAX

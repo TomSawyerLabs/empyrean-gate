@@ -3,7 +3,7 @@
 //! loop takes short locks to snapshot inputs and never blocks on clients.
 
 use crate::config::AppConfig;
-use crate::layers::{EffectCfg, MAX_AUDIO_SOURCES};
+use crate::layers::{EffectCfg, EffectKind, MAX_AUDIO_SOURCES};
 use crate::protocol::{ProDjLinkDebugEntry, ProDjLinkTrackInfo, RuntimeStatus, ServerMsg};
 use parking_lot::{Mutex, RwLock};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -21,7 +21,9 @@ pub const DJ_EVENT_LOOP_START: usize = 5;
 pub const DJ_EVENT_LOOP_WRAP: usize = 6;
 pub const DJ_EVENT_LOOP_END: usize = 7;
 pub const DJ_EVENT_JUMP: usize = 8;
-pub const DJ_EVENT_COUNT: usize = 9;
+pub const DJ_EVENT_PHRASE: usize = 9;
+pub const DJ_EVENT_FILL: usize = 10;
+pub const DJ_EVENT_COUNT: usize = 11;
 
 /// Monotonic PRO DJ LINK event counters consumed by patch runtimes. Counters
 /// preserve short deck events until the next render frame instead of relying on
@@ -160,6 +162,12 @@ pub struct ControlInputs {
 pub struct ActiveEffect {
     pub cfg: EffectCfg,
     pub born: Instant,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RotationState {
+    pub angle: f32,
+    pub velocity: f32,
 }
 
 pub struct ActiveDab {
@@ -308,12 +316,16 @@ pub struct SharedState {
     /// a busy touch surface does not double-dispatch every ordinary effect.
     pub low_latency_render_seq: AtomicU64,
     pub effects: Mutex<Vec<ActiveEffect>>,
+    /// Persistent whole-composition rotation. Rotate-pad pulses add angular
+    /// velocity; the render loop integrates it and applies smooth drag.
+    pub rotation: Mutex<RotationState>,
     pub dabs: Mutex<Vec<ActiveDab>>,
     pub audio: [Mutex<AudioFeatures>; MAX_AUDIO_SOURCES],
     pub scope: [Mutex<ScopeData>; MAX_AUDIO_SOURCES],
     pub midi_clock: Mutex<crate::rhythm::MidiClockState>,
     pub pioneer_clock: Mutex<crate::rhythm::PioneerClockState>,
     pub pioneer_patch_events: Mutex<DjLinkPatchEvents>,
+    pub pioneer_phrase_key: Mutex<Option<(u8, u32, u16, bool)>>,
     pub pioneer_debug: Mutex<VecDeque<ProDjLinkDebugEntry>>,
     pub pioneer_debug_seq: AtomicU64,
     pub pioneer_tracks: Mutex<HashMap<u8, ProDjLinkTrackInfo>>,
@@ -422,12 +434,14 @@ impl SharedState {
             effect_seq: AtomicU64::new(0),
             low_latency_render_seq: AtomicU64::new(0),
             effects: Mutex::new(Vec::new()),
+            rotation: Mutex::new(RotationState::default()),
             dabs: Mutex::new(Vec::new()),
             audio: Default::default(),
             scope: Default::default(),
             midi_clock: Mutex::new(crate::rhythm::MidiClockState::default()),
             pioneer_clock: Mutex::new(crate::rhythm::PioneerClockState::default()),
             pioneer_patch_events: Mutex::new(DjLinkPatchEvents::default()),
+            pioneer_phrase_key: Mutex::new(None),
             pioneer_debug: Mutex::new(VecDeque::new()),
             pioneer_debug_seq: AtomicU64::new(1),
             pioneer_tracks: Mutex::new(HashMap::new()),
@@ -727,6 +741,14 @@ impl SharedState {
 
     pub fn trigger_effect(&self, cfg: EffectCfg) {
         self.effect_seq.fetch_add(1, Ordering::Relaxed);
+        if cfg.kind == EffectKind::Rotate {
+            let direction = if cfg.angle < 0.0 { -1.0 } else { 1.0 };
+            let mut rotation = self.rotation.lock();
+            rotation.velocity = (rotation.velocity
+                + direction * cfg.intensity.clamp(0.05, 3.0) * 0.42)
+                .clamp(-12.0, 12.0);
+            return;
+        }
         let mut effects = self.effects.lock();
         // Cap active effects; drop the oldest if the floor is spamming taps.
         if effects.len() >= crate::layers::MAX_EFFECTS {

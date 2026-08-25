@@ -67,6 +67,10 @@ pub struct Globals {
     /// Beat envelope (1 on the beat, decaying) for the game's brightness pulse.
     pub game_beat: f32,
     pub _pad_game: [f32; 2],
+    /// Whole-composition rotation, integrated on the CPU so it remains
+    /// continuous as transient button pulses expire.
+    pub rotation: f32,
+    pub _pad_rotation: [f32; 3],
 }
 
 #[repr(C)]
@@ -1832,13 +1836,21 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let clock_now = Instant::now();
         let clock_latency = cfg.rhythm.latency_ms.clamp(-500.0, 500.0);
         let midi_clock = state.midi_clock.lock().snapshot(clock_now, clock_latency);
-        let (pioneer_clock, pioneer_label, pioneer_error, pioneer_devices, pioneer_visual) = {
+        let (
+            pioneer_clock,
+            pioneer_label,
+            pioneer_error,
+            pioneer_devices,
+            pioneer_network_devices,
+            pioneer_visual,
+        ) = {
             let link = state.pioneer_clock.lock();
             (
                 link.snapshot(clock_now, clock_latency),
                 link.player_label(),
                 link.listen_error().to_owned(),
                 link.devices(clock_now),
+                link.network_devices(clock_now),
                 link.visual_snapshot(clock_now),
             )
         };
@@ -2454,6 +2466,70 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // Control-rate evaluation of the active patch: scalar/event nodes run on
         // the CPU and their results fill the GPU parameter slab. Exposed-param
         // plays queued by clients apply here, recompile-free.
+        let pioneer_phrase_phase = pioneer_devices
+            .iter()
+            .find(|device| device.number == pioneer_visual.player && device.phase_available)
+            .map_or(external_clock.beat_phase, |device| device.beat_phase);
+        let active_phrase = state
+            .pioneer_tracks
+            .lock()
+            .get(&pioneer_visual.player)
+            .and_then(|track| {
+                track.phrase_analysis.as_ref().and_then(|analysis| {
+                    crate::prolink_analysis::active_phrase(
+                        analysis,
+                        pioneer_visual.beat_number,
+                        pioneer_phrase_phase,
+                    )
+                    .map(|phrase| (track.rekordbox_id, phrase))
+                })
+            });
+        let phrase_key = active_phrase.as_ref().map(|(track_id, phrase)| {
+            (
+                pioneer_visual.player,
+                *track_id,
+                phrase.phrase_number,
+                phrase.fill_in_active,
+            )
+        });
+        let phrase_transition = {
+            let mut previous = state.pioneer_phrase_key.lock();
+            let transition = match (*previous, phrase_key) {
+                (Some((player, track, phrase, _fill)), Some(current))
+                    if (player, track, phrase) != (current.0, current.1, current.2) =>
+                {
+                    Some((crate::state::DJ_EVENT_PHRASE, current.0))
+                }
+                (Some((_, _, _, false)), Some(current)) if current.3 => {
+                    Some((crate::state::DJ_EVENT_FILL, current.0))
+                }
+                (None, Some(current)) => Some((crate::state::DJ_EVENT_PHRASE, current.0)),
+                _ => None,
+            };
+            *previous = phrase_key;
+            transition
+        };
+        if let Some((event, player)) = phrase_transition {
+            state.pioneer_patch_events.lock().record(event, player);
+            if let Some((_, phrase)) = &active_phrase {
+                state.push_pioneer_debug(
+                    "phrase",
+                    player,
+                    if event == crate::state::DJ_EVENT_FILL {
+                        format!("{} fill-in", phrase.kind)
+                    } else {
+                        format!("phrase {} · {}", phrase.phrase_number, phrase.kind)
+                    },
+                    std::collections::BTreeMap::from([
+                        ("kind".into(), phrase.kind.clone()),
+                        ("mood".into(), phrase.mood.clone()),
+                        ("bank".into(), phrase.bank.clone()),
+                        ("start_beat".into(), phrase.start_beat.to_string()),
+                        ("end_beat".into(), phrase.end_beat.to_string()),
+                    ]),
+                );
+            }
+        }
         let dj_events = *state.pioneer_patch_events.lock();
         let deck_side = |player| match player {
             1 => -1.0,
@@ -2475,6 +2551,14 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             mix: dj_fade_position,
             mix_activity: dj_fade_activity,
             beat_in_bar: f32::from(pioneer_visual.beat_in_bar),
+            phrase_active: f32::from(active_phrase.is_some()),
+            phrase_kind: active_phrase
+                .as_ref()
+                .map_or(0.0, |(_, phrase)| crate::prolink_analysis::phrase_kind_code(&phrase.kind)),
+            phrase_progress: active_phrase.as_ref().map_or(0.0, |(_, phrase)| phrase.progress),
+            phrase_fill: active_phrase
+                .as_ref()
+                .map_or(0.0, |(_, phrase)| f32::from(phrase.fill_in_active)),
             event_seq: dj_events.seq,
         };
         let patch_params = patch_rt.as_mut().map(|rt| {
@@ -2496,6 +2580,17 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             })
             .to_vec()
         });
+
+        let rotation_angle = {
+            let mut rotation = state.rotation.lock();
+            rotation.angle =
+                (rotation.angle + rotation.velocity * dt).rem_euclid(std::f32::consts::TAU);
+            rotation.velocity *= (-1.15 * dt).exp();
+            if rotation.velocity.abs() < 0.0005 {
+                rotation.velocity = 0.0;
+            }
+            rotation.angle
+        };
 
         let inputs = FrameInputs {
             globals: Globals {
@@ -2533,6 +2628,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 game_alpha,
                 game_beat: (-audio[0].beat_phase * 6.0).exp() * audio[0].bpm_conf,
                 _pad_game: [0.0; 2],
+                rotation: rotation_angle,
+                _pad_rotation: [0.0; 3],
             },
             audio,
             layers,
@@ -2867,6 +2964,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 st.discovery_running = state
                     .discovery_running
                     .load(std::sync::atomic::Ordering::Relaxed);
+                let pioneer_tracks = state.pioneer_tracks.lock();
                 st.pro_dj_link_devices = pioneer_devices
                     .iter()
                     .map(|device| crate::protocol::ProDjLinkDeviceInfo {
@@ -2878,10 +2976,53 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         on_air: device.on_air,
                         looping: device.looping,
                         beat_number: device.beat_number,
+                        phrase: pioneer_tracks
+                            .get(&device.number)
+                            .and_then(|track| track.phrase_analysis.as_ref())
+                            .and_then(|analysis| {
+                                crate::prolink_analysis::active_phrase(
+                                    analysis,
+                                    device.beat_number,
+                                    device.beat_phase,
+                                )
+                            }),
+                        playhead_ms: device.playhead_ms,
+                        track_length_secs: device.track_length_secs,
+                        pitch_percent: device.pitch_percent,
+                        track_bpm: device.track_bpm,
+                        effective_bpm: device.effective_bpm,
+                        phase_available: device.phase_available,
+                        beat_phase: device.beat_phase,
+                        bar_phase: device.bar_phase,
+                        beat_elapsed_secs: device.beat_elapsed_secs,
+                        beat_remaining_secs: device.beat_remaining_secs,
+                        bar_elapsed_secs: device.bar_elapsed_secs,
+                        bar_remaining_secs: device.bar_remaining_secs,
+                        next_beat_ms: device.next_beat_ms,
+                        second_beat_ms: device.second_beat_ms,
+                        next_bar_ms: device.next_bar_ms,
+                        fourth_beat_ms: device.fourth_beat_ms,
+                        second_bar_ms: device.second_bar_ms,
+                        eighth_beat_ms: device.eighth_beat_ms,
+                        synced: device.synced,
+                        beat_in_bar: device.beat_in_bar,
+                        play_state: device.play_state,
+                        status_flags: device.status_flags,
+                        beats_until_cue: device.beats_until_cue,
+                    })
+                    .collect();
+                st.pro_dj_link_network_devices = pioneer_network_devices
+                    .iter()
+                    .map(|device| crate::protocol::ProDjLinkNetworkDeviceInfo {
+                        number: device.number,
+                        name: device.name.clone(),
+                        kind: device.kind.clone(),
+                        ip: device.ip.to_string(),
+                        mac: device.mac.clone(),
                     })
                     .collect();
                 st.pro_dj_link_debug = state.pioneer_debug.lock().iter().cloned().collect();
-                st.pro_dj_link_tracks = state.pioneer_tracks.lock().values().cloned().collect();
+                st.pro_dj_link_tracks = pioneer_tracks.values().cloned().collect();
                 st.pro_dj_link_tracks.sort_by_key(|track| track.deck);
                 st.video = {
                     let v = state.video.lock();

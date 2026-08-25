@@ -553,7 +553,8 @@ export default function App() {
     setTab(t);
   };
 
-  // Global keyboard: 1-8 fire the motion effects. The shape keys are Live's,
+  // Global keyboard: number keys fire motion effects; R rotates the whole
+  // composition. The shape keys are Live's,
   // because there they pick what a press on the array stamps.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -569,12 +570,13 @@ export default function App() {
       ) {
         return;
       }
-      const fx = EFFECTS.find((f) => f.key === e.key);
+      const fx = EFFECTS.find((f) => f.key === e.key.toLowerCase());
       if (fx) {
         const color = loadSelectedLiveColor();
         client.triggerEffect({
           kind: fx.kind,
-          angle: Math.random() * Math.PI * 2,
+          angle: fx.kind === "rotate" ? (e.shiftKey ? -1 : 1) : Math.random() * Math.PI * 2,
+          intensity: fx.kind === "rotate" ? (e.repeat ? 1.35 : 0.45) : 1,
           hue: color.hue,
           saturation: color.saturation,
           brightness: color.brightness,

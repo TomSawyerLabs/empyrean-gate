@@ -428,6 +428,39 @@ pub struct ProDjLinkDeviceInfo {
     pub on_air: bool,
     pub looping: bool,
     pub beat_number: u64,
+    pub phrase: Option<ProDjLinkActivePhrase>,
+    pub playhead_ms: u32,
+    pub track_length_secs: u32,
+    pub pitch_percent: f32,
+    pub track_bpm: f32,
+    pub effective_bpm: f32,
+    pub phase_available: bool,
+    pub beat_phase: f32,
+    pub bar_phase: f32,
+    pub beat_elapsed_secs: f32,
+    pub beat_remaining_secs: f32,
+    pub bar_elapsed_secs: f32,
+    pub bar_remaining_secs: f32,
+    pub next_beat_ms: u32,
+    pub second_beat_ms: u32,
+    pub next_bar_ms: u32,
+    pub fourth_beat_ms: u32,
+    pub second_bar_ms: u32,
+    pub eighth_beat_ms: u32,
+    pub synced: bool,
+    pub beat_in_bar: u8,
+    pub play_state: u8,
+    pub status_flags: u8,
+    pub beats_until_cue: Option<u16>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkNetworkDeviceInfo {
+    pub number: u8,
+    pub name: String,
+    pub kind: String,
+    pub ip: String,
+    pub mac: String,
 }
 
 /// One structured line in the live PRO DJ LINK inspector. Values remain strings
@@ -453,6 +486,48 @@ pub struct ProDjLinkCueInfo {
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkBeatGridEntry {
+    pub beat_number: u32,
+    pub beat_in_bar: u8,
+    pub bpm: f64,
+    pub time_ms: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkPhraseInfo {
+    pub phrase_number: u16,
+    pub start_beat: u32,
+    pub end_beat: u32,
+    pub start_ms: u32,
+    pub end_ms: u32,
+    pub kind: String,
+    pub raw_kind: u16,
+    pub fill_in: bool,
+    pub fill_in_beat: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkPhraseAnalysis {
+    pub mood: String,
+    pub bank: String,
+    pub end_beat: u32,
+    pub phrases: Vec<ProDjLinkPhraseInfo>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProDjLinkActivePhrase {
+    pub phrase_number: u16,
+    pub kind: String,
+    pub mood: String,
+    pub bank: String,
+    pub start_beat: u32,
+    pub end_beat: u32,
+    pub progress: f32,
+    pub beats_remaining: f32,
+    pub fill_in_active: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ProDjLinkTrackInfo {
     pub deck: u8,
     pub source_player: u8,
@@ -472,8 +547,11 @@ pub struct ProDjLinkTrackInfo {
     pub rating: u8,
     pub year: u16,
     pub bit_rate: u32,
+    pub color_id: Option<u8>,
     pub artwork_id: u32,
     pub cues: Vec<ProDjLinkCueInfo>,
+    pub beat_grid: Vec<ProDjLinkBeatGridEntry>,
+    pub phrase_analysis: Option<ProDjLinkPhraseAnalysis>,
     /// Normalized 0..255 heights, compact enough for the 2 Hz status stream.
     pub waveform_preview: Vec<u8>,
     /// Full waveform downsampled to at most 1200 normalized height samples.
@@ -631,6 +709,7 @@ pub struct RuntimeStatus {
     /// Hot-plug refreshed MIDI input names.
     pub midi_ports: Vec<String>,
     pub pro_dj_link_devices: Vec<ProDjLinkDeviceInfo>,
+    pub pro_dj_link_network_devices: Vec<ProDjLinkNetworkDeviceInfo>,
     pub pro_dj_link_debug: Vec<ProDjLinkDebugEntry>,
     pub pro_dj_link_tracks: Vec<ProDjLinkTrackInfo>,
     /// Available local capture devices, for the settings UI dropdowns.

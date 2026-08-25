@@ -238,8 +238,8 @@ pub enum RhythmSource {
     /// One MIDI Timing Clock drives every layer; audio remains independently
     /// selectable per layer. Intended for DJ mixers, bridges, and controllers.
     MidiClock,
-    /// Passively receive beat/status packets from a Pioneer/AlphaTheta PRO DJ
-    /// LINK network. This app never announces a virtual deck or sends commands.
+    /// Observe a Pioneer/AlphaTheta PRO DJ LINK network. Observer mode announces
+    /// a read-only peer so players send their unicast status packets.
     ProDjLink,
 }
 
@@ -257,6 +257,11 @@ pub struct RhythmConfig {
     /// sends transport/master commands. XDJ-XZ decks occupy 1 and 2, so 3 is the
     /// safe default; metadata queries are refused if that number is observed.
     pub pro_dj_link_metadata_player: u8,
+    /// IPv4 address of the DJ-network interface. Empty observes all usable NICs.
+    pub pro_dj_link_interface: String,
+    /// Disable peer announcements. This is stricter but misses unicast status on
+    /// hardware that only sends rich state to announced peers.
+    pub pro_dj_link_passive: bool,
     /// Shift the lighting clock relative to the external input to compensate for LED/audio
     /// transport latency. Positive values make the visual beat happen later.
     pub latency_ms: f32,
@@ -272,6 +277,8 @@ impl Default for RhythmConfig {
             midi_port: None,
             pro_dj_link_player: 0,
             pro_dj_link_metadata_player: 3,
+            pro_dj_link_interface: String::new(),
+            pro_dj_link_passive: false,
             latency_ms: 0.0,
             fallback_to_audio: true,
             fallback_audio_source: 0,

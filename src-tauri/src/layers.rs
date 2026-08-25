@@ -275,12 +275,14 @@ pub enum EffectKind {
     Moon,
     /// Clean radial ring expanding from the center of the array.
     Ring,
+    /// Spin the entire rendered Gate composition around its center.
+    Rotate,
 }
 
 impl EffectKind {
     /// Order is the GPU id — the `case` arms in `gate.wgsl` are literal numbers.
     /// Append only.
-    pub const ALL: [EffectKind; 15] = [
+    pub const ALL: [EffectKind; 16] = [
         EffectKind::Burst,
         EffectKind::Strobe,
         EffectKind::Swoosh,
@@ -296,6 +298,7 @@ impl EffectKind {
         EffectKind::Triangle,
         EffectKind::Moon,
         EffectKind::Ring,
+        EffectKind::Rotate,
     ];
 
     /// The figures — stamped center-array, `angle` is their rotation. Everything
@@ -328,6 +331,9 @@ impl EffectKind {
             EffectKind::Twinkle => 1.1,
             EffectKind::Wipe => 1.0,
             EffectKind::Ring => 1.0,
+            // Rotate is consumed by the CPU before it reaches the transient
+            // effect buffer; keep a nominal duration for the stable effect ABI.
+            EffectKind::Rotate => 0.1,
             // Stamps hold long enough to be read across a dance floor.
             EffectKind::Star
             | EffectKind::Heart

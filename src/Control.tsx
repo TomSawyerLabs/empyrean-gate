@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { CENTERED_SHAPE, EFFECTS, GROW_MODES, growValue, SHAPES, type GrowMode } from "./effects";
+import EffectPad from "./EffectPad";
 import LayerQuickEdit, { type QuickEditAnchor } from "./LayerQuickEdit";
 import ShapeQuickEdit, { type ShapeEditAnchor } from "./ShapeQuickEdit";
 import { loadShapeStyle, saveShapeStyle, type ShapeStyle } from "./shapeStyle";
@@ -158,16 +159,7 @@ export default function Control() {
         <h2>Effects</h2>
         <div className="effect-row big">
           {EFFECTS.map((e) => (
-            <button
-              key={e.kind}
-              className="effect-btn"
-              onClick={() =>
-                client.triggerEffect({ kind: e.kind, angle: Math.random() * Math.PI * 2 })
-              }
-            >
-              {e.label}
-              <span className="key-hint">{e.key}</span>
-            </button>
+            <EffectPad key={e.kind} effect={e} trigger={(fx) => client.triggerEffect(fx)} />
           ))}
         </div>
       </section>

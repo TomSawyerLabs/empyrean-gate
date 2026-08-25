@@ -35,7 +35,8 @@ export type MotionEffectKind =
   | "pinwheel"
   | "twinkle"
   | "wipe"
-  | "ring";
+  | "ring"
+  | "rotate";
 
 export type ShapeKind = "star" | "heart" | "flower" | "diamond" | "triangle" | "moon";
 
@@ -220,6 +221,8 @@ export interface RhythmConfig {
   midi_port: string | null;
   pro_dj_link_player: number;
   pro_dj_link_metadata_player: number;
+  pro_dj_link_interface: string;
+  pro_dj_link_passive: boolean;
   latency_ms: number;
   fallback_to_audio: boolean;
   fallback_audio_source: number;
@@ -357,6 +360,39 @@ export interface ProDjLinkDeviceInfo {
   on_air: boolean;
   looping: boolean;
   beat_number: number;
+  phrase: ProDjLinkActivePhrase | null;
+  playhead_ms: number;
+  track_length_secs: number;
+  pitch_percent: number;
+  track_bpm: number;
+  effective_bpm: number;
+  phase_available: boolean;
+  beat_phase: number;
+  bar_phase: number;
+  beat_elapsed_secs: number;
+  beat_remaining_secs: number;
+  bar_elapsed_secs: number;
+  bar_remaining_secs: number;
+  /** 0xffffffff means the track ends before this boundary. */
+  next_beat_ms: number;
+  second_beat_ms: number;
+  next_bar_ms: number;
+  fourth_beat_ms: number;
+  second_bar_ms: number;
+  eighth_beat_ms: number;
+  synced: boolean;
+  beat_in_bar: number;
+  play_state: number;
+  status_flags: number;
+  beats_until_cue: number | null;
+}
+
+export interface ProDjLinkNetworkDeviceInfo {
+  number: number;
+  name: string;
+  kind: "player" | "mixer" | "rekordbox" | "unknown";
+  ip: string;
+  mac: string;
 }
 
 export interface ProDjLinkDebugEntry {
@@ -369,12 +405,50 @@ export interface ProDjLinkDebugEntry {
 }
 
 export interface ProDjLinkCueInfo {
-  kind: "memory" | "hot_cue" | "loop";
+  kind: "memory" | "hot_cue" | "loop" | "hot_loop";
   hot_cue_number: number | null;
   position_ms: number;
   loop_end_ms: number | null;
   comment: string;
   color: string;
+}
+
+export interface ProDjLinkBeatGridEntry {
+  beat_number: number;
+  beat_in_bar: number;
+  bpm: number;
+  time_ms: number;
+}
+
+export interface ProDjLinkPhraseInfo {
+  phrase_number: number;
+  start_beat: number;
+  end_beat: number;
+  start_ms: number;
+  end_ms: number;
+  kind: string;
+  raw_kind: number;
+  fill_in: boolean;
+  fill_in_beat: number | null;
+}
+
+export interface ProDjLinkPhraseAnalysis {
+  mood: "high" | "mid" | "low";
+  bank: string;
+  end_beat: number;
+  phrases: ProDjLinkPhraseInfo[];
+}
+
+export interface ProDjLinkActivePhrase {
+  phrase_number: number;
+  kind: string;
+  mood: string;
+  bank: string;
+  start_beat: number;
+  end_beat: number;
+  progress: number;
+  beats_remaining: number;
+  fill_in_active: boolean;
 }
 
 export interface ProDjLinkTrackInfo {
@@ -396,8 +470,11 @@ export interface ProDjLinkTrackInfo {
   rating: number;
   year: number;
   bit_rate: number;
+  color_id: number | null;
   artwork_id: number;
   cues: ProDjLinkCueInfo[];
+  beat_grid: ProDjLinkBeatGridEntry[];
+  phrase_analysis: ProDjLinkPhraseAnalysis | null;
   waveform_preview: number[];
   waveform_detail: number[];
 }
@@ -430,6 +507,7 @@ export interface RuntimeStatus {
   rhythm: RhythmStatus;
   midi_ports: string[];
   pro_dj_link_devices: ProDjLinkDeviceInfo[];
+  pro_dj_link_network_devices: ProDjLinkNetworkDeviceInfo[];
   pro_dj_link_debug: ProDjLinkDebugEntry[];
   pro_dj_link_tracks: ProDjLinkTrackInfo[];
   input_devices: DeviceInfo[];

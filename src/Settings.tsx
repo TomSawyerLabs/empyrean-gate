@@ -102,13 +102,32 @@ function DjLinkTracksPanel() {
                   <div className="dj-track-cues">
                     {track.cues.length === 0 ? <span className="hint">No cues returned</span> : track.cues.map((cue, index) => (
                       <span className={`dj-track-cue ${cue.kind}`} style={cue.color ? { borderColor: cue.color } : undefined} key={`${cue.kind}-${cue.position_ms}-${index}`}>
-                        {cue.kind === "hot_cue" ? `HOT ${cue.hot_cue_number ?? ""}` : cue.kind.toUpperCase()}
+                        {cue.kind === "hot_cue" || cue.kind === "hot_loop"
+                          ? `${cue.kind === "hot_loop" ? "HOT LOOP" : "HOT"} ${cue.hot_cue_number ?? ""}`
+                          : cue.kind.toUpperCase()}
                         {" · "}{formatTrackTime(cue.position_ms / 1000)}
                         {cue.loop_end_ms !== null && `–${formatTrackTime(cue.loop_end_ms / 1000)}`}
                         {cue.comment && ` · ${cue.comment}`}
                       </span>
                     ))}
                   </div>
+                  {track.phrase_analysis && (
+                    <div className="dj-track-phrases">
+                      <p className="hint">
+                        Phrase analysis · {track.phrase_analysis.mood} mood · {track.phrase_analysis.bank} bank
+                        {track.beat_grid.length > 0 ? ` · ${track.beat_grid.length} analyzed beats` : ""}
+                      </p>
+                      <div className="dj-track-phrase-list">
+                        {track.phrase_analysis.phrases.map((phrase) => (
+                          <span className={`dj-track-phrase kind-${phrase.kind}`} key={phrase.phrase_number}>
+                            {phrase.phrase_number}. {phrase.kind}
+                            {phrase.start_ms > 0 ? ` · ${formatTrackTime(phrase.start_ms / 1000)}` : ` · beat ${phrase.start_beat}`}
+                            {phrase.fill_in ? " · fill" : ""}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </article>
@@ -280,6 +299,27 @@ function RhythmPanel({ config }: { config: AppConfig }) {
       {rhythm.source === "pro_dj_link" && (
         <>
           <label className="field-row">
+            <span>DJ network interface</span>
+            <select
+              value={rhythm.pro_dj_link_interface}
+              onChange={(e) => commit({ pro_dj_link_interface: e.target.value })}
+            >
+              <option value="">All wired IPv4 interfaces</option>
+              {(status?.interfaces ?? []).map((entry) => {
+                const ip = entry.split("—").pop()?.trim() ?? entry;
+                return <option key={entry} value={ip}>{entry}</option>;
+              })}
+            </select>
+          </label>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={rhythm.pro_dj_link_passive}
+              onChange={(e) => commit({ pro_dj_link_passive: e.target.checked })}
+            />
+            Strictly passive mode (may miss deck status and metadata)
+          </label>
+          <label className="field-row">
             <span>Deck</span>
             <select
               value={rhythm.pro_dj_link_player}
@@ -318,18 +358,26 @@ function RhythmPanel({ config }: { config: AppConfig }) {
                 <span key={deck.number}>
                   Deck {deck.number}: {deck.playing ? "playing" : "stopped"}
                   {deck.tempo_master ? " · MASTER" : ""}
+                  {deck.synced ? " · SYNC" : ""}
                   {deck.cued ? " · CUE" : ""}
                   {deck.on_air ? " · on air" : " · off air"}
                   {deck.looping ? " · LOOP" : ""}
+                  {deck.beats_until_cue != null ? ` · cue in ${deck.beats_until_cue} beats` : ""}
+                  {deck.phrase
+                    ? ` · ${deck.phrase.kind.toUpperCase()} ${(deck.phrase.progress * 100).toFixed(0)}%${deck.phrase.fill_in_active ? " · FILL" : ""}`
+                    : ""}
+                  {deck.track_length_secs > 0
+                    ? ` · ${formatTrackTime(deck.playhead_ms / 1000)} / ${formatTrackTime(deck.track_length_secs)}`
+                    : ""}
                   {"  "}
                 </span>
               ))}
             </p>
           )}
           <p className="hint">
-            Gate passively listens on UDP 50001/50002 and uses the unused metadata identity above
-            only for read-only XDJ database queries; it never sends sync, transport, load, or master
-            commands, and refuses queries if that player number is detected. Auto follows the DJ LINK tempo master, including a mixer master,
+            Gate listens on UDP 50000–50002 and normally announces the unused identity above so decks
+            send their read-only status stream. It never sends sync, transport, load, or master commands,
+            and refuses metadata queries if that player number is detected. Auto follows the DJ LINK tempo master, including a mixer master,
             for global timing. Deck handoffs sweep an additive ribbon across the Gate; cue, play,
             loop, on-air, and inferred Hot Cue/seek changes fire localized additive effects. If Auto
             cannot see full status, select the playing deck number.

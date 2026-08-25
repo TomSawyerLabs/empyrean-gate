@@ -2,17 +2,20 @@
 //! owns authoritative timing signals that can be overlaid on every layer.
 
 use crate::config::RhythmSource;
-use crate::protocol::{ProDjLinkCueInfo, ProDjLinkTrackInfo};
+use crate::protocol::{
+    ProDjLinkBeatGridEntry, ProDjLinkCueInfo, ProDjLinkPhraseAnalysis, ProDjLinkTrackInfo,
+};
 use crate::state::SharedState;
 use crossbeam_channel::{Receiver, Sender, bounded};
 use midir::{Ignore, MidiInput, MidiInputConnection};
+use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use prodjlink_rs::data::metadata::build_metadata_request_args;
 use prodjlink_rs::dbserver::client::Client as DbClient;
 use prodjlink_rs::dbserver::field::Field as DbField;
 use prodjlink_rs::dbserver::message::MessageType as DbMessageType;
 use prodjlink_rs::{
-    CueList, CueType, DataReference, DeviceNumber, TrackMetadata, TrackSourceSlot, WaveformDetail,
-    WaveformPreview, WaveformStyle,
+    BeatGrid, CueList, CueType, DataReference, DeviceNumber, TrackMetadata, TrackSourceSlot,
+    WaveformDetail, WaveformPreview, WaveformStyle,
 };
 use socket2::{Domain, Protocol, Socket, Type};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -28,6 +31,7 @@ const CLOCKS_PER_BEAT: f64 = 24.0;
 const CLOCK_TIMEOUT: Duration = Duration::from_millis(500);
 const RESCAN_EVERY: Duration = Duration::from_secs(2);
 const PRO_DJ_LINK_MAGIC: &[u8; 10] = b"Qspt1WmJOL";
+const PRO_DJ_LINK_DISCOVERY_PORT: u16 = 50_000;
 const PRO_DJ_LINK_BEAT_PORT: u16 = 50_001;
 const PRO_DJ_LINK_STATUS_PORT: u16 = 50_002;
 const MAX_DETAIL_SAMPLES: usize = 1_200;
@@ -170,6 +174,44 @@ pub struct PioneerDevice {
     pub on_air: bool,
     pub looping: bool,
     pub beat_number: u64,
+    pub playhead_ms: u32,
+    pub track_length_secs: u32,
+    pub pitch_percent: f32,
+    pub track_bpm: f32,
+    pub effective_bpm: f32,
+    pub beat_phase: f32,
+    pub bar_phase: f32,
+    pub beat_elapsed_secs: f32,
+    pub beat_remaining_secs: f32,
+    pub bar_elapsed_secs: f32,
+    pub bar_remaining_secs: f32,
+    pub phase_available: bool,
+    pub next_beat_ms: u32,
+    pub second_beat_ms: u32,
+    pub next_bar_ms: u32,
+    pub fourth_beat_ms: u32,
+    pub second_bar_ms: u32,
+    pub eighth_beat_ms: u32,
+    pub synced: bool,
+    pub beat_in_bar: u8,
+    pub play_state: u8,
+    pub status_flags: u8,
+    pub beats_until_cue: Option<u16>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PioneerNetworkDevice {
+    pub number: u8,
+    pub name: String,
+    pub kind: String,
+    pub ip: Ipv4Addr,
+    pub mac: String,
+}
+
+#[derive(Debug, Clone)]
+struct LinkNetworkDevice {
+    info: PioneerNetworkDevice,
+    seen: Instant,
 }
 
 /// Estimate musical energy without an audio capture path. PRO DJ LINK does not
@@ -262,6 +304,7 @@ pub struct PioneerVisualSnapshot {
     pub deck_2_on_air: bool,
     pub looping: bool,
     pub beat_in_bar: u8,
+    pub beat_number: u64,
 }
 
 #[derive(Debug)]
@@ -274,11 +317,51 @@ struct PioneerDeckState {
     on_air: bool,
     looping: bool,
     beat_number: Option<u64>,
+    playhead_ms: u32,
+    track_length_secs: u32,
+    pitch_percent: f32,
+    track_bpm: f32,
+    synced: bool,
+    play_state: u8,
+    status_flags: u8,
+    beats_until_cue: Option<u16>,
     last_beat_in_bar: u8,
+    last_beat_bpm: f32,
+    beat_timings_ms: [u32; 6],
     last_beat_packet: Option<Instant>,
     last_loop_wrap: Option<Instant>,
     last_jump: Option<Instant>,
     pending_jump: Option<Instant>,
+}
+
+/// beat phase, bar phase, beat elapsed/remaining, bar elapsed/remaining.
+fn deck_phase(deck: &PioneerDeckState, now: Instant) -> Option<(f32, f32, f32, f32, f32, f32)> {
+    let last = deck.last_beat_packet?;
+    if !(20.0..=400.0).contains(&deck.last_beat_bpm) {
+        return None;
+    }
+    let period = 60.0 / deck.last_beat_bpm;
+    let total_beats = now.saturating_duration_since(last).as_secs_f32() / period;
+    // Match netbeat's default PhaseTracker lifetime (64 beats).
+    if total_beats > 64.0 {
+        return None;
+    }
+    let beat_phase = total_beats.fract();
+    let anchor = deck.last_beat_in_bar.saturating_sub(1).min(3) as f32;
+    let bar_phase = ((anchor + total_beats) / 4.0).rem_euclid(1.0);
+    let beat_elapsed = beat_phase * period;
+    let beat_remaining = (1.0 - beat_phase) * period;
+    let bar_period = period * 4.0;
+    let bar_elapsed = bar_phase * bar_period;
+    let bar_remaining = (1.0 - bar_phase) * bar_period;
+    Some((
+        beat_phase,
+        bar_phase,
+        beat_elapsed,
+        beat_remaining,
+        bar_elapsed,
+        bar_remaining,
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -307,6 +390,7 @@ pub struct PioneerClockState {
     on_air_observed: bool,
     decks: HashMap<u8, PioneerDeckState>,
     beat_numbers: HashMap<u8, u64>,
+    network_devices: HashMap<u8, LinkNetworkDevice>,
     listen_error: String,
 }
 
@@ -320,6 +404,10 @@ impl PioneerClockState {
         self.decks
             .get(&number)
             .is_some_and(|deck| now.duration_since(deck.seen) < Duration::from_secs(10))
+            || self
+                .network_devices
+                .get(&number)
+                .is_some_and(|device| now.duration_since(device.seen) < Duration::from_secs(10))
     }
 
     pub fn snapshot(&self, now: Instant, latency_ms: f32) -> ClockSnapshot {
@@ -366,19 +454,96 @@ impl PioneerClockState {
             .filter(|(number, deck)| {
                 **number < 32 && now.duration_since(deck.seen) < Duration::from_secs(10)
             })
-            .map(|(number, deck)| PioneerDevice {
-                number: *number,
-                name: deck.name.clone(),
-                tempo_master: self.master_player == Some(*number),
-                playing: deck.playing,
-                cued: deck.cued,
-                on_air: deck.on_air,
-                looping: deck.looping,
-                beat_number: deck.beat_number.unwrap_or(0),
+            .map(|(number, deck)| {
+                let phase = deck_phase(deck, now);
+                PioneerDevice {
+                    // Mirror netbeat's per-player PhaseTracker. Keeping this per
+                    // deck matters during blends: the selected/master clock is not
+                    // necessarily the deck whose phrase a client is inspecting.
+                    effective_bpm: deck.last_beat_bpm,
+                    beat_phase: phase.map_or(0.0, |phase| phase.0),
+                    bar_phase: phase.map_or(0.0, |phase| phase.1),
+                    beat_elapsed_secs: phase.map_or(0.0, |phase| phase.2),
+                    beat_remaining_secs: phase.map_or(0.0, |phase| phase.3),
+                    bar_elapsed_secs: phase.map_or(0.0, |phase| phase.4),
+                    bar_remaining_secs: phase.map_or(0.0, |phase| phase.5),
+                    phase_available: phase.is_some(),
+                    next_beat_ms: deck.beat_timings_ms[0],
+                    second_beat_ms: deck.beat_timings_ms[1],
+                    next_bar_ms: deck.beat_timings_ms[2],
+                    fourth_beat_ms: deck.beat_timings_ms[3],
+                    second_bar_ms: deck.beat_timings_ms[4],
+                    eighth_beat_ms: deck.beat_timings_ms[5],
+                    number: *number,
+                    name: deck.name.clone(),
+                    tempo_master: self.master_player == Some(*number),
+                    playing: deck.playing,
+                    cued: deck.cued,
+                    on_air: deck.on_air,
+                    looping: deck.looping,
+                    beat_number: deck.beat_number.unwrap_or(0),
+                    playhead_ms: deck.playhead_ms,
+                    track_length_secs: deck.track_length_secs,
+                    pitch_percent: deck.pitch_percent,
+                    track_bpm: deck.track_bpm,
+                    synced: deck.synced,
+                    beat_in_bar: deck.last_beat_in_bar,
+                    play_state: deck.play_state,
+                    status_flags: deck.status_flags,
+                    beats_until_cue: deck.beats_until_cue,
+                }
             })
             .collect();
         out.sort_by_key(|d| d.number);
         out
+    }
+
+    pub fn network_devices(&self, now: Instant) -> Vec<PioneerNetworkDevice> {
+        let mut devices: Vec<_> = self
+            .network_devices
+            .values()
+            .filter(|device| now.duration_since(device.seen) < Duration::from_secs(10))
+            .map(|device| device.info.clone())
+            .collect();
+        devices.sort_by_key(|device| device.number);
+        devices
+    }
+
+    fn receive_keepalive(&mut self, packet: &[u8], now: Instant) -> bool {
+        if !valid_link_packet(packet, 0x06) || packet.len() < 0x36 {
+            return false;
+        }
+        let number = packet[0x24];
+        let raw_type = packet[0x34];
+        let name = link_name_at(packet, 0x0c);
+        if name == "empyrean-gate" {
+            return false;
+        }
+        let info = PioneerNetworkDevice {
+            number,
+            name,
+            kind: match raw_type {
+                1 => "player",
+                2 | 3 => "mixer",
+                4 => "rekordbox",
+                _ => "unknown",
+            }
+            .into(),
+            ip: Ipv4Addr::new(packet[0x2c], packet[0x2d], packet[0x2e], packet[0x2f]),
+            mac: packet[0x26..0x2c]
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join(":"),
+        };
+        let changed = self.network_devices.get(&number).is_none_or(|old| {
+            old.info.name != info.name
+                || old.info.kind != info.kind
+                || old.info.ip != info.ip
+                || old.info.mac != info.mac
+        });
+        self.network_devices.insert(number, LinkNetworkDevice { info, seen: now });
+        changed
     }
 
     pub fn visual_snapshot(&self, now: Instant) -> PioneerVisualSnapshot {
@@ -412,6 +577,7 @@ impl PioneerClockState {
             looping: deck_1.is_some_and(|deck| deck.looping)
                 || deck_2.is_some_and(|deck| deck.looping),
             beat_in_bar: selected.map_or(0, |deck| deck.last_beat_in_bar),
+            beat_number: selected.and_then(|deck| deck.beat_number).unwrap_or(0),
         }
     }
 
@@ -458,6 +624,9 @@ impl PioneerClockState {
         let cued = matches!(play_mode, 0x06 | 0x07 | 0x08);
         let cue_playing = matches!(play_mode, 0x07 | 0x08);
         let looping = matches!(play_mode, 0x04 | 0x12);
+        let synced = flags & 0x10 != 0;
+        let cue_countdown = u16::from_be_bytes([packet[0xa4], packet[0xa5]]);
+        let beats_until_cue = (cue_countdown != u16::MAX).then_some(cue_countdown);
         self.on_air_observed |= on_air;
         if flags & 0x20 != 0 {
             self.master_player = Some(player);
@@ -465,6 +634,10 @@ impl PioneerClockState {
             self.master_player = None;
         }
         let raw_beat = u32::from_be_bytes(packet[0xa0..0xa4].try_into().unwrap());
+        let raw_pitch = u32::from_be_bytes([0, packet[0x8d], packet[0x8e], packet[0x8f]]);
+        let pitch_percent = (raw_pitch as f32 / 0x10_0000 as f32 - 1.0) * 100.0;
+        let track_bpm =
+            f32::from(u16::from_be_bytes([packet[0x92], packet[0x93]])) / 100.0;
         let beat_number = (raw_beat != u32::MAX).then_some(u64::from(raw_beat));
         if let Some(number) = beat_number {
             self.beat_numbers.insert(player, number);
@@ -482,7 +655,17 @@ impl PioneerClockState {
                     on_air,
                     looping,
                     beat_number,
+                    playhead_ms: 0,
+                    track_length_secs: 0,
+                    pitch_percent,
+                    track_bpm,
+                    synced,
+                    play_state: play_mode,
+                    status_flags: flags,
+                    beats_until_cue,
                     last_beat_in_bar: 0,
+                    last_beat_bpm: 0.0,
+                    beat_timings_ms: [u32::MAX; 6],
                     last_beat_packet: None,
                     last_loop_wrap: None,
                     last_jump: None,
@@ -553,6 +736,12 @@ impl PioneerClockState {
         deck.on_air = on_air;
         deck.looping = looping;
         deck.beat_number = beat_number;
+        deck.pitch_percent = pitch_percent;
+        deck.track_bpm = track_bpm;
+        deck.synced = synced;
+        deck.play_state = play_mode;
+        deck.status_flags = flags;
+        deck.beats_until_cue = beats_until_cue;
         events
     }
 
@@ -589,7 +778,17 @@ impl PioneerClockState {
             on_air: false,
             looping: false,
             beat_number: None,
+            playhead_ms: 0,
+            track_length_secs: 0,
+            pitch_percent: 0.0,
+            track_bpm: 0.0,
+            synced: false,
+            play_state: 0,
+            status_flags: 0,
+            beats_until_cue: None,
             last_beat_in_bar: 0,
+            last_beat_bpm: 0.0,
+            beat_timings_ms: [u32::MAX; 6],
             last_beat_packet: None,
             last_loop_wrap: None,
             last_jump: None,
@@ -597,6 +796,16 @@ impl PioneerClockState {
         });
         deck.name = beat.name.clone();
         deck.seen = now;
+        let period = Duration::from_secs_f32(60.0 / beat.bpm.max(20.0));
+        let since_last = deck.last_beat_packet.map(|last| now.duration_since(last));
+        // Advance every player's interpolation anchor, even when another deck
+        // owns the global/master clock.
+        let previous_beat_in_bar = deck.last_beat_in_bar;
+        let previous_beat_packet = deck.last_beat_packet;
+        deck.last_beat_in_bar = beat.beat_within_bar;
+        deck.last_beat_bpm = beat.bpm;
+        deck.beat_timings_ms = beat.timings_ms;
+        deck.last_beat_packet = Some(now);
         let wanted = if configured_player > 0 {
             Some(configured_player)
         } else {
@@ -616,8 +825,6 @@ impl PioneerClockState {
         {
             return None;
         }
-        let period = Duration::from_secs_f32(60.0 / beat.bpm.max(20.0));
-        let since_last = deck.last_beat_packet.map(|last| now.duration_since(last));
         // Advance the expectation by the number of elapsed beat periods, not
         // merely one packet. UDP loss otherwise looks exactly like a Hot Cue:
         // e.g. seeing bar beats 2 then 4 one second apart at 120 BPM is normal
@@ -629,13 +836,12 @@ impl PioneerClockState {
                     .clamp(1.0, 16.0) as u8
             })
             .unwrap_or(1);
-        let expected_bar_beat = if (1..=4).contains(&deck.last_beat_in_bar) {
-            ((deck.last_beat_in_bar - 1 + elapsed_beats) % 4) + 1
+        let expected_bar_beat = if (1..=4).contains(&previous_beat_in_bar) {
+            ((previous_beat_in_bar - 1 + elapsed_beats) % 4) + 1
         } else {
             0
         };
-        let early = deck
-            .last_beat_packet
+        let early = previous_beat_packet
             .is_some_and(|last| now.duration_since(last) < period.mul_f32(0.45));
         let recent = since_last.is_some_and(|elapsed| elapsed < period.mul_f32(4.5));
         let bar_discontinuity = expected_bar_beat != 0
@@ -645,7 +851,7 @@ impl PioneerClockState {
             .last_jump
             .is_none_or(|last| now.duration_since(last) > Duration::from_millis(500));
         let visual_event = if deck.looping
-            && deck.last_beat_packet.is_some()
+            && previous_beat_packet.is_some()
             && beat.beat_within_bar == 1
             && deck
                 .last_loop_wrap
@@ -660,8 +866,6 @@ impl PioneerClockState {
         } else {
             None
         };
-        deck.last_beat_in_bar = beat.beat_within_bar;
-        deck.last_beat_packet = Some(now);
         let changed_player = self.player != beat.player;
         self.player = beat.player;
         self.player_name = beat.name;
@@ -676,6 +880,77 @@ impl PioneerClockState {
             self.beat_count = self.beat_count.wrapping_add(1);
         }
         visual_event
+    }
+
+    fn receive_absolute_position(&mut self, packet: &[u8], now: Instant) -> bool {
+        if !valid_link_packet(packet, 0x0b) || packet.len() < 0x30 {
+            return false;
+        }
+        let player = packet[0x21];
+        let raw_pitch = i32::from_be_bytes(packet[0x2c..0x30].try_into().unwrap());
+        let deck = self.decks.entry(player).or_insert(PioneerDeckState {
+            name: link_name(packet),
+            seen: now,
+            playing: false,
+            cued: false,
+            cue_playing: false,
+            on_air: false,
+            looping: false,
+            beat_number: None,
+            playhead_ms: 0,
+            track_length_secs: 0,
+            pitch_percent: 0.0,
+            track_bpm: 0.0,
+            synced: false,
+            play_state: 0,
+            status_flags: 0,
+            beats_until_cue: None,
+            last_beat_in_bar: 0,
+            last_beat_bpm: 0.0,
+            beat_timings_ms: [u32::MAX; 6],
+            last_beat_packet: None,
+            last_loop_wrap: None,
+            last_jump: None,
+            pending_jump: None,
+        });
+        deck.seen = now;
+        deck.playhead_ms = u32::from_be_bytes(packet[0x28..0x2c].try_into().unwrap());
+        deck.track_length_secs = u32::from_be_bytes(packet[0x24..0x28].try_into().unwrap());
+        deck.pitch_percent = raw_pitch as f32 / 100.0;
+        deck.track_bpm = if packet.len() >= 0x32 {
+            f32::from(u16::from_be_bytes(packet[0x30..0x32].try_into().unwrap())) / 10.0
+        } else {
+            0.0
+        };
+        true
+    }
+
+    fn receive_channels_on_air(
+        &mut self,
+        packet: &[u8],
+        now: Instant,
+    ) -> Vec<PioneerVisualEvent> {
+        if !valid_link_packet(packet, 0x03) || packet.len() < 0x28 {
+            return Vec::new();
+        }
+        let count = if packet[0x0b] == 3 { 6 } else { 4 };
+        if packet.len() < 0x24 + count {
+            return Vec::new();
+        }
+        self.on_air_observed = true;
+        let mut events = Vec::new();
+        for (index, value) in packet[0x24..0x24 + count].iter().enumerate() {
+            let player = index as u8 + 1;
+            let on_air = *value != 0;
+            if let Some(deck) = self.decks.get_mut(&player) {
+                deck.seen = now;
+                if deck.on_air != on_air {
+                    deck.on_air = on_air;
+                    events.push(PioneerVisualEvent::OnAirChanged(player, on_air));
+                }
+            }
+        }
+        events
     }
 
     fn take_due_visual_events(&mut self, now: Instant) -> Vec<PioneerVisualEvent> {
@@ -702,6 +977,61 @@ struct LinkBeat {
     name: String,
     bpm: f32,
     beat_within_bar: u8,
+    timings_ms: [u32; 6],
+}
+
+#[derive(Debug, Clone)]
+struct LinkIdentity {
+    ip: Ipv4Addr,
+    mac: [u8; 6],
+}
+
+fn link_identities(selector: &str) -> Vec<LinkIdentity> {
+    NetworkInterface::show()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|interface| {
+            let ip = interface.addr.iter().find_map(|address| match address.ip() {
+                std::net::IpAddr::V4(ip) if !ip.is_loopback() => Some(ip),
+                _ => None,
+            })?;
+            if !selector.is_empty() && selector != interface.name && selector != ip.to_string() {
+                return None;
+            }
+            let parts: Vec<_> = interface
+                .mac_addr?
+                .split(':')
+                .map(|part| u8::from_str_radix(part, 16).ok())
+                .collect();
+            let mac: [u8; 6] = parts
+                .into_iter()
+                .collect::<Option<Vec<_>>>()?
+                .try_into()
+                .ok()?;
+            Some(LinkIdentity { ip, mac })
+        })
+        .collect()
+}
+
+fn build_link_keepalive(identity: &LinkIdentity, player: u8) -> [u8; 0x36] {
+    let mut packet = [0u8; 0x36];
+    packet[..10].copy_from_slice(PRO_DJ_LINK_MAGIC);
+    packet[0x0a] = 0x06;
+    for (to, from) in packet[0x0c..0x20]
+        .iter_mut()
+        .zip(b"empyrean-gate".iter().copied())
+    {
+        *to = from;
+    }
+    packet[0x20] = 1;
+    packet[0x21] = 2;
+    packet[0x23] = 0x12;
+    packet[0x24] = player;
+    packet[0x25] = 1;
+    packet[0x26..0x2c].copy_from_slice(&identity.mac);
+    packet[0x2c..0x30].copy_from_slice(&identity.ip.octets());
+    packet[0x34] = 1;
+    packet
 }
 
 fn valid_link_packet(packet: &[u8], kind: u8) -> bool {
@@ -709,11 +1039,15 @@ fn valid_link_packet(packet: &[u8], kind: u8) -> bool {
 }
 
 fn link_name(packet: &[u8]) -> String {
-    let end = packet[0x0b..0x1f]
+    link_name_at(packet, 0x0b)
+}
+
+fn link_name_at(packet: &[u8], offset: usize) -> String {
+    let end = packet[offset..offset + 20]
         .iter()
         .position(|b| *b == 0)
         .unwrap_or(20);
-    String::from_utf8_lossy(&packet[0x0b..0x0b + end]).into_owned()
+    String::from_utf8_lossy(&packet[offset..offset + end]).into_owned()
 }
 
 fn parse_link_beat(packet: &[u8]) -> Option<LinkBeat> {
@@ -731,6 +1065,8 @@ fn parse_link_beat(packet: &[u8]) -> Option<LinkBeat> {
         name: link_name(packet),
         bpm,
         beat_within_bar: packet[0x5c],
+        timings_ms: [0x24, 0x28, 0x2c, 0x30, 0x34, 0x38]
+            .map(|offset| u32::from_be_bytes(packet[offset..offset + 4].try_into().unwrap())),
     })
 }
 
@@ -881,8 +1217,12 @@ pub fn spawn(state: Arc<SharedState>) -> std::thread::JoinHandle<()> {
 }
 
 fn pioneer_thread(state: Arc<SharedState>, metadata_tx: Sender<MetadataRequest>) {
+    let mut discovery_sockets: Vec<UdpSocket> = Vec::new();
     let mut beat_sockets: Vec<UdpSocket> = Vec::new();
     let mut status_sockets: Vec<UdpSocket> = Vec::new();
+    let mut announce_sockets: Vec<(UdpSocket, [u8; 0x36])> = Vec::new();
+    let mut announce_config = (String::new(), 0u8, true);
+    let mut last_announce = Instant::now() - Duration::from_secs(2);
     let mut debug_status_signatures: HashMap<u8, Vec<u8>> = HashMap::new();
     let mut last_debug_beat: HashMap<u8, Instant> = HashMap::new();
     let mut device_ips: HashMap<u8, Ipv4Addr> = HashMap::new();
@@ -891,31 +1231,42 @@ fn pioneer_thread(state: Arc<SharedState>, metadata_tx: Sender<MetadataRequest>)
     let mut buffer = [0u8; 2048];
 
     while !state.shutdown.load(Ordering::Relaxed) {
-        let (enabled, configured_player) = {
+        let (enabled, configured_player, interface, passive, observer_id) = {
             let cfg = state.config.read();
             (
                 cfg.rhythm.source == RhythmSource::ProDjLink,
                 cfg.rhythm.pro_dj_link_player,
+                cfg.rhythm.pro_dj_link_interface.clone(),
+                cfg.rhythm.pro_dj_link_passive,
+                cfg.rhythm.pro_dj_link_metadata_player,
             )
         };
         if !enabled {
+            discovery_sockets.clear();
             beat_sockets.clear();
             status_sockets.clear();
+            announce_sockets.clear();
             state.pioneer_clock.lock().disconnect();
             std::thread::sleep(Duration::from_millis(100));
             continue;
         }
 
-        if (beat_sockets.is_empty() || status_sockets.is_empty())
+        if (discovery_sockets.is_empty() || beat_sockets.is_empty() || status_sockets.is_empty())
             && last_bind_attempt.elapsed() >= RESCAN_EVERY
         {
             last_bind_attempt = Instant::now();
+            if discovery_sockets.is_empty() {
+                match bind_link_sockets(PRO_DJ_LINK_DISCOVERY_PORT) {
+                    Ok(sockets) => discovery_sockets = sockets,
+                    Err(error) => log::warn!("PRO DJ LINK discovery port unavailable: {error}"),
+                }
+            }
             if beat_sockets.is_empty() {
                 match bind_link_sockets(PRO_DJ_LINK_BEAT_PORT) {
                     Ok(sockets) => {
                         beat_sockets = sockets;
                         state.pioneer_clock.lock().set_listen_error(String::new());
-                        log::info!("passively listening for PRO DJ LINK beats on UDP 50001");
+                        log::info!("listening for PRO DJ LINK beats on UDP 50001");
                     }
                     Err(e) => state
                         .pioneer_clock
@@ -933,11 +1284,90 @@ fn pioneer_thread(state: Arc<SharedState>, metadata_tx: Sender<MetadataRequest>)
             }
         }
 
+        let wanted_announce = (interface.clone(), observer_id, passive);
+        if announce_config != wanted_announce {
+            announce_sockets.clear();
+            if !passive && (1..=15).contains(&observer_id) {
+                for identity in link_identities(&interface) {
+                    if let Ok(socket) = bind_link_socket(identity.ip, 0) {
+                        if socket.set_broadcast(true).is_ok() {
+                            announce_sockets.push((
+                                socket,
+                                build_link_keepalive(&identity, observer_id),
+                            ));
+                        }
+                    }
+                }
+            }
+            announce_config = wanted_announce;
+            last_announce = Instant::now() - Duration::from_secs(2);
+        }
+        if !passive && last_announce.elapsed() >= Duration::from_millis(1500) {
+            last_announce = Instant::now();
+            let identity_in_use = state
+                .pioneer_clock
+                .lock()
+                .has_fresh_device(observer_id, Instant::now());
+            if identity_in_use {
+                state.pioneer_clock.lock().set_listen_error(format!(
+                    "PRO DJ LINK observer identity {observer_id} is already in use"
+                ));
+            } else {
+                for (socket, packet) in &announce_sockets {
+                    let _ = socket.send_to(
+                        packet,
+                        SocketAddrV4::new(Ipv4Addr::BROADCAST, PRO_DJ_LINK_DISCOVERY_PORT),
+                    );
+                }
+            }
+        }
+
+        discovery_sockets.retain(|socket| loop {
+            match socket.recv_from(&mut buffer) {
+                Ok((length, _)) => {
+                    let now = Instant::now();
+                    let mut clock = state.pioneer_clock.lock();
+                    if clock.receive_keepalive(&buffer[..length], now) {
+                        let device = clock
+                            .network_devices(now)
+                            .into_iter()
+                            .find(|device| device.number == buffer[0x24]);
+                        drop(clock);
+                        if let Some(device) = device {
+                            state.push_pioneer_debug(
+                                "device",
+                                device.number,
+                                format!("{} · {} · {}", device.name, device.kind, device.ip),
+                                BTreeMap::from([
+                                    ("kind".into(), device.kind),
+                                    ("ip".into(), device.ip.to_string()),
+                                    ("mac".into(), device.mac),
+                                ]),
+                            );
+                        }
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => return true,
+                Err(_) => return false,
+            }
+        });
+
         let mut beat_error = None;
         beat_sockets.retain(|socket| {
             loop {
                 match socket.recv_from(&mut buffer) {
                     Ok((length, _)) => {
+                        let on_air_events = state
+                            .pioneer_clock
+                            .lock()
+                            .receive_channels_on_air(&buffer[..length], Instant::now());
+                        for event in on_air_events {
+                            trigger_pioneer_visual(&state, event);
+                        }
+                        state
+                            .pioneer_clock
+                            .lock()
+                            .receive_absolute_position(&buffer[..length], Instant::now());
                         if let Some(beat) = parse_link_beat(&buffer[..length]) {
                             let now = Instant::now();
                             let duplicate = last_debug_beat.get(&beat.player).is_some_and(|last| {
@@ -1156,6 +1586,15 @@ fn metadata_thread(state: Arc<SharedState>, requests: Receiver<MetadataRequest>)
                 fields.insert("title".into(), track.title.clone());
                 fields.insert("artist".into(), track.artist.clone());
                 fields.insert("cues".into(), track.cues.len().to_string());
+                fields.insert("beat_grid_beats".into(), track.beat_grid.len().to_string());
+                fields.insert(
+                    "phrases".into(),
+                    track
+                        .phrase_analysis
+                        .as_ref()
+                        .map_or(0, |analysis| analysis.phrases.len())
+                        .to_string(),
+                );
                 fields.insert(
                     "waveform_preview_samples".into(),
                     track.waveform_preview.len().to_string(),
@@ -1261,6 +1700,39 @@ async fn fetch_track_info(request: MetadataRequest) -> Result<ProDjLinkTrackInfo
         .await
         .ok()
         .map(|items| CueList::from_menu_items(&items));
+    let beat_grid = client
+        .simple_request(DbMessageType::BeatGridReq, data_args())
+        .await
+        .ok()
+        .and_then(|message| {
+            message
+                .args
+                .get(3)
+                .and_then(|field| field.as_binary().ok())
+                .and_then(|bytes| BeatGrid::from_bytes(bytes).ok())
+        });
+    // The generic ANLZ tag request encodes its four-character identifiers
+    // backwards in a big-endian numeric field: PSSI -> ISSP, EXT -> \0TXE.
+    let phrase_tag = client
+        .simple_request(
+            DbMessageType::AnlzTagReq,
+            vec![
+                DbField::number(1),
+                DbField::number(u8::from(slot) as u32),
+                DbField::number(request.track_id),
+                DbField::number_with_size(0x4953_5350, 4),
+                DbField::number_with_size(0x0054_5845, 4),
+            ],
+        )
+        .await
+        .ok()
+        .and_then(|message| {
+            message
+                .args
+                .get(3)
+                .and_then(|field| field.as_binary().ok())
+                .and_then(|bytes| crate::prolink_analysis::parse_pssi_tag(bytes))
+        });
     let preview = client
         .simple_request(DbMessageType::WaveformPreviewReq, data_args())
         .await
@@ -1327,6 +1799,7 @@ async fn fetch_track_info(request: MetadataRequest) -> Result<ProDjLinkTrackInfo
                         kind: match cue.cue_type {
                             CueType::MemoryPoint => "memory",
                             CueType::HotCue => "hot_cue",
+                            CueType::Loop if cue.hot_cue_number.is_some() => "hot_loop",
                             CueType::Loop => "loop",
                         }
                         .into(),
@@ -1340,6 +1813,31 @@ async fn fetch_track_info(request: MetadataRequest) -> Result<ProDjLinkTrackInfo
                 .collect()
         })
         .unwrap_or_default();
+    let beat_grid: Vec<ProDjLinkBeatGridEntry> = beat_grid
+        .map(|grid| {
+            grid.entries
+                .into_iter()
+                .enumerate()
+                .map(|(index, beat)| ProDjLinkBeatGridEntry {
+                    beat_number: index as u32 + 1,
+                    beat_in_bar: beat.beat_within_bar as u8,
+                    bpm: beat.tempo,
+                    time_ms: beat.time_ms,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let phrase_analysis = phrase_tag.map(|mut analysis: ProDjLinkPhraseAnalysis| {
+        for phrase in &mut analysis.phrases {
+            phrase.start_ms = beat_grid
+                .get(phrase.start_beat.saturating_sub(1) as usize)
+                .map_or(0, |beat| beat.time_ms);
+            phrase.end_ms = beat_grid
+                .get(phrase.end_beat.saturating_sub(1) as usize)
+                .map_or(0, |beat| beat.time_ms);
+        }
+        analysis
+    });
 
     Ok(ProDjLinkTrackInfo {
         deck: request.deck,
@@ -1358,8 +1856,11 @@ async fn fetch_track_info(request: MetadataRequest) -> Result<ProDjLinkTrackInfo
         rating: metadata.rating,
         year: metadata.year,
         bit_rate: metadata.bit_rate,
+        color_id: metadata.color,
         artwork_id: metadata.artwork_id,
         cues,
+        beat_grid,
+        phrase_analysis,
         waveform_preview,
         waveform_detail,
         ..Default::default()
@@ -1675,6 +2176,62 @@ mod tests {
         link_status_state(player, master, beat_number, true, false, false)
     }
 
+    #[test]
+    fn pioneer_keepalive_round_trip_exposes_network_identity() {
+        let identity = LinkIdentity {
+            ip: Ipv4Addr::new(10, 0, 0, 42),
+            mac: [0, 1, 2, 3, 4, 5],
+        };
+        let mut packet = build_link_keepalive(&identity, 7);
+        assert_eq!(&packet[0x0c..0x19], b"empyrean-gate");
+        packet[0x0c..0x20].fill(0);
+        packet[0x0c..0x14].copy_from_slice(b"CDJ-TEST");
+        let now = Instant::now();
+        let mut clock = PioneerClockState::default();
+        assert!(clock.receive_keepalive(&packet, now));
+        let device = clock.network_devices(now).pop().expect("device");
+        assert_eq!(device.number, 7);
+        assert_eq!(device.name, "CDJ-TEST");
+        assert_eq!(device.kind, "player");
+        assert_eq!(device.ip, identity.ip);
+        assert_eq!(device.mac, "00:01:02:03:04:05");
+    }
+
+    #[test]
+    fn pioneer_absolute_position_and_six_channel_on_air_are_retained() {
+        let now = Instant::now();
+        let mut clock = PioneerClockState::default();
+        clock.receive_status(&link_status(2, true, 12), now);
+
+        let mut position = vec![0u8; 0x32];
+        position[..10].copy_from_slice(PRO_DJ_LINK_MAGIC);
+        position[0x0a] = 0x0b;
+        position[0x0b..0x13].copy_from_slice(b"CDJ-TEST");
+        position[0x21] = 2;
+        position[0x24..0x28].copy_from_slice(&360u32.to_be_bytes());
+        position[0x28..0x2c].copy_from_slice(&91_234u32.to_be_bytes());
+        position[0x2c..0x30].copy_from_slice(&(-625i32).to_be_bytes());
+        position[0x30..0x32].copy_from_slice(&1280u16.to_be_bytes());
+        assert!(clock.receive_absolute_position(&position, now));
+
+        let mut on_air = vec![0u8; 0x2a];
+        on_air[..10].copy_from_slice(PRO_DJ_LINK_MAGIC);
+        on_air[0x0a] = 0x03;
+        on_air[0x0b] = 3;
+        on_air[0x24..0x2a].copy_from_slice(&[0, 1, 0, 0, 0, 0]);
+        assert_eq!(
+            clock.receive_channels_on_air(&on_air, now),
+            vec![PioneerVisualEvent::OnAirChanged(2, true)]
+        );
+
+        let deck = clock.devices(now).pop().expect("deck");
+        assert!(deck.on_air);
+        assert_eq!(deck.playhead_ms, 91_234);
+        assert_eq!(deck.track_length_secs, 360);
+        assert!((deck.pitch_percent + 6.25).abs() < f32::EPSILON);
+        assert!((deck.track_bpm - 128.0).abs() < f32::EPSILON);
+    }
+
     fn link_status_state(
         player: u8,
         master: bool,
@@ -1753,11 +2310,36 @@ mod tests {
     #[test]
     fn pioneer_beat_parser_applies_pitch() {
         let mut packet = link_beat(2, 120.0, 3);
+        packet[0x24..0x28].copy_from_slice(&500u32.to_be_bytes());
+        packet[0x2c..0x30].copy_from_slice(&1_500u32.to_be_bytes());
         packet[0x55..0x58].copy_from_slice(&[0x11, 0x00, 0x00]); // +6.25%
         let beat = parse_link_beat(&packet).unwrap();
         assert_eq!(beat.player, 2);
         assert!((beat.bpm - 127.5).abs() < 0.01);
         assert_eq!(beat.beat_within_bar, 3);
+        assert_eq!(beat.timings_ms[0], 500);
+        assert_eq!(beat.timings_ms[2], 1_500);
+    }
+
+    #[test]
+    fn pioneer_interpolates_phase_for_every_deck_not_only_the_master() {
+        let start = Instant::now();
+        let mut clock = PioneerClockState::default();
+        clock.receive_beat(&link_beat(1, 120.0, 1), 1, start);
+        // Player 2 is not selected, but its own phase anchor must still advance.
+        clock.receive_beat(
+            &link_beat(2, 120.0, 3),
+            1,
+            start + Duration::from_millis(100),
+        );
+        let devices = clock.devices(start + Duration::from_millis(350));
+        let one = devices.iter().find(|deck| deck.number == 1).unwrap();
+        let two = devices.iter().find(|deck| deck.number == 2).unwrap();
+        assert!(one.phase_available && two.phase_available);
+        assert!((one.beat_phase - 0.7).abs() < 0.001);
+        assert!((two.beat_phase - 0.5).abs() < 0.001);
+        assert!((one.bar_phase - 0.175).abs() < 0.001);
+        assert!((two.bar_phase - 0.625).abs() < 0.001);
     }
 
     #[test]
@@ -1771,6 +2353,29 @@ mod tests {
             on_air: true,
             looping: false,
             beat_number: 51,
+            playhead_ms: 50_000,
+            track_length_secs: 100,
+            pitch_percent: 0.0,
+            track_bpm: 60.0,
+            effective_bpm: 60.0,
+            beat_phase: 0.0,
+            bar_phase: 0.5,
+            beat_elapsed_secs: 0.0,
+            beat_remaining_secs: 1.0,
+            bar_elapsed_secs: 2.0,
+            bar_remaining_secs: 2.0,
+            phase_available: true,
+            next_beat_ms: 1000,
+            second_beat_ms: 2000,
+            next_bar_ms: 2000,
+            fourth_beat_ms: 4000,
+            second_bar_ms: 6000,
+            eighth_beat_ms: 8000,
+            synced: true,
+            beat_in_bar: 3,
+            play_state: 0x03,
+            status_flags: 0x78,
+            beats_until_cue: None,
         }];
         let tracks = HashMap::from([(
             2,
@@ -1797,6 +2402,29 @@ mod tests {
             on_air: true,
             looping: false,
             beat_number: 1,
+            playhead_ms: 0,
+            track_length_secs: 0,
+            pitch_percent: 0.0,
+            track_bpm: 0.0,
+            effective_bpm: 0.0,
+            beat_phase: 0.0,
+            bar_phase: 0.0,
+            beat_elapsed_secs: 0.0,
+            beat_remaining_secs: 0.0,
+            bar_elapsed_secs: 0.0,
+            bar_remaining_secs: 0.0,
+            phase_available: false,
+            next_beat_ms: u32::MAX,
+            second_beat_ms: u32::MAX,
+            next_bar_ms: u32::MAX,
+            fourth_beat_ms: u32::MAX,
+            second_bar_ms: u32::MAX,
+            eighth_beat_ms: u32::MAX,
+            synced: true,
+            beat_in_bar: 1,
+            play_state: 0x03,
+            status_flags: 0x78,
+            beats_until_cue: None,
         }];
         let tracks = HashMap::new();
         assert!((pioneer_energy(&devices, &tracks, 1, 0.0) - 0.70).abs() < 1e-4);

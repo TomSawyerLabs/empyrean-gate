@@ -17,6 +17,7 @@ pub mod media;
 pub mod patch;
 pub mod power;
 pub mod protocol;
+pub mod prolink_analysis;
 pub mod report;
 pub mod rhythm;
 pub mod sacn;

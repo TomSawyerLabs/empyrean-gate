@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { EFFECTS, GROW_MODES, growValue, isShape, SHAPES, type GrowMode } from "./effects";
+import EffectPad from "./EffectPad";
 import GateCanvas from "./GateCanvas";
 import LayerQuickEdit, { type QuickEditAnchor } from "./LayerQuickEdit";
 import ShapeQuickEdit, { type ShapeEditAnchor } from "./ShapeQuickEdit";
@@ -247,20 +248,8 @@ export default function Live() {
   const effects = (
     <div className="cluster effects">
       {EFFECTS.map((e) => (
-        <button
-          key={e.kind}
-          className="effect-btn"
-          onClick={() => client.triggerEffect({
-            kind: e.kind,
-            angle: Math.random() * Math.PI * 2,
-            hue: color.hue,
-            saturation: color.saturation,
-            brightness: color.brightness,
-          })}
-        >
-          {e.label}
-          <span className="key-hint">{e.key}</span>
-        </button>
+        <EffectPad key={e.kind} effect={e} trigger={(fx) => client.triggerEffect(fx)}
+          color={{ hue: color.hue, saturation: color.saturation, brightness: color.brightness }} />
       ))}
     </div>
   );
