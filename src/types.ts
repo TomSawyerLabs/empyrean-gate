@@ -610,7 +610,13 @@ export interface TestModeStatus {
 
 // --- game mode (mirrors src-tauri/src/game/mod.rs, plans/game-mode.md) ---
 
-export type GameKind = "rps" | "life" | "spokewar" | "flak";
+export type GameKind = "rps" | "life" | "spokewar" | "flak" | "radial_tetris";
+export type GameCommand =
+  | "move_counter_clockwise"
+  | "move_clockwise"
+  | "rotate_clockwise"
+  | "soft_drop"
+  | "hard_drop";
 
 /** A playlist entry that runs a game world over its scene. */
 export interface GameCue {

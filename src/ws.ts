@@ -6,6 +6,7 @@ import type {
   AppConfig,
   EffectCfg,
   GameKind,
+  GameCommand,
   LayerCfg,
   PatchDoc,
   PreviewFrame,
@@ -383,6 +384,10 @@ export class GateClient {
   /** Inject into the running game. Open to every client; inputs merge. */
   gameInput(species: number, points: { angle: number; radius: number }[]) {
     this.send({ type: "game_input", species, points });
+  }
+  /** Named game action from a visible control or keyboard shortcut. */
+  gameCommand(command: GameCommand) {
+    this.send({ type: "game_command", command });
   }
   addLayer(layer: LayerCfg) {
     this.send({ type: "add_layer", layer });

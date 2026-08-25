@@ -966,6 +966,11 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
             &name(),
             json!({ "species": species, "points": points.len() }),
         ),
+        ClientMsg::GameCommand { command } => rec.event(
+            "game_command",
+            &name(),
+            serde_json::json!({ "command": command }),
+        ),
         // Test mode replaces every pixel on the rig, so both the arming and the
         // pattern changes belong on the timeline — a report captured during
         // commissioning should say plainly that the array was under test.
@@ -1662,6 +1667,9 @@ async fn handle_msg(
         }
         ClientMsg::GameInput { species, points } => {
             state.game_input(species, &points);
+        }
+        ClientMsg::GameCommand { command } => {
+            state.game_command(command);
         }
         ClientMsg::SetTestMode { active } => {
             if let Err(message) = state.set_test_mode(active) {

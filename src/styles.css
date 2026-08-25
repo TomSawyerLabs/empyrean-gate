@@ -4856,6 +4856,12 @@ button:disabled {
   background: #10231b;
 }
 
+/* Once a world is running, keep play above the fold. Stopping it restores the
+   full chooser, so switching games remains a deliberate two-step action. */
+.games-control.running .games-card:not(.active) {
+  display: none;
+}
+
 .games-card-text {
   flex: 1;
   min-width: 0;
@@ -4869,6 +4875,10 @@ button:disabled {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.games-picker-label {
+  margin-bottom: -6px;
 }
 
 /* Species chips: the color IS the label (the array can't show text), so the
@@ -4947,6 +4957,110 @@ button:disabled {
      and the tap surface must never scroll the page out from under a finger. */
   height: min(46vh, 380px);
   touch-action: none;
+}
+
+.ringfall-play {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #39305d;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #14102a, #0e0c1d);
+}
+
+.ringfall-piece-key {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ringfall-piece-key > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ringfall-piece {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #bcb5da;
+}
+
+.ringfall-piece-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 7px);
+  grid-template-rows: repeat(2, 7px);
+  gap: 2px;
+}
+
+.ringfall-piece-grid i {
+  border-radius: 2px;
+  background: transparent;
+}
+
+.ringfall-piece-grid i.filled {
+  background: #45dfce;
+  box-shadow: 0 0 5px #45dfce88;
+}
+
+.ringfall-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ringfall-controls button {
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.ringfall-controls button:last-child {
+  grid-column: span 2;
+}
+
+.ringfall-controls button > span:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ringfall-controls small {
+  color: #9f98bd;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.ringfall-control-icon {
+  width: 25px;
+  flex: 0 0 25px;
+  color: #45dfce;
+  font-size: 24px;
+  line-height: 1;
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .ringfall-piece-key {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ringfall-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ringfall-controls button:last-child {
+    grid-column: auto;
+  }
 }
 
 .test-mode-control {

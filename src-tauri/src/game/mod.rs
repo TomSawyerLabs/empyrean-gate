@@ -6,6 +6,7 @@
 
 pub mod flak;
 pub mod life;
+pub mod radial_tetris;
 pub mod rps;
 pub mod spokewar;
 
@@ -25,6 +26,8 @@ pub enum GameKind {
     Spokewar,
     /// Co-op inverted Missile Command: meteors in, taps detonate (see `flak`).
     Flak,
+    /// Mixed-size blocks falling inward; complete concentric rings collapse.
+    RadialTetris,
 }
 
 impl GameKind {
@@ -34,6 +37,7 @@ impl GameKind {
             GameKind::Life => "Primordial",
             GameKind::Spokewar => "Spokewar",
             GameKind::Flak => "Flak",
+            GameKind::RadialTetris => "Ringfall",
         }
     }
 }
@@ -46,6 +50,7 @@ pub enum GameSim {
     Life(life::LifeSim),
     Spokewar(spokewar::SpokewarSim),
     Flak(flak::FlakSim),
+    RadialTetris(radial_tetris::RadialTetrisSim),
 }
 
 impl GameSim {
@@ -57,6 +62,9 @@ impl GameSim {
                 GameSim::Spokewar(spokewar::SpokewarSim::new(theta, radial, species, seed))
             }
             GameKind::Flak => GameSim::Flak(flak::FlakSim::new(theta, radial, species, seed)),
+            GameKind::RadialTetris => GameSim::RadialTetris(
+                radial_tetris::RadialTetrisSim::new(theta, radial, species, seed),
+            ),
         }
     }
 
@@ -66,6 +74,7 @@ impl GameSim {
             GameSim::Life(s) => s.theta(),
             GameSim::Spokewar(s) => s.theta(),
             GameSim::Flak(s) => s.theta(),
+            GameSim::RadialTetris(s) => s.theta(),
         }
     }
 
@@ -75,6 +84,7 @@ impl GameSim {
             GameSim::Life(s) => s.radial(),
             GameSim::Spokewar(s) => s.radial(),
             GameSim::Flak(s) => s.radial(),
+            GameSim::RadialTetris(s) => s.radial(),
         }
     }
 
@@ -87,6 +97,7 @@ impl GameSim {
             GameSim::Life(s) => s.set_palette(species),
             GameSim::Spokewar(s) => s.set_bases(species),
             GameSim::Flak(s) => s.set_slots(species),
+            GameSim::RadialTetris(s) => s.set_slots(species),
         }
     }
 
@@ -97,6 +108,7 @@ impl GameSim {
             GameSim::Rps(_) | GameSim::Life(_) => None,
             GameSim::Spokewar(_) => Some(spokewar::TICK_SECS),
             GameSim::Flak(_) => Some(flak::TICK_SECS),
+            GameSim::RadialTetris(_) => Some(radial_tetris::TICK_SECS),
         }
     }
 
@@ -106,6 +118,7 @@ impl GameSim {
             GameSim::Life(s) => s.tick(),
             GameSim::Spokewar(s) => s.tick(),
             GameSim::Flak(s) => s.tick(),
+            GameSim::RadialTetris(s) => s.tick(),
         }
     }
 
@@ -115,6 +128,7 @@ impl GameSim {
             GameSim::Life(s) => s.watchdog(),
             GameSim::Spokewar(s) => s.watchdog(),
             GameSim::Flak(s) => s.watchdog(),
+            GameSim::RadialTetris(s) => s.watchdog(),
         }
     }
 
@@ -124,6 +138,25 @@ impl GameSim {
             GameSim::Life(s) => s.inject(it, ir, half_theta, half_r, species),
             GameSim::Spokewar(s) => s.inject(it, ir, species),
             GameSim::Flak(s) => s.inject(it, ir, species),
+            GameSim::RadialTetris(s) => s.inject(it, species),
+        }
+    }
+
+    pub fn command(&mut self, command: GameCommand) {
+        if let GameSim::RadialTetris(sim) = self {
+            sim.command(command);
+        }
+    }
+
+    pub fn detail(&self) -> Option<String> {
+        match self {
+            GameSim::RadialTetris(sim) => Some(format!(
+                "{} falling · {} next · {} rings",
+                sim.current_name(),
+                sim.next_name(),
+                sim.cleared_rings()
+            )),
+            _ => None,
         }
     }
 
@@ -157,8 +190,22 @@ impl GameSim {
                 .collect(),
             GameSim::Spokewar(s) => s.pack_cells(),
             GameSim::Flak(s) => s.pack_cells(),
+            GameSim::RadialTetris(s) => s.pack_cells(),
         }
     }
+}
+
+/// Explicit controller actions for games that need buttons. Keeping these out
+/// of polar tap coordinates makes the play surface self-explanatory and keeps
+/// canvas taps free to mean “move here”.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GameCommand {
+    MoveCounterClockwise,
+    MoveClockwise,
+    RotateClockwise,
+    SoftDrop,
+    HardDrop,
 }
 
 /// One queued player injection, in the same polar space as drawing dabs:
@@ -184,6 +231,8 @@ pub struct GameControl {
     /// Queued player injections, drained by the engine each frame. Bounded so
     /// a hammering client cannot grow memory.
     pub inputs: Vec<QueuedInput>,
+    /// Explicit button/keyboard actions, drained once per render frame.
+    pub commands: Vec<GameCommand>,
     /// When the current game was started (None while inactive).
     pub started: Option<Instant>,
 }
@@ -197,6 +246,7 @@ impl Default for GameControl {
             species: 3,
             effects_overlay: false,
             inputs: Vec::new(),
+            commands: Vec::new(),
             started: None,
         }
     }
@@ -239,6 +289,13 @@ mod tests {
         assert_eq!(json, "\"rps\"");
         let back: GameKind = serde_json::from_str(&json).unwrap();
         assert_eq!(back, GameKind::Rps);
+
+        let radial = serde_json::to_string(&GameKind::RadialTetris).unwrap();
+        assert_eq!(radial, "\"radial_tetris\"");
+        assert_eq!(
+            serde_json::from_str::<GameKind>(&radial).unwrap(),
+            GameKind::RadialTetris
+        );
     }
 
     /// WGSL uniform structs round their size to 16 bytes; a Rust struct that

@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useGate } from "./state";
 import GateCanvas from "./GateCanvas";
-import type { GameKind } from "./types";
+import type { GameCommand, GameKind } from "./types";
 
 const GAMES: {
   kind: GameKind;
@@ -79,7 +79,55 @@ const GAMES: {
       "paint grinds squads down, so soften a sector before pushing through. " +
       "Bases never die — the goal is the biggest empire right now.",
   },
+  {
+    kind: "radial_tetris",
+    name: "Ringfall",
+    blurb:
+      "Blocks fall inward from the rim. The bag mixes dots, dominoes, triominoes, " +
+      "and classic four-block pieces, so small gaps stay playable. Fill a complete " +
+      "ring to collapse it toward the center.",
+    knob: { label: "Colors", min: 2, max: 8, start: 6 },
+    howTo:
+      "Tap a spoke to move the falling piece directly there. The outlined ghost " +
+      "shows where it will land; use the controls or keyboard to move, rotate, " +
+      "and drop it. Complete a ring to clear it inward.",
+  },
 ];
+
+const RINGFALL_COMMANDS: Array<{
+  command: GameCommand;
+  icon: string;
+  label: string;
+  detail: string;
+  key: string;
+  strong?: boolean;
+}> = [
+  { command: "move_counter_clockwise", icon: "↶", label: "Move left", detail: "counter-clockwise", key: "← / A" },
+  { command: "rotate_clockwise", icon: "↻", label: "Rotate piece", detail: "clockwise", key: "↑ / W" },
+  { command: "move_clockwise", icon: "↷", label: "Move right", detail: "clockwise", key: "→ / D" },
+  { command: "soft_drop", icon: "↓", label: "Drop 1 ring", detail: "one step inward", key: "↓ / S" },
+  { command: "hard_drop", icon: "⇊", label: "Hard drop", detail: "land immediately", key: "Space", strong: true },
+];
+
+const GAP_FILLERS = [
+  { label: "Dot", cells: [0] },
+  { label: "Domino", cells: [0, 1] },
+  { label: "Bar 3", cells: [0, 1, 2] },
+  { label: "Corner 3", cells: [0, 1, 4] },
+];
+
+function PieceKey({ label, cells }: { label: string; cells: number[] }) {
+  return (
+    <span className="ringfall-piece">
+      <span className="ringfall-piece-grid" aria-hidden="true">
+        {Array.from({ length: 8 }, (_, cell) => (
+          <i key={cell} className={cells.includes(cell) ? "filled" : ""} />
+        ))}
+      </span>
+      <small>{label}</small>
+    </span>
+  );
+}
 
 /** Life's erase input — matches `game::life::ERASE` on the backend. */
 const ERASE_SPECIES = 0xff;
@@ -131,6 +179,34 @@ export default function Games() {
     }, 33);
     return () => clearInterval(flush);
   }, [client]);
+
+  useEffect(() => {
+    if (active !== "radial_tetris") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.matches("input, textarea, select, button")) return;
+      const command: GameCommand | undefined = {
+        ArrowLeft: "move_counter_clockwise",
+        a: "move_counter_clockwise",
+        A: "move_counter_clockwise",
+        ArrowRight: "move_clockwise",
+        d: "move_clockwise",
+        D: "move_clockwise",
+        ArrowUp: "rotate_clockwise",
+        w: "rotate_clockwise",
+        W: "rotate_clockwise",
+        ArrowDown: "soft_drop",
+        s: "soft_drop",
+        S: "soft_drop",
+        " ": "hard_drop",
+      }[event.key] as GameCommand | undefined;
+      if (!command) return;
+      event.preventDefault();
+      client.gameCommand(command);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [active, client]);
 
   if (!status) return <p className="hint">Waiting for backend…</p>;
 
@@ -216,6 +292,9 @@ export default function Games() {
               array below. That&apos;s joining — there are no seats and no
               turns, and any number of people can play, sharing colors freely.
             </p>
+            {active === "radial_tetris" && (
+              <span className="hint games-picker-label">Your piece color</span>
+            )}
             <div className="games-species">
               {Array.from({ length: species }, (_, s) => (
                 <button
@@ -236,6 +315,32 @@ export default function Games() {
                 </button>
               )}
             </div>
+            {active === "radial_tetris" && (
+              <div className="ringfall-play">
+                <div className="ringfall-piece-key">
+                  <span className="hint">Frequent gap fillers</span>
+                  <div>
+                    {GAP_FILLERS.map((piece) => <PieceKey key={piece.label} {...piece} />)}
+                  </div>
+                </div>
+                <div className="ringfall-controls" role="group" aria-label="Ringfall controls">
+                  {RINGFALL_COMMANDS.map((control) => (
+                    <button
+                      key={control.command}
+                      className={control.strong ? "primary" : "ghost"}
+                      onClick={() => client.gameCommand(control.command)}
+                      aria-label={`${control.label} — ${control.detail}`}
+                    >
+                      <span className="ringfall-control-icon">{control.icon}</span>
+                      <span>
+                        <strong>{control.label}</strong>
+                        <small>{control.detail} · {control.key}</small>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <p className="hint">

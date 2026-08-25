@@ -2431,13 +2431,14 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // step with it, and drive the crossfade. Ticks follow the beat when
         // the tracker is confident, else a fixed cadence; the shader
         // interpolates between generations so nothing strobes.
-        let (manual_game, manual_species, game_overlay, game_inputs) = {
+        let (manual_game, manual_species, game_overlay, game_inputs, game_commands) = {
             let mut g = state.game.lock();
             (
                 g.active,
                 g.species,
                 g.effects_overlay,
                 std::mem::take(&mut g.inputs),
+                std::mem::take(&mut g.commands),
             )
         };
         // A playlist game cue enters here rather than through `set_game_mode`:
@@ -2488,7 +2489,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 let ir = (t * (rt.sim.radial() as f32 - 1.0)).round() as i32;
                 rt.sim.inject(it, ir, 1.5, 3.0, input.species);
             }
-            if !game_inputs.is_empty() {
+            for command in &game_commands {
+                rt.sim.command(*command);
+            }
+            if !game_inputs.is_empty() || !game_commands.is_empty() {
                 // Repack "next" so the blob blends in over the rest of this
                 // generation instead of waiting a beat to exist.
                 rt.next = rt.sim.pack_cells(game_now);
@@ -3219,14 +3223,24 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     active: game_desired,
                     summary: match (game_desired, state.game.lock().started) {
                         (Some(kind), Some(started)) => format!(
-                            "{} · {} species · {} min",
+                            "{} · {} · {} min",
                             kind.label(),
-                            game_species,
+                            game_rt
+                                .as_ref()
+                                .and_then(|runtime| runtime.sim.detail())
+                                .unwrap_or_else(|| format!("{} species", game_species)),
                             started.elapsed().as_secs() / 60
                         ),
                         // A playlist cue is driving; there is no manual start time.
                         (Some(kind), None) => {
-                            format!("{} · {} species · scheduled", kind.label(), game_species)
+                            format!(
+                                "{} · {} · scheduled",
+                                kind.label(),
+                                game_rt
+                                    .as_ref()
+                                    .and_then(|runtime| runtime.sim.detail())
+                                    .unwrap_or_else(|| format!("{} species", game_species))
+                            )
                         }
                         _ => String::new(),
                     },

@@ -233,6 +233,11 @@ pub enum ClientMsg {
         species: u8,
         points: Vec<DabPoint>,
     },
+    /// A named game action from an on-screen button or keyboard. Open to every
+    /// connected player; games that do not use commands simply ignore it.
+    GameCommand {
+        command: crate::game::GameCommand,
+    },
     /// Arm/disarm hardware test mode. Open to every client (the commissioning
     /// workflow is a phone in your hand at the array), but refused while the
     /// show scheduler is running a playlist — see `SharedState::set_test_mode`.
