@@ -13,9 +13,6 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-#[cfg(windows)]
-use std::sync::atomic::Ordering;
-
 use crate::state::SharedState;
 
 pub fn spawn(state: Arc<SharedState>) {
