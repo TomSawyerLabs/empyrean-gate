@@ -19,7 +19,6 @@
         "minHeight": 600,
         "resizable": true,
         "zoomHotkeysEnabled": false,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --overscroll-history-navigation=0",
         "backgroundColor": "#0A0814"
       }
     ],

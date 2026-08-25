@@ -181,6 +181,9 @@ code,
   background: #3a1220;
   color: #ffb3c2;
 }
+.banner.dismissible {
+  cursor: pointer;
+}
 .banner.warn {
   background: #33280f;
   color: #ffe9a8;

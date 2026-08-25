@@ -427,6 +427,7 @@ function TopbarMenu({
   onShowMode,
   onConnect,
   onNewWindow,
+  newWindowBusy,
 }: {
   tab: TabId;
   onSelectTab: (t: TabId) => void;
@@ -434,6 +435,7 @@ function TopbarMenu({
   onShowMode: () => void;
   onConnect: () => void;
   onNewWindow: () => void;
+  newWindowBusy: boolean;
 }) {
   const { connected, status } = useGate();
 
@@ -494,12 +496,13 @@ function TopbarMenu({
           </button>
           {IN_TAURI && (
             <button
+              disabled={newWindowBusy}
               onClick={() => {
                 onNewWindow();
                 onClose();
               }}
             >
-              ⧉ New window
+              {newWindowBusy ? "Opening…" : "⧉ New window"}
             </button>
           )}
         </div>
@@ -523,6 +526,22 @@ export default function App() {
   const [savedVisible, setSavedVisible] = useState(false);
   const [showMode, setShowMode] = useShowMode(config?.update.leave_show_at);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [newWindowBusy, setNewWindowBusy] = useState(false);
+  const [newWindowError, setNewWindowError] = useState<string | null>(null);
+
+  const handleOpenNewWindow = useCallback(async () => {
+    if (newWindowBusy) return;
+    setNewWindowBusy(true);
+    setNewWindowError(null);
+    try {
+      await openNewWindow(tab);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setNewWindowError(detail || "The native window could not be created.");
+    } finally {
+      setNewWindowBusy(false);
+    }
+  }, [newWindowBusy, tab]);
 
   const togglePerformanceRecording = () => {
     if (status?.performance_recording) {
@@ -680,8 +699,13 @@ export default function App() {
           ⊕ <span className="btn-label">Connect</span>
         </button>
         {IN_TAURI && (
-          <button className="ghost" aria-label="New window" onClick={() => void openNewWindow(tab)}>
-            ⧉ <span className="btn-label">New window</span>
+          <button
+            className="ghost"
+            aria-label="New window"
+            disabled={newWindowBusy}
+            onClick={() => void handleOpenNewWindow()}
+          >
+            ⧉ <span className="btn-label">{newWindowBusy ? "Opening…" : "New window"}</span>
           </button>
         )}
         {status && <span className="gpu-name">{status.gpu_name}</span>}
@@ -690,6 +714,14 @@ export default function App() {
         </span>
         <VersionChip />
       </header>
+
+      {newWindowError && (
+        <div className="banner error dismissible" onClick={() => setNewWindowError(null)}>
+          <strong>Could not open another window:</strong> {newWindowError}. The show is
+          still running; use <code>http://localhost:9520/#{tab}</code> in a browser if
+          you need a second control surface now. <span className="hint">(click to dismiss)</span>
+        </div>
+      )}
 
       {/* Test mode drives the rig from a fixed pattern instead of the show, so it
           has to be impossible to leave on by accident. Shown on every tab and in
@@ -820,7 +852,8 @@ export default function App() {
           onClose={() => setMenuOpen(false)}
           onShowMode={() => setShowMode(true)}
           onConnect={() => setShowConnect(true)}
-          onNewWindow={() => void openNewWindow(tab)}
+          onNewWindow={() => void handleOpenNewWindow()}
+          newWindowBusy={newWindowBusy}
         />
       )}
       {showConnect && <ConnectModal onClose={() => setShowConnect(false)} />}

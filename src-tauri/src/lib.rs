@@ -380,6 +380,9 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
     // executable that a previous launch may have targeted.
     let launch_at_startup = state.config.read().windows.launch_at_startup;
     startup::reconcile(launch_at_startup, headless).publish(&mut state.status.lock());
+    if let Err(error) = startup::refresh_start_menu_shortcut() {
+        log::warn!("could not refresh the existing Start-menu shortcut: {error:#}");
+    }
     updater::cleanup_old_binaries();
     state.broadcast_state();
 
@@ -611,15 +614,43 @@ fn cancel_close(state: tauri::State<'_, Backend>) {
 
 /// Create (or focus) the popped-out window for a tab, with a stable label so the
 /// window-state plugin can restore its geometry. Records it for restore-on-start.
+///
+/// This command must remain async. Tauri documents a Windows WebView2 deadlock
+/// when `WebviewWindowBuilder` is called from a synchronous command.
+const AUX_TABS: &[&str] = &[
+    "live", "ready", "media", "patch", "replay", "control", "games", "test", "settings",
+];
+
+fn valid_aux_tab(tab: &str) -> bool {
+    AUX_TABS.contains(&tab)
+}
+
 #[tauri::command]
-fn open_aux(app: tauri::AppHandle, tab: String, state: tauri::State<'_, Backend>) -> Result<(), String> {
+async fn open_aux(
+    app: tauri::AppHandle,
+    tab: String,
+    state: tauri::State<'_, Backend>,
+) -> Result<(), String> {
     use tauri::Manager;
+    if !valid_aux_tab(&tab) {
+        let error = format!("'{tab}' is not a valid Empyrean Gate tab");
+        log::warn!("refused aux-window request: {error}");
+        return Err(error);
+    }
     let label = format!("aux-{tab}");
     if let Some(existing) = app.get_webview_window(&label) {
-        let _ = existing.set_focus();
+        existing
+            .set_focus()
+            .map_err(|error| format!("could not focus '{label}': {error}"))?;
+        log::info!("focused existing aux window '{label}'");
         return Ok(());
     }
-    open_aux_window(&app, &tab).map_err(|e| e.to_string())?;
+    log::info!("opening aux window '{label}'");
+    if let Err(error) = open_aux_window(&app, &tab) {
+        let detail = format!("could not create '{label}': {error}");
+        log::error!("{detail}");
+        return Err(detail);
+    }
     state.state.update_config(|c| {
         if !c.windows.aux_open.contains(&tab) {
             c.windows.aux_open.push(tab.clone());
@@ -642,17 +673,28 @@ fn open_aux_window(app: &tauri::AppHandle, tab: &str) -> tauri::Result<()> {
             // white window if the page never loads at all.
             .background_color(tauri::window::Color(0x0A, 0x08, 0x14, 0xFF))
             .initialization_script(format!("if (!location.hash) location.hash = '#{tab}';"));
-    // Same browser hardening the main window gets from tauri.conf.json (the
-    // first group is wry's own default, which passing this option replaces).
-    // Pinch input stays enabled so the Patch graph can consume trackpad zoom;
-    // src/touch.ts prevents page-level zoom everywhere else.
-    #[cfg(target_os = "windows")]
-    let builder = builder.additional_browser_args(
-        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
-         --overscroll-history-navigation=0",
-    );
+    // Do not set `additional_browser_args` here or on the configured main
+    // window. WebView2 environments sharing one data directory must agree on
+    // their environment options; overriding the arguments is a known trigger
+    // for HRESULT 0x8007139F when a second webview is created. Wry supplies its
+    // own safe defaults, and CSS handles overscroll for this app.
     builder.build()?;
     harden_touch_visuals(app);
     log::info!("opened aux window '{label}'");
     Ok(())
+}
+
+#[cfg(test)]
+mod aux_window_tests {
+    use super::{AUX_TABS, valid_aux_tab};
+
+    #[test]
+    fn only_known_tabs_can_become_window_labels() {
+        for tab in AUX_TABS {
+            assert!(valid_aux_tab(tab));
+        }
+        assert!(!valid_aux_tab(""));
+        assert!(!valid_aux_tab("../settings"));
+        assert!(!valid_aux_tab("live-2"));
+    }
 }

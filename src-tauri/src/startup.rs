@@ -67,17 +67,58 @@ pub fn set_enabled(enabled: bool, headless: bool) -> anyhow::Result<bool> {
         }
 
         let exe = std::env::current_exe()?;
-        let script = std::env::temp_dir().join(format!(
-            "empyrean-gate-startup-{}.ps1",
-            uuid::Uuid::new_v4()
-        ));
-        let mut script_file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&script)?;
-        std::io::Write::write_all(
-            &mut script_file,
-            r#"param([string]$ShortcutPath, [string]$TargetPath, [string]$LaunchArgs)
+        let launch_args = if headless { "--headless" } else { "" };
+        write_shortcut(&shortcut, &exe, launch_args)?;
+        Ok(true)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (enabled, headless);
+        Ok(false)
+    }
+}
+
+/// Retarget an existing Start-menu entry to the image that is actually running.
+///
+/// Self-updates deliberately execute from a versioned sibling and delete older
+/// siblings later. A shortcut left pointing at one of those older files becomes
+/// a dead click. Portable installs should not create Start-menu entries without
+/// consent, so this only repairs an entry that already exists.
+pub fn refresh_start_menu_shortcut() -> anyhow::Result<bool> {
+    #[cfg(windows)]
+    {
+        let shortcut = program_shortcut_path()?;
+        if !shortcut.is_file() {
+            return Ok(false);
+        }
+        let exe = std::env::current_exe()?;
+        write_shortcut(&shortcut, &exe, "")?;
+        log::info!("refreshed Start-menu shortcut to {}", exe.display());
+        Ok(true)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(false)
+    }
+}
+
+#[cfg(windows)]
+fn write_shortcut(
+    shortcut: &std::path::Path,
+    exe: &std::path::Path,
+    launch_args: &str,
+) -> anyhow::Result<()> {
+    let script = std::env::temp_dir().join(format!(
+        "empyrean-gate-shortcut-{}.ps1",
+        uuid::Uuid::new_v4()
+    ));
+    let mut script_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&script)?;
+    std::io::Write::write_all(
+        &mut script_file,
+        r#"param([string]$ShortcutPath, [string]$TargetPath, [string]$LaunchArgs)
 $ErrorActionPreference = 'Stop'
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($ShortcutPath)
@@ -87,37 +128,27 @@ $shortcut.Arguments = $LaunchArgs
 $shortcut.Description = 'Empyrean Gate lighting controller'
 $shortcut.Save()
 "#
-            .as_bytes(),
-        )?;
-        drop(script_file);
-        let launch_args = if headless { "--headless" } else { "" };
-        let result = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-            ])
-            .arg(&script)
-            .arg(&shortcut)
-            .arg(&exe)
-            .arg(launch_args)
-            .status();
-        let _ = std::fs::remove_file(&script);
-        let result = result?;
-        anyhow::ensure!(result.success(), "PowerShell exited with {result}");
-        anyhow::ensure!(
-            shortcut.is_file(),
-            "Windows did not create the startup shortcut"
-        );
-        Ok(true)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = (enabled, headless);
-        Ok(false)
-    }
+        .as_bytes(),
+    )?;
+    drop(script_file);
+    let result = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(&script)
+        .arg(shortcut)
+        .arg(exe)
+        .arg(launch_args)
+        .status();
+    let _ = std::fs::remove_file(&script);
+    let result = result?;
+    anyhow::ensure!(result.success(), "PowerShell exited with {result}");
+    anyhow::ensure!(shortcut.is_file(), "Windows did not create the shortcut");
+    Ok(())
 }
 
 pub fn shortcut_exists() -> bool {
@@ -144,6 +175,18 @@ fn shortcut_path() -> anyhow::Result<std::path::PathBuf> {
         .join(SHORTCUT_NAME))
 }
 
+#[cfg(windows)]
+fn program_shortcut_path() -> anyhow::Result<std::path::PathBuf> {
+    let appdata =
+        std::env::var_os("APPDATA").ok_or_else(|| anyhow::anyhow!("APPDATA is not set"))?;
+    Ok(std::path::PathBuf::from(appdata)
+        .join("Microsoft")
+        .join("Windows")
+        .join("Start Menu")
+        .join("Programs")
+        .join(SHORTCUT_NAME))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,6 +197,7 @@ mod tests {
         assert!(!supported());
         assert_eq!(set_enabled(true, false).unwrap(), false);
         assert!(!shortcut_exists());
+        assert!(!refresh_start_menu_shortcut().unwrap());
 
         let outcome = reconcile(true, false);
         assert!(!outcome.succeeded);
