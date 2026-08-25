@@ -675,3 +675,18 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{GpuDab, GpuEffect};
+
+    #[test]
+    fn patch_transient_abi_keeps_full_color_records() {
+        assert_eq!(std::mem::size_of::<GpuEffect>(), 48);
+        assert_eq!(std::mem::size_of::<GpuDab>(), 48);
+
+        let patch_shader = include_str!("engine/shaders/patch_lib.wgsl");
+        assert!(patch_shader.contains("col = hsv2rgb(E.hue, E.saturation, E.brightness);"));
+        assert!(patch_shader.contains("col = hsv2rgb(D.hue, D.saturation, D.brightness);"));
+    }
+}
