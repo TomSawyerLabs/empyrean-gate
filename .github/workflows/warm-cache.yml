@@ -1,0 +1,98 @@
+name: Warm the release build cache
+
+# Why this exists
+# ---------------
+# Every release used to compile the entire Rust dependency tree from scratch, on
+# all three platforms, and the logs said `No cache found` every single time. Two
+# reasons, and this workflow fixes both:
+#
+#   1. GitHub scopes a cache to the ref that wrote it, and a run may only read
+#      caches from its own ref or from the DEFAULT BRANCH. Releases run on
+#      `refs/tags/vX.Y.Z`, so each release could only ever read a cache written
+#      by that same tag — i.e. never. v0.9.0 rebuilt a byte-identical copy of a
+#      949 MB cache sitting under `refs/tags/v0.8.0` that it was not allowed to
+#      open, then saved its own for a tag that will never run again.
+#
+#   2. Nothing on master ever built the RELEASE profile. checks.yml runs
+#      `cargo test --lib`, which is debug — a cache full of `target/debug`
+#      artifacts is no help to `tauri build --release`.
+#
+# So: this runs on master (the default branch, readable from every tag), builds
+# the release profile, and saves under a `shared-key` that release.yml asks for
+# by name. `shared-key` matters because rust-cache otherwise puts the job id in
+# the key, and the jobs are called different things in the two workflows.
+#
+# What is actually cached is the ~700-crate dependency tree — rust-cache prunes
+# this workspace's own artifacts before saving. Dependencies only change when
+# Cargo.lock does, which is why nightly is frequent enough even though master
+# moves many times a day.
+#
+# Standard runners, so this is free on a public repo. It costs wall clock on
+# GitHub's infrastructure and nothing else.
+
+on:
+  schedule:
+    # 09:00 UTC — after the small hours in US/Pacific, so a release cut during
+    # the day gets a cache warmed from that morning's master.
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+  # A dependency change is the one edit that invalidates the cache outright, so
+  # re-warm as soon as one lands rather than waiting for the next night.
+  push:
+    branches: [master]
+    paths:
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/Cargo.lock"
+      - ".github/workflows/warm-cache.yml"
+
+# A warm started by the nightly cron and one started by a lockfile push would
+# race to save the same key; the later one wins and the earlier is wasted work.
+concurrency:
+  group: warm-cache-${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  warm:
+    name: Warm ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Linux system deps (webkit for the Tauri shell, ALSA for audio)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # The same shared-key release.yml restores by. Saving is the entire point
+      # of this workflow, so unlike release.yml it does NOT set save-if: false.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: release-build
+          cache-on-failure: true
+
+      # `tauri build` also bundles and needs ../dist; none of that affects which
+      # dependency artifacts land in target/, and build.rs writes a placeholder
+      # dist for us. A plain cargo build compiles the same dependency graph in
+      # the same profile, which is all the cache carries.
+      - name: Build dependencies (release profile)
+        working-directory: src-tauri
+        run: cargo build --release --bins
+
+      # The release also runs `cargo test --release`, which pulls dev-dependencies
+      # (naga) that the build above never touches. --no-run compiles them without
+      # spending time executing anything.
+      - name: Build test binaries (release profile)
+        working-directory: src-tauri
+        run: cargo test --release --no-run --lib --bin engine-smoke
