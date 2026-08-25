@@ -67,6 +67,17 @@ const GAMES: {
       "Pick a base color, then tap where its squads should fly. Strong enemy " +
       "paint grinds squads down — soften a sector before pushing through it.",
   },
+  {
+    kind: "radial_tetris",
+    name: "Radial Tetris",
+    blurb:
+      "Tetrominoes fall from the rim toward the heart of the Gate. Steer the " +
+      "shared piece around the circle, rotate it, and complete rings to collapse them.",
+    knob: { label: "Colors", min: 2, max: 8 },
+    playHint:
+      "Tap the array to choose an angular lane, or use the controls to rotate, " +
+      "nudge, and hard-drop the shared piece. Complete a whole ring to clear it.",
+  },
 ];
 
 /** Life's erase input — matches `game::life::ERASE` on the backend. */
@@ -97,6 +108,10 @@ export default function Games() {
     client.httpBase.startsWith("http://localhost");
 
   const [mySpecies, setMySpecies] = useState(0);
+  const tetrisAction = (quarter: number) => {
+    // Near-hole inputs are commands; the angular quadrant selects the action.
+    client.gameInput(mySpecies, [{ angle: quarter * Math.PI / 2 + 0.01, radius: 0 }]);
+  };
   useEffect(() => {
     if (mySpecies === ERASE_SPECIES) {
       // The eraser only exists in Life.
@@ -214,6 +229,20 @@ export default function Games() {
                 </button>
               )}
             </div>
+            {active === "radial_tetris" && (
+              <div className="tetris-controls" role="group" aria-label="Radial Tetris controls">
+                <button onClick={() => tetrisAction(1)} aria-label="Move counterclockwise">
+                  ↶
+                </button>
+                <button onClick={() => tetrisAction(0)}>Rotate</button>
+                <button onClick={() => tetrisAction(2)} aria-label="Move clockwise">
+                  ↷
+                </button>
+                <button className="tetris-drop" onClick={() => tetrisAction(3)}>
+                  Hard drop
+                </button>
+              </div>
+            )}
           </>
         ) : (
           <p className="hint">
@@ -225,7 +254,9 @@ export default function Games() {
           <GateCanvas
             onTap={(angle, radius) => {
               if (!active) return;
-              pending.current.push({ angle, radius });
+              // Tetris uses ordinary canvas taps only for lane selection; keep
+              // them out of the near-hole command band exposed by its buttons.
+              pending.current.push({ angle, radius: active === "radial_tetris" ? 1 : radius });
             }}
           />
         </div>

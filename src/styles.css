@@ -4884,6 +4884,22 @@ button:disabled {
   touch-action: none;
 }
 
+.tetris-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(64px, 1fr));
+  gap: 8px;
+}
+
+.tetris-controls button {
+  min-height: 48px;
+  font-size: 16px;
+}
+
+.tetris-controls .tetris-drop {
+  grid-column: 1 / -1;
+  border-color: #7a5cff;
+}
+
 .test-mode-control {
   display: flex;
   flex-direction: column;
