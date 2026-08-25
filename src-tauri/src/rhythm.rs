@@ -1381,7 +1381,7 @@ fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
         PioneerVisualEvent::LoopStarted(_) => ("loop started", "ring"),
         PioneerVisualEvent::LoopWrap(_) => ("loop wrapped", "ring"),
         PioneerVisualEvent::LoopEnded(_) => ("loop ended", "ring"),
-        PioneerVisualEvent::Jump(_) => ("hot cue / seek inferred", "burst"),
+        PioneerVisualEvent::Jump(_) => ("hot cue / seek inferred", "burst + strobe"),
     };
     state.push_pioneer_debug(
         "visual",
@@ -1425,8 +1425,9 @@ fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
         }
         PioneerVisualEvent::Jump(_) => {
             // A large analyzed-beat discontinuity is our first-version Hot Cue
-            // signal. Keep its visual vocabulary deliberately singular.
+            // signal. Pair the localized burst with a short full-array strike.
             state.trigger_effect(effect(EffectKind::Burst, 2.0, 1.5, 0.85, 1.25));
+            state.trigger_effect(effect(EffectKind::Strobe, 1.0, 1.0, 0.5, 0.22));
         }
     }
     // The renderer normally submits frame N while reading back N-1. That is
@@ -1956,12 +1957,13 @@ mod tests {
     }
 
     #[test]
-    fn pioneer_jump_fires_only_a_burst() {
+    fn pioneer_jump_fires_one_burst_and_one_strobe() {
         let state = SharedState::new(crate::config::AppConfig::default());
         trigger_pioneer_visual(&state, PioneerVisualEvent::Jump(2));
         let effects = state.effects.lock();
-        assert_eq!(effects.len(), 1);
+        assert_eq!(effects.len(), 2);
         assert_eq!(effects[0].cfg.kind, crate::layers::EffectKind::Burst);
+        assert_eq!(effects[1].cfg.kind, crate::layers::EffectKind::Strobe);
         assert_eq!(
             effects[0].cfg.angle,
             std::f32::consts::FRAC_PI_2,

@@ -876,6 +876,19 @@ fn effective_beat_phase(
     }
 }
 
+/// Patch visuals should remain connected across short gaps in the beat stream.
+/// A player status entry is retained only while the deck is still present, so
+/// it is a safer connection signal than the stricter clock interpolation
+/// timeout. The latter intentionally expires after a few missed beat packets.
+fn pioneer_visual_signal_active(
+    selected: bool,
+    clock_usable: bool,
+    visual_active: bool,
+    has_devices: bool,
+) -> bool {
+    selected && (clock_usable || visual_active || has_devices)
+}
+
 /// Detects only a sustained, dramatic collapse in master audio energy. The
 /// reference follows rises quickly and falls slowly, so ordinary groove dynamics
 /// do not look like a fader cut. Once latched, darkness holds until sound returns.
@@ -1108,7 +1121,7 @@ fn transition_layers(
 mod beat_time_tests {
     use super::{
         MasterDropDetector, apply_stack_to_config, effective_beat_phase, stack_from_config,
-        transition_layers, walked_speed,
+        pioneer_visual_signal_active, transition_layers, walked_speed,
     };
     use crate::config::{AppConfig, BeatTime, SavedStack};
     use crate::layers::MAX_LAYERS;
@@ -1124,6 +1137,14 @@ mod beat_time_tests {
     fn double_time_wraps_halfway_through_a_base_beat() {
         assert_eq!(effective_beat_phase(0.25, 0, BeatTime::Double), 0.5);
         assert_eq!(effective_beat_phase(0.75, 0, BeatTime::Double), 0.5);
+    }
+
+    #[test]
+    fn pioneer_patch_signal_survives_a_short_beat_packet_gap() {
+        assert!(pioneer_visual_signal_active(true, false, false, true));
+        assert!(pioneer_visual_signal_active(true, false, true, false));
+        assert!(!pioneer_visual_signal_active(true, false, false, false));
+        assert!(!pioneer_visual_signal_active(false, true, true, true));
     }
 
     #[test]
@@ -1787,8 +1808,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         };
         let midi_selected = cfg.rhythm.source == crate::config::RhythmSource::MidiClock;
         let pioneer_selected = cfg.rhythm.source == crate::config::RhythmSource::ProDjLink;
-        let link_clock_active = pioneer_selected && pioneer_clock.usable;
-        let link_energy = if link_clock_active {
+        let link_visual_active = pioneer_visual_signal_active(
+            pioneer_selected,
+            pioneer_clock.usable,
+            pioneer_visual.active,
+            !pioneer_devices.is_empty(),
+        );
+        let link_energy = if link_visual_active {
             let tracked = crate::rhythm::pioneer_energy(
                 &pioneer_devices,
                 &state.pioneer_tracks.lock(),
@@ -1806,7 +1832,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         } else {
             0.0
         };
-        let dj_visual_active = link_clock_active;
+        let dj_visual_active = link_visual_active;
         let dj_fade_target = match (pioneer_visual.deck_1_on_air, pioneer_visual.deck_2_on_air) {
             (true, false) => 0.0,
             (false, true) => 1.0,
@@ -2392,7 +2418,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             _ => 0.0,
         };
         let dj_link = crate::patch::eval::DjLinkInputs {
-            active: f32::from(link_clock_active),
+            active: f32::from(link_visual_active),
             energy: link_energy,
             deck: f32::from(pioneer_visual.player),
             deck_side: deck_side(pioneer_visual.player),
