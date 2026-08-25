@@ -2,12 +2,14 @@
   "format": 1,
   "id": "builtin-dj-loop-tunnel",
   "name": "DJ Loop Tunnel",
-  "description": "Loop state tightens the original six-arm spiral and each wrap launches a beat-synchronized ring; master audio drives brightness quickly and LINK BPM drives motion speed.",
+  "description": "Loop state tightens the original six-arm spiral and each wrap launches a beat-synchronized ring; LINK keeps it visible, rekordbox waveform energy adds brightness, and LINK BPM drives motion speed without a microphone.",
   "nodes": [
     { "id": "link", "kind": "dj_link", "name": "loop and mixer state", "params": {}, "pos": [40, 50] },
     { "id": "aud", "kind": "audio", "name": "master beat", "params": {}, "pos": [40, 310] },
-    { "id": "level_gain", "kind": "scalar_math", "name": "fast master brightness", "params": { "op": 2, "b": 0.82 }, "pos": [270, 470] },
+    { "id": "level_gain", "kind": "scalar_math", "name": "LINK waveform energy", "params": { "op": 2, "b": 0.47 }, "pos": [270, 470] },
+    { "id": "link_gain", "kind": "scalar_math", "name": "LINK connected brightness", "params": { "op": 2, "b": 0.35 }, "pos": [270, 580] },
     { "id": "level_floor", "kind": "scalar_math", "name": "brightness floor", "params": { "op": 0, "b": 0.18 }, "pos": [500, 470] },
+    { "id": "level_live", "kind": "scalar_math", "name": "visible while connected", "params": { "op": 0, "b": 0.0 }, "pos": [730, 470] },
     { "id": "tempo", "kind": "scalar_math", "name": "BPM motion", "params": { "op": 2, "b": 0.34 }, "pos": [280, 260] },
     { "id": "wrap_env", "kind": "envelope", "name": "loop wrap pulse", "params": { "attack": 0.0, "decay": 0.42, "peak": 1.35 }, "pos": [280, 40] },
     { "id": "tunnel_light", "kind": "scalar_math", "name": "loop tunnel level", "params": { "op": 0, "b": 0.28 }, "pos": [280, 150] },
@@ -22,9 +24,12 @@
     { "from": { "node": "link", "port": "looping" }, "to": { "node": "tunnel_light", "port": "a" } },
     { "from": { "node": "aud", "port": "tempo" }, "to": { "node": "tempo", "port": "a" } },
     { "from": { "node": "tempo", "port": "out" }, "to": { "node": "tunnel", "port": "speed" } },
-    { "from": { "node": "aud", "port": "level" }, "to": { "node": "level_gain", "port": "a" } },
+    { "from": { "node": "link", "port": "energy" }, "to": { "node": "level_gain", "port": "a" } },
+    { "from": { "node": "link", "port": "active" }, "to": { "node": "link_gain", "port": "a" } },
     { "from": { "node": "level_gain", "port": "out" }, "to": { "node": "level_floor", "port": "a" } },
-    { "from": { "node": "level_floor", "port": "out" }, "to": { "node": "out", "port": "master" } },
+    { "from": { "node": "level_floor", "port": "out" }, "to": { "node": "level_live", "port": "a" } },
+    { "from": { "node": "link_gain", "port": "out" }, "to": { "node": "level_live", "port": "b" } },
+    { "from": { "node": "level_live", "port": "out" }, "to": { "node": "out", "port": "master" } },
     { "from": { "node": "tunnel_light", "port": "out" }, "to": { "node": "tunnel", "port": "brightness" } },
     { "from": { "node": "aud", "port": "beat_phase" }, "to": { "node": "ring", "port": "front" } },
     { "from": { "node": "wrap_env", "port": "out" }, "to": { "node": "ring", "port": "brightness" } },
@@ -39,7 +44,8 @@
     { "node": "tunnel", "param": "twist", "label": "Tunnel twist" },
     { "node": "wrap_env", "param": "decay", "label": "Wrap decay" },
     { "node": "tempo", "param": "b", "label": "BPM motion" },
-    { "node": "level_gain", "param": "b", "label": "Music brightness" },
-    { "node": "level_floor", "param": "b", "label": "Brightness floor" }
+    { "node": "level_gain", "param": "b", "label": "LINK energy brightness" },
+    { "node": "level_floor", "param": "b", "label": "Brightness floor" },
+    { "node": "link_gain", "param": "b", "label": "LINK brightness" }
   ]
 }

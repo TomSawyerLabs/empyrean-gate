@@ -112,7 +112,7 @@ mod tests {
     }
 
     #[test]
-    fn link_performance_tracks_level_immediately_and_bpm_proportionally() {
+    fn link_performance_tracks_link_energy_immediately_and_bpm_proportionally() {
         let doc = presets()
             .iter()
             .find(|doc| doc.id == "builtin-dj-link-spiral-performance")
@@ -136,7 +136,9 @@ mod tests {
             .expect("wired tunnel speed")
             .slot;
         let mut runtime = Runtime::new(doc, program);
-        let mut quiet_audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let mut silent_audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        silent_audio[0].bpm = 60.0;
+        let mut quiet_audio = silent_audio;
         quiet_audio[0].level = 0.2;
         quiet_audio[0].bpm = 60.0;
         let mut loud_audio = quiet_audio;
@@ -145,21 +147,30 @@ mod tests {
         let mut inputs = EvalInputs {
             dt: 0.1,
             master_speed: 1.0,
-            audio: &quiet_audio,
+            audio: &silent_audio,
             yaw: 0.0,
             pitch: 0.0,
             roll: 0.0,
             shake: 0.0,
             effect_seq: 0,
-            dj_link: DjLinkInputs::default(),
+            dj_link: DjLinkInputs { active: 1.0, ..Default::default() },
         };
+        let connected_silent = runtime.eval(&inputs).to_vec();
+        assert!(
+            (connected_silent[master_slot] - 0.53).abs() < 1e-4,
+            "LINK alone must keep the performance clearly visible"
+        );
+
+        inputs.audio = &quiet_audio;
+        inputs.dj_link.energy = 0.2;
         let first = runtime.eval(&inputs).to_vec();
-        assert!((first[master_slot] - 0.344).abs() < 1e-4);
-        let slow_phase_step = first[speed_slot];
+        assert!((first[master_slot] - 0.624).abs() < 1e-4);
+        let slow_phase_step = first[speed_slot] - connected_silent[speed_slot];
 
         inputs.audio = &loud_audio;
+        inputs.dj_link.energy = 0.9;
         let second = runtime.eval(&inputs).to_vec();
-        assert!((second[master_slot] - 0.918).abs() < 1e-4);
+        assert!((second[master_slot] - 0.953).abs() < 1e-4);
         let fast_phase_step = second[speed_slot] - first[speed_slot];
         assert!(
             (fast_phase_step / slow_phase_step - 2.0).abs() < 1e-3,

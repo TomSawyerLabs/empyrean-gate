@@ -319,6 +319,7 @@ pub const TYPES: &[NodeType] = &[
         inputs: &[],
         outputs: &[
             PortDef { name: "active", shape: Shape::Scalar },
+            PortDef { name: "energy", shape: Shape::Scalar },
             PortDef { name: "deck", shape: Shape::Scalar },
             PortDef { name: "deck_side", shape: Shape::Scalar },
             PortDef { name: "event_deck", shape: Shape::Scalar },

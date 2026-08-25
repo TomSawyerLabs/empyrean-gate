@@ -172,6 +172,78 @@ pub struct PioneerDevice {
     pub beat_number: u64,
 }
 
+/// Estimate musical energy without an audio capture path. PRO DJ LINK does not
+/// publish mixer meters or PCM, but rekordbox's analyzed waveform plus the
+/// deck's track-relative beat number gives us a useful, deterministic level.
+/// When metadata is unavailable, a conservative beat-shaped playing level keeps
+/// LINK-native shows alive rather than silently blacking out.
+pub fn pioneer_energy(
+    devices: &[PioneerDevice],
+    tracks: &HashMap<u8, ProDjLinkTrackInfo>,
+    followed_player: u8,
+    beat_phase: f32,
+) -> f32 {
+    let mut candidates: Vec<&PioneerDevice> = devices
+        .iter()
+        .filter(|deck| {
+            deck.playing
+                && if (1..32).contains(&followed_player) {
+                    deck.number == followed_player
+                } else {
+                    deck.on_air || deck.tempo_master
+                }
+        })
+        .collect();
+    // Some all-in-one/mixer paths omit on-air flags. A playing deck is a safer
+    // fallback than zero energy; if two play, max() below follows the stronger
+    // analyzed waveform without pretending we know their fader positions.
+    if candidates.is_empty() {
+        candidates.extend(devices.iter().filter(|deck| deck.playing));
+    }
+    if candidates.is_empty() {
+        return 0.0;
+    }
+
+    let phase = beat_phase.rem_euclid(1.0);
+    candidates
+        .into_iter()
+        .map(|deck| {
+            tracks
+                .get(&deck.number)
+                .and_then(|track| waveform_level(track, deck.beat_number, phase))
+                // No metadata server / unanalyzed source: transport still gives
+                // a musical signal, though not a claim about actual loudness.
+                .unwrap_or_else(|| 0.46 + 0.24 * (-phase * 7.0).exp())
+        })
+        .fold(0.0, f32::max)
+        .clamp(0.0, 1.0)
+}
+
+fn waveform_level(track: &ProDjLinkTrackInfo, beat_number: u64, beat_phase: f32) -> Option<f32> {
+    let samples = if track.waveform_detail.is_empty() {
+        &track.waveform_preview
+    } else {
+        &track.waveform_detail
+    };
+    if samples.is_empty() || track.duration_seconds == 0 || track.bpm <= 0.0 {
+        return None;
+    }
+    let beats = beat_number.saturating_sub(1) as f64 + f64::from(beat_phase);
+    let seconds = beats * 60.0 / track.bpm;
+    let progress = (seconds / f64::from(track.duration_seconds)).clamp(0.0, 0.999_999);
+    let center = (progress * samples.len() as f64) as usize;
+    let start = center.saturating_sub(2);
+    let end = (center + 3).min(samples.len());
+    let mean = samples[start..end]
+        .iter()
+        .map(|sample| f32::from(*sample) / 255.0)
+        .sum::<f32>()
+        / (end - start).max(1) as f32;
+    // Waveform height is peak-like and visually compressed; sqrt restores
+    // useful dynamics at the quiet end without turning silence into a floor.
+    Some(mean.sqrt())
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PioneerVisualSnapshot {
     pub active: bool,
@@ -1631,6 +1703,51 @@ mod tests {
         assert_eq!(beat.player, 2);
         assert!((beat.bpm - 127.5).abs() < 0.01);
         assert_eq!(beat.beat_within_bar, 3);
+    }
+
+    #[test]
+    fn pioneer_energy_follows_rekordbox_waveform_without_audio_capture() {
+        let devices = vec![PioneerDevice {
+            number: 2,
+            name: "CDJ-TEST".into(),
+            tempo_master: true,
+            playing: true,
+            cued: false,
+            on_air: true,
+            looping: false,
+            beat_number: 51,
+        }];
+        let tracks = HashMap::from([(
+            2,
+            ProDjLinkTrackInfo {
+                deck: 2,
+                duration_seconds: 100,
+                bpm: 60.0,
+                waveform_detail: vec![64; 10],
+                ..Default::default()
+            },
+        )]);
+        let energy = pioneer_energy(&devices, &tracks, 2, 0.0);
+        assert!((energy - (64.0f32 / 255.0).sqrt()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn pioneer_energy_has_transport_fallback_but_stops_with_the_deck() {
+        let mut devices = vec![PioneerDevice {
+            number: 1,
+            name: "CDJ-TEST".into(),
+            tempo_master: true,
+            playing: true,
+            cued: false,
+            on_air: true,
+            looping: false,
+            beat_number: 1,
+        }];
+        let tracks = HashMap::new();
+        assert!((pioneer_energy(&devices, &tracks, 1, 0.0) - 0.70).abs() < 1e-4);
+        assert!(pioneer_energy(&devices, &tracks, 1, 0.5) < 0.48);
+        devices[0].playing = false;
+        assert_eq!(pioneer_energy(&devices, &tracks, 1, 0.0), 0.0);
     }
 
     #[test]

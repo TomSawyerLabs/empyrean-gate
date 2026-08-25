@@ -1787,6 +1787,16 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         };
         let midi_selected = cfg.rhythm.source == crate::config::RhythmSource::MidiClock;
         let pioneer_selected = cfg.rhythm.source == crate::config::RhythmSource::ProDjLink;
+        let link_energy = if pioneer_selected && pioneer_clock.usable {
+            crate::rhythm::pioneer_energy(
+                &pioneer_devices,
+                &state.pioneer_tracks.lock(),
+                pioneer_visual.player,
+                pioneer_clock.beat_phase,
+            )
+        } else {
+            0.0
+        };
         let dj_visual_active = pioneer_selected && pioneer_visual.active;
         let dj_fade_target = match (pioneer_visual.deck_1_on_air, pioneer_visual.deck_2_on_air) {
             (true, false) => 0.0,
@@ -1814,9 +1824,14 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let fallback_index =
             (cfg.rhythm.fallback_audio_source as usize).min(MAX_AUDIO_SOURCES.saturating_sub(1));
         let master_audio = &audio_inputs[fallback_index];
+        let master_level = if pioneer_selected && external_clock.usable {
+            link_energy
+        } else {
+            master_audio.level
+        };
         let (master_drop_brightness, master_drop_triggered) = master_drop.step(
-            master_audio.level,
-            pioneer_selected && external_clock.usable && master_audio.active,
+            master_level,
+            pioneer_selected && external_clock.usable,
             dt,
         );
         if master_drop_triggered {
@@ -1842,7 +1857,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         "collapse + global brightness envelope".into(),
                     ),
                     ("audio_source".into(), fallback_index.to_string()),
-                    ("level".into(), format!("{:.4}", master_audio.level)),
+                    ("level".into(), format!("{master_level:.4}")),
                     ("target_brightness".into(), "0.015".into()),
                 ]),
             );
@@ -1869,7 +1884,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 None => (a.beat_phase, raw_beat_count[i], a.bpm),
             };
             audio[i] = AudioUniform {
-                level: a.level,
+                // In LINK mode this is analyzed-track energy, not a microphone:
+                // it keeps level-reactive shows viable across a large site.
+                level: if pioneer_selected && external_clock.usable {
+                    link_energy
+                } else {
+                    a.level
+                },
                 bass: a.bass,
                 mid: a.mid,
                 treble: a.treble,
@@ -2363,6 +2384,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         };
         let dj_link = crate::patch::eval::DjLinkInputs {
             active: f32::from(pioneer_visual.active),
+            energy: link_energy,
             deck: f32::from(pioneer_visual.player),
             deck_side: deck_side(pioneer_visual.player),
             event_deck: f32::from(dj_events.last_player),

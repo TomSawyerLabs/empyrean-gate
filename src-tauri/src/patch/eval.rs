@@ -31,6 +31,7 @@ pub struct EvalInputs<'a> {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DjLinkInputs {
     pub active: f32,
+    pub energy: f32,
     pub deck: f32,
     pub deck_side: f32,
     pub event_deck: f32,
@@ -216,6 +217,7 @@ impl Runtime {
                     let dj = inp.dj_link;
                     let o = &mut self.outputs[node];
                     o.insert("active".into(), dj.active);
+                    o.insert("energy".into(), dj.energy);
                     o.insert("deck".into(), dj.deck);
                     o.insert("deck_side".into(), dj.deck_side);
                     o.insert("event_deck".into(), dj.event_deck);

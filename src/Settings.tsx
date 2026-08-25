@@ -67,6 +67,8 @@ function DjLinkTracksPanel() {
       <h2>Live rekordbox tracks</h2>
       <p className="hint">
         Resolved from the XDJ metadata server: track details, cues, loops, and analyzed waveforms.
+        In PRO DJ LINK rhythm mode, Gate follows the playing deck through this waveform to provide
+        microphone-free energy/level; LINK does not transmit live mixer meters or frequency bands.
       </p>
       {tracks.length === 0 ? (
         <div className="dj-link-debug-empty">Load a rekordbox-analyzed track on either deck…</div>
