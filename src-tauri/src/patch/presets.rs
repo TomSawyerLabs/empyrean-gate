@@ -12,6 +12,8 @@ const SOURCES: &[&str] = &[
     include_str!("presets/rainbow-sparkle.json"),
     include_str!("presets/event-horizon.json"),
     include_str!("presets/ember-canvas.json"),
+    include_str!("presets/root-current.json"),
+    include_str!("presets/deep-space-pulse.json"),
     include_str!("presets/dj-crunch-sparkles.json"),
     include_str!("presets/dj-cue-strike.json"),
     include_str!("presets/dj-loop-tunnel.json"),

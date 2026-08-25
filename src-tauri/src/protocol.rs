@@ -55,6 +55,19 @@ pub enum ClientMsg {
     ActivateStack {
         stack: crate::config::SavedStack,
     },
+    PerformanceRecordStart {
+        name: String,
+    },
+    PerformanceRecordStop {
+        /// Final name chosen at stop time. Empty keeps the start-time default.
+        #[serde(default)]
+        name: String,
+    },
+    /// Play one saved metadata performance as a first-class scene. The backend
+    /// owns its clock; no all-night playlist needs to be created by the UI.
+    PerformancePlay {
+        id: String,
+    },
     SetSacnEnabled {
         enabled: bool,
     },
@@ -664,6 +677,9 @@ pub struct RuntimeStatus {
     /// engine falls back to the layer stack when this is set.
     pub patch_error: Option<String>,
     pub show: ScheduledShowStatus,
+    pub performance_recording: bool,
+    pub performance_recording_name: String,
+    pub performance_recording_secs: f32,
     pub test: TestModeStatus,
     pub game: GameModeStatus,
     /// True while a controller scan is in flight, so the Scan button can say so.

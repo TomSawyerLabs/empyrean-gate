@@ -77,6 +77,8 @@ fn is_gpu_kind(kind: &str) -> bool {
             | "wedges"
             | "interference"
             | "fire"
+            | "cosmic_drift"
+            | "earth_current"
             | "meteors"
             | "warp"
             | "waveform"
@@ -89,6 +91,7 @@ fn is_gpu_kind(kind: &str) -> bool {
             | "touch_dabs"
             | "render_points"
             | "video_in"
+            | "image_in"
             | "texture_sample"
             | "output"
     )
@@ -598,6 +601,85 @@ impl Gen<'_> {
                 sat = self.p(i, "saturation"),
                 bright = self.p(i, "brightness"),
             ),
+            "cosmic_drift" => format!(
+                "    // A handful of wide, coherent travellers reads as depth on 64 spokes;\n\
+                 \x20   // independent per-pixel stars only read as glitter at this sampling density.\n\
+                 \x20   let dir = vec2f(cos(c.theta), sin(c.theta));\n\
+                 \x20   let z = c.r01 * (2.2 + {depth} * 2.8) - {phase} * 0.045;\n\
+                 \x20   let bend = snoise3(vec3f(dir * 1.15, z * 0.32));\n\
+                 \x20   let q = vec3f(dir * (1.25 + bend * 0.16), z);\n\
+                 \x20   let cloud = 0.5 + 0.5 * fbm3(q * (0.72 + {depth} * 0.46) + vec3f(0.0, 0.0, {phase} * 0.012), 3u);\n\
+                 \x20   let filament_n = snoise3(q * 1.55 + vec3f(8.7, -3.1, {phase} * 0.018));\n\
+                 \x20   let filament = pow(clamp(1.0 - abs(filament_n) * 1.7, 0.0, 1.0), 3.0);\n\
+                 \x20   var travellers = 0.0;\n\
+                 \x20   var traveller_hue = 0.0;\n\
+                 \x20   for (var k = 0u; k < 6u; k++) {{\n\
+                 \x20       let seed = hash01(k * 1619u + 47u);\n\
+                 \x20       let cycle = fract(seed + {phase} * (0.016 + hash01(k * 3571u) * 0.012));\n\
+                 \x20       let head = 1.08 - cycle * 1.30;\n\
+                 \x20       let behind = c.r01 - head;\n\
+                 \x20       let lane = seed * TAU + bend * 0.12 + sin(z * 0.42 + seed * TAU) * 0.035;\n\
+                 \x20       let da = ang_dist(c.theta, lane);\n\
+                 \x20       let aw = 0.085 + cycle * 0.075;\n\
+                 \x20       let across = exp(-(da * da) / (aw * aw));\n\
+                 \x20       let tail = exp(-max(behind, 0.0) / (0.055 + {trail} * 0.20));\n\
+                 \x20       let body = step(0.0, behind) * step(behind, 0.42) * tail;\n\
+                 \x20       let head_glow = exp(-(behind * behind) / 0.0018);\n\
+                 \x20       let star = across * max(body * 0.46, head_glow);\n\
+                 \x20       if star > travellers {{ traveller_hue = hash01(k * 811u); }}\n\
+                 \x20       travellers = max(travellers, star);\n\
+                 \x20   }}\n\
+                 \x20   let base_hue = {h} + cloud * {hr} * 0.72;\n\
+                 \x20   let base_v = (0.060 + cloud * cloud * 0.27 + filament * 0.23) * {bright};\n\
+                 \x20   let base = hsv2rgb(base_hue, {sat}, base_v);\n\
+                 \x20   let star = hsv2rgb({h} + {hr} * (0.35 + traveller_hue * 0.65), {sat} * 0.28, travellers * {bright} * (1.20 + {pulse} * 0.38));\n\
+                 \x20   return vec4f(base + star, 1.0);",
+                depth = self.p(i, "depth"),
+                phase = self.p(i, "speed"),
+                trail = self.p(i, "trail"),
+                pulse = self.p(i, "pulse"),
+                h = self.p(i, "hue"),
+                hr = self.p(i, "hue_range"),
+                sat = self.p(i, "saturation"),
+                bright = self.p(i, "brightness"),
+            ),
+            "earth_current" => format!(
+                "    // Three broad canopy layers drift at different rates. Their low spatial\n\
+                 \x20   // frequencies survive the Gate's 64 angular samples as leafy masses.\n\
+                 \x20   let t = {phase} * 0.075;\n\
+                 \x20   let base_p = c.pos * (0.78 + {scale} * 0.58);\n\
+                 \x20   let gust = vec2f(t * 0.24 + sin(t * 0.61) * 0.10, sin(t * 0.47) * 0.13);\n\
+                 \x20   let bend_a = snoise3(vec3f(base_p * 0.58, t * 0.38));\n\
+                 \x20   let bend_b = snoise3(vec3f(base_p.yx * 0.54 + vec2f(12.7, -4.8), t * 0.31));\n\
+                 \x20   let bend = vec2f(bend_a, bend_b) * (0.10 + {warp} * 0.34);\n\
+                 \x20   let q1 = base_p + bend + gust;\n\
+                 \x20   let q2 = base_p * 1.31 - bend * 0.72 + gust * 0.63 + vec2f(7.4, -3.2);\n\
+                 \x20   let q3 = base_p * 1.82 + bend * 0.46 + gust * 0.38 + vec2f(-5.1, 9.6);\n\
+                 \x20   let broad = 0.5 + 0.5 * fbm3(vec3f(q1 * 0.62, t * 0.16), 3u);\n\
+                 \x20   let n1 = 0.5 + 0.5 * snoise3(vec3f(q1 * 1.34, t * 0.29));\n\
+                 \x20   let n2 = 0.5 + 0.5 * snoise3(vec3f(q2 * 1.58, t * 0.23));\n\
+                 \x20   let n3 = 0.5 + 0.5 * snoise3(vec3f(q3 * 1.76, t * 0.19));\n\
+                 \x20   let cover = clamp({width}, 0.0, 1.0);\n\
+                 \x20   let leaf1 = smoothstep(0.62 - cover * 0.10, 0.78 - cover * 0.05, n1 + broad * 0.11);\n\
+                 \x20   let leaf2 = smoothstep(0.66 - cover * 0.09, 0.81 - cover * 0.04, n2 + broad * 0.08);\n\
+                 \x20   let leaf3 = smoothstep(0.72 - cover * 0.07, 0.86 - cover * 0.03, n3 + broad * 0.05);\n\
+                 \x20   let cluster = smoothstep(0.42, 0.66, broad);\n\
+                 \x20   let deep = hsv2rgb({root_hue}, {sat} * 0.92, cluster * (0.030 + broad * 0.080) * {bright});\n\
+                 \x20   let forest = hsv2rgb({leaf_hue} + 0.055, {sat} * 0.94, leaf1 * (0.10 + broad * 0.24) * {bright});\n\
+                 \x20   let fern = hsv2rgb({leaf_hue} - 0.030, {sat} * 0.86, leaf2 * (0.10 + n2 * 0.32) * {bright});\n\
+                 \x20   let sun = hsv2rgb({leaf_hue} - 0.105, {sat} * 0.66, leaf3 * (0.12 + n3 * 0.38 + {pulse} * 0.10) * {bright});\n\
+                 \x20   let canopy = max(cluster * 0.42, max(leaf1, max(leaf2, leaf3)));\n\
+                 \x20   return vec4f((deep + forest + fern + sun) * smoothstep(0.03, 0.34, canopy), 1.0);",
+                phase = self.p(i, "speed"),
+                scale = self.p(i, "scale"),
+                warp = self.p(i, "warp"),
+                width = self.p(i, "width"),
+                pulse = self.p(i, "pulse"),
+                root_hue = self.p(i, "root_hue"),
+                leaf_hue = self.p(i, "leaf_hue"),
+                sat = self.p(i, "saturation"),
+                bright = self.p(i, "brightness"),
+            ),
             "meteors" => {
                 let dir = if self.select(i, "direction") == 1 {
                     "1.0 - c.r01"
@@ -703,6 +785,9 @@ impl Gen<'_> {
             "effects_in" => return Ok(()),
             // Likewise: marks the live video frame as a Texture source.
             "video_in" => return Ok(()),
+            // Still images use that same browser-decoded RGBA texture, but a
+            // separate source node makes the patch's media contract explicit.
+            "image_in" => return Ok(()),
             "texture_sample" => {
                 if self.upstream(i, "tex").is_none() {
                     "    return vec4f(0.0);".to_string()

@@ -620,7 +620,7 @@ impl LayerCfg {
 }
 
 #[cfg(test)]
-mod tests {
+mod patch_transient_abi_tests {
     use super::*;
 
     /// The position in `ALL` is the GPU id, and `gate.wgsl` matches on it as a

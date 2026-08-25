@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "id": "builtin-root-current",
+  "name": "Root Current",
+  "description": "Layered forest greens form a shifting canopy, with broad leaf clusters bending slowly in dappled wind.",
+  "nodes": [
+    { "id": "breath", "kind": "lfo", "name": "dappled sunlight", "params": { "rate": 0.035, "min": 0.08, "max": 0.34 }, "pos": [40, 360] },
+    { "id": "earth", "kind": "earth_current", "name": "leaves in the wind", "params": { "scale": 1.08, "warp": 0.58, "width": 0.64, "speed": 0.16, "pulse": 0.0, "root_hue": 0.39, "leaf_hue": 0.31, "saturation": 0.82, "brightness": 1.42 }, "pos": [300, 160] },
+    { "id": "drift", "kind": "transform", "name": "canopy drift", "params": { "spin": 0.0, "zoom": 1.0 }, "pos": [570, 160] },
+    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.92 }, "pos": [820, 160] }
+  ],
+  "edges": [
+    { "from": { "node": "breath", "port": "out" }, "to": { "node": "earth", "port": "pulse" } },
+    { "from": { "node": "earth", "port": "out" }, "to": { "node": "drift", "port": "in" } },
+    { "from": { "node": "drift", "port": "out" }, "to": { "node": "out", "port": "in" } }
+  ],
+  "exposed": [
+    { "node": "earth", "param": "speed", "label": "Wind speed" },
+    { "node": "earth", "param": "width", "label": "Leaf coverage" },
+    { "node": "earth", "param": "warp", "label": "Wind bend" },
+    { "node": "earth", "param": "leaf_hue", "label": "Leaf hue" },
+    { "node": "out", "param": "master", "label": "Master" }
+  ]
+}

@@ -28,8 +28,8 @@
 
 use crate::state::SharedState;
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 const REPO: &str = "cinderblock/empyrean-gate";
@@ -106,6 +106,14 @@ fn already_staged(target: &std::path::Path) -> bool {
 }
 
 pub fn spawn(state: Arc<SharedState>) {
+    // A local debug bundle may contain fixes newer than the latest published
+    // release even when its Cargo version is lower. Letting it auto-update can
+    // silently replace that development binary with an older release build.
+    if cfg!(debug_assertions) {
+        set_update_status(&state, None, "development build — updates disabled");
+        return;
+    }
+
     std::thread::Builder::new()
         .name("updater".into())
         .spawn(move || updater_thread(state))
@@ -139,7 +147,6 @@ fn updater_thread(state: Arc<SharedState>) {
                         log::info!("update available: v{version} (running v{})", effective_version());
                         latest = Some((version.clone(), url.clone(), digest.clone()));
                         set_update_status(&state, Some(version.clone()), "");
-
                         if state.config.read().update.auto_install {
                             state.update_install_requested.store(true, Ordering::SeqCst);
                         } else {
@@ -198,7 +205,10 @@ fn updater_thread(state: Arc<SharedState>) {
 }
 
 fn is_newer(candidate: &str) -> bool {
-    match (parse_version(candidate), parse_version(&effective_version())) {
+    match (
+        parse_version(candidate),
+        parse_version(&effective_version()),
+    ) {
         (Some(c), Some(cur)) => c > cur,
         _ => false,
     }
@@ -214,7 +224,9 @@ fn check_latest() -> anyhow::Result<Option<(String, String, String)>> {
         .build()
         .into();
     let mut resp = agent
-        .get(format!("https://api.github.com/repos/{REPO}/releases/latest"))
+        .get(format!(
+            "https://api.github.com/repos/{REPO}/releases/latest"
+        ))
         .header("User-Agent", "empyrean-gate-updater")
         .call()?;
     let body: serde_json::Value = resp.body_mut().read_json()?;
@@ -501,7 +513,9 @@ pub(crate) fn cleanup_old_binaries() {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        let Some(rest) = name.strip_prefix("empyrean-gate-v") else { continue };
+        let Some(rest) = name.strip_prefix("empyrean-gate-v") else {
+            continue;
+        };
         let version_part = rest.trim_end_matches(".exe");
         if let Some(v) = parse_version(version_part) {
             // `<=`, not `<`: after promotion the versioned sibling we were

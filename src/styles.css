@@ -394,6 +394,13 @@ main {
   color: var(--text);
 }
 
+.record-btn.recording,
+.show-report.recording {
+  color: #fff;
+  background: #c9364f;
+  border-color: #ec5a70;
+}
+
 /* The Live tab's top-right cluster shares that corner with the fullscreen
    shortcuts, below the retained top bar. */
 .app.show-mode .corner.tr,

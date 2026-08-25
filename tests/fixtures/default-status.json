@@ -73,6 +73,9 @@
     "remaining_secs": 0.0,
     "transition_progress": 0.0
   },
+  "performance_recording": false,
+  "performance_recording_name": "",
+  "performance_recording_secs": 0.0,
   "test": {
     "active": false,
     "summary": "",

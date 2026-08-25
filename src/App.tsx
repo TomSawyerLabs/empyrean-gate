@@ -44,6 +44,12 @@ const IN_TAURI = "__TAURI_INTERNALS__" in window;
 const IS_LOCAL_UI = IN_TAURI || ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
 
 const SHOW_MODE_KEY = "empyrean-show-mode";
+
+function defaultPerformanceName(): string {
+  return `Performance ${new Date().toLocaleString([], {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  })}`;
+}
 /// Date (local) that the scheduled show-mode exit last fired, so it fires once a day.
 const SHOW_MODE_LEFT_KEY = "empyrean-show-mode-left-on";
 
@@ -518,6 +524,16 @@ export default function App() {
   const [showMode, setShowMode] = useShowMode(config?.update.leave_show_at);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  const togglePerformanceRecording = () => {
+    if (status?.performance_recording) {
+      const fallback = status.performance_recording_name || defaultPerformanceName();
+      const chosen = window.prompt("Save this performance as:", fallback);
+      client.stopPerformanceRecording(chosen?.trim() || fallback);
+    } else {
+      client.startPerformanceRecording(defaultPerformanceName());
+    }
+  };
+
   // Flash "saved" whenever the backend confirms a config change (from any client).
   useEffect(() => {
     if (savedPulse === 0) return;
@@ -595,6 +611,12 @@ export default function App() {
           <button className="show-report" onClick={() => setShowReport(true)}>
             ⚑ Report
           </button>
+          <button
+            className={`show-report ${status?.performance_recording ? "recording" : ""}`}
+            onClick={togglePerformanceRecording}
+          >
+            {status?.performance_recording ? "■ Stop recording" : "● Record"}
+          </button>
           <button className="show-exit" onClick={() => setShowMode(false)}>
             ⤢ Exit show mode <span className="chip-key">Esc</span>
           </button>
@@ -635,6 +657,14 @@ export default function App() {
           onClick={() => setShowReport(true)}
         >
           ⚑ <span className="btn-label">Report</span>
+        </button>
+        <button
+          className={`ghost record-btn ${status?.performance_recording ? "recording" : ""}`}
+          aria-label={status?.performance_recording ? "Stop and save performance" : "Record performance"}
+          onClick={togglePerformanceRecording}
+        >
+          {status?.performance_recording ? "■" : "●"}{" "}
+          <span className="btn-label">{status?.performance_recording ? "Stop" : "Record"}</span>
         </button>
         <button
           className="ghost"

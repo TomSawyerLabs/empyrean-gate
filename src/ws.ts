@@ -329,6 +329,15 @@ export class GateClient {
   activateStack(stack: import("./types").SavedStack) {
     this.send({ type: "activate_stack", stack });
   }
+  startPerformanceRecording(name: string) {
+    this.send({ type: "performance_record_start", name });
+  }
+  stopPerformanceRecording(name = "") {
+    this.send({ type: "performance_record_stop", name });
+  }
+  playPerformance(id: string) {
+    this.send({ type: "performance_play", id });
+  }
   setSacnEnabled(enabled: boolean) {
     this.send({ type: "set_sacn_enabled", enabled });
   }

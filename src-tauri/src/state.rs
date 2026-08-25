@@ -175,6 +175,15 @@ pub struct ActiveDab {
     pub born: Instant,
 }
 
+pub struct ActivePerformanceRecording {
+    pub id: String,
+    pub name: String,
+    pub started: Instant,
+    pub initial_stack: crate::config::SavedStack,
+    pub initial_patch: Option<String>,
+    pub events: Vec<crate::config::PerformanceEvent>,
+}
+
 /// One frame as produced by the engine: raw perceptual RGB (no LED gamma).
 pub struct PreviewFrame {
     pub frame_number: u64,
@@ -389,6 +398,9 @@ pub struct SharedState {
     /// Always-on rolling capture of operator input + engine state, so the Report
     /// button can freeze the last seconds of a visual complaint.
     pub recorder: crate::report::Recorder,
+    /// Explicit long-form capture. Unlike the rolling feedback recorder this is
+    /// unbounded by time and stores only replayable control metadata.
+    pub performance_recording: Mutex<Option<ActivePerformanceRecording>>,
     pub started: Instant,
 }
 
@@ -448,6 +460,7 @@ impl SharedState {
             close_guard_ready: AtomicBool::new(false),
             last_close_attempt_ms: AtomicU64::new(0),
             recorder: crate::report::Recorder::new(),
+            performance_recording: Mutex::new(None),
             started: Instant::now(),
         })
     }

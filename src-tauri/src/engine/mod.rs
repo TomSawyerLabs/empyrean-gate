@@ -1000,6 +1000,95 @@ fn eased_crossfade(outgoing: &[u8], incoming: &[u8], progress: f32, out: &mut Ve
     }
 }
 
+fn replay_performance_action(state: &Arc<SharedState>, action: &crate::config::PerformanceAction) {
+    use crate::config::PerformanceAction as A;
+    match action {
+        A::SetLook { stack, patch } => {
+            let stack = stack.clone();
+            let patch = patch.clone();
+            state.request_render_transition();
+            state.update_config(move |c| {
+                c.active_patch = patch;
+                apply_stack_to_config(c, &stack);
+            });
+        }
+        A::AddLayer { layer } => {
+            let layer = layer.clone();
+            state.update_config(move |c| {
+                if c.layers.len() < MAX_LAYERS {
+                    c.layers.push(layer);
+                }
+            });
+        }
+        A::UpdateLayer { index, layer } => {
+            let (index, layer) = (*index, layer.clone());
+            state.update_config(move |c| {
+                if let Some(slot) = c.layers.get_mut(index) {
+                    *slot = layer;
+                }
+            });
+        }
+        A::RemoveLayer { index } => {
+            let index = *index;
+            state.update_config(move |c| {
+                if index < c.layers.len() {
+                    c.layers.remove(index);
+                }
+            });
+        }
+        A::MoveLayer { from, to } => {
+            let (from, to) = (*from, *to);
+            state.update_config(move |c| {
+                if from < c.layers.len() && to < c.layers.len() {
+                    let layer = c.layers.remove(from);
+                    c.layers.insert(to, layer);
+                }
+            });
+        }
+        A::SetMaster { brightness, speed } => {
+            let (brightness, speed) = (*brightness, *speed);
+            state.update_config(move |c| {
+                if let Some(v) = brightness {
+                    c.render.master_brightness = v.clamp(0.0, 1.0);
+                }
+                if let Some(v) = speed {
+                    c.render.master_speed = v.clamp(0.0, 8.0);
+                }
+            });
+        }
+        A::TriggerEffect { effect } => state.trigger_effect(effect.clone()),
+        A::Paint {
+            pen,
+            points,
+            hue,
+            saturation,
+            brightness,
+            size,
+            intensity,
+        } => {
+            state.paint(
+                *pen,
+                points,
+                *hue,
+                *saturation,
+                *brightness,
+                *size,
+                *intensity,
+            );
+        }
+        A::PatchActivate { id } => {
+            let id = id.clone();
+            state.request_render_transition();
+            state.update_config(move |c| c.active_patch = id);
+        }
+        A::PatchParam { node, param, value } => {
+            state
+                .patch_params
+                .lock()
+                .push((node.clone(), param.clone(), *value));
+        }
+    }
+}
 /// Keep scene blend math intact by arranging complete outgoing and incoming stacks.
 /// The shader composes each side independently and mixes only their finished colors.
 fn transition_layers(
@@ -1241,6 +1330,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut current_stack: Option<crate::config::SavedStack> = None;
     let mut transition_from: Option<crate::config::SavedStack> = None;
     let mut advance_requested = false;
+    let mut performance_event_index = 0usize;
 
     // Per-second buckets for the UI history bars (frames rendered / packets sent).
     let mut sec_start = Instant::now();
@@ -1514,16 +1604,32 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     .take()
                     .unwrap_or_else(|| stack_from_config(&cfg));
                 transition_from = Some(previous);
-                current_stack = Some(entry.stack.clone());
+                let target_stack = entry
+                    .performance
+                    .as_ref()
+                    .map(|performance| performance.initial_stack.clone())
+                    .unwrap_or_else(|| entry.stack.clone());
+                current_stack = Some(target_stack);
                 show_key = key;
                 scene_started = now;
                 advance_requested = false;
+                performance_event_index = 0;
 
                 // Make the scheduled target the actual live config too. Controllers
                 // now show (and edit) the scene that the renderer is using instead
                 // of a stale stack left over from before the journey started.
                 let target = entry.stack.clone();
-                state.update_config(move |c| apply_stack_to_config(c, &target));
+                let performance = entry.performance.clone();
+                state.update_config(move |c| {
+                    let stack = performance
+                        .as_ref()
+                        .map(|item| &item.initial_stack)
+                        .unwrap_or(&target);
+                    apply_stack_to_config(c, stack);
+                    if let Some(performance) = performance {
+                        c.active_patch = performance.initial_patch;
+                    }
+                });
             } else {
                 // Config edits made while a cue is running are edits to that cue's
                 // effective live stack. The embedded playlist snapshot stays intact.
@@ -1539,6 +1645,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             render_walk_depth = target.walk_depth;
 
             let elapsed = scene_started.elapsed().as_secs_f32();
+            if let Some(performance) = &entry.performance {
+                while let Some(event) = performance.events.get(performance_event_index) {
+                    if event.at_secs > elapsed {
+                        break;
+                    }
+                    replay_performance_action(state, &event.action);
+                    performance_event_index += 1;
+                }
+            }
             let transition_secs = entry.transition_secs.clamp(0.0, 300.0);
             let linear = if transition_secs <= 0.001 {
                 1.0
@@ -1567,7 +1682,12 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             render_transition_active = transition_from.is_some();
             render_transition_progress = fade;
 
-            let duration = entry.duration_secs.clamp(10.0, 86_400.0);
+            let duration = entry
+                .performance
+                .as_ref()
+                .map(|performance| performance.duration_secs)
+                .unwrap_or(entry.duration_secs)
+                .clamp(0.1, 86_400.0);
             show_status = ScheduledShowStatus {
                 enabled: true,
                 playlist_id: playlist.id.clone(),
@@ -1599,12 +1719,18 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         c.show_scheduler.current_index = if is_last { 0 } else { index as u32 + 1 };
                     }
                 });
+                // A repeating one-cue performance leaves current_index at zero;
+                // clear the key so its event timeline starts again.
+                if is_last && repeat {
+                    show_key.clear();
+                }
             }
         } else {
             show_key.clear();
             current_stack = None;
             transition_from = None;
             advance_requested = false;
+            performance_event_index = 0;
         }
 
         layer_phases.resize(render_layers.len(), 0.0);
@@ -2336,6 +2462,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                                 roll: control.roll,
                                 shake: control.shake,
                                 effect_seq: state.effect_seq.load(Ordering::Relaxed),
+                                dj_link,
                             })
                             .to_vec()
                     });
@@ -2580,6 +2707,16 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 st.render_transition_progress = handoff_progress;
                 st.patch_active = patch_rt.is_some();
                 st.show = show_status.clone();
+                let recording = state.performance_recording.lock();
+                st.performance_recording = recording.is_some();
+                st.performance_recording_name = recording
+                    .as_ref()
+                    .map(|r| r.name.clone())
+                    .unwrap_or_default();
+                st.performance_recording_secs = recording
+                    .as_ref()
+                    .map(|r| r.started.elapsed().as_secs_f32())
+                    .unwrap_or(0.0);
                 st.test = test_status.clone();
                 st.game = crate::protocol::GameModeStatus {
                     active: game_desired,

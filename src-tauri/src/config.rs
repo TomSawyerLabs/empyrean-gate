@@ -10,6 +10,9 @@ use std::path::PathBuf;
 pub const MAX_PIXEL_COUNT: usize = 500_000;
 pub const MAX_E131_UNIVERSE: u32 = 63_999;
 pub const MAX_CLIENT_RECORDS: usize = 256;
+/// Internal one-cue transport used when a saved performance is played like a
+/// scene. It is hidden from the authored all-night playlist UI.
+pub const PERFORMANCE_SCENE_PLAYLIST_ID: &str = "__performance_scene_player";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -509,6 +512,62 @@ pub struct SavedStack {
     pub walk_depth: f32,
 }
 
+/// A pixel-free recording of a live performance. The initial look plus timestamped
+/// control messages recreate long sessions without storing rendered RGB frames.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SavedPerformance {
+    pub id: String,
+    pub name: String,
+    pub initial_stack: SavedStack,
+    pub initial_patch: Option<String>,
+    pub duration_secs: f32,
+    pub events: Vec<PerformanceEvent>,
+}
+
+impl Default for SavedPerformance {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: "Untitled performance".into(),
+            initial_stack: SavedStack::default(),
+            initial_patch: None,
+            duration_secs: 0.0,
+            events: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerformanceEvent {
+    pub at_secs: f32,
+    #[serde(flatten)]
+    pub action: PerformanceAction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum PerformanceAction {
+    SetLook { stack: SavedStack, patch: Option<String> },
+    AddLayer { layer: LayerCfg },
+    UpdateLayer { index: usize, layer: LayerCfg },
+    RemoveLayer { index: usize },
+    MoveLayer { from: usize, to: usize },
+    SetMaster { brightness: Option<f32>, speed: Option<f32> },
+    TriggerEffect { effect: crate::layers::EffectCfg },
+    Paint {
+        pen: crate::layers::PenKind,
+        points: Vec<crate::layers::DabPoint>,
+        hue: f32,
+        saturation: f32,
+        brightness: f32,
+        size: f32,
+        intensity: f32,
+    },
+    PatchActivate { id: Option<String> },
+    PatchParam { node: String, param: String, value: f32 },
+}
+
 /// A playlist entry that runs a game world instead of (strictly: on top of) a
 /// scene — "2am: twenty minutes of Ecosystem". The zero-player attract mode is
 /// what makes an unattended game segment viable (plans/game-mode.md). The
@@ -548,6 +607,9 @@ pub struct ShowPlaylistEntry {
     /// absent so existing configs and the fixture serialize unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub game: Option<GameCue>,
+    /// Embedded so deleting the source recording does not break an authored show.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub performance: Option<SavedPerformance>,
 }
 
 impl Default for ShowPlaylistEntry {
@@ -559,6 +621,7 @@ impl Default for ShowPlaylistEntry {
             duration_secs: 1_800.0,
             transition_secs: 20.0,
             game: None,
+            performance: None,
         }
     }
 }
@@ -629,6 +692,8 @@ pub struct AppConfig {
     pub layers: Vec<LayerCfg>,
     /// Named layer-stack captures shared by all clients.
     pub saved_stacks: Vec<SavedStack>,
+    /// Pixel-free, backend-replayable performance captures.
+    pub saved_performances: Vec<SavedPerformance>,
     /// Reusable timed shows and the currently running selection.
     pub saved_playlists: Vec<SavedPlaylist>,
     pub show_scheduler: ShowSchedulerConfig,
@@ -672,6 +737,7 @@ impl Default for AppConfig {
             autostart: false,
             layers: default_layer_stack(),
             saved_stacks: Vec::new(),
+            saved_performances: Vec::new(),
             saved_playlists: Vec::new(),
             show_scheduler: ShowSchedulerConfig::default(),
             clients: Vec::new(),
@@ -1189,6 +1255,7 @@ mod tests {
                 duration_secs: 2_100.0,
                 transition_secs: 20.0,
                 game: None,
+                performance: None,
             }],
             repeat: true,
         });
@@ -1206,5 +1273,60 @@ mod tests {
             restored.saved_playlists[0].entries[0].duration_secs,
             2_100.0
         );
+    }
+
+    #[test]
+    fn performance_capture_round_trips_as_an_embedded_playlist_cue() {
+        let performance = SavedPerformance {
+            id: "performance-a".into(),
+            name: "Opening set".into(),
+            initial_stack: SavedStack {
+                id: "opening".into(),
+                name: "Opening look".into(),
+                layers: default_layer_stack(),
+                ..Default::default()
+            },
+            initial_patch: Some("patch-a".into()),
+            duration_secs: 3_600.0,
+            events: vec![PerformanceEvent {
+                at_secs: 12.5,
+                action: PerformanceAction::SetMaster {
+                    brightness: Some(0.75),
+                    speed: Some(1.25),
+                },
+            }],
+        };
+        let mut config = AppConfig::default();
+        config.saved_performances.push(performance.clone());
+        config.saved_playlists.push(SavedPlaylist {
+            id: "performance-player".into(),
+            name: "Now playing".into(),
+            entries: vec![ShowPlaylistEntry {
+                id: "performance-cue".into(),
+                name: performance.name.clone(),
+                stack: performance.initial_stack.clone(),
+                duration_secs: performance.duration_secs,
+                transition_secs: 0.0,
+                game: None,
+                performance: Some(performance),
+            }],
+            repeat: false,
+        });
+
+        let restored: AppConfig =
+            serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+        let restored_performance = restored.saved_playlists[0].entries[0]
+            .performance
+            .as_ref()
+            .expect("performance cue");
+        assert_eq!(restored_performance.initial_patch.as_deref(), Some("patch-a"));
+        assert_eq!(restored_performance.events.len(), 1);
+        assert!(matches!(
+            restored_performance.events[0].action,
+            PerformanceAction::SetMaster {
+                brightness: Some(0.75),
+                speed: Some(1.25)
+            }
+        ));
     }
 }

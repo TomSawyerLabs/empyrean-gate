@@ -19,10 +19,12 @@ import {
   type ShowPlaylistEntry,
   type SavedPlaylist,
   type SavedStack,
+  type SavedPerformance,
 } from "./types";
 
 const newId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+const PERFORMANCE_SCENE_PLAYLIST_ID = "__performance_scene_player";
 
 function stackFromScene(scene: ScenePreset): SavedStack {
   return {
@@ -45,6 +47,18 @@ function playlistEntry(stack: SavedStack): ShowPlaylistEntry {
     stack: { ...stack, layers: stack.layers.map((layer) => ({ ...layer })) },
     duration_secs: 35 * 60,
     transition_secs: 20,
+    performance: null,
+  };
+}
+
+function performancePlaylistEntry(performance: SavedPerformance): ShowPlaylistEntry {
+  return {
+    id: newId("cue"),
+    name: performance.name,
+    stack: { ...performance.initial_stack, layers: performance.initial_stack.layers.map((layer) => ({ ...layer })) },
+    duration_secs: performance.duration_secs,
+    transition_secs: 0,
+    performance: structuredClone(performance),
   };
 }
 
@@ -424,7 +438,9 @@ function ShowSchedulerPanel() {
   const { client, config, status } = useGate();
   if (!config) return null;
 
-  const playlists = config.saved_playlists ?? [];
+  const allPlaylists = config.saved_playlists ?? [];
+  const hiddenPlaylists = allPlaylists.filter((playlist) => playlist.id === PERFORMANCE_SCENE_PLAYLIST_ID);
+  const playlists = allPlaylists.filter((playlist) => playlist.id !== PERFORMANCE_SCENE_PLAYLIST_ID);
   const scheduler = config.show_scheduler ?? {
     enabled: false,
     active_playlist_id: "",
@@ -441,7 +457,7 @@ function ShowSchedulerPanel() {
     schedulerPatch: Partial<typeof scheduler> = {},
   ) => client.setConfig({
     ...config,
-    saved_playlists: nextPlaylists,
+    saved_playlists: [...hiddenPlaylists, ...nextPlaylists],
     show_scheduler: { ...scheduler, ...schedulerPatch },
   });
 
@@ -604,12 +620,14 @@ function ShowSchedulerPanel() {
                 const builtIn = SCENE_PRESETS.find((scene) => `built:${scene.id}` === value);
                 const saved = config.saved_stacks.find((stack) => `saved:${stack.id}` === value);
                 const game = GAME_CUES.find((cue) => `game:${cue.kind}` === value);
+                const performance = config.saved_performances.find((item) => `performance:${item.id}` === value);
                 const stack = builtIn ? stackFromScene(builtIn) : saved;
                 if (stack) updateActive((playlist) => ({ ...playlist, entries: [...playlist.entries, playlistEntry(stack)] }));
                 else if (game) updateActive((playlist) => ({
                   ...playlist,
                   entries: [...playlist.entries, gameCueEntry(game.kind, game.name)],
                 }));
+                if (performance) updateActive((playlist) => ({ ...playlist, entries: [...playlist.entries, performancePlaylistEntry(performance)] }));
                 event.target.value = "";
               }}>
                 <option value="">＋ Add a scene…</option>
@@ -622,6 +640,9 @@ function ShowSchedulerPanel() {
                 <optgroup label="Games (the world runs itself — see the Games tab)">
                   {GAME_CUES.map((game) => <option key={game.kind} value={`game:${game.kind}`}>{game.name}</option>)}
                 </optgroup>
+                {config.saved_performances.length > 0 && <optgroup label="Recorded performances">
+                  {config.saved_performances.map((item) => <option key={item.id} value={`performance:${item.id}`}>{item.name}</option>)}
+                </optgroup>}
               </select>
             </>
           )}
@@ -733,6 +754,34 @@ function ScenesPanel() {
         />
         <output>{config.render.manual_transition_secs.toFixed(2)} s</output>
       </div>
+      {config.saved_performances.length > 0 && (
+        <div className="saved-stack-section">
+          <div className="scene-section-title"><h3>Your performance scenes</h3><span>{config.saved_performances.length} playable metadata scenes</span></div>
+          <div className="saved-stack-list">
+            {config.saved_performances.map((item) => {
+              const playing = Boolean(config.show_scheduler.enabled
+                && config.show_scheduler.active_playlist_id === PERFORMANCE_SCENE_PLAYLIST_ID
+                && config.saved_playlists
+                  .find((playlist) => playlist.id === PERFORMANCE_SCENE_PLAYLIST_ID)
+                  ?.entries[0]?.performance?.id === item.id);
+              return <article key={item.id} className={`saved-stack-row ${playing ? "active" : ""}`}>
+                <div><strong>{item.name}</strong><span>{humanize(item.duration_secs)} · {item.events.length} events · no pixels</span></div>
+                <div className="saved-stack-actions">
+                  {playing ? (
+                    <button className="active" onClick={() => client.setConfig({
+                      ...config,
+                      show_scheduler: { ...config.show_scheduler, enabled: false },
+                    })}>■ Hold</button>
+                  ) : <button onClick={() => client.playPerformance(item.id)}>▶ Play scene</button>}
+                  <button className="danger" onClick={() => {
+                    if (window.confirm(`Delete recorded performance “${item.name}”?`)) client.setConfig({ ...config, saved_performances: config.saved_performances.filter((p) => p.id !== item.id) });
+                  }}>×</button>
+                </div>
+              </article>;
+            })}
+          </div>
+        </div>
+      )}
       <div className="scene-speed-control">
         <div className="scene-speed-copy">
           <strong>Scene speed</strong>

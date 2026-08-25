@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "id": "builtin-deep-space-pulse",
+  "name": "Deep Space Pulse",
+  "description": "A slow flight through deep indigo cloudbanks, with six broad travellers crossing the gate and a restrained bass swell.",
+  "nodes": [
+    { "id": "aud", "kind": "audio", "name": "music", "params": {}, "pos": [40, 420] },
+    { "id": "bass_smooth", "kind": "smooth", "name": "restrained bass swell", "params": { "seconds": 0.85 }, "pos": [260, 420] },
+    { "id": "space", "kind": "cosmic_drift", "name": "slow deep-space flight", "params": { "depth": 0.64, "trail": 0.58, "speed": 0.32, "pulse": 0.0, "hue": 0.64, "hue_range": 0.16, "saturation": 0.88, "brightness": 1.24 }, "pos": [500, 180] },
+    { "id": "drift", "kind": "transform", "name": "almost imperceptible roll", "params": { "spin": 0.0025, "zoom": 1.0 }, "pos": [760, 180] },
+    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.96 }, "pos": [1000, 180] }
+  ],
+  "edges": [
+    { "from": { "node": "aud", "port": "bass" }, "to": { "node": "bass_smooth", "port": "in" } },
+    { "from": { "node": "bass_smooth", "port": "out" }, "to": { "node": "space", "port": "pulse" } },
+    { "from": { "node": "space", "port": "out" }, "to": { "node": "drift", "port": "in" } },
+    { "from": { "node": "drift", "port": "out" }, "to": { "node": "out", "port": "in" } }
+  ],
+  "exposed": [
+    { "node": "space", "param": "hue", "label": "Space hue" },
+    { "node": "space", "param": "speed", "label": "Flight speed" },
+    { "node": "space", "param": "depth", "label": "Cloud depth" },
+    { "node": "space", "param": "trail", "label": "Traveller trails" },
+    { "node": "out", "param": "master", "label": "Master" }
+  ]
+}

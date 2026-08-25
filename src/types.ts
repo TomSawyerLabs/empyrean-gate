@@ -76,6 +76,32 @@ export interface SavedStack {
   walk_depth: number;
 }
 
+export type PerformanceAction =
+  | { action: "set_look"; stack: SavedStack; patch: string | null }
+  | { action: "add_layer"; layer: LayerCfg }
+  | { action: "update_layer"; index: number; layer: LayerCfg }
+  | { action: "remove_layer"; index: number }
+  | { action: "move_layer"; from: number; to: number }
+  | { action: "set_master"; brightness: number | null; speed: number | null }
+  | { action: "trigger_effect"; effect: EffectCfg }
+  | { action: "paint"; pen: PenKind; points: { angle: number; radius: number }[]; hue: number; saturation: number; brightness: number; size: number; intensity: number }
+  | { action: "patch_activate"; id: string | null }
+  | { action: "patch_param"; node: string; param: string; value: number };
+
+export interface PerformanceEvent {
+  at_secs: number;
+  action: PerformanceAction["action"];
+}
+
+export interface SavedPerformance {
+  id: string;
+  name: string;
+  initial_stack: SavedStack;
+  initial_patch: string | null;
+  duration_secs: number;
+  events: (PerformanceEvent & Record<string, unknown>)[];
+}
+
 export interface ShowPlaylistEntry {
   id: string;
   name: string;
@@ -84,6 +110,8 @@ export interface ShowPlaylistEntry {
   transition_secs: number;
   /** Present = this cue runs a game world (absent in older configs). */
   game?: GameCue | null;
+  /** Present when the cue replays captured control metadata. */
+  performance?: SavedPerformance | null;
 }
 
 export interface SavedPlaylist {
@@ -274,6 +302,7 @@ export interface AppConfig {
   autostart: boolean;
   layers: LayerCfg[];
   saved_stacks: SavedStack[];
+  saved_performances: SavedPerformance[];
   saved_playlists: SavedPlaylist[];
   show_scheduler: ShowSchedulerConfig;
   clients: ClientRecord[];
@@ -421,6 +450,9 @@ export interface RuntimeStatus {
   /** Why the active patch is NOT rendering (engine fell back to the stack). */
   patch_error: string | null;
   show: ScheduledShowStatus;
+  performance_recording: boolean;
+  performance_recording_name: string;
+  performance_recording_secs: number;
   test: TestModeStatus;
   game: GameModeStatus;
   /** True while a controller scan is in flight. */

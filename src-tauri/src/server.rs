@@ -980,6 +980,92 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
     }
 }
 
+fn stack_snapshot(
+    cfg: &crate::config::AppConfig,
+    id: String,
+    name: String,
+) -> crate::config::SavedStack {
+    crate::config::SavedStack {
+        id,
+        name,
+        layers: cfg.layers.clone(),
+        master_speed: cfg.render.master_speed,
+        walk_enabled: cfg.render.walk_enabled,
+        walk_layers: cfg.render.walk_layers,
+        walk_min_layers: cfg.render.walk_min_layers,
+        walk_speed: cfg.render.walk_speed,
+        walk_depth: cfg.render.walk_depth,
+    }
+}
+
+/// Record replayable control metadata while an explicit performance capture is armed.
+/// Continuous audio/video pixels are intentionally absent.
+fn record_performance(state: &SharedState, msg: &ClientMsg, is_loopback: bool) {
+    use crate::config::{PerformanceAction as A, PerformanceEvent};
+    let patch_for_config = matches!(msg, ClientMsg::SetConfig { .. })
+        .then(|| state.config.read().active_patch.clone())
+        .flatten();
+    let mut recording = state.performance_recording.lock();
+    let Some(active) = recording.as_mut() else {
+        return;
+    };
+    let action = match msg {
+        ClientMsg::SetMaster { brightness, speed } => A::SetMaster {
+            brightness: *brightness,
+            speed: *speed,
+        },
+        ClientMsg::ActivateStack { stack } => A::SetLook {
+            stack: stack.clone(),
+            patch: None,
+        },
+        ClientMsg::SetConfig { config } => A::SetLook {
+            stack: stack_snapshot(config, "recorded-look".into(), "Recorded look".into()),
+            patch: patch_for_config,
+        },
+        ClientMsg::AddLayer { layer } => A::AddLayer { layer: layer.clone() },
+        ClientMsg::UpdateLayer { index, layer } => A::UpdateLayer {
+            index: *index,
+            layer: layer.clone(),
+        },
+        ClientMsg::RemoveLayer { index } => A::RemoveLayer { index: *index },
+        ClientMsg::MoveLayer { from, to } => A::MoveLayer {
+            from: *from,
+            to: *to,
+        },
+        ClientMsg::TriggerEffect { effect } => A::TriggerEffect {
+            effect: effect.clone(),
+        },
+        ClientMsg::Paint {
+            pen,
+            points,
+            hue,
+            saturation,
+            brightness,
+            size,
+            intensity,
+        } => A::Paint {
+            pen: *pen,
+            points: points.clone(),
+            hue: *hue,
+            saturation: *saturation,
+            brightness: *brightness,
+            size: *size,
+            intensity: *intensity,
+        },
+        ClientMsg::PatchActivate { id } if is_loopback => A::PatchActivate { id: id.clone() },
+        ClientMsg::PatchParam { node, param, value } => A::PatchParam {
+            node: node.clone(),
+            param: param.clone(),
+            value: *value,
+        },
+        _ => return,
+    };
+    active.events.push(PerformanceEvent {
+        at_secs: active.started.elapsed().as_secs_f32(),
+        action,
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_msg(
     ctx: &Ctx,
@@ -995,6 +1081,7 @@ async fn handle_msg(
     // Feedback capture: every operator action that can change what the array
     // does, logged in one place so new message kinds can't quietly go unrecorded.
     record_timeline(state, &msg, client_id);
+    record_performance(state, &msg, addr.ip().is_loopback());
     match msg {
         ClientMsg::Hello {
             name,
@@ -1203,6 +1290,121 @@ async fn handle_msg(
                 c.render.walk_min_layers = stack.walk_min_layers;
                 c.render.walk_speed = stack.walk_speed;
                 c.render.walk_depth = stack.walk_depth;
+            });
+        }
+        ClientMsg::PerformanceRecordStart { name } => {
+            if !require_local_operator(tx, addr, "Performance recording").await {
+                return Ok(());
+            }
+            let cfg = state.config.read();
+            let id = format!(
+                "performance-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+            );
+            let recording_name: String = if name.trim().is_empty() {
+                "Untitled performance".into()
+            } else {
+                name.trim().chars().take(80).collect()
+            };
+            *state.performance_recording.lock() = Some(crate::state::ActivePerformanceRecording {
+                id: id.clone(),
+                name: recording_name.clone(),
+                started: std::time::Instant::now(),
+                initial_stack: stack_snapshot(&cfg, format!("{id}-initial"), "Opening look".into()),
+                initial_patch: cfg.active_patch.clone(),
+                events: Vec::new(),
+            });
+            drop(cfg);
+            let mut status = state.status.lock();
+            status.performance_recording = true;
+            status.performance_recording_name = recording_name;
+            status.performance_recording_secs = 0.0;
+            drop(status);
+            state.broadcast_state();
+        }
+        ClientMsg::PerformanceRecordStop { name } => {
+            if !require_local_operator(tx, addr, "Performance recording").await {
+                return Ok(());
+            }
+            let finished = state.performance_recording.lock().take();
+            {
+                let mut status = state.status.lock();
+                status.performance_recording = false;
+                status.performance_recording_name.clear();
+                status.performance_recording_secs = 0.0;
+            }
+            if let Some(mut active) = finished {
+                if !name.trim().is_empty() {
+                    active.name = name.trim().chars().take(80).collect();
+                }
+                let duration_secs = active.started.elapsed().as_secs_f32().max(0.1);
+                state.update_config(|config| {
+                    config.saved_performances.push(crate::config::SavedPerformance {
+                        id: active.id,
+                        name: active.name,
+                        initial_stack: active.initial_stack,
+                        initial_patch: active.initial_patch,
+                        duration_secs,
+                        events: active.events,
+                    });
+                });
+            } else {
+                state.broadcast_state();
+            }
+        }
+        ClientMsg::PerformancePlay { id } => {
+            let performance = state
+                .config
+                .read()
+                .saved_performances
+                .iter()
+                .find(|item| item.id == id)
+                .cloned();
+            let Some(performance) = performance else {
+                let _ = send_json(
+                    tx,
+                    &ServerMsg::Error {
+                        message: "Saved performance not found".into(),
+                    },
+                )
+                .await;
+                return Ok(());
+            };
+            let cue_id = format!(
+                "performance-cue-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+            );
+            let playlist = crate::config::SavedPlaylist {
+                id: crate::config::PERFORMANCE_SCENE_PLAYLIST_ID.into(),
+                name: format!("Now playing · {}", performance.name),
+                entries: vec![crate::config::ShowPlaylistEntry {
+                    id: cue_id,
+                    name: performance.name.clone(),
+                    stack: performance.initial_stack.clone(),
+                    duration_secs: performance.duration_secs,
+                    transition_secs: 0.0,
+                    game: None,
+                    performance: Some(performance.clone()),
+                }],
+                repeat: false,
+            };
+            state.request_render_transition();
+            state.update_config(move |config| {
+                config
+                    .saved_playlists
+                    .retain(|item| item.id != crate::config::PERFORMANCE_SCENE_PLAYLIST_ID);
+                config.saved_playlists.push(playlist);
+                config.active_patch = performance.initial_patch;
+                config.show_scheduler.enabled = true;
+                config.show_scheduler.active_playlist_id =
+                    crate::config::PERFORMANCE_SCENE_PLAYLIST_ID.into();
+                config.show_scheduler.current_index = 0;
             });
         }
         ClientMsg::SetSacnEnabled { enabled } => {

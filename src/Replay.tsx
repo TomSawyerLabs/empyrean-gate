@@ -392,11 +392,16 @@ export default function Replay() {
 
       <aside className="replay-panel">
         <div>
-          <div className="eyebrow">Archived show playback</div>
-          <h2>Uprising Replay</h2>
+          <div className="eyebrow">Legacy rendered-frame viewer</div>
+          <h2>Uprising RGB Archive</h2>
           <p className="hint">
             Plays the exact RGB frames used by the original show software. Files stay local
             and are read one frame at a time, so long recordings do not fill memory.
+          </p>
+          <p className="replay-note">
+            This is a reference viewer: it previews old, pixel-heavy recordings here and does
+            not send them to Gate output. For reusable scenes that play on Gate, record a
+            metadata Performance in <strong>Control → Saved scenes</strong>.
           </p>
         </div>
 

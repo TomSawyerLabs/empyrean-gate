@@ -108,11 +108,12 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   Editing works on the Gate machine only; remote clients get a read-only view.
   Slated to replace the layer stack once all pattern kinds are ported — see
   `plans/node-graph.md`.
-- **Archived-show replay**: open individual Uprising `.eg.data` RGB recordings or
+- **Legacy RGB archive**: open individual Uprising `.eg.data` RGB recordings or
   index an entire `Uprising-Data` checkout. Playback streams one 64×378 frame at a
   time from disk, supports seeking, looping, and variable playback speed, and keeps
   recent filesystem references without copying the recordings. Archive is available
-  in production desktop, headless web, and PWA builds.
+  in production desktop, headless web, and PWA builds. This is a reference preview,
+  not Gate output; metadata Performance scenes are the composable replay path.
 - **Live drawing**: paint on the array from any client with Glow / Ripple / Sparkle
   pens (color swatches + size). Strokes stream as polar dabs over WS and render on the
   GPU with ~2 s trails; multiple people can draw at once.
@@ -151,6 +152,14 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   restarts, and exposes skip/hold controls plus a live countdown. The built-in
   all-night journey rotates through nine restrained compositions instead of
   leaving one look on the installation for hours.
+- **Recorded performances**: Control can record an opening look plus timestamped
+  layer/patch adjustments, effect taps, and exact drawing dabs for hours without
+  storing rendered pixels. Recordings replay on the backend, can be embedded as
+  cues in an all-night show, and keep running with every controller closed.
+- **Live renderer handoffs**: manual scene and patch switches run two independent
+  render buses during the fade. The outgoing layers/patch keep animating and
+  reacting to live inputs while the incoming renderer starts, then Gate eases
+  between their completed frames instead of dissolving from a frozen screenshot.
 - **Audio loopback**: pick a system *output* device as a source (WASAPI loopback) —
   music played on the show machine drives the beat with no cabling.
 - **External lighting clock**: timing and audio energy are separate. By default each
