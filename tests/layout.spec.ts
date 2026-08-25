@@ -272,6 +272,47 @@ for (const viewport of VIEWPORTS) {
       ).toEqual([]);
     });
 
+    // Game mode's two stateful layouts: the banner with its ▶ Play join path
+    // (on every tab — Live is the tightest), and the Games tab's active play
+    // surface (how-to text, join line, color chips).
+    for (const tab of ["live", "games"] as const) {
+      test(`${tab} tab fits while a game runs`, async ({ page }) => {
+        const clientId = `layout-game-${tab}-${viewport.name}`;
+        await page.addInitScript(
+          (id) => localStorage.setItem("empyrean-client-id", id),
+          clientId,
+        );
+        await page.request.post(`/mock/status?client=${clientId}`, {
+          data: {
+            game: {
+              active: "spokewar",
+              summary: "Spokewar · 5 species · 12 min",
+              species: 5,
+              effects_overlay: false,
+              blocked_by_show: null,
+            },
+          },
+        });
+        await page.goto(`/#${tab}`);
+        await expect(page.locator('.app[data-connected="yes"]')).toBeAttached();
+        await expect(page.locator(".game-banner")).toBeVisible();
+        if (tab === "games") {
+          await expect(page.locator(".games-join")).toBeVisible();
+        }
+        await page.waitForTimeout(250);
+
+        const problems = await overflows(
+          page,
+          MUST_FIT_VERTICALLY.has(tab) && !viewport.mobile,
+        );
+        expect(
+          problems,
+          `Clipped or overflowing regions on the ${tab} tab with a game running at ${viewport.width}x${viewport.height}:\n` +
+            problems.map((p) => `  [${p.axis}] ${p.element} — ${p.detail}`).join("\n"),
+        ).toEqual([]);
+      });
+    }
+
     test("the corner menu fits", async ({ page }) => {
       test.skip(!viewport.mobile, "the corner menu only exists below the 700px breakpoint");
       await page.goto("/#live");

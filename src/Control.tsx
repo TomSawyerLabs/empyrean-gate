@@ -62,17 +62,17 @@ function performancePlaylistEntry(performance: SavedPerformance): ShowPlaylistEn
   };
 }
 
-const GAME_CUES: { kind: GameKind; name: string }[] = [
-  { kind: "rps", name: "Ecosystem" },
-  { kind: "life", name: "Primordial" },
-  { kind: "spokewar", name: "Spokewar" },
-  { kind: "flak", name: "Flak" },
+const GAME_CUES: { kind: GameKind; name: string; species: number }[] = [
+  { kind: "rps", name: "Ecosystem", species: 5 },
+  { kind: "life", name: "Primordial", species: 6 },
+  { kind: "spokewar", name: "Spokewar", species: 5 },
+  { kind: "flak", name: "Flak", species: 5 },
 ];
 
 /// A cue that runs a game world (plans/game-mode.md). The underlying stack is
 /// empty — black under the game while it runs, and what the array fades to for
 /// a beat when the next cue takes over.
-function gameCueEntry(kind: GameKind, name: string): ShowPlaylistEntry {
+function gameCueEntry(kind: GameKind, name: string, species: number): ShowPlaylistEntry {
   return {
     id: newId("cue"),
     name,
@@ -89,7 +89,7 @@ function gameCueEntry(kind: GameKind, name: string): ShowPlaylistEntry {
     },
     duration_secs: 20 * 60,
     transition_secs: 20,
-    game: { game: kind, species: 3 },
+    game: { game: kind, species },
   };
 }
 
@@ -625,7 +625,7 @@ function ShowSchedulerPanel() {
                 if (stack) updateActive((playlist) => ({ ...playlist, entries: [...playlist.entries, playlistEntry(stack)] }));
                 else if (game) updateActive((playlist) => ({
                   ...playlist,
-                  entries: [...playlist.entries, gameCueEntry(game.kind, game.name)],
+                  entries: [...playlist.entries, gameCueEntry(game.kind, game.name, game.species)],
                 }));
                 if (performance) updateActive((playlist) => ({ ...playlist, entries: [...playlist.entries, performancePlaylistEntry(performance)] }));
                 event.target.value = "";

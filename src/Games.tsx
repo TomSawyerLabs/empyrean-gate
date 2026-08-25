@@ -14,9 +14,13 @@ const GAMES: {
   kind: GameKind;
   name: string;
   blurb: string;
-  /** The one admin knob, with its per-game meaning and bounds. */
-  knob: { label: string; min: number; max: number };
-  playHint: string;
+  /** The one admin knob, with its per-game meaning, bounds, and the value a
+   * fresh start uses (more colors than the backend's conservative default —
+   * chips are colors, not seats, but more of them still reads as more room). */
+  knob: { label: string; min: number; max: number; start: number };
+  /** Player-facing: what the goal is and what a tap does. Shown on the play
+   * surface, written for someone who just picked up a phone. */
+  howTo: string;
 }[] = [
   {
     kind: "rps",
@@ -24,10 +28,12 @@ const GAMES: {
     blurb:
       "Species forever eating each other in rotating spiral fronts — it never " +
       "settles and never ends. Pick a species and tap the array to seed it.",
-    knob: { label: "Species", min: 3, max: 5 },
-    playHint:
-      "Pick a species, then tap the array to seed it. Hold nothing back — " +
-      "inputs from everyone merge.",
+    knob: { label: "Species", min: 3, max: 5, start: 5 },
+    howTo:
+      "The species eat each other in a circle — each color feeds on the next. " +
+      "There is no winning, only tides: pick a species and tap (or hold) to " +
+      "flood ground with it, and watch the spiral war swing your way… until " +
+      "the color that eats yours finds you.",
   },
   {
     kind: "life",
@@ -36,10 +42,12 @@ const GAMES: {
       "Game of Life in color: your taps splat living soup in your color, and " +
       "newborn cells inherit blended hues where colonies meet. Generations " +
       "advance on the beat; a drizzle of soup keeps a quiet world moving.",
-    knob: { label: "Colors", min: 2, max: 8 },
-    playHint:
-      "Pick a color and tap to splat living soup — or take the ✕ and erase. " +
-      "Newborns blend their parents' colors where colonies meet.",
+    knob: { label: "Colors", min: 2, max: 8, start: 6 },
+    howTo:
+      "A living petri dish. Tap to splat soup of your color — it grows, dies " +
+      "and drifts by the Game of Life's rules, stepping on the beat, and " +
+      "newborn cells blend the colors of their parents. Grow gardens, crash " +
+      "them into your neighbors', or take the ✕ and erase.",
   },
   {
     kind: "flak",
@@ -49,10 +57,12 @@ const GAMES: {
       "flak bloom that vaporizes what it catches, in your color. Pure co-op — " +
       "the storm swells with how hard the crowd is firing, and calms when " +
       "everyone wanders off.",
-    knob: { label: "Colors", min: 2, max: 8 },
-    playHint:
-      "Tap ahead of a falling meteor to catch it in your bloom — kills flash " +
-      "your color. The harder everyone fires, the heavier the storm.",
+    knob: { label: "Colors", min: 2, max: 8, start: 5 },
+    howTo:
+      "Meteors are falling toward the middle — everyone is on the same team, " +
+      "keeping them out. Tap just ahead of one to catch it in your flak " +
+      "bloom; every kill sparkles in your color. The harder the crowd fires, " +
+      "the heavier the storm gets.",
   },
   {
     kind: "spokewar",
@@ -62,10 +72,12 @@ const GAMES: {
       "particles at it, painting territory that always slowly fades. Every " +
       "base fights for itself until a player picks up its color — leaving " +
       "just hands it back.",
-    knob: { label: "Bases", min: 2, max: 8 },
-    playHint:
-      "Pick a base color, then tap where its squads should fly. Strong enemy " +
-      "paint grinds squads down — soften a sector before pushing through it.",
+    knob: { label: "Bases", min: 2, max: 8, start: 5 },
+    howTo:
+      "Your color owns a base on the rim, and a tap anywhere sends a squad " +
+      "flying there, painting territory that always slowly fades. Thick enemy " +
+      "paint grinds squads down, so soften a sector before pushing through. " +
+      "Bases never die — the goal is the biggest empire right now.",
   },
 ];
 
@@ -84,7 +96,7 @@ export default function Games() {
   const game = status?.game;
   const active = game?.active ?? null;
   const activeGame = GAMES.find((g) => g.kind === active);
-  const knob = activeGame?.knob ?? { label: "Species", min: 3, max: 5 };
+  const knob = activeGame?.knob ?? { label: "Species", min: 3, max: 5, start: 3 };
   // The knob value is shared across games; show it clamped to the running
   // game's own bounds (the sim clamps the same way).
   const species = Math.min(Math.max(game?.species ?? 3, knob.min), knob.max);
@@ -145,7 +157,12 @@ export default function Games() {
               ) : (
                 <button
                   disabled={!!blockedBy}
-                  onClick={() => client.setGameMode(g.kind)}
+                  onClick={() => {
+                    client.setGameMode(g.kind);
+                    // Open with the game's own color count — roomier than the
+                    // backend's conservative default.
+                    client.setGameConfig({ species: g.knob.start });
+                  }}
                 >
                   Start
                 </button>
@@ -190,10 +207,15 @@ export default function Games() {
       </section>
 
       <section className="panel games-play">
-        <h3>Play</h3>
+        <h3>{active ? `Play ${activeGame?.name ?? ""}` : "Play"}</h3>
         {active ? (
           <>
-            <p className="hint">{activeGame?.playHint}</p>
+            <p className="games-howto">{activeGame?.howTo}</p>
+            <p className="games-join">
+              <strong>1.</strong> Pick a color &nbsp;<strong>2.</strong> Tap the
+              array below. That&apos;s joining — there are no seats and no
+              turns, and any number of people can play, sharing colors freely.
+            </p>
             <div className="games-species">
               {Array.from({ length: species }, (_, s) => (
                 <button

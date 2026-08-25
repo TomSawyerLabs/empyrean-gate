@@ -709,12 +709,24 @@ export default function App() {
       )}
       {/* Game mode replaces the scene with a game world; like test mode the
           state is unmissable everywhere, but stopping is Gate-machine-only so
-          the button only shows where it will actually work. */}
+          the button only shows where it will actually work. The banner is
+          also the JOIN path: every phone sees ▶ Play, which lands on the
+          Games tab's play surface. */}
       {status?.game?.active && (
         <div className="banner game-banner">
           <span className="game-dot" />
           <strong>GAME MODE</strong>
           <span className="testmode-summary">{status.game.summary}</span>
+          {tab !== "games" && (
+            <button
+              className="game-banner-play"
+              onClick={() => {
+                location.hash = "games";
+              }}
+            >
+              ▶ Play
+            </button>
+          )}
           {(client.httpBase.startsWith("http://127.0.0.1") ||
             client.httpBase.startsWith("http://localhost")) && (
             <button className="ghost" onClick={() => client.setGameMode(null)}>

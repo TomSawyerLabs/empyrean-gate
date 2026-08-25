@@ -97,8 +97,11 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   connected phone, and every world runs fine with zero players, so there is
   nothing to wait for and nothing to ruin by leaving. Effects and drawing are
   suppressed during a game unless the operator overlays them. A green GAME
-  MODE banner sits on every device while a world is live. Design notes and the
-  game roster: `plans/game-mode.md`.
+  MODE banner sits on every device while a world is live, and its **▶ Play**
+  button is the join path: it lands on the play surface, which explains the
+  game's goal and that colors are shared freely — there are no seats, no
+  turns, and no player cap. Design notes and the game roster:
+  `plans/game-mode.md`.
 - **Patches (early)**: a node-graph alternative to the layer stack — wire
   generators, transforms, blends, and inputs (audio features, beats, LFOs,
   envelopes, IMU) into a typed dataflow whose sink is the array. Graphs compile

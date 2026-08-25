@@ -70,6 +70,17 @@ GAME MODE banner. Commits `c7f3bb6`, `608a85d`, `f0b7a6b`.
       shows meteors slipping through (an invitation, not a performance).
       Impacts at the hole are a warm flash, not a fail state. Kills sparkle
       in the defender's chip color: score IS color.
+- [x] First user feedback round (2026-08-24): joining was unclear, no player
+      blurb, "only 3 players?". Fixes: the GAME MODE banner grew a ▶ Play
+      button (the join path — lands on #games from any tab/device); the play
+      panel leads with a per-game `howTo` (goal + what a tap does, written
+      for someone who just picked up a phone) plus an explicit "1. pick a
+      color 2. tap — no seats, no turns, share colors freely" join line; and
+      each game starts with its own roomier color count (Ecosystem 5,
+      Primordial 6, Spokewar 5, Flak 5 — `knob.start`, also used by playlist
+      cue defaults) instead of the backend's conservative 3. Layout gate
+      grew 16 cases: live + games tabs with a running game (banner + active
+      play surface) at all 8 viewports, via the mock status patch.
 - [ ] Next games: Comets (wants IMU steering — sensors.ts already streams
       orientation) or Pulse (wants a beat-grid claim mechanic).
 

@@ -4862,6 +4862,34 @@ button:disabled {
   text-transform: uppercase;
 }
 
+/* Player-facing goal blurb on the play surface — this is the text that turns
+   a bystander into a player, so it reads at body size, not hint size. */
+.games-howto {
+  margin: 4px 0 2px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #d6d2ea;
+}
+
+.games-join {
+  margin: 2px 0 6px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #a89fd0;
+}
+
+/* The banner's join path: bigger and brighter than the ghost buttons beside
+   it — on a phone this is THE way into a running game. */
+.game-banner-play {
+  padding: 4px 14px;
+  border: 1px solid #2fbf7f;
+  border-radius: 999px;
+  background: #123324;
+  color: #8ff0c0;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
 /* Life's eraser: visibly "no color" among the colored chips. */
 .games-chip.erase {
   background: transparent;
