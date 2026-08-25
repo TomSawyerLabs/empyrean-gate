@@ -45,9 +45,18 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Restores the release-profile cache warm-cache.yml saves on master.
+      # `shared-key` because rust-cache otherwise bakes the job id into the key,
+      # and this job is `build` while the warm job is `warm` — different keys,
+      # permanent miss. `save-if: false` because a cache written here would be
+      # scoped to this tag's ref and readable by nothing afterwards: that is the
+      # ~2.8 GB per release this repo was manufacturing and never reading, on a
+      # 10 GB quota. See the header of warm-cache.yml.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          shared-key: release-build
+          save-if: false
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
