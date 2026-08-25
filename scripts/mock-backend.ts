@@ -26,6 +26,15 @@ const SPOKES = 64;
 const PIXELS = 64; // decimated preview
 const PREVIEW_MAGIC = 0x45475056;
 
+// Arms in the preview spiral. Anything that varies with the spoke index has to
+// close on itself — a whole number of cycles per revolution — or spoke 63 and
+// spoke 0 meet at a seam and the array shows a discontinuity at 0°. So the
+// angular term is written as turns-per-revolution, like the real layers write
+// theirs (the spiral, rainbow and wedge shaders all floor their arm/turn count
+// for exactly this reason), rather than as a fixed per-spoke phase step that
+// only lands on a whole turn by luck.
+const ARMS = 3;
+
 // A plausible, fully-populated status. The BASE is RuntimeStatus::default()
 // straight from Rust (kept current by `default_status_fixture_is_current`), so a
 // field the backend starts sending can never silently go missing here — the UI
@@ -77,9 +86,10 @@ function previewFrame(t: number): Uint8Array {
   header.setUint16(8, SPOKES, true);
   header.setUint16(10, PIXELS, true);
   for (let s = 0; s < SPOKES; s++) {
+    const sweep = (ARMS * s * 2 * Math.PI) / SPOKES;
     for (let i = 0; i < PIXELS; i++) {
       const o = 12 + (s * PIXELS + i) * 3;
-      const v = Math.round(128 + 127 * Math.sin(i / 6 + s / 3 + t / 10));
+      const v = Math.round(128 + 127 * Math.sin(i / 6 + sweep + t / 10));
       packet[o] = v;
       packet[o + 1] = Math.round(v * 0.4);
       packet[o + 2] = 255 - v;
