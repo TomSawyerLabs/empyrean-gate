@@ -85,10 +85,10 @@ pub fn authorize(port: u16) -> anyhow::Result<()> {
         let script = format!(
             "netsh advfirewall firewall delete rule name=\"{name}\" | Out-Null\r\n\
              netsh advfirewall firewall add rule name=\"{name}\" dir=in action=allow \
-             protocol=TCP localport={port} profile=any\r\n\
+             protocol=TCP localport={port} remoteip=localsubnet profile=any\r\n\
              $fw = $LASTEXITCODE\r\n\
              netsh advfirewall firewall add rule name=\"{name}\" dir=in action=allow \
-             protocol=UDP localport=49150,49151,5568 profile=any | Out-Null\r\n\
+             protocol=UDP localport=49150,49151,5568 remoteip=localsubnet profile=any | Out-Null\r\n\
              $wu = 'HKLM\\SOFTWARE\\Microsoft\\WindowsUpdate\\UX\\Settings'\r\n\
              reg add $wu /v ActiveHoursStart /t REG_DWORD /d 15 /f | Out-Null\r\n\
              reg add $wu /v ActiveHoursEnd /t REG_DWORD /d 9 /f | Out-Null\r\n\
