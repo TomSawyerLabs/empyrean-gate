@@ -328,6 +328,7 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
             roll: 0.0,
             shake: 0.0,
             effect_seq: 0,
+            dj_link: patch::eval::DjLinkInputs::default(),
         });
         inputs.patch_params = Some(slab.to_vec());
         if let Some(rgb) = engine

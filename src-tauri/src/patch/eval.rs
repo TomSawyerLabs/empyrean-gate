@@ -10,6 +10,7 @@ use super::codegen::Program;
 use super::registry::{self, ParamKind};
 use crate::engine::AudioUniform;
 use crate::layers::MAX_AUDIO_SOURCES;
+use crate::state::DJ_EVENT_COUNT;
 use std::collections::HashMap;
 use std::f32::consts::TAU;
 
@@ -24,7 +25,38 @@ pub struct EvalInputs<'a> {
     /// Monotonic count of triggered effects (taps, pads, beat-taps) — the Tap
     /// node fires an event whenever it advances.
     pub effect_seq: u64,
+    pub dj_link: DjLinkInputs,
 }
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DjLinkInputs {
+    pub active: f32,
+    pub deck: f32,
+    pub deck_side: f32,
+    pub event_deck: f32,
+    pub event_side: f32,
+    pub playing: f32,
+    pub on_air: f32,
+    pub deck_1_on_air: f32,
+    pub deck_2_on_air: f32,
+    pub looping: f32,
+    pub mix: f32,
+    pub mix_activity: f32,
+    pub beat_in_bar: f32,
+    pub event_seq: [u64; DJ_EVENT_COUNT],
+}
+
+const DJ_EVENT_PORTS: [&str; DJ_EVENT_COUNT] = [
+    "play",
+    "cue",
+    "cue_release",
+    "on_air_event",
+    "off_air_event",
+    "loop_start",
+    "loop_wrap",
+    "loop_end",
+    "jump",
+];
 
 #[derive(Clone)]
 struct NodeState {
@@ -39,6 +71,8 @@ struct NodeState {
     /// Last seen effect_seq (tap); MAX = not yet initialized, so pre-existing
     /// effects never fire a spurious tap on the first frame.
     prev_seq: u64,
+    /// Last seen sequence for every PRO DJ LINK event output.
+    prev_dj_seq: [u64; DJ_EVENT_COUNT],
 }
 
 impl Default for NodeState {
@@ -49,6 +83,7 @@ impl Default for NodeState {
             env_t: f32::INFINITY,
             prev_beat: 0.0,
             prev_seq: u64::MAX,
+            prev_dj_seq: [u64::MAX; DJ_EVENT_COUNT],
         }
     }
 }
@@ -174,6 +209,32 @@ impl Runtime {
                         self.events[node].push("tap");
                     }
                     st.prev_seq = inp.effect_seq;
+                }
+                "dj_link" => {
+                    let dj = inp.dj_link;
+                    let o = &mut self.outputs[node];
+                    o.insert("active".into(), dj.active);
+                    o.insert("deck".into(), dj.deck);
+                    o.insert("deck_side".into(), dj.deck_side);
+                    o.insert("event_deck".into(), dj.event_deck);
+                    o.insert("event_side".into(), dj.event_side);
+                    o.insert("playing".into(), dj.playing);
+                    o.insert("on_air".into(), dj.on_air);
+                    o.insert("deck_1_on_air".into(), dj.deck_1_on_air);
+                    o.insert("deck_2_on_air".into(), dj.deck_2_on_air);
+                    o.insert("looping".into(), dj.looping);
+                    o.insert("mix".into(), dj.mix);
+                    o.insert("mix_activity".into(), dj.mix_activity);
+                    o.insert("beat_in_bar".into(), dj.beat_in_bar);
+                    let st = &mut self.state[node];
+                    for (event, port) in DJ_EVENT_PORTS.iter().enumerate() {
+                        if st.prev_dj_seq[event] != u64::MAX
+                            && dj.event_seq[event] > st.prev_dj_seq[event]
+                        {
+                            self.events[node].push(port);
+                        }
+                        st.prev_dj_seq[event] = dj.event_seq[event];
+                    }
                 }
                 "scalar_math" => {
                     let a = self.input(node, "a");
@@ -314,6 +375,7 @@ mod tests {
             roll: 0.0,
             shake: 0.0,
             effect_seq: 0,
+            dj_link: DjLinkInputs::default(),
         }
     }
 
@@ -524,6 +586,54 @@ mod tests {
         rt.eval(&inp);
         rt.eval(&inp);
         assert!(rt.slab[env_slot] > 0.0, "tap fired the envelope");
+    }
+
+    #[test]
+    fn dj_link_events_fire_once_and_expose_deck_state() {
+        let doc = PatchDoc {
+            nodes: vec![
+                node("link", "dj_link"),
+                node("env", "envelope"),
+                node("rings", "beat_rings"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("link", "jump", "env", "trigger"),
+                edge("env", "out", "rings", "brightness"),
+                edge("link", "mix", "rings", "front"),
+                edge("rings", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let mut rt = runtime(doc);
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let brightness_slot = rt
+            .prog
+            .slots
+            .iter()
+            .find(|s| s.wired.as_ref().is_some_and(|(_, port)| port == "out"))
+            .unwrap()
+            .slot;
+        let front_slot = rt
+            .prog
+            .slots
+            .iter()
+            .find(|s| s.wired.as_ref().is_some_and(|(_, port)| port == "mix"))
+            .unwrap()
+            .slot;
+
+        let mut inp = inputs(&audio);
+        inp.dj_link.mix = 0.75;
+        inp.dj_link.event_seq[crate::state::DJ_EVENT_JUMP] = 4;
+        rt.eval(&inp);
+        rt.eval(&inp);
+        assert_eq!(rt.slab[brightness_slot], 0.0, "no startup event");
+        assert_eq!(rt.slab[front_slot], 0.75, "continuous LINK state reaches GPU");
+
+        inp.dj_link.event_seq[crate::state::DJ_EVENT_JUMP] += 1;
+        rt.eval(&inp);
+        rt.eval(&inp);
+        assert!(rt.slab[brightness_slot] > 0.0, "jump fired the envelope");
     }
 
     #[test]

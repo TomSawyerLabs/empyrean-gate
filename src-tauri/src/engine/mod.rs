@@ -2209,6 +2209,28 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // Control-rate evaluation of the active patch: scalar/event nodes run on
         // the CPU and their results fill the GPU parameter slab. Exposed-param
         // plays queued by clients apply here, recompile-free.
+        let dj_events = *state.pioneer_patch_events.lock();
+        let deck_side = |player| match player {
+            1 => -1.0,
+            2 => 1.0,
+            _ => 0.0,
+        };
+        let dj_link = crate::patch::eval::DjLinkInputs {
+            active: f32::from(pioneer_visual.active),
+            deck: f32::from(pioneer_visual.player),
+            deck_side: deck_side(pioneer_visual.player),
+            event_deck: f32::from(dj_events.last_player),
+            event_side: deck_side(dj_events.last_player),
+            playing: f32::from(pioneer_visual.playing),
+            on_air: f32::from(pioneer_visual.on_air),
+            deck_1_on_air: f32::from(pioneer_visual.deck_1_on_air),
+            deck_2_on_air: f32::from(pioneer_visual.deck_2_on_air),
+            looping: f32::from(pioneer_visual.looping),
+            mix: dj_fade_position,
+            mix_activity: dj_fade_activity,
+            beat_in_bar: f32::from(pioneer_visual.beat_in_bar),
+            event_seq: dj_events.seq,
+        };
         let patch_params = patch_rt.as_mut().map(|rt| {
             for (node, param, value) in state.patch_params.lock().drain(..) {
                 rt.set_param(&node, &param, value);
@@ -2224,6 +2246,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 roll: control.roll,
                 shake: control.shake,
                 effect_seq: state.effect_seq.load(Ordering::Relaxed),
+                dj_link,
             })
             .to_vec()
         });

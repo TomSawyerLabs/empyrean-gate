@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "id": "builtin-dj-loop-tunnel",
+  "name": "DJ Loop Tunnel",
+  "description": "Loop state tightens a rotating tunnel and each loop wrap launches a beat-synchronized ring; mixer handoffs rotate the whole field.",
+  "nodes": [
+    { "id": "link", "kind": "dj_link", "name": "loop and mixer state", "params": {}, "pos": [40, 50] },
+    { "id": "aud", "kind": "audio", "name": "master beat", "params": {}, "pos": [40, 310] },
+    { "id": "wrap_env", "kind": "envelope", "name": "loop wrap pulse", "params": { "attack": 0.0, "decay": 0.42, "peak": 1.35 }, "pos": [280, 40] },
+    { "id": "tunnel_light", "kind": "scalar_math", "name": "loop tunnel level", "params": { "op": 0, "b": 0.28 }, "pos": [280, 150] },
+    { "id": "tunnel", "kind": "spiral", "name": "loop tunnel", "params": { "arms": 6, "twist": 2.8, "speed": 0.34, "sharpness": 0.82, "hue": 0.76, "saturation": 0.84, "brightness": 0.34 }, "pos": [520, 150] },
+    { "id": "ring", "kind": "beat_rings", "name": "wrap ring", "params": { "front": 0.0, "width": 0.055, "direction": 0, "hue": 0.52, "hue_range": 0.16, "saturation": 0.55, "brightness": 0.0 }, "pos": [520, 350] },
+    { "id": "mix", "kind": "blend", "name": "wrap over tunnel", "params": { "mode": 0, "opacity": 0.94 }, "pos": [760, 250] },
+    { "id": "handoff", "kind": "transform", "name": "mixer handoff", "params": { "rotate": 0.0, "spin": 0.025, "zoom": 1.0 }, "pos": [980, 250] },
+    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.94 }, "pos": [1200, 250] }
+  ],
+  "edges": [
+    { "from": { "node": "link", "port": "loop_wrap" }, "to": { "node": "wrap_env", "port": "trigger" } },
+    { "from": { "node": "link", "port": "looping" }, "to": { "node": "tunnel_light", "port": "a" } },
+    { "from": { "node": "tunnel_light", "port": "out" }, "to": { "node": "tunnel", "port": "brightness" } },
+    { "from": { "node": "aud", "port": "beat_phase" }, "to": { "node": "ring", "port": "front" } },
+    { "from": { "node": "wrap_env", "port": "out" }, "to": { "node": "ring", "port": "brightness" } },
+    { "from": { "node": "tunnel", "port": "out" }, "to": { "node": "mix", "port": "base" } },
+    { "from": { "node": "ring", "port": "out" }, "to": { "node": "mix", "port": "over" } },
+    { "from": { "node": "mix", "port": "out" }, "to": { "node": "handoff", "port": "in" } },
+    { "from": { "node": "link", "port": "mix" }, "to": { "node": "handoff", "port": "rotate" } },
+    { "from": { "node": "handoff", "port": "out" }, "to": { "node": "out", "port": "in" } }
+  ],
+  "exposed": [
+    { "node": "tunnel", "param": "arms", "label": "Tunnel arms" },
+    { "node": "tunnel", "param": "twist", "label": "Tunnel twist" },
+    { "node": "wrap_env", "param": "decay", "label": "Wrap decay" },
+    { "node": "out", "param": "master", "label": "Master" }
+  ]
+}

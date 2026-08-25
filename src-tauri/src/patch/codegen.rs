@@ -54,7 +54,7 @@ pub struct SlabSlot {
 fn is_cpu_kind(kind: &str) -> bool {
     matches!(
         kind,
-        "time" | "slider" | "audio" | "imu" | "tap" | "scalar_math" | "lfo" | "smooth" | "envelope"
+        "time" | "slider" | "audio" | "imu" | "tap" | "dj_link" | "scalar_math" | "lfo" | "smooth" | "envelope"
     )
 }
 

@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "id": "builtin-dj-crunch-sparkles",
+  "name": "DJ Crunch Sparkles",
+  "description": "Treble and onset energy stand in for a crunchy filter while PRO DJ LINK mix motion sends bright particles around a beat-locked spiral.",
+  "nodes": [
+    { "id": "link", "kind": "dj_link", "name": "deck motion", "params": {}, "pos": [40, 40] },
+    { "id": "aud", "kind": "audio", "name": "music texture", "params": {}, "pos": [40, 260] },
+    { "id": "treble", "kind": "smooth", "name": "crunch energy", "params": { "seconds": 0.10 }, "pos": [250, 250] },
+    { "id": "treble_scale", "kind": "scalar_math", "name": "treble weight", "params": { "op": 2, "b": 0.72 }, "pos": [450, 230] },
+    { "id": "mix_scale", "kind": "scalar_math", "name": "mixer motion weight", "params": { "op": 2, "b": 0.42 }, "pos": [450, 80] },
+    { "id": "density", "kind": "scalar_math", "name": "spark density", "params": { "op": 0 }, "pos": [650, 170] },
+    { "id": "spiral", "kind": "spiral", "name": "beat helix", "params": { "arms": 4, "twist": 1.8, "speed": 0.16, "sharpness": 0.72, "hue": 0.60, "saturation": 0.82, "brightness": 0.34 }, "pos": [450, 430] },
+    { "id": "spark", "kind": "sparkle", "name": "crunch particles", "params": { "density": 0.12, "twinkle": 0.92, "speed": 1.55, "hue": 0.53, "hue_range": 0.24, "saturation": 0.25, "brightness": 1.55 }, "pos": [850, 170] },
+    { "id": "mix", "kind": "blend", "name": "particles over helix", "params": { "mode": 0, "opacity": 0.92 }, "pos": [1070, 310] },
+    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.92 }, "pos": [1290, 310] }
+  ],
+  "edges": [
+    { "from": { "node": "aud", "port": "treble" }, "to": { "node": "treble", "port": "in" } },
+    { "from": { "node": "treble", "port": "out" }, "to": { "node": "treble_scale", "port": "a" } },
+    { "from": { "node": "link", "port": "mix_activity" }, "to": { "node": "mix_scale", "port": "a" } },
+    { "from": { "node": "treble_scale", "port": "out" }, "to": { "node": "density", "port": "a" } },
+    { "from": { "node": "mix_scale", "port": "out" }, "to": { "node": "density", "port": "b" } },
+    { "from": { "node": "density", "port": "out" }, "to": { "node": "spark", "port": "density" } },
+    { "from": { "node": "aud", "port": "beat_phase" }, "to": { "node": "spiral", "port": "speed" } },
+    { "from": { "node": "spiral", "port": "out" }, "to": { "node": "mix", "port": "base" } },
+    { "from": { "node": "spark", "port": "out" }, "to": { "node": "mix", "port": "over" } },
+    { "from": { "node": "mix", "port": "out" }, "to": { "node": "out", "port": "in" } }
+  ],
+  "exposed": [
+    { "node": "treble_scale", "param": "b", "label": "Crunch sensitivity" },
+    { "node": "mix_scale", "param": "b", "label": "Mix-motion boost" },
+    { "node": "spark", "param": "hue", "label": "Spark hue" },
+    { "node": "out", "param": "master", "label": "Master" }
+  ]
+}

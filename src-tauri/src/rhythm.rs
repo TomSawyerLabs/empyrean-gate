@@ -175,9 +175,13 @@ pub struct PioneerDevice {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PioneerVisualSnapshot {
     pub active: bool,
+    pub player: u8,
+    pub playing: bool,
+    pub on_air: bool,
     pub deck_1_on_air: bool,
     pub deck_2_on_air: bool,
     pub looping: bool,
+    pub beat_in_bar: u8,
 }
 
 #[derive(Debug)]
@@ -299,6 +303,7 @@ impl PioneerClockState {
         };
         let deck_1 = fresh(1);
         let deck_2 = fresh(2);
+        let selected = fresh(self.player);
         let fresh_status = deck_1.is_some() || deck_2.is_some();
         let (deck_1_on_air, deck_2_on_air) = if self.on_air_observed {
             (
@@ -313,10 +318,14 @@ impl PioneerClockState {
         };
         PioneerVisualSnapshot {
             active: fresh_status && (self.on_air_observed || matches!(self.player, 1 | 2)),
+            player: self.player,
+            playing: selected.is_some_and(|deck| deck.playing),
+            on_air: selected.is_some_and(|deck| deck.on_air),
             deck_1_on_air,
             deck_2_on_air,
             looping: deck_1.is_some_and(|deck| deck.looping)
                 || deck_2.is_some_and(|deck| deck.looping),
+            beat_in_bar: selected.map_or(0, |deck| deck.last_beat_in_bar),
         }
     }
 
@@ -1227,6 +1236,11 @@ async fn fetch_track_info(request: MetadataRequest) -> Result<ProDjLinkTrackInfo
 
 fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
     use crate::layers::{EffectCfg, EffectKind};
+    use crate::state::{
+        DJ_EVENT_CUE, DJ_EVENT_CUE_RELEASE, DJ_EVENT_JUMP, DJ_EVENT_LOOP_END,
+        DJ_EVENT_LOOP_START, DJ_EVENT_LOOP_WRAP, DJ_EVENT_OFF_AIR, DJ_EVENT_ON_AIR,
+        DJ_EVENT_PLAY,
+    };
 
     let player = match event {
         PioneerVisualEvent::PlayStarted(player)
@@ -1249,6 +1263,21 @@ fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
         _ => f32::from(player.saturating_sub(1)) * std::f32::consts::FRAC_PI_2,
     };
     let hue = if player == 1 { 0.58 } else { 0.08 };
+    let patch_event = match event {
+        PioneerVisualEvent::PlayStarted(_) => DJ_EVENT_PLAY,
+        PioneerVisualEvent::CueStarted(_) | PioneerVisualEvent::CuePlayStarted(_) => DJ_EVENT_CUE,
+        PioneerVisualEvent::CueEnded(_) => DJ_EVENT_CUE_RELEASE,
+        PioneerVisualEvent::OnAirChanged(_, true) => DJ_EVENT_ON_AIR,
+        PioneerVisualEvent::OnAirChanged(_, false) => DJ_EVENT_OFF_AIR,
+        PioneerVisualEvent::LoopStarted(_) => DJ_EVENT_LOOP_START,
+        PioneerVisualEvent::LoopWrap(_) => DJ_EVENT_LOOP_WRAP,
+        PioneerVisualEvent::LoopEnded(_) => DJ_EVENT_LOOP_END,
+        PioneerVisualEvent::Jump(_) => DJ_EVENT_JUMP,
+    };
+    state
+        .pioneer_patch_events
+        .lock()
+        .record(patch_event, player);
     let effect = |kind, intensity, size, radius, duration| EffectCfg {
         kind,
         angle,

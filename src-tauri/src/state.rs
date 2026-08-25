@@ -12,6 +12,33 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::time::Instant;
 use tokio::sync::broadcast;
 
+pub const DJ_EVENT_PLAY: usize = 0;
+pub const DJ_EVENT_CUE: usize = 1;
+pub const DJ_EVENT_CUE_RELEASE: usize = 2;
+pub const DJ_EVENT_ON_AIR: usize = 3;
+pub const DJ_EVENT_OFF_AIR: usize = 4;
+pub const DJ_EVENT_LOOP_START: usize = 5;
+pub const DJ_EVENT_LOOP_WRAP: usize = 6;
+pub const DJ_EVENT_LOOP_END: usize = 7;
+pub const DJ_EVENT_JUMP: usize = 8;
+pub const DJ_EVENT_COUNT: usize = 9;
+
+/// Monotonic PRO DJ LINK event counters consumed by patch runtimes. Counters
+/// preserve short deck events until the next render frame instead of relying on
+/// a one-frame boolean pulse from the network thread.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DjLinkPatchEvents {
+    pub seq: [u64; DJ_EVENT_COUNT],
+    pub last_player: u8,
+}
+
+impl DjLinkPatchEvents {
+    pub fn record(&mut self, event: usize, player: u8) {
+        self.seq[event] = self.seq[event].wrapping_add(1);
+        self.last_player = player;
+    }
+}
+
 /// Per-source audio features, written by an analysis chain, read by the frame loop.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AudioFeatures {
@@ -273,6 +300,7 @@ pub struct SharedState {
     pub scope: [Mutex<ScopeData>; MAX_AUDIO_SOURCES],
     pub midi_clock: Mutex<crate::rhythm::MidiClockState>,
     pub pioneer_clock: Mutex<crate::rhythm::PioneerClockState>,
+    pub pioneer_patch_events: Mutex<DjLinkPatchEvents>,
     pub pioneer_debug: Mutex<VecDeque<ProDjLinkDebugEntry>>,
     pub pioneer_debug_seq: AtomicU64,
     pub pioneer_tracks: Mutex<HashMap<u8, ProDjLinkTrackInfo>>,
@@ -382,6 +410,7 @@ impl SharedState {
             scope: Default::default(),
             midi_clock: Mutex::new(crate::rhythm::MidiClockState::default()),
             pioneer_clock: Mutex::new(crate::rhythm::PioneerClockState::default()),
+            pioneer_patch_events: Mutex::new(DjLinkPatchEvents::default()),
             pioneer_debug: Mutex::new(VecDeque::new()),
             pioneer_debug_seq: AtomicU64::new(1),
             pioneer_tracks: Mutex::new(HashMap::new()),
