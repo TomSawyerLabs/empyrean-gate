@@ -213,10 +213,18 @@ pub fn pioneer_energy(
                 .and_then(|track| waveform_level(track, deck.beat_number, phase))
                 // No metadata server / unanalyzed source: transport still gives
                 // a musical signal, though not a claim about actual loudness.
-                .unwrap_or_else(|| 0.46 + 0.24 * (-phase * 7.0).exp())
+                .unwrap_or_else(|| pioneer_transport_energy(phase))
         })
         .fold(0.0, f32::max)
         .clamp(0.0, 1.0)
+}
+
+/// Beat-only PRO DJ LINK sources do not expose player status or rekordbox
+/// metadata. A received clock still proves that music is advancing, so provide
+/// a conservative musical envelope instead of reporting silence.
+pub fn pioneer_transport_energy(beat_phase: f32) -> f32 {
+    let phase = beat_phase.rem_euclid(1.0);
+    0.46 + 0.24 * (-phase * 7.0).exp()
 }
 
 fn waveform_level(track: &ProDjLinkTrackInfo, beat_number: u64, beat_phase: f32) -> Option<f32> {
@@ -1748,6 +1756,13 @@ mod tests {
         assert!(pioneer_energy(&devices, &tracks, 1, 0.5) < 0.48);
         devices[0].playing = false;
         assert_eq!(pioneer_energy(&devices, &tracks, 1, 0.0), 0.0);
+    }
+
+    #[test]
+    fn pioneer_transport_energy_keeps_beat_only_link_sources_visible() {
+        assert!((pioneer_transport_energy(0.0) - 0.70).abs() < 1e-4);
+        assert!(pioneer_transport_energy(0.5) > 0.46);
+        assert!(pioneer_transport_energy(0.5) < 0.48);
     }
 
     #[test]

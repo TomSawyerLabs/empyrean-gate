@@ -1787,17 +1787,26 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         };
         let midi_selected = cfg.rhythm.source == crate::config::RhythmSource::MidiClock;
         let pioneer_selected = cfg.rhythm.source == crate::config::RhythmSource::ProDjLink;
-        let link_energy = if pioneer_selected && pioneer_clock.usable {
-            crate::rhythm::pioneer_energy(
+        let link_clock_active = pioneer_selected && pioneer_clock.usable;
+        let link_energy = if link_clock_active {
+            let tracked = crate::rhythm::pioneer_energy(
                 &pioneer_devices,
                 &state.pioneer_tracks.lock(),
                 pioneer_visual.player,
                 pioneer_clock.beat_phase,
-            )
+            );
+            if tracked > 0.0 || !pioneer_devices.is_empty() {
+                tracked
+            } else {
+                // Beat-only LINK implementations have neither player status nor
+                // waveform metadata. The usable clock is still an honest proof
+                // of playback, so do not make their visuals look disconnected.
+                crate::rhythm::pioneer_transport_energy(pioneer_clock.beat_phase)
+            }
         } else {
             0.0
         };
-        let dj_visual_active = pioneer_selected && pioneer_visual.active;
+        let dj_visual_active = link_clock_active;
         let dj_fade_target = match (pioneer_visual.deck_1_on_air, pioneer_visual.deck_2_on_air) {
             (true, false) => 0.0,
             (false, true) => 1.0,
@@ -2383,7 +2392,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             _ => 0.0,
         };
         let dj_link = crate::patch::eval::DjLinkInputs {
-            active: f32::from(pioneer_visual.active),
+            active: f32::from(link_clock_active),
             energy: link_energy,
             deck: f32::from(pioneer_visual.player),
             deck_side: deck_side(pioneer_visual.player),

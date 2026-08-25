@@ -12,7 +12,7 @@
     { "id": "level_live", "kind": "scalar_math", "name": "visible while connected", "params": { "op": 0, "b": 0.0 }, "pos": [730, 470] },
     { "id": "tempo", "kind": "scalar_math", "name": "BPM motion", "params": { "op": 2, "b": 0.34 }, "pos": [280, 260] },
     { "id": "wrap_env", "kind": "envelope", "name": "loop wrap pulse", "params": { "attack": 0.0, "decay": 0.42, "peak": 1.35 }, "pos": [280, 40] },
-    { "id": "tunnel_light", "kind": "scalar_math", "name": "loop tunnel level", "params": { "op": 0, "b": 0.28 }, "pos": [280, 150] },
+    { "id": "tunnel_light", "kind": "scalar_math", "name": "loop tunnel level", "params": { "op": 0, "b": 0.72 }, "pos": [280, 150] },
     { "id": "tunnel", "kind": "spiral", "name": "loop tunnel", "params": { "arms": 6, "twist": 2.8, "speed": 0.34, "sharpness": 0.82, "hue": 0.76, "saturation": 0.84, "brightness": 0.34 }, "pos": [520, 150] },
     { "id": "ring", "kind": "beat_rings", "name": "wrap ring", "params": { "front": 0.0, "width": 0.055, "direction": 0, "hue": 0.52, "hue_range": 0.16, "saturation": 0.55, "brightness": 0.0 }, "pos": [520, 350] },
     { "id": "mix", "kind": "blend", "name": "wrap over tunnel", "params": { "mode": 0, "opacity": 0.94 }, "pos": [760, 250] },
