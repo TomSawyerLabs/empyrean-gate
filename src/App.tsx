@@ -12,6 +12,8 @@ import Test from "./Test";
 import { contenders, peerLabel, peerVerdict, severity } from "./sacnPeers";
 import Ready from "./Ready";
 import { useGate } from "./state";
+import Participate from "./Participate";
+import ParticipationControl from "./ParticipationControl";
 
 // The patch editor pulls in React Flow; lazy so phones on the play surfaces
 // never pay for it.
@@ -519,7 +521,7 @@ function TopbarMenu({
 }
 
 export default function App() {
-  const { connected, status, errors, dismissError, client, config, denied, savedPulse } = useGate();
+  const { connected, status, errors, dismissError, client, config, denied, savedPulse, role } = useGate();
   const [tab, setTab] = useState<TabId>(tabFromHash);
   const [showConnect, setShowConnect] = useState(false);
   const [showReport, setShowReport] = useState(false);
@@ -618,6 +620,8 @@ export default function App() {
     );
   }
 
+  if (role !== "operator") return <Participate />;
+
   return (
     <div
       className={`app ${showMode ? "show-mode" : ""}`}
@@ -641,6 +645,10 @@ export default function App() {
           <button className="show-exit" onClick={() => setShowMode(false)}>
             ⤢ Exit show mode <span className="chip-key">Esc</span>
           </button>
+          {config && config.public_access.mode !== "private" && <button className="danger"
+            onClick={() => client.setConfig({ ...config, public_access: { ...config.public_access, mode: "private" } })}>
+            Lock public now
+          </button>}
           {/* Only when there is actually an update. Show mode is meant to be
               nearly empty, so a control that is always there costs more than it
               earns — but an update you cannot see or refuse is worse. */}
@@ -714,6 +722,7 @@ export default function App() {
         </span>
         <VersionChip />
       </header>
+      <ParticipationControl />
 
       {newWindowError && (
         <div className="banner error dismissible" onClick={() => setNewWindowError(null)}>

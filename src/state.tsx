@@ -11,13 +11,14 @@ import {
   type ReactNode,
 } from "react";
 import { GateClient } from "./ws";
-import type { AppConfig, ProDjLinkDebugEntry, RuntimeStatus, ServerMsg } from "./types";
+import type { AppConfig, ClientRole, ProDjLinkDebugEntry, RuntimeStatus, ServerMsg } from "./types";
 
 interface Gate {
   client: GateClient;
   config: AppConfig | null;
   status: RuntimeStatus | null;
   connected: boolean;
+  role: ClientRole;
   /** Set when the server refused this client (revoked / token required). */
   denied: string | null;
   /** Bumps every time the backend confirms a config change (saved + broadcast). */
@@ -37,6 +38,7 @@ export function GateProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
   const [connected, setConnected] = useState(false);
+  const [role, setRole] = useState<ClientRole>("participant");
   const [denied, setDenied] = useState<string | null>(null);
   const [savedPulse, setSavedPulse] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
@@ -46,6 +48,9 @@ export function GateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const offMsg = client.onMessage((msg: ServerMsg) => {
       switch (msg.type) {
+        case "role":
+          setRole(msg.role);
+          break;
         case "state":
           setConfig((prev) => {
             // The very first state after connect is a greeting, not a save.
@@ -88,6 +93,7 @@ export function GateProvider({ children }: { children: ReactNode }) {
     config,
     status,
     connected,
+    role,
     denied,
     savedPulse,
     errors,

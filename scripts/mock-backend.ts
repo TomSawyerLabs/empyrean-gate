@@ -185,22 +185,35 @@ const server = Bun.serve({
     );
   },
   websocket: {
-    open(ws) {
-      ws.send(JSON.stringify({ type: "state", config, status }));
-    },
+    open() {},
     message(ws, raw) {
-      let msg: { type?: string; client_id?: string; include_ready?: boolean; ready_id?: string; stack?: unknown };
+      let msg: { type?: string; client_id?: string; token?: string; include_ready?: boolean; ready_id?: string; stack?: unknown };
       try {
         msg = JSON.parse(String(raw));
       } catch {
         return;
       }
       switch (msg.type) {
-        case "hello":
-        case "get_state": {
+        case "hello": {
           // `hello` is the first thing a client sends and it carries the id a
           // test can address, so this is where an override lands.
           if (msg.client_id) clients.set(ws, msg.client_id);
+          const patch = overrides.get(clients.get(ws) ?? "") ?? {};
+          const participant = msg.token?.startsWith("participant-") ?? false;
+          ws.send(JSON.stringify({ type: "role", role: participant ? "participant" : "operator" }));
+          const publicConfig = participant ? {
+            ...config,
+            public_access: {
+              ...config.public_access,
+              mode: msg.token === "participant-effects-test" ? "effects" : "private",
+            },
+            server: { ...config.server, join_token: "" },
+            clients: [],
+          } : config;
+          ws.send(JSON.stringify({ type: "state", config: publicConfig, status: { ...status, ...patch } }));
+          break;
+        }
+        case "get_state": {
           const patch = overrides.get(clients.get(ws) ?? "") ?? {};
           ws.send(JSON.stringify({ type: "state", config, status: { ...status, ...patch } }));
           break;

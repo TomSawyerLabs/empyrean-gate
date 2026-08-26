@@ -2,7 +2,7 @@
 //! on the LAN, phones). Text frames carry JSON messages; preview frames are binary
 //! (see `PREVIEW_MAGIC` layout below).
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, MediaSubmissionStatus};
 use crate::layers::{DabPoint, EffectCfg, LayerCfg, PenKind};
 use crate::patch::store::PatchSummary;
 use crate::patch::PatchDoc;
@@ -20,6 +20,15 @@ pub const READY_PREVIEW_MAGIC: u32 = 0x4547_5256; // "VRGE"
 /// `u32 magic, u32 sequence, u16 width, u16 height`, then RGBA8 pixels.
 pub const VIDEO_FRAME_MAGIC: u32 = 0x4547_5646; // "FVGE"
 pub const MAX_VIDEO_DIMENSION: u16 = 256;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientRole {
+    Operator,
+    Moderator,
+    #[default]
+    Participant,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,6 +52,10 @@ pub enum ClientMsg {
         token: String,
     },
     GetState,
+    ActivatePublicScene { id: String },
+    SubmitMedia { url: String },
+    ModerateMedia { id: String, status: MediaSubmissionStatus },
+    RemoveMediaSubmission { id: String },
     /// Full config replace (settings page "everything" updates go through this).
     SetConfig {
         config: Box<AppConfig>,
@@ -304,6 +317,9 @@ fn default_brightness() -> f32 {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMsg {
+    Role {
+        role: ClientRole,
+    },
     State {
         config: Box<AppConfig>,
         status: RuntimeStatus,

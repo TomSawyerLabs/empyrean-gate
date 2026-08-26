@@ -396,6 +396,18 @@ export class GateClient {
   moveLayer(from: number, to: number) {
     this.send({ type: "move_layer", from, to });
   }
+  activatePublicScene(id: string) {
+    this.send({ type: "activate_public_scene", id });
+  }
+  submitMedia(url: string) {
+    this.send({ type: "submit_media", url });
+  }
+  moderateMedia(id: string, status: import("./types").MediaSubmissionStatus) {
+    this.send({ type: "moderate_media", id, status });
+  }
+  removeMediaSubmission(id: string) {
+    this.send({ type: "remove_media_submission", id });
+  }
   triggerEffect(effect: Partial<EffectCfg> & { kind: EffectCfg["kind"] }) {
     this.send({
       type: "trigger_effect",

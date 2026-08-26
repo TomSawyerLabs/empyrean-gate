@@ -190,5 +190,31 @@
     "current_index": 0
   },
   "clients": [],
+  "public_access": {
+    "mode": "private",
+    "participant_token": "",
+    "moderator_token": "",
+    "drawing_enabled": true,
+    "allowed_effects": [
+      "burst",
+      "swoosh",
+      "bloom",
+      "twinkle",
+      "ring"
+    ],
+    "public_scene_ids": [],
+    "media_submissions_enabled": false,
+    "media_approval": "manual",
+    "trusted_media_domains": [
+      "youtube.com",
+      "youtu.be",
+      "instagram.com"
+    ],
+    "max_paint_size": 0.18,
+    "max_paint_intensity": 0.7,
+    "effects_per_second": 6,
+    "paint_points_per_second": 120
+  },
+  "media_submissions": [],
   "active_patch": null
 }
