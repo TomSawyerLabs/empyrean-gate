@@ -35,7 +35,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -740,7 +740,10 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                         let ev = state_message_for(&state, role, &client_id);
                         if send_json(&mut tx, &ev).await.is_err() { break; }
                     }
-                    Ok(ev) => { if send_json(&mut tx, &ev).await.is_err() { break; } }
+                    Ok(ev) => {
+                        let Some(ev) = event_for_role(ev, role) else { continue };
+                        if send_json(&mut tx, &ev).await.is_err() { break; }
+                    }
                     Err(RecvError::Lagged(_)) => continue,
                     Err(RecvError::Closed) => break,
                 }
@@ -929,9 +932,43 @@ fn redacted_config(mut cfg: AppConfig, role: ClientRole, client_id: &str) -> App
 
 fn state_message_for(state: &SharedState, role: ClientRole, client_id: &str) -> ServerMsg {
     let config = redacted_config(state.config.read().clone(), role, client_id);
+    let status = redacted_status(state.status.lock().clone(), role);
     ServerMsg::State {
         config: Box::new(config),
-        status: state.status.lock().clone(),
+        status,
+    }
+}
+
+fn redacted_status(
+    status: crate::protocol::RuntimeStatus,
+    role: ClientRole,
+) -> crate::protocol::RuntimeStatus {
+    if role == ClientRole::Operator {
+        status
+    } else {
+        // Public clients render from preview frames and do not need machine,
+        // network, DJ, controller, diagnostics, or source-owner telemetry.
+        crate::protocol::RuntimeStatus::default()
+    }
+}
+
+fn event_for_role(event: ServerMsg, role: ClientRole) -> Option<ServerMsg> {
+    if role == ClientRole::Operator {
+        return Some(event);
+    }
+    match event {
+        ServerMsg::Status { status } => Some(ServerMsg::Status {
+            status: redacted_status(status, role),
+        }),
+        ServerMsg::ProDjLinkDebug { .. }
+        | ServerMsg::Error { .. }
+        | ServerMsg::ReportSaved { .. }
+        | ServerMsg::Patches { .. }
+        | ServerMsg::Patch { .. }
+        | ServerMsg::PatchParamChanged { .. }
+        | ServerMsg::Discovery { .. }
+        | ServerMsg::Role { .. } => None,
+        other => Some(other),
     }
 }
 
@@ -978,10 +1015,32 @@ fn trusted_media_url(raw: &str, domains: &[String]) -> Result<(String, bool), St
         return Err("Only public http(s) URLs without embedded credentials are accepted.".into());
     }
     let host = parsed.host_str().ok_or_else(|| "The URL needs a public hostname.".to_string())?;
+    let normalized_host = host.trim_end_matches('.').to_ascii_lowercase();
+    if normalized_host == "localhost" || normalized_host.ends_with(".local") {
+        return Err("Local-network media URLs are not accepted.".into());
+    }
+    if let Ok(ip) = normalized_host.parse::<IpAddr>() {
+        let private = match ip {
+            IpAddr::V4(ip) => ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_unspecified()
+                || ip.is_broadcast()
+                || ip.is_multicast(),
+            IpAddr::V6(ip) => ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_multicast()
+                || (ip.segments()[0] & 0xfe00) == 0xfc00
+                || (ip.segments()[0] & 0xffc0) == 0xfe80,
+        };
+        if private {
+            return Err("Local-network media URLs are not accepted.".into());
+        }
+    }
     let trusted = domains.iter().any(|domain| {
         let domain = domain.trim().trim_start_matches('.').to_ascii_lowercase();
-        let host = host.to_ascii_lowercase();
-        !domain.is_empty() && (host == domain || host.ends_with(&format!(".{domain}")))
+        !domain.is_empty()
+            && (normalized_host == domain || normalized_host.ends_with(&format!(".{domain}")))
     });
     Ok((parsed.to_string(), trusted))
 }
@@ -1370,15 +1429,17 @@ async fn handle_msg(
             // without putting another round of probes on the network.
             // Cloned out of the lock first: the guard is not Send and this task
             // must stay Send across the await below.
-            let cached = state.last_discovery.lock().clone();
-            if let Some(result) = cached {
-                let _ = send_json(
-                    tx,
-                    &ServerMsg::Discovery {
-                        result: Box::new(result),
-                    },
-                )
-                .await;
+            if *role == ClientRole::Operator {
+                let cached = state.last_discovery.lock().clone();
+                if let Some(result) = cached {
+                    let _ = send_json(
+                        tx,
+                        &ServerMsg::Discovery {
+                            result: Box::new(result),
+                        },
+                    )
+                    .await;
+                }
             }
         }
         ClientMsg::ActivatePublicScene { id } => {
@@ -2191,6 +2252,27 @@ mod diagnostics_tests {
         assert!(trusted_media_url("https://m.youtube.com/watch?v=x", &domains).unwrap().1);
         assert!(!trusted_media_url("https://youtube.com.evil.example/x", &domains).unwrap().1);
         assert!(trusted_media_url("file:///etc/passwd", &domains).is_err());
+        assert!(trusted_media_url("http://localhost/video.mp4", &domains).is_err());
+        assert!(trusted_media_url("http://127.0.0.1/video.mp4", &domains).is_err());
+        assert!(trusted_media_url("http://192.168.1.20/video.mp4", &domains).is_err());
+    }
+
+    #[test]
+    fn participant_events_hide_operator_telemetry() {
+        let mut status = crate::protocol::RuntimeStatus::default();
+        status.interfaces.push("Ethernet — 10.0.0.2".into());
+        status.diagnostics_path = "/operator/private.log".into();
+        let Some(ServerMsg::Status { status }) =
+            event_for_role(ServerMsg::Status { status }, ClientRole::Participant)
+        else {
+            panic!("participant should receive a redacted status heartbeat");
+        };
+        assert!(status.interfaces.is_empty());
+        assert!(status.diagnostics_path.is_empty());
+        assert!(event_for_role(
+            ServerMsg::Patches { patches: Vec::new() },
+            ClientRole::Participant,
+        ).is_none());
     }
 
     #[test]
