@@ -598,6 +598,8 @@ pub struct SavedStack {
     pub id: String,
     pub name: String,
     pub layers: Vec<LayerCfg>,
+    /// Scene-level output level, kept with Ready so preview and Take agree.
+    pub master_brightness: f32,
     pub master_speed: f32,
     pub walk_enabled: bool,
     pub walk_layers: bool,
@@ -759,6 +761,7 @@ impl Default for SavedStack {
             id: String::new(),
             name: "Untitled stack".into(),
             layers: Vec::new(),
+            master_brightness: 1.0,
             master_speed: 1.0,
             walk_enabled: false,
             walk_layers: false,
@@ -1401,6 +1404,14 @@ mod tests {
             restored.saved_playlists[0].entries[0].duration_secs,
             2_100.0
         );
+    }
+
+    #[test]
+    fn older_saved_stacks_default_to_full_brightness() {
+        let mut value = serde_json::to_value(SavedStack::default()).unwrap();
+        value.as_object_mut().unwrap().remove("master_brightness");
+        let restored: SavedStack = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.master_brightness, 1.0);
     }
 
     #[test]

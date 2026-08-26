@@ -70,6 +70,7 @@ export interface SavedStack {
   id: string;
   name: string;
   layers: LayerCfg[];
+  master_brightness: number;
   master_speed: number;
   walk_enabled: boolean;
   walk_layers: boolean;

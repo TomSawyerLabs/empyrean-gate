@@ -235,6 +235,7 @@ const server = Bun.serve({
             id: "mock-previous-program",
             name: "Previous program",
             layers: config.layers,
+            master_brightness: config.render.master_brightness,
             master_speed: config.render.master_speed,
             walk_enabled: config.render.walk_enabled,
             walk_layers: config.render.walk_layers,
@@ -244,7 +245,14 @@ const server = Bun.serve({
           };
           const next = config.ready_stack;
           config.layers = next.layers;
+          config.render.master_brightness = next.master_brightness;
           config.render.master_speed = next.master_speed;
+          config.render.walk_enabled = next.walk_enabled;
+          config.render.walk_layers = next.walk_layers;
+          config.render.walk_min_layers = next.walk_min_layers;
+          config.render.walk_speed = next.walk_speed;
+          config.render.walk_depth = next.walk_depth;
+          if (next.dj_link_effects) config.rhythm.pro_dj_link_effects = next.dj_link_effects;
           config.ready_stack = previous;
           ws.send(JSON.stringify({ type: "state", config, status }));
           break;

@@ -447,7 +447,7 @@ function RhythmPanel({ config }: { config: AppConfig }) {
   );
 }
 
-function DjLinkEffectsEditor({
+export function DjLinkEffectsEditor({
   value,
   onChange,
 }: {

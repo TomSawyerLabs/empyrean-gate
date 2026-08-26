@@ -1005,6 +1005,7 @@ fn stack_from_config(cfg: &crate::config::AppConfig) -> crate::config::SavedStac
         id: "live-stack".into(),
         name: "Current look".into(),
         layers: cfg.layers.clone(),
+        master_brightness: cfg.render.master_brightness,
         master_speed: cfg.render.master_speed,
         walk_enabled: cfg.render.walk_enabled,
         walk_layers: cfg.render.walk_layers,
@@ -1017,6 +1018,7 @@ fn stack_from_config(cfg: &crate::config::AppConfig) -> crate::config::SavedStac
 
 fn apply_stack_to_config(cfg: &mut crate::config::AppConfig, stack: &crate::config::SavedStack) {
     cfg.layers = stack.layers.clone();
+    cfg.render.master_brightness = stack.master_brightness;
     cfg.render.master_speed = stack.master_speed;
     cfg.render.walk_enabled = stack.walk_enabled;
     cfg.render.walk_layers = stack.walk_layers;
@@ -1263,6 +1265,7 @@ mod beat_time_tests {
     fn scheduled_stack_round_trips_through_live_config() {
         let mut cfg = AppConfig::default();
         let mut stack = stack_from_config(&cfg);
+        stack.master_brightness = 0.64;
         stack.master_speed = 0.42;
         stack.walk_enabled = true;
         stack.walk_depth = 2.25;
@@ -1272,6 +1275,7 @@ mod beat_time_tests {
         apply_stack_to_config(&mut cfg, &stack);
         let mirrored = stack_from_config(&cfg);
 
+        assert_eq!(mirrored.master_brightness, stack.master_brightness);
         assert_eq!(mirrored.master_speed, stack.master_speed);
         assert_eq!(mirrored.walk_enabled, stack.walk_enabled);
         assert_eq!(mirrored.walk_depth, stack.walk_depth);
@@ -1718,6 +1722,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         });
         let mut show_status = ScheduledShowStatus::default();
         let mut render_layers = cfg.layers.clone();
+        let mut render_master_brightness = cfg.render.master_brightness;
         let mut render_master_speed = cfg.render.master_speed;
         let mut render_walk_enabled = cfg.render.walk_enabled;
         let mut render_walk_layers = cfg.render.walk_layers;
@@ -1795,6 +1800,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 (elapsed / transition_secs).clamp(0.0, 1.0)
             };
             let fade = linear * linear * (3.0 - 2.0 * linear);
+            render_master_brightness = transition_from.as_ref().map_or(
+                target.master_brightness,
+                |previous| {
+                    previous.master_brightness
+                        + (target.master_brightness - previous.master_brightness) * fade
+                },
+            );
 
             if linear >= 1.0 && transition_from.is_some() {
                 let old_len = transition_from
@@ -1842,6 +1854,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 state.update_config(move |c| {
                     if is_last && !repeat {
                         c.layers = hold.layers;
+                        c.render.master_brightness = hold.master_brightness;
                         c.render.master_speed = hold.master_speed;
                         c.render.walk_enabled = hold.walk_enabled;
                         c.render.walk_layers = hold.walk_layers;
@@ -2666,7 +2679,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 effect_count: effects.len() as u32,
                 time: state.started.elapsed().as_secs_f32(),
                 dt,
-                master: cfg.render.master_brightness * master_drop_brightness,
+                master: render_master_brightness * master_drop_brightness,
                 inner_over_outer: (cfg.geometry.inner_radius_ft
                     / cfg.geometry.outer_radius_ft.max(0.001))
                 .clamp(0.0, 1.0),
@@ -2784,6 +2797,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             ready_inputs.globals.transition_split = 0;
             ready_inputs.globals.transition_active = 0;
             ready_inputs.globals.transition_progress = 0.0;
+            ready_inputs.globals.master = stack.master_brightness;
             // A prepared scene is a layer-stack scene. Program-only patch/game
             // state must not leak into its preview.
             ready_inputs.patch_params = None;
@@ -2823,11 +2837,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     let transition_split = bus.inputs.globals.transition_split;
                     let transition_active = bus.inputs.globals.transition_active;
                     let transition_progress = bus.inputs.globals.transition_progress;
+                    let master = bus.inputs.globals.master;
                     bus.inputs.globals = inputs.globals;
                     bus.inputs.globals.layer_count = layer_count;
                     bus.inputs.globals.transition_split = transition_split;
                     bus.inputs.globals.transition_active = transition_active;
                     bus.inputs.globals.transition_progress = transition_progress;
+                    bus.inputs.globals.master = master;
                     bus.inputs.audio = inputs.audio;
                     bus.inputs.effects.clone_from(&inputs.effects);
                     bus.inputs.dabs.clone_from(&inputs.dabs);
@@ -3042,7 +3058,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         // Effective values, not the configured ones: a master drop
                         // or a scene transition overrides both, and the whole point
                         // of a report is what was actually rendering.
-                        master_brightness: cfg.render.master_brightness * master_drop_brightness,
+                        master_brightness: render_master_brightness * master_drop_brightness,
                         master_speed: render_master_speed,
                         effects_active,
                         dabs_active,
@@ -3094,7 +3110,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 }
                 st.fps_history = fps_hist.iter().copied().collect();
                 st.pps_history = pps_hist.iter().copied().collect();
-                st.master_brightness = cfg.render.master_brightness;
+                st.master_brightness = render_master_brightness;
                 st.master_speed = render_master_speed;
                 st.render_transition_active = handoff_active;
                 st.render_transition_progress = handoff_progress;

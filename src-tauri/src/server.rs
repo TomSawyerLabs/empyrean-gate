@@ -999,6 +999,7 @@ fn stack_snapshot(
         id,
         name,
         layers: cfg.layers.clone(),
+        master_brightness: cfg.render.master_brightness,
         master_speed: cfg.render.master_speed,
         walk_enabled: cfg.render.walk_enabled,
         walk_layers: cfg.render.walk_layers,
@@ -1295,6 +1296,7 @@ async fn handle_msg(
                 c.active_patch = None;
                 c.show_scheduler.enabled = false;
                 c.layers = stack.layers;
+                c.render.master_brightness = stack.master_brightness;
                 c.render.master_speed = stack.master_speed;
                 c.render.walk_enabled = stack.walk_enabled;
                 c.render.walk_layers = stack.walk_layers;
@@ -1325,6 +1327,7 @@ async fn handle_msg(
                 c.active_patch = None;
                 c.show_scheduler.enabled = false;
                 c.layers = next.layers;
+                c.render.master_brightness = next.master_brightness;
                 c.render.master_speed = next.master_speed;
                 c.render.walk_enabled = next.walk_enabled;
                 c.render.walk_layers = next.walk_layers;
