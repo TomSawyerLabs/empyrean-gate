@@ -117,21 +117,6 @@ const timers = new WeakMap<object, ReturnType<typeof setInterval>>();
 const overrides = new Map<string, Record<string, unknown>>();
 /// Which client id each open socket said hello as.
 const clients = new WeakMap<object, string>();
-/// The credential determines which redacted state subsequent requests receive.
-const clientTokens = new WeakMap<object, string>();
-
-function configForToken(token: string) {
-  if (!token.startsWith("participant-")) return config;
-  return {
-    ...config,
-    public_access: {
-      ...config.public_access,
-      mode: token === "participant-effects-test" ? "effects" : "private",
-    },
-    server: { ...config.server, join_token: "" },
-    clients: [],
-  };
-}
 
 const server = Bun.serve({
   port: PORT,
@@ -213,27 +198,24 @@ const server = Bun.serve({
           // `hello` is the first thing a client sends and it carries the id a
           // test can address, so this is where an override lands.
           if (msg.client_id) clients.set(ws, msg.client_id);
-          const token = msg.token ?? "";
-          clientTokens.set(ws, token);
           const patch = overrides.get(clients.get(ws) ?? "") ?? {};
-          const participant = token.startsWith("participant-");
+          const participant = msg.token?.startsWith("participant-") ?? false;
           ws.send(JSON.stringify({ type: "role", role: participant ? "participant" : "operator" }));
-          ws.send(JSON.stringify({
-            type: "state",
-            config: configForToken(token),
-            status: participant ? fixture("default-status") : { ...status, ...patch },
-          }));
+          const publicConfig = participant ? {
+            ...config,
+            public_access: {
+              ...config.public_access,
+              mode: msg.token === "participant-effects-test" ? "effects" : "private",
+            },
+            server: { ...config.server, join_token: "" },
+            clients: [],
+          } : config;
+          ws.send(JSON.stringify({ type: "state", config: publicConfig, status: { ...status, ...patch } }));
           break;
         }
         case "get_state": {
           const patch = overrides.get(clients.get(ws) ?? "") ?? {};
-          const token = clientTokens.get(ws) ?? "";
-          const participant = token.startsWith("participant-");
-          ws.send(JSON.stringify({
-            type: "state",
-            config: configForToken(token),
-            status: participant ? fixture("default-status") : { ...status, ...patch },
-          }));
+          ws.send(JSON.stringify({ type: "state", config, status: { ...status, ...patch } }));
           break;
         }
         case "subscribe_preview": {
