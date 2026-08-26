@@ -196,35 +196,6 @@ export interface ClientRecord {
   revoked: boolean;
 }
 
-export type ClientRole = "operator" | "moderator" | "participant";
-export type PublicMode = "private" | "effects" | "curated";
-export type MediaApprovalMode = "manual" | "trusted_domains" | "open";
-export type MediaSubmissionStatus = "pending" | "approved" | "rejected";
-
-export interface PublicAccessConfig {
-  mode: PublicMode;
-  participant_token: string;
-  moderator_token: string;
-  drawing_enabled: boolean;
-  allowed_effects: EffectKind[];
-  public_scene_ids: string[];
-  media_submissions_enabled: boolean;
-  media_approval: MediaApprovalMode;
-  trusted_media_domains: string[];
-  max_paint_size: number;
-  max_paint_intensity: number;
-  effects_per_second: number;
-  paint_points_per_second: number;
-}
-
-export interface MediaSubmission {
-  id: string;
-  owner_id: string;
-  url: string;
-  status: MediaSubmissionStatus;
-  auto_approved: boolean;
-}
-
 export interface ClientInfo {
   id: string;
   name: string;
@@ -357,8 +328,6 @@ export interface AppConfig {
   saved_playlists: SavedPlaylist[];
   show_scheduler: ShowSchedulerConfig;
   clients: ClientRecord[];
-  public_access: PublicAccessConfig;
-  media_submissions: MediaSubmission[];
   /** Id of the node-graph patch the engine renders instead of the layer stack. */
   active_patch: string | null;
 }
@@ -743,7 +712,6 @@ export interface VideoSourceStatus {
 }
 
 export type ServerMsg =
-  | { type: "role"; role: ClientRole }
   | { type: "state"; config: AppConfig; status: RuntimeStatus }
   | { type: "status"; status: RuntimeStatus }
   | { type: "beat"; source: number; bpm: number }

@@ -16,14 +16,12 @@
 //! back-pressuring the engine.
 
 use crate::audio::RemoteChains;
-use crate::config::{
-    AppConfig, ClientRecord, MediaApprovalMode, MediaSubmission, MediaSubmissionStatus, PublicMode,
-};
+use crate::config::ClientRecord;
 use crate::media::{MediaResolver, ResolveRequest};
 use crate::patch;
 use crate::protocol::{
-    BrowserAudioStream, ClientMsg, ClientRole, HandoverGrant, ServerMsg, PREVIEW_MAGIC,
-    READY_PREVIEW_MAGIC, VIDEO_FRAME_MAGIC,
+    BrowserAudioStream, ClientMsg, HandoverGrant, ServerMsg, PREVIEW_MAGIC, READY_PREVIEW_MAGIC,
+    VIDEO_FRAME_MAGIC,
 };
 use crate::state::{PreviewFrame, SharedState};
 use axum::extract::connect_info::ConnectInfo;
@@ -609,41 +607,6 @@ struct PreviewSub {
     last_sent: Instant,
 }
 
-struct ParticipationLimiter {
-    window: Instant,
-    effects: u32,
-    paint_points: u32,
-}
-
-impl ParticipationLimiter {
-    fn new() -> Self {
-        Self { window: Instant::now(), effects: 0, paint_points: 0 }
-    }
-
-    fn refresh(&mut self) {
-        if self.window.elapsed() >= Duration::from_secs(1) {
-            self.window = Instant::now();
-            self.effects = 0;
-            self.paint_points = 0;
-        }
-    }
-
-    fn effect(&mut self, limit: u32) -> bool {
-        self.refresh();
-        if self.effects >= limit.max(1) { return false; }
-        self.effects += 1;
-        true
-    }
-
-    fn paint(&mut self, points: usize, limit: u32) -> bool {
-        self.refresh();
-        let points = points.min(u32::MAX as usize) as u32;
-        if self.paint_points.saturating_add(points) > limit.max(1) { return false; }
-        self.paint_points = self.paint_points.saturating_add(points);
-        true
-    }
-}
-
 async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
     let state = ctx.state.clone();
     let mut events_rx = state.events.subscribe();
@@ -652,16 +615,14 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
 
     let conn_id = state.conn_seq.fetch_add(1, Ordering::SeqCst);
     state.status.lock().clients += 1;
-    let is_local = addr.ip().is_loopback();
     let mut client_id = String::new();
-    let mut role = if is_local { ClientRole::Operator } else { ClientRole::Participant };
-    let mut participation_limiter = ParticipationLimiter::new();
     let mut authenticated = false;
     let mut preview: Option<PreviewSub> = None;
     let mut announced_meta = (0u32, 0u32, 0u32);
     let mut queued_notified: Option<u32> = None;
     // Loopback clients (the desktop window, aux windows, local browsers) are
     // exempt from preview-slot rationing: their frames never cross the NIC.
+    let is_local = addr.ip().is_loopback();
     let max_preview = |state: &SharedState| {
         state.config.read().server.max_preview_clients.max(1) as usize
     };
@@ -684,15 +645,15 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                                     break;
                                 }
                                 let mut reset_meta = false;
-                                if handle_msg(&ctx, m, &mut client_id, &mut role, &mut participation_limiter, conn_id, addr, &mut preview, &mut reset_meta, &mut tx).await.is_err() {
+                                if handle_msg(&ctx, m, &mut client_id, conn_id, addr, &mut preview, &mut reset_meta, &mut tx).await.is_err() {
                                     break;
                                 }
                                 if is_hello {
                                     authenticated = true;
-                                    if send_json(&mut tx, &ServerMsg::Role { role }).await.is_err() {
-                                        break;
-                                    }
-                                    let hello = state_message_for(&state, role, &client_id);
+                                    let hello = ServerMsg::State {
+                                        config: Box::new(state.config.read().clone()),
+                                        status: state.status.lock().clone(),
+                                    };
                                     if send_json(&mut tx, &hello).await.is_err() {
                                         break;
                                     }
@@ -709,7 +670,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                         }
                     }
                     Message::Binary(bytes) => {
-                        if authenticated && role == ClientRole::Operator {
+                        if authenticated {
                             handle_video_frame(&state, conn_id, &bytes);
                         }
                     }
@@ -736,10 +697,6 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                     }
                 }
                 match ev {
-                    Ok(ServerMsg::State { .. }) => {
-                        let ev = state_message_for(&state, role, &client_id);
-                        if send_json(&mut tx, &ev).await.is_err() { break; }
-                    }
                     Ok(ev) => { if send_json(&mut tx, &ev).await.is_err() { break; } }
                     Err(RecvError::Lagged(_)) => continue,
                     Err(RecvError::Closed) => break,
@@ -903,87 +860,6 @@ async fn require_local_operator(tx: &mut WsSink, addr: SocketAddr, action: &str)
     )
     .await;
     false
-}
-
-fn redacted_config(mut cfg: AppConfig, role: ClientRole, client_id: &str) -> AppConfig {
-    if role == ClientRole::Operator {
-        return cfg;
-    }
-    cfg.server.join_token.clear();
-    cfg.server.auth_token = None;
-    cfg.public_access.participant_token.clear();
-    cfg.public_access.moderator_token.clear();
-    cfg.clients.clear();
-    cfg.output.controllers.clear();
-    cfg.active_patch = None;
-    cfg.ready_stack = None;
-    cfg.saved_performances.clear();
-    cfg.saved_playlists.clear();
-    let allowed = cfg.public_access.public_scene_ids.clone();
-    cfg.saved_stacks.retain(|stack| allowed.contains(&stack.id));
-    if role == ClientRole::Participant {
-        cfg.media_submissions.retain(|item| item.owner_id == client_id);
-    }
-    cfg
-}
-
-fn state_message_for(state: &SharedState, role: ClientRole, client_id: &str) -> ServerMsg {
-    let config = redacted_config(state.config.read().clone(), role, client_id);
-    ServerMsg::State {
-        config: Box::new(config),
-        status: state.status.lock().clone(),
-    }
-}
-
-fn message_allowed(role: ClientRole, msg: &ClientMsg) -> bool {
-    if role == ClientRole::Operator || matches!(msg, ClientMsg::Hello { .. }) {
-        return true;
-    }
-    let participant = matches!(
-        msg,
-        ClientMsg::GetState
-            | ClientMsg::SetClientName { .. }
-            | ClientMsg::TriggerEffect { .. }
-            | ClientMsg::Paint { .. }
-            | ClientMsg::SubscribePreview { .. }
-            | ClientMsg::UnsubscribePreview
-            | ClientMsg::ActivatePublicScene { .. }
-            | ClientMsg::SubmitMedia { .. }
-    );
-    participant
-        || (role == ClientRole::Moderator
-            && matches!(
-                msg,
-                ClientMsg::ModerateMedia { .. } | ClientMsg::RemoveMediaSubmission { .. }
-            ))
-}
-
-async fn permission_denied(tx: &mut WsSink) -> Result<(), ()> {
-    let _ = send_json(
-        tx,
-        &ServerMsg::Error {
-            message: "That control is not available to this device.".into(),
-        },
-    )
-    .await;
-    Ok(())
-}
-
-fn trusted_media_url(raw: &str, domains: &[String]) -> Result<(String, bool), String> {
-    let parsed = url::Url::parse(raw).map_err(|_| "Enter a valid http(s) URL.".to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https")
-        || !parsed.username().is_empty()
-        || parsed.password().is_some()
-    {
-        return Err("Only public http(s) URLs without embedded credentials are accepted.".into());
-    }
-    let host = parsed.host_str().ok_or_else(|| "The URL needs a public hostname.".to_string())?;
-    let trusted = domains.iter().any(|domain| {
-        let domain = domain.trim().trim_start_matches('.').to_ascii_lowercase();
-        let host = host.to_ascii_lowercase();
-        !domain.is_empty() && (host == domain || host.ends_with(&format!(".{domain}")))
-    });
-    Ok((parsed.to_string(), trusted))
 }
 
 /// Friendly device name for the timeline; falls back to the raw id.
@@ -1206,8 +1082,6 @@ async fn handle_msg(
     ctx: &Ctx,
     msg: ClientMsg,
     client_id: &mut String,
-    role: &mut ClientRole,
-    participation_limiter: &mut ParticipationLimiter,
     conn_id: u64,
     addr: SocketAddr,
     preview: &mut Option<PreviewSub>,
@@ -1215,9 +1089,6 @@ async fn handle_msg(
     tx: &mut WsSink,
 ) -> Result<(), ()> {
     let state = &ctx.state;
-    if !message_allowed(*role, &msg) {
-        return permission_denied(tx).await;
-    }
     // Feedback capture: every operator action that can change what the array
     // does, logged in one place so new message kinds can't quietly go unrecorded.
     record_timeline(state, &msg, client_id);
@@ -1237,40 +1108,26 @@ async fn handle_msg(
                 return deny(tx, "Invalid client identity.").await;
             }
             let is_local = addr.ip().is_loopback();
-            let (known, revoked, operator_token, moderator_token, participant_token, client_capacity_reached) = {
+            let (known, revoked, token_ok, client_capacity_reached) = {
                 let cfg = state.config.read();
                 let rec = cfg.clients.iter().find(|c| c.id == id);
                 (
                     rec.is_some(),
                     rec.is_some_and(|r| r.revoked),
-                    !token.is_empty() && token == cfg.server.join_token,
-                    !token.is_empty() && token == cfg.public_access.moderator_token,
-                    !token.is_empty() && token == cfg.public_access.participant_token,
+                    token == cfg.server.join_token,
                     cfg.clients.len() >= crate::config::MAX_CLIENT_RECORDS,
                 )
             };
             if revoked {
                 return deny(tx, "Access revoked by the operator.").await;
             }
-            if state.config.read().server.require_token
-                && !is_local
-                && !operator_token
-                && !moderator_token
-                && !participant_token
-            {
+            if state.config.read().server.require_token && !is_local && !known && !token_ok {
                 return deny(
                     tx,
                     "This system requires a join token — scan the Connect QR code in the app.",
                 )
                 .await;
             }
-            *role = if is_local || operator_token {
-                ClientRole::Operator
-            } else if moderator_token {
-                ClientRole::Moderator
-            } else {
-                ClientRole::Participant
-            };
             if !known && client_capacity_reached {
                 return deny(
                     tx,
@@ -1380,86 +1237,6 @@ async fn handle_msg(
                 )
                 .await;
             }
-        }
-        ClientMsg::ActivatePublicScene { id } => {
-            let stack = {
-                let cfg = state.config.read();
-                if *role != ClientRole::Operator
-                    && (cfg.public_access.mode != PublicMode::Curated
-                        || !cfg.public_access.public_scene_ids.contains(&id))
-                {
-                    None
-                } else {
-                    cfg.saved_stacks.iter().find(|stack| stack.id == id).cloned()
-                }
-            };
-            let Some(stack) = stack else {
-                return permission_denied(tx).await;
-            };
-            state.request_render_transition();
-            state.update_config(|cfg| {
-                cfg.active_patch = None;
-                cfg.show_scheduler.enabled = false;
-                cfg.layers = stack.layers;
-                cfg.render.master_speed = stack.master_speed;
-                cfg.render.walk_enabled = stack.walk_enabled;
-                cfg.render.walk_layers = stack.walk_layers;
-                cfg.render.walk_min_layers = stack.walk_min_layers;
-                cfg.render.walk_speed = stack.walk_speed;
-                cfg.render.walk_depth = stack.walk_depth;
-                cfg.rhythm.pro_dj_link_effects = stack.dj_link_effects;
-            });
-        }
-        ClientMsg::SubmitMedia { url } => {
-            let (mode, enabled, approval, domains) = {
-                let cfg = state.config.read();
-                (
-                    cfg.public_access.mode,
-                    cfg.public_access.media_submissions_enabled,
-                    cfg.public_access.media_approval,
-                    cfg.public_access.trusted_media_domains.clone(),
-                )
-            };
-            if mode != PublicMode::Curated || !enabled {
-                return permission_denied(tx).await;
-            }
-            let (url, trusted) = match trusted_media_url(&url, &domains) {
-                Ok(value) => value,
-                Err(message) => {
-                    let _ = send_json(tx, &ServerMsg::Error { message }).await;
-                    return Ok(());
-                }
-            };
-            let auto_approved = approval == MediaApprovalMode::Open
-                || (approval == MediaApprovalMode::TrustedDomains && trusted);
-            let owner_id = client_id.clone();
-            state.update_config(|cfg| {
-                if cfg.media_submissions.len() >= 200 {
-                    cfg.media_submissions.remove(0);
-                }
-                cfg.media_submissions.push(MediaSubmission {
-                    id: uuid::Uuid::new_v4().simple().to_string(),
-                    owner_id,
-                    url,
-                    status: if auto_approved {
-                        MediaSubmissionStatus::Approved
-                    } else {
-                        MediaSubmissionStatus::Pending
-                    },
-                    auto_approved,
-                });
-            });
-        }
-        ClientMsg::ModerateMedia { id, status } => {
-            state.update_config(|cfg| {
-                if let Some(item) = cfg.media_submissions.iter_mut().find(|item| item.id == id) {
-                    item.status = status;
-                    item.auto_approved = false;
-                }
-            });
-        }
-        ClientMsg::RemoveMediaSubmission { id } => {
-            state.update_config(|cfg| cfg.media_submissions.retain(|item| item.id != id));
         }
         ClientMsg::SetConfig { config } => {
             if let Err(e) = config.validate() {
@@ -1997,22 +1774,6 @@ async fn handle_msg(
             });
         }
         ClientMsg::TriggerEffect { effect } => {
-            if *role != ClientRole::Operator {
-                let access = state.config.read().public_access.clone();
-                if access.mode == PublicMode::Private || !access.allowed_effects.contains(&effect.kind) {
-                    return permission_denied(tx).await;
-                }
-                if !participation_limiter.effect(access.effects_per_second) {
-                    return permission_denied(tx).await;
-                }
-            }
-            let mut effect = effect;
-            if *role != ClientRole::Operator {
-                effect.intensity = effect.intensity.clamp(0.0, 1.0);
-                effect.size = effect.size.clamp(0.25, 2.0);
-                effect.duration = effect.duration.clamp(0.0, 3.0);
-                effect.grow = effect.grow.clamp(-1.0, 1.0);
-            }
             state.trigger_effect(effect);
         }
         ClientMsg::Paint {
@@ -2024,21 +1785,6 @@ async fn handle_msg(
             size,
             intensity,
         } => {
-            let (size, intensity) = if *role == ClientRole::Operator {
-                (size, intensity)
-            } else {
-                let access = state.config.read().public_access.clone();
-                if access.mode == PublicMode::Private || !access.drawing_enabled {
-                    return permission_denied(tx).await;
-                }
-                if !participation_limiter.paint(points.len(), access.paint_points_per_second) {
-                    return permission_denied(tx).await;
-                }
-                (
-                    size.clamp(0.01, access.max_paint_size.clamp(0.01, 0.3)),
-                    intensity.clamp(0.0, access.max_paint_intensity.clamp(0.0, 1.0)),
-                )
-            };
             state.paint(pen, &points, hue, saturation, brightness, size, intensity);
         }
         ClientMsg::SubscribePreview { fps, decimate, include_ready } => {
@@ -2163,54 +1909,6 @@ mod diagnostics_tests {
         let state = SharedState::new(AppConfig::default());
         let loopback = "127.0.0.1:1234".parse().unwrap();
         assert!(diagnostics_authorized(&state, loopback, "", ""));
-    }
-
-    #[test]
-    fn participant_protocol_is_an_allowlist() {
-        assert!(message_allowed(
-            ClientRole::Participant,
-            &ClientMsg::ActivatePublicScene { id: "scene".into() }
-        ));
-        assert!(message_allowed(
-            ClientRole::Participant,
-            &ClientMsg::SubmitMedia { url: "https://youtu.be/x".into() }
-        ));
-        assert!(!message_allowed(
-            ClientRole::Participant,
-            &ClientMsg::SetSacnEnabled { enabled: false }
-        ));
-        assert!(!message_allowed(
-            ClientRole::Participant,
-            &ClientMsg::SetConfig { config: Box::new(AppConfig::default()) }
-        ));
-    }
-
-    #[test]
-    fn media_domain_matching_cannot_be_suffix_spoofed() {
-        let domains = vec!["youtube.com".to_string(), "instagram.com".to_string()];
-        assert!(trusted_media_url("https://m.youtube.com/watch?v=x", &domains).unwrap().1);
-        assert!(!trusted_media_url("https://youtube.com.evil.example/x", &domains).unwrap().1);
-        assert!(trusted_media_url("file:///etc/passwd", &domains).is_err());
-    }
-
-    #[test]
-    fn participant_state_redacts_credentials_and_other_submissions() {
-        let mut config = AppConfig::default();
-        config.server.join_token = "operator-secret".into();
-        config.public_access.participant_token = "participant-secret".into();
-        config.media_submissions.push(MediaSubmission {
-            id: "mine".into(), owner_id: "phone-a".into(), url: "https://youtu.be/a".into(),
-            status: MediaSubmissionStatus::Pending, auto_approved: false,
-        });
-        config.media_submissions.push(MediaSubmission {
-            id: "theirs".into(), owner_id: "phone-b".into(), url: "https://youtu.be/b".into(),
-            status: MediaSubmissionStatus::Pending, auto_approved: false,
-        });
-        let redacted = redacted_config(config, ClientRole::Participant, "phone-a");
-        assert!(redacted.server.join_token.is_empty());
-        assert!(redacted.public_access.participant_token.is_empty());
-        assert_eq!(redacted.media_submissions.len(), 1);
-        assert_eq!(redacted.media_submissions[0].id, "mine");
     }
 
     #[test]

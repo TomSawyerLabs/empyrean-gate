@@ -1,7 +1,7 @@
 //! Application configuration: geometry of the installation, sACN output, audio
 //! sources, server, and the layer stack. Persisted as JSON in the user config dir.
 
-use crate::layers::{BlendMode, EffectKind, LayerCfg, LayerKind};
+use crate::layers::{BlendMode, LayerCfg, LayerKind};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -179,91 +179,6 @@ pub struct ClientRecord {
     pub id: String,
     pub name: String,
     pub revoked: bool,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PublicMode {
-    #[default]
-    Private,
-    Effects,
-    Curated,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MediaApprovalMode {
-    #[default]
-    Manual,
-    TrustedDomains,
-    Open,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MediaSubmissionStatus {
-    #[default]
-    Pending,
-    Approved,
-    Rejected,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct MediaSubmission {
-    pub id: String,
-    pub owner_id: String,
-    pub url: String,
-    pub status: MediaSubmissionStatus,
-    pub auto_approved: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct PublicAccessConfig {
-    pub mode: PublicMode,
-    pub participant_token: String,
-    pub moderator_token: String,
-    pub drawing_enabled: bool,
-    pub allowed_effects: Vec<EffectKind>,
-    pub public_scene_ids: Vec<String>,
-    pub media_submissions_enabled: bool,
-    pub media_approval: MediaApprovalMode,
-    pub trusted_media_domains: Vec<String>,
-    pub max_paint_size: f32,
-    pub max_paint_intensity: f32,
-    pub effects_per_second: u32,
-    pub paint_points_per_second: u32,
-}
-
-impl Default for PublicAccessConfig {
-    fn default() -> Self {
-        Self {
-            mode: PublicMode::Private,
-            participant_token: String::new(),
-            moderator_token: String::new(),
-            drawing_enabled: true,
-            allowed_effects: vec![
-                EffectKind::Burst,
-                EffectKind::Swoosh,
-                EffectKind::Bloom,
-                EffectKind::Twinkle,
-                EffectKind::Ring,
-            ],
-            public_scene_ids: Vec::new(),
-            media_submissions_enabled: false,
-            media_approval: MediaApprovalMode::Manual,
-            trusted_media_domains: vec![
-                "youtube.com".into(),
-                "youtu.be".into(),
-                "instagram.com".into(),
-            ],
-            max_paint_size: 0.18,
-            max_paint_intensity: 0.7,
-            effects_per_second: 6,
-            paint_points_per_second: 120,
-        }
-    }
 }
 
 /// Random URL-safe token used by join links and authenticated local handover.
@@ -884,10 +799,6 @@ pub struct AppConfig {
     pub show_scheduler: ShowSchedulerConfig,
     /// Known client devices (see `ClientRecord`).
     pub clients: Vec<ClientRecord>,
-    /// Public participation policy. The active mode is reset to Private on every
-    /// backend start, while allowlists and credentials remain persisted.
-    pub public_access: PublicAccessConfig,
-    pub media_submissions: Vec<MediaSubmission>,
     /// Id of the node-graph patch the engine renders instead of the layer
     /// stack; `None` renders the stack (a dev-time bridge until the stack is
     /// retired — see `plans/node-graph.md`).
@@ -931,8 +842,6 @@ impl Default for AppConfig {
             saved_playlists: Vec::new(),
             show_scheduler: ShowSchedulerConfig::default(),
             clients: Vec::new(),
-            public_access: PublicAccessConfig::default(),
-            media_submissions: Vec::new(),
             active_patch: None,
         }
     }
@@ -1142,17 +1051,6 @@ pub fn load() -> AppConfig {
     // First-run identities. Both must be written back immediately: the sACN CID in
     // particular is only useful if it is the SAME one next launch.
     let mut dirty = recovered; // rewrite a good main config after any fallback
-    // Fail closed after every process restart. An operator must deliberately
-    // reopen public interaction for the current show.
-    cfg.public_access.mode = PublicMode::Private;
-    if cfg.public_access.participant_token.is_empty() {
-        cfg.public_access.participant_token = generate_token();
-        dirty = true;
-    }
-    if cfg.public_access.moderator_token.is_empty() {
-        cfg.public_access.moderator_token = generate_token();
-        dirty = true;
-    }
     if cfg.server.join_token.is_empty() {
         cfg.server.join_token = generate_token();
         dirty = true;
