@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 
+// These cases intentionally mutate the one shared mock bus/configuration.
+test.describe.configure({ mode: "serial" });
+
 async function openReadyWithWire(page: import("@playwright/test").Page) {
   const sent: string[] = [];
   page.on("websocket", (socket) => socket.on("framesent", (frame) => {
