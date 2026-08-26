@@ -1,6 +1,21 @@
 import { expect, test } from "@playwright/test";
 import { SCENE_PRESETS } from "../src/scenes";
 
+test("new visual studies have distinct silhouettes, palettes, and motion", () => {
+  const studies = [
+    SCENE_PRESETS.find((scene) => scene.id === "monochrome-switchyard"),
+    SCENE_PRESETS.find((scene) => scene.id === "hyperfruit-pinball"),
+    SCENE_PRESETS.find((scene) => scene.id === "infrared-topography"),
+  ];
+
+  expect(studies.every(Boolean)).toBe(true);
+  expect(new Set(studies.map((scene) => scene!.layers.map((layer) => layer.kind).join(","))).size).toBe(3);
+  expect(studies[0]!.layers.some((layer) => layer.kind === "solid")).toBe(true);
+  expect(studies[1]!.layers.some((layer) => layer.kind === "meteors")).toBe(true);
+  expect(studies[2]!.layers.some((layer) => layer.blend === "multiply")).toBe(true);
+  expect(new Set(studies.map((scene) => scene!.palette.join(","))).size).toBe(3);
+});
+
 test("DJ mode scenes combine master-audio anchors with LINK-synchronized layers", () => {
   const subduction = SCENE_PRESETS.find((scene) => scene.id === "dj-subduction-array");
   const prism = SCENE_PRESETS.find((scene) => scene.id === "dj-prism-relay");

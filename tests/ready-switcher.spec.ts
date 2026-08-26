@@ -17,6 +17,21 @@ async function openReadyWithWire(page: import("@playwright/test").Page) {
   };
 }
 
+async function expectCanvasInsidePreview(
+  preview: import("@playwright/test").Locator,
+) {
+  const [stage, canvas] = await Promise.all([
+    preview.boundingBox(),
+    preview.locator("canvas").boundingBox(),
+  ]);
+  expect(stage).not.toBeNull();
+  expect(canvas).not.toBeNull();
+  expect(canvas!.x).toBeGreaterThan(stage!.x);
+  expect(canvas!.y).toBeGreaterThan(stage!.y);
+  expect(canvas!.x + canvas!.width).toBeLessThan(stage!.x + stage!.width);
+  expect(canvas!.y + canvas!.height).toBeLessThan(stage!.y + stage!.height);
+}
+
 test("a scene can be prepared off air and taken to Program", async ({ page, request }) => {
   await request.post("/mock/reset-config");
   await page.setViewportSize({ width: 1400, height: 900 });
@@ -45,6 +60,9 @@ test("the phone layout keeps both buses and Take reachable", async ({ page }) =>
   await expect(page.locator(".bus-card.program")).toBeVisible();
   await expect(page.locator(".take-button")).toBeVisible();
   await expect(page.locator(".bus-card.ready")).toBeVisible();
+  for (const preview of await page.locator(".bus-preview:has(canvas)").all()) {
+    await expectCanvasInsidePreview(preview);
+  }
 });
 
 test("Ready exposes complete master and layer tuning without touching Program", async ({ page, request }) => {
