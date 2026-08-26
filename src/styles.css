@@ -435,8 +435,21 @@ main {
 .bus-live, .bus-safe { padding: 4px 8px; border-radius: 999px; font-size: 9px; font-style: normal; font-weight: 900; letter-spacing: .09em; }
 .bus-live { color: #ff8399; background: rgba(255, 92, 122, .16); }
 .bus-safe { color: var(--accent2); background: rgba(56, 209, 194, .12); }
-.bus-preview { display: grid; aspect-ratio: 1.42; min-height: 260px; place-items: center; }
-.bus-preview .gate-canvas { width: min(92%, 460px); height: min(92%, 460px); }
+.bus-preview {
+  display: grid;
+  /* Give the square Gate a taller stage than the old 1.42:1 letterbox. This
+     keeps the outer pixels and their glow comfortably inside both bus cards. */
+  aspect-ratio: 1.25;
+  min-height: 300px;
+  place-items: center;
+}
+.bus-preview .gate-canvas {
+  /* A 1.25:1 stage is 80% as tall as it is wide; 72% leaves 4% of that width
+     above and below the square. Width drives height so the browser never
+     stretches GateCanvas's square backing buffer. */
+  width: min(72%, 520px);
+  height: auto;
+}
 .bus-preview.empty { padding: 32px; color: var(--muted); text-align: center; }
 
 .take-column { display: grid; justify-items: center; gap: 9px; text-align: center; }
@@ -4236,7 +4249,7 @@ button:disabled {
   .take-column { grid-template-columns: 1fr auto 1fr; align-items: center; }
   .take-button { width: 76px; height: 76px; }
   .take-column small { text-align: left; }
-  .bus-preview { min-height: 220px; }
+  .bus-preview { min-height: 260px; }
   .ready-tuning-head { align-items: flex-start; flex-direction: column; }
   .ready-master-grid { grid-template-columns: minmax(0, 1fr); }
   .ready-layers-head { align-items: stretch; flex-direction: column; }
