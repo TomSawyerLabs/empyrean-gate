@@ -1077,7 +1077,7 @@ dependencies = [
 
 [[package]]
 name = "digest"
-version = "0.10.8"
+version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
@@ -1276,7 +1276,7 @@ checksum = "4ef6b89e5b37196644d8796de5268852ff179b44e96276cf4290264843743bb7"
 
 [[package]]
 name = "empyrean-gate"
-version = "0.10.7"
+version = "0.10.9"
 dependencies = [
  "anyhow",
  "axum",

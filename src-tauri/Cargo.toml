@@ -1,6 +1,6 @@
 [package]
 name = "empyrean-gate"
-version = "0.10.8"
+version = "0.10.9"
 description = "GPU pattern generator and sACN output for the Empyrean Gate"
 license = "MIT"
 edition = "2024"
