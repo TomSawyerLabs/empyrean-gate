@@ -323,7 +323,7 @@ export default function Media() {
           return false;
         }
         sourceIndex = sources.length;
-        sources.push({ id: "video", kind: "video", gain: 1 });
+        sources.push({ id: "video", kind: "video", gain: 1, brightness_follows_audio: false });
       }
     } else if (mode.startsWith("source:")) {
       sourceIndex = Number(mode.slice(7));

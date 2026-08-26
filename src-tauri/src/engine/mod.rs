@@ -1000,6 +1000,54 @@ impl MasterDropDetector {
     }
 }
 
+/// A deliberately gentle whole-gate loudness follower. Its curve reaches near
+/// full brightness well before the analyzer reaches 1.0, while retaining a
+/// useful low-end range for breakdowns and fader-down moments.
+struct AudioBrightnessFollower {
+    brightness: f32,
+}
+
+impl Default for AudioBrightnessFollower {
+    fn default() -> Self {
+        Self { brightness: 1.0 }
+    }
+}
+
+impl AudioBrightnessFollower {
+    fn target(levels: &[f32]) -> f32 {
+        if levels.is_empty() {
+            return 1.0;
+        }
+
+        // A normalized softmax is effectively a smooth maximum: a strong main
+        // feed wins, but enabling a second copy of it cannot add brightness.
+        let peak = levels.iter().copied().fold(0.0f32, f32::max);
+        let mut weighted_level = 0.0;
+        let mut weights = 0.0;
+        for level in levels.iter().copied() {
+            let level = level.clamp(0.0, 1.0);
+            let weight = ((level - peak) * 8.0).exp();
+            weighted_level += level * weight;
+            weights += weight;
+        }
+        let level = weighted_level / weights.max(f32::EPSILON);
+
+        // Smoothstep suppresses analyzer noise near silence; sqrt biases the
+        // useful middle upward so normal program material stays usually bright.
+        let x = ((level - 0.04) / 0.48).clamp(0.0, 1.0);
+        let shaped = (x * x * (3.0 - 2.0 * x)).sqrt();
+        0.18 + 0.82 * shaped
+    }
+
+    fn step(&mut self, levels: &[f32], dt: f32) -> f32 {
+        let target = Self::target(levels);
+        let dt = dt.clamp(0.0, 0.1);
+        let tau = if target > self.brightness { 0.18 } else { 1.4 };
+        self.brightness += (target - self.brightness) * (1.0 - (-dt / tau).exp());
+        self.brightness
+    }
+}
+
 fn stack_from_config(cfg: &crate::config::AppConfig) -> crate::config::SavedStack {
     crate::config::SavedStack {
         id: "live-stack".into(),
@@ -1145,8 +1193,9 @@ fn transition_layers(
 #[cfg(test)]
 mod beat_time_tests {
     use super::{
-        MasterDropDetector, apply_stack_to_config, effective_beat_phase, hybrid_audio_level,
-        pioneer_visual_signal_active, stack_from_config, transition_layers, walked_speed,
+        AudioBrightnessFollower, MasterDropDetector, apply_stack_to_config, effective_beat_phase,
+        hybrid_audio_level, pioneer_visual_signal_active, stack_from_config, transition_layers,
+        walked_speed,
     };
     use crate::config::{AppConfig, BeatTime, SavedStack};
     use crate::layers::MAX_LAYERS;
@@ -1226,6 +1275,31 @@ mod beat_time_tests {
         for _ in 0..12 {
             assert!(!detector.step(0.01, true, 1.0 / 60.0).1);
         }
+    }
+
+    #[test]
+    fn audio_brightness_follower_is_bright_but_tracks_sustained_quiet() {
+        assert_eq!(AudioBrightnessFollower::target(&[]), 1.0);
+        assert!(AudioBrightnessFollower::target(&[0.5]) > 0.98);
+        assert!(AudioBrightnessFollower::target(&[0.3]) > 0.75);
+        assert!(AudioBrightnessFollower::target(&[0.05]) < 0.25);
+
+        // Duplicate sources cannot inflate the response above one source.
+        let one = AudioBrightnessFollower::target(&[0.32]);
+        let duplicate = AudioBrightnessFollower::target(&[0.32, 0.32]);
+        assert!((one - duplicate).abs() < 1e-6);
+        // A quiet redundant feed barely drags down the live main feed.
+        assert!(AudioBrightnessFollower::target(&[0.45, 0.03]) > 0.95);
+
+        let mut follower = AudioBrightnessFollower::default();
+        for _ in 0..180 {
+            follower.step(&[0.02], 1.0 / 60.0);
+        }
+        assert!(follower.brightness < 0.3, "brightness={}", follower.brightness);
+        for _ in 0..60 {
+            follower.step(&[0.6], 1.0 / 60.0);
+        }
+        assert!(follower.brightness > 0.98, "brightness={}", follower.brightness);
     }
 
     #[test]
@@ -1495,6 +1569,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut dj_fade_position = 0.5f32;
     let mut dj_fade_activity = 0.0f32;
     let mut master_drop = MasterDropDetector::default();
+    let mut audio_brightness = AudioBrightnessFollower::default();
 
     #[cfg(feature = "shader-hot-reload")]
     let shader_dirty = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1896,6 +1971,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // any layer's level/bands/waveform source.
         let audio_inputs: [crate::state::AudioFeatures; MAX_AUDIO_SOURCES] =
             std::array::from_fn(|i| *state.audio[i].lock());
+        let brightness_levels: Vec<f32> = cfg
+            .audio
+            .sources
+            .iter()
+            .zip(audio_inputs.iter())
+            .filter(|(source, features)| source.brightness_follows_audio && features.active)
+            .map(|(_, features)| features.level)
+            .collect();
+        let audio_follow_brightness = audio_brightness.step(&brightness_levels, dt);
         for (i, a) in audio_inputs.iter().enumerate() {
             if a.bpm <= 0.0 {
                 raw_beat_count[i] = 0;
@@ -2679,7 +2763,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 effect_count: effects.len() as u32,
                 time: state.started.elapsed().as_secs_f32(),
                 dt,
-                master: render_master_brightness * master_drop_brightness,
+                master: render_master_brightness
+                    * master_drop_brightness
+                    * audio_follow_brightness,
                 inner_over_outer: (cfg.geometry.inner_radius_ft
                     / cfg.geometry.outer_radius_ft.max(0.001))
                 .clamp(0.0, 1.0),
@@ -3058,7 +3144,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         // Effective values, not the configured ones: a master drop
                         // or a scene transition overrides both, and the whole point
                         // of a report is what was actually rendering.
-                        master_brightness: render_master_brightness * master_drop_brightness,
+                        master_brightness: render_master_brightness
+                            * master_drop_brightness
+                            * audio_follow_brightness,
                         master_speed: render_master_speed,
                         effects_active,
                         dabs_active,

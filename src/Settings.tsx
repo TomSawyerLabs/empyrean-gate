@@ -901,7 +901,11 @@ function AudioPanel({ config }: { config: AppConfig }) {
                 value={s.kind === "device" ? (s.loopback ? "loopback" : "device") : s.kind}
                 onChange={(e) => {
                   const kind = e.target.value;
-                  const base = { id: s.id, gain: s.gain };
+                  const base = {
+                    id: s.id,
+                    gain: s.gain,
+                    brightness_follows_audio: s.brightness_follows_audio,
+                  };
                   commit(
                     sources.map((x, j) =>
                       j === i
@@ -952,6 +956,14 @@ function AudioPanel({ config }: { config: AppConfig }) {
                   style={{ width: "10em" }}
                 />
               )}
+              <label className="audio-brightness-toggle" title="Dim the whole gate when this source gets quiet">
+                <input
+                  type="checkbox"
+                  checked={s.brightness_follows_audio ?? false}
+                  onChange={(e) => updateSource(i, { brightness_follows_audio: e.target.checked })}
+                />
+                Follow brightness
+              </label>
               <span className="spacer" />
               <button className="danger" onClick={() => commit(sources.filter((_, j) => j !== i))}>
                 ✕
@@ -990,6 +1002,7 @@ function AudioPanel({ config }: { config: AppConfig }) {
                 channels: [],
                 loopback: false,
                 gain: 1,
+                brightness_follows_audio: false,
               },
             ])
           }

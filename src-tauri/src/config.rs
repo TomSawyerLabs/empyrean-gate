@@ -217,6 +217,11 @@ pub struct AudioSourceConfig {
     #[serde(flatten)]
     pub kind: AudioSourceKind,
     pub gain: f32,
+    /// When enabled, this source's level contributes to the whole-gate
+    /// brightness envelope. Multiple opted-in sources are combined as a soft
+    /// maximum, so redundant feeds do not make the gate brighter.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub brightness_follows_audio: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -384,6 +389,7 @@ impl Default for AudioConfig {
                     loopback: false,
                 },
                 gain: 1.0,
+                brightness_follows_audio: false,
             }],
         }
     }
@@ -1235,6 +1241,26 @@ mod tests {
         assert_eq!(cfg.phase_reset_at, None);
         // Unchanged fields keep coming from Default, not from zero.
         assert_eq!(cfg.fps, 60.0);
+    }
+
+    #[test]
+    fn audio_brightness_follow_is_opt_in_and_backwards_compatible() {
+        let older = serde_json::json!({
+            "id": "main",
+            "kind": "device",
+            "device": null,
+            "channels": [],
+            "loopback": false,
+            "gain": 1.0
+        });
+        let source: AudioSourceConfig =
+            serde_json::from_value(older).expect("older audio source config");
+        assert!(!source.brightness_follows_audio);
+
+        let mut opted_in = source;
+        opted_in.brightness_follows_audio = true;
+        let value = serde_json::to_value(opted_in).expect("serialize opted-in audio source");
+        assert_eq!(value["brightness_follows_audio"], true);
     }
 
     /// The web UI's layout tests drive a mock backend that replays a committed

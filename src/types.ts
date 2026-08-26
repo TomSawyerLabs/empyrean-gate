@@ -207,6 +207,8 @@ export interface ClientInfo {
 export type AudioSourceConfig = {
   id: string;
   gain: number;
+  /** Let this source's level drive the whole gate's brightness. */
+  brightness_follows_audio?: boolean;
 } & (
   | { kind: "device"; device: string | null; channels: number[]; loopback: boolean }
   | { kind: "remote"; client_id: string }
