@@ -1868,7 +1868,6 @@ async fn fetch_track_info(request: MetadataRequest) -> Result<ProDjLinkTrackInfo
 }
 
 fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
-    use crate::layers::{EffectCfg, EffectKind};
     use crate::state::{
         DJ_EVENT_CUE, DJ_EVENT_CUE_RELEASE, DJ_EVENT_JUMP, DJ_EVENT_LOOP_END, DJ_EVENT_LOOP_START,
         DJ_EVENT_LOOP_WRAP, DJ_EVENT_OFF_AIR, DJ_EVENT_ON_AIR, DJ_EVENT_PLAY,
@@ -1885,16 +1884,6 @@ fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
         | PioneerVisualEvent::LoopEnded(player)
         | PioneerVisualEvent::Jump(player) => player,
     };
-    // Deck 1 occupies the left hemisphere, deck 2 the right. Additional
-    // players fan around the circle rather than all originating at one point.
-    let angle = match player {
-        // The preview rotates spoke zero to the top: shader-space -Y/+Y are
-        // displayed left/right respectively.
-        1 => -std::f32::consts::FRAC_PI_2,
-        2 => std::f32::consts::FRAC_PI_2,
-        _ => f32::from(player.saturating_sub(1)) * std::f32::consts::FRAC_PI_2,
-    };
-    let hue = if player == 1 { 0.58 } else { 0.08 };
     let patch_event = match event {
         PioneerVisualEvent::PlayStarted(_) => DJ_EVENT_PLAY,
         PioneerVisualEvent::CueStarted(_) | PioneerVisualEvent::CuePlayStarted(_) => DJ_EVENT_CUE,
@@ -1910,30 +1899,35 @@ fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
         .pioneer_patch_events
         .lock()
         .record(patch_event, player);
-    let effect = |kind, intensity, size, radius, duration| EffectCfg {
-        kind,
-        angle,
-        radius,
-        intensity,
-        size,
-        hue,
-        saturation: 0.9,
-        brightness: 1.0,
-        duration,
-        ..Default::default()
+    let (patch_routes_effects, configured) = {
+        let config = state.config.read();
+        (
+            config.active_patch.is_some(),
+            config.rhythm.pro_dj_link_effects.event(patch_event).to_vec(),
+        )
     };
-
-    let (event_name, visual_effects) = match event {
-        PioneerVisualEvent::PlayStarted(_) => ("play started", "burst"),
-        PioneerVisualEvent::CueStarted(_) => ("cue engaged", "burst"),
-        PioneerVisualEvent::CuePlayStarted(_) => ("cue play", "swoosh"),
-        PioneerVisualEvent::CueEnded(_) => ("cue released", "collapse"),
-        PioneerVisualEvent::OnAirChanged(_, true) => ("on air", "swoosh"),
-        PioneerVisualEvent::OnAirChanged(_, false) => ("off air", "collapse"),
-        PioneerVisualEvent::LoopStarted(_) => ("loop started", "ring"),
-        PioneerVisualEvent::LoopWrap(_) => ("loop wrapped", "ring"),
-        PioneerVisualEvent::LoopEnded(_) => ("loop ended", "ring"),
-        PioneerVisualEvent::Jump(_) => ("hot cue / seek inferred", "burst + strobe"),
+    let event_name = match event {
+        PioneerVisualEvent::PlayStarted(_) => "play started",
+        PioneerVisualEvent::CueStarted(_) => "cue engaged",
+        PioneerVisualEvent::CuePlayStarted(_) => "cue play",
+        PioneerVisualEvent::CueEnded(_) => "cue released",
+        PioneerVisualEvent::OnAirChanged(_, true) => "on air",
+        PioneerVisualEvent::OnAirChanged(_, false) => "off air",
+        PioneerVisualEvent::LoopStarted(_) => "loop started",
+        PioneerVisualEvent::LoopWrap(_) => "loop wrapped",
+        PioneerVisualEvent::LoopEnded(_) => "loop ended",
+        PioneerVisualEvent::Jump(_) => "hot cue / seek inferred",
+    };
+    let visual_effects = if patch_routes_effects {
+        "active patch".into()
+    } else if configured.is_empty() {
+        "none".into()
+    } else {
+        configured
+            .iter()
+            .map(|effect| format!("{:?}", effect.kind).to_lowercase())
+            .collect::<Vec<_>>()
+            .join(" + ")
     };
     state.push_pioneer_debug(
         "visual",
@@ -1941,47 +1935,19 @@ fn trigger_pioneer_visual(state: &SharedState, event: PioneerVisualEvent) {
         format!("{event_name} → {visual_effects}"),
         BTreeMap::from([
             ("event".into(), event_name.into()),
-            ("effects".into(), visual_effects.into()),
-            ("origin_angle_rad".into(), format!("{angle:.3}")),
-            ("deck_hue".into(), format!("{hue:.3}")),
+            ("effects".into(), visual_effects),
         ]),
     );
 
-    match event {
-        PioneerVisualEvent::PlayStarted(_) => {
-            state.trigger_effect(effect(EffectKind::Burst, 1.4, 1.25, 0.7, 1.1));
-        }
-        PioneerVisualEvent::CueStarted(_) => {
-            state.trigger_effect(effect(EffectKind::Burst, 1.15, 0.7, 0.82, 0.7));
-        }
-        PioneerVisualEvent::CuePlayStarted(_) => {
-            state.trigger_effect(effect(EffectKind::Swoosh, 1.3, 1.2, 0.82, 0.8));
-        }
-        PioneerVisualEvent::CueEnded(_) => {
-            state.trigger_effect(effect(EffectKind::Collapse, 0.8, 0.7, 0.82, 0.65));
-        }
-        PioneerVisualEvent::OnAirChanged(_, true) => {
-            state.trigger_effect(effect(EffectKind::Swoosh, 1.5, 1.8, 0.8, 1.35));
-        }
-        PioneerVisualEvent::OnAirChanged(_, false) => {
-            state.trigger_effect(effect(EffectKind::Collapse, 1.1, 1.2, 0.8, 1.1));
-        }
-        PioneerVisualEvent::LoopStarted(_) => {
-            state.trigger_effect(effect(EffectKind::Ring, 1.7, 1.1, 0.5, 1.2));
-        }
-        PioneerVisualEvent::LoopWrap(_) => {
-            state.trigger_effect(effect(EffectKind::Ring, 1.35, 0.85, 0.5, 0.75));
-        }
-        PioneerVisualEvent::LoopEnded(_) => {
-            state.trigger_effect(effect(EffectKind::Ring, 1.15, 1.2, 0.5, 0.9));
-        }
-        PioneerVisualEvent::Jump(_) => {
-            // A large analyzed-beat discontinuity is our first-version Hot Cue
-            // signal. Pair the localized burst with a short full-array strike.
-            state.trigger_effect(effect(EffectKind::Burst, 2.0, 1.5, 0.85, 1.25));
-            state.trigger_effect(effect(EffectKind::Strobe, 1.0, 1.0, 0.5, 0.22));
-        }
+    // An active patch owns granular DJ LINK reactions through its PRO DJ LINK
+    // → Event effect wiring. Do not layer the legacy transport mapping under
+    // it, or choosing Moon in the patch would still also draw the old Ring.
+    if patch_routes_effects {
+        state.low_latency_render_seq.fetch_add(1, Ordering::Release);
+        return;
     }
+
+    state.trigger_dj_link_effects(&configured, player);
     // The renderer normally submits frame N while reading back N-1. That is
     // ideal steady-state throughput, but adds a visible 16.7 ms at 60 Hz to an
     // event that arrived asynchronously just after a frame boundary. Mark only

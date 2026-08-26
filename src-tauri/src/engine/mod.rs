@@ -1011,6 +1011,7 @@ fn stack_from_config(cfg: &crate::config::AppConfig) -> crate::config::SavedStac
         walk_min_layers: cfg.render.walk_min_layers,
         walk_speed: cfg.render.walk_speed,
         walk_depth: cfg.render.walk_depth,
+        dj_link_effects: cfg.rhythm.pro_dj_link_effects.clone(),
     }
 }
 
@@ -1022,6 +1023,7 @@ fn apply_stack_to_config(cfg: &mut crate::config::AppConfig, stack: &crate::conf
     cfg.render.walk_min_layers = stack.walk_min_layers;
     cfg.render.walk_speed = stack.walk_speed;
     cfg.render.walk_depth = stack.walk_depth;
+    cfg.rhythm.pro_dj_link_effects = stack.dj_link_effects.clone();
 }
 
 fn eased_crossfade(outgoing: &[u8], incoming: &[u8], progress: f32, out: &mut Vec<u8>) {
@@ -1265,6 +1267,7 @@ mod beat_time_tests {
         stack.walk_enabled = true;
         stack.walk_depth = 2.25;
         stack.layers[0].opacity = 0.37;
+        stack.dj_link_effects.loop_wrap[0].kind = crate::layers::EffectKind::Moon;
 
         apply_stack_to_config(&mut cfg, &stack);
         let mirrored = stack_from_config(&cfg);
@@ -1273,6 +1276,10 @@ mod beat_time_tests {
         assert_eq!(mirrored.walk_enabled, stack.walk_enabled);
         assert_eq!(mirrored.walk_depth, stack.walk_depth);
         assert_eq!(mirrored.layers[0].opacity, stack.layers[0].opacity);
+        assert_eq!(
+            mirrored.dj_link_effects.loop_wrap[0].kind,
+            crate::layers::EffectKind::Moon,
+        );
     }
 
     #[test]
@@ -1388,7 +1395,26 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             None
         }
     };
+    // Ready is a persistent off-air renderer. Unlike the transition renderer it
+    // exists before a take, so selecting a scene never has to touch Program in
+    // order to produce an honest preview.
+    let mut ready_engine = match Engine::new(engine.npix) {
+        Ok(bus) => Some(bus),
+        Err(error) => {
+            log::warn!("ready render bus unavailable: {error:#}");
+            None
+        }
+    };
+    let mut ready_key = String::new();
+    let mut ready_phases = Vec::<f64>::new();
+    let mut ready_walks = Vec::<LayerWalk>::new();
+    let mut ready_targets = Vec::<bool>::new();
+    let mut ready_env = Vec::<f32>::new();
+    let mut ready_walk_rng = WalkRng::new();
+    let mut ready_next_flip = Instant::now();
+    let mut ready_rgb = Vec::<u8>::new();
     let mut handoff_epoch = state.render_transition_epoch.load(Ordering::Relaxed);
+    let mut ready_take_epoch = state.ready_take_epoch.load(Ordering::Relaxed);
     let mut handoff_started: Option<Instant> = None;
     let mut handoff_from = Vec::<u8>::new();
     let mut handoff_rgb = Vec::<u8>::new();
@@ -1473,18 +1499,29 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
 
     while !state.shutdown.load(Ordering::Relaxed) {
         #[cfg(feature = "shader-hot-reload")]
-        if shader_dirty.swap(false, Ordering::Relaxed)
-            && let Err(e) = engine.reload_shader()
-        {
-            let msg = format!("shader reload failed: {e:#}");
-            log::error!("{msg}");
-            let _ = state.events.send(ServerMsg::Error { message: msg });
+        if shader_dirty.swap(false, Ordering::Relaxed) {
+            if let Err(e) = engine.reload_shader() {
+                let msg = format!("shader reload failed: {e:#}");
+                log::error!("{msg}");
+                let _ = state.events.send(ServerMsg::Error { message: msg });
+            }
+            if let Some(ready) = ready_engine.as_mut() {
+                let _ = ready.reload_shader();
+            }
         }
 
         // Reconfigure buffers + the sACN plan only when geometry/output change —
         // NOT on every config epoch bump (sliders would reset sequence numbers).
-        let cfg = state.config.read().clone();
+        let before_handoff = state.render_transition_epoch.load(Ordering::Relaxed);
+        let before_ready_take = state.ready_take_epoch.load(Ordering::Relaxed);
+        let mut cfg = state.config.read().clone();
         let requested_handoff = state.render_transition_epoch.load(Ordering::Relaxed);
+        let requested_ready_take = state.ready_take_epoch.load(Ordering::Relaxed);
+        if requested_handoff != before_handoff || requested_ready_take != before_ready_take {
+            // An update crossed the first snapshot. Re-read after its write lock
+            // released so an epoch can never be paired with the previous config.
+            cfg = state.config.read().clone();
+        }
         if requested_handoff != handoff_epoch {
             handoff_epoch = requested_handoff;
             if cfg.render.manual_transition_secs > 0.001 && !last_normal_rgb.is_empty() {
@@ -1523,6 +1560,24 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 outgoing_render_bus = None;
             }
         }
+        if requested_ready_take != ready_take_epoch {
+            ready_take_epoch = requested_ready_take;
+            if let Some(ready) = ready_engine.as_mut() {
+                // Exchange the actual renderers and their animation state. The
+                // scene seen on Bus B therefore arrives on Program at the same
+                // phase instead of being reconstructed at Take time.
+                std::mem::swap(engine, ready);
+                std::mem::swap(&mut layer_phases, &mut ready_phases);
+                std::mem::swap(&mut layer_walks, &mut ready_walks);
+                std::mem::swap(&mut layer_target, &mut ready_targets);
+                std::mem::swap(&mut layer_env, &mut ready_env);
+                std::mem::swap(&mut walk_rng, &mut ready_walk_rng);
+                std::mem::swap(&mut next_flip, &mut ready_next_flip);
+                ready_key = cfg.ready_stack.as_ref()
+                    .and_then(|stack| serde_json::to_string(stack).ok())
+                    .unwrap_or_default();
+            }
+        }
         let current_epoch = state.epoch();
         if current_epoch != epoch {
             epoch = current_epoch;
@@ -1532,6 +1587,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 engine.ensure_capacity(cfg.geometry.pixel_count() as u32);
                 if let Some(outgoing) = outgoing_engine.as_mut() {
                     outgoing.ensure_capacity(cfg.geometry.pixel_count() as u32);
+                }
+                if let Some(ready) = ready_engine.as_mut() {
+                    ready.ensure_capacity(cfg.geometry.pixel_count() as u32);
                 }
                 if let Some(s) = sacn.as_mut() {
                     s.configure(&cfg.geometry, &cfg.output);
@@ -2079,7 +2137,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             // authoritative master clock. This cannot depend on local input level:
             // in headphone-only sets the default Mac microphone measures the room,
             // not the DJ master mix. All of these transients remain additive.
-            if pioneer_selected {
+            if pioneer_selected && cfg.active_patch.is_none() && !pioneer_visual.looping {
                 let phrase_angle = if (tap_beat_count / 8).is_multiple_of(2) {
                     -std::f32::consts::FRAC_PI_2
                 } else {
@@ -2390,40 +2448,6 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // we never consume an urgent request with a frame that narrowly missed
         // the corresponding effect.
         let requested_low_latency = state.low_latency_render_seq.load(Ordering::Acquire);
-        let effects: Vec<GpuEffect> = {
-            let mut fx = state.effects.lock();
-            fx.retain(|e| {
-                let dur = if e.cfg.duration > 0.0 {
-                    e.cfg.duration
-                } else {
-                    e.cfg.kind.default_duration()
-                };
-                e.born.elapsed().as_secs_f32() < dur
-            });
-            fx.iter()
-                .map(|e| GpuEffect {
-                    kind: e.cfg.kind.gpu_id(),
-                    size: e.cfg.size.clamp(0.1, 4.0),
-                    age: e.born.elapsed().as_secs_f32(),
-                    duration: if e.cfg.duration > 0.0 {
-                        e.cfg.duration
-                    } else {
-                        e.cfg.kind.default_duration()
-                    },
-                    angle: e.cfg.angle,
-                    radius: e.cfg.radius,
-                    intensity: e.cfg.intensity,
-                    hue: e.cfg.hue,
-                    saturation: e.cfg.saturation.clamp(0.0, 1.0),
-                    brightness: e.cfg.brightness.clamp(0.0, 1.0),
-                    rotation: e.cfg.rotation,
-                    grow: e.cfg.grow.clamp(-1.0, 1.0),
-                    edge: e.cfg.edge.clamp(0.0, 1.0),
-                    fill: e.cfg.fill.clamp(0.0, 1.0),
-                })
-                .collect()
-        };
-
         let dabs: Vec<GpuDab> = {
             let mut dabs = state.dabs.lock();
             dabs.retain(|d| d.born.elapsed().as_secs_f32() < d.kind.lifetime());
@@ -2444,7 +2468,6 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 })
                 .collect()
         };
-        let effects = if game_suppress { Vec::new() } else { effects };
         let dabs = if game_suppress { Vec::new() } else { dabs };
 
         let (video_width, video_height, video_active, video_upload) = {
@@ -2511,6 +2534,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         };
         if let Some((event, player)) = phrase_transition {
             state.pioneer_patch_events.lock().record(event, player);
+            if cfg.active_patch.is_none() {
+                state.trigger_dj_link_effects(cfg.rhythm.pro_dj_link_effects.event(event), player);
+            }
             if let Some((_, phrase)) = &active_phrase {
                 state.push_pioneer_debug(
                     "phrase",
@@ -2565,7 +2591,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             for (node, param, value) in state.patch_params.lock().drain(..) {
                 rt.set_param(&node, &param, value);
             }
-            rt.eval(&crate::patch::eval::EvalInputs {
+            let params = rt.eval(&crate::patch::eval::EvalInputs {
                 dt,
                 // The scene scheduler's crossfade-effective speed, so patch
                 // phases follow show transitions exactly like layer phases.
@@ -2577,9 +2603,49 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 shake: control.shake,
                 effect_seq: state.effect_seq.load(Ordering::Relaxed),
                 dj_link,
-            })
-            .to_vec()
+            }).to_vec();
+            for effect in rt.take_emitted_effects() {
+                state.trigger_effect_from_patch(effect);
+            }
+            params
         });
+
+        // Snapshot after patch evaluation so an Event effect is present in the
+        // same low-latency frame as the DJ LINK event that emitted it.
+        let effects: Vec<GpuEffect> = {
+            let mut fx = state.effects.lock();
+            fx.retain(|e| {
+                let dur = if e.cfg.duration > 0.0 {
+                    e.cfg.duration
+                } else {
+                    e.cfg.kind.default_duration()
+                };
+                e.born.elapsed().as_secs_f32() < dur
+            });
+            fx.iter()
+                .map(|e| GpuEffect {
+                    kind: e.cfg.kind.gpu_id(),
+                    size: e.cfg.size.clamp(0.1, 4.0),
+                    age: e.born.elapsed().as_secs_f32(),
+                    duration: if e.cfg.duration > 0.0 {
+                        e.cfg.duration
+                    } else {
+                        e.cfg.kind.default_duration()
+                    },
+                    angle: e.cfg.angle,
+                    radius: e.cfg.radius,
+                    intensity: e.cfg.intensity,
+                    hue: e.cfg.hue,
+                    saturation: e.cfg.saturation.clamp(0.0, 1.0),
+                    brightness: e.cfg.brightness.clamp(0.0, 1.0),
+                    rotation: e.cfg.rotation,
+                    grow: e.cfg.grow.clamp(-1.0, 1.0),
+                    edge: e.cfg.edge.clamp(0.0, 1.0),
+                    fill: e.cfg.fill.clamp(0.0, 1.0),
+                })
+                .collect()
+        };
+        let effects = if game_suppress { Vec::new() } else { effects };
 
         let rotation_angle = {
             let mut rotation = state.rotation.lock();
@@ -2640,6 +2706,108 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             patch_params,
             game_cells,
         };
+
+        // Render the prepared scene on its own GPU bus. It shares live global
+        // inputs (audio, controls, effects and video) but owns its layer phases,
+        // so it keeps moving while off air and does not perturb Program.
+        if let (Some(stack), Some(ready)) = (cfg.ready_stack.as_ref(), ready_engine.as_mut()) {
+            let key = serde_json::to_string(stack).unwrap_or_default();
+            if key != ready_key {
+                ready_key = key;
+                ready_phases.resize(stack.layers.len().min(MAX_LAYERS), 0.0);
+                ready_phases.fill(0.0);
+                ready_walks.resize(ready_phases.len(), LayerWalk::default());
+                ready_walks.fill(LayerWalk::default());
+                ready_targets.resize(ready_phases.len(), true);
+                ready_targets.fill(true);
+                ready_env.resize(ready_phases.len(), 1.0);
+                ready_env.fill(1.0);
+                ready_next_flip = now;
+            }
+            ready_phases.resize(stack.layers.len().min(MAX_LAYERS), 0.0);
+            ready_walks.resize(ready_phases.len(), LayerWalk::default());
+            ready_targets.resize(ready_phases.len(), true);
+            ready_env.resize(ready_phases.len(), 1.0);
+            let ready_walk_tau = 45.0 / stack.walk_speed.clamp(0.05, 20.0);
+            if stack.walk_enabled && stack.walk_layers && now >= ready_next_flip {
+                ready_next_flip = now + Duration::from_secs_f32(ready_walk_tau);
+                let eligible: Vec<usize> = stack.layers.iter().take(MAX_LAYERS).enumerate()
+                    .filter(|(_, layer)| layer.enabled).map(|(index, _)| index).collect();
+                let min_on = (stack.walk_min_layers as usize).min(eligible.len());
+                let on_count = eligible.iter().filter(|index| ready_targets[**index]).count();
+                for _ in 0..8 {
+                    if eligible.is_empty() { break; }
+                    let pick = eligible[(ready_walk_rng.next_u64() % eligible.len() as u64) as usize];
+                    if ready_targets[pick] && on_count > min_on {
+                        ready_targets[pick] = false;
+                        break;
+                    }
+                    if !ready_targets[pick] {
+                        ready_targets[pick] = true;
+                        break;
+                    }
+                }
+            }
+            let mut ready_layers = Vec::with_capacity(ready_phases.len());
+            for (index, layer) in stack.layers.iter().take(MAX_LAYERS).enumerate() {
+                let level = audio[(layer.audio_source as usize).min(MAX_AUDIO_SOURCES - 1)].level;
+                let target = !stack.walk_enabled || !stack.walk_layers || ready_targets[index];
+                let goal = if target { 1.0 } else { 0.0 };
+                ready_env[index] += (goal - ready_env[index]) * (dt / 4.0).min(1.0);
+                if !layer.enabled { continue; }
+                if ready_env[index] < 0.005 {
+                    ready_phases[index] +=
+                        (layer.phase_rate(level) * layer.speed * stack.master_speed * dt) as f64;
+                    if let Some(period) = layer.phase_period() {
+                        ready_phases[index] = ready_phases[index].rem_euclid(period);
+                    }
+                    continue;
+                }
+                let mut layer = if stack.walk_enabled && layer.walk_amount > 0.0 {
+                    walk_step(&mut ready_walks[index], &mut ready_walk_rng, dt, ready_walk_tau);
+                    let mut scaled = layer.clone();
+                    scaled.walk_amount = (layer.walk_amount * stack.walk_depth).clamp(0.0, 3.0);
+                    walked_layer(&scaled, &mut ready_walks[index], dt)
+                } else { layer.clone() };
+                layer.opacity *= ready_env[index];
+                ready_phases[index] +=
+                    (layer.phase_rate(level) * layer.speed * stack.master_speed * dt) as f64;
+                if let Some(period) = layer.phase_period() {
+                    ready_phases[index] = ready_phases[index].rem_euclid(period);
+                }
+                let (phase, phase_epoch) = layer.split_phase(ready_phases[index]);
+                ready_layers.push(layer.to_gpu(phase, phase_epoch));
+            }
+            let mut ready_inputs = inputs.clone();
+            ready_inputs.layers = ready_layers;
+            ready_inputs.globals.layer_count = ready_inputs.layers.len() as u32;
+            ready_inputs.globals.transition_split = 0;
+            ready_inputs.globals.transition_active = 0;
+            ready_inputs.globals.transition_progress = 0.0;
+            // A prepared scene is a layer-stack scene. Program-only patch/game
+            // state must not leak into its preview.
+            ready_inputs.patch_params = None;
+            ready_inputs.game_cells = None;
+            ready_inputs.globals.game_active = 0;
+            ready_inputs.globals.game_mix = 0.0;
+            ready_inputs.globals.game_theta = 0;
+            ready_inputs.globals.game_rings = 0;
+            match ready.render(&ready_inputs) {
+                Ok(Some(rgb)) => {
+                    ready_rgb.clear();
+                    ready_rgb.extend_from_slice(rgb);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    log::warn!("ready render bus failed: {error:#}");
+                    ready_engine = None;
+                    ready_rgb.clear();
+                }
+            }
+        } else if cfg.ready_stack.is_none() {
+            ready_key.clear();
+            ready_rgb.clear();
+        }
 
         // Read before the vectors move into FrameInputs; the recorder reports
         // what this frame actually had live, not what survives to the next one.
@@ -2838,6 +3006,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     spokes: cfg.geometry.spokes,
                     pixels_per_spoke: cfg.geometry.pixels_per_spoke,
                     rgb: rgb.to_vec(),
+                    ready_rgb: ready_rgb.clone(),
                 }));
             }
 

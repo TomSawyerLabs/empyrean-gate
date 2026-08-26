@@ -15,6 +15,7 @@ import type {
 } from "./types";
 
 const PREVIEW_MAGIC = 0x45475056;
+const READY_PREVIEW_MAGIC = 0x45475256;
 const VIDEO_FRAME_MAGIC = 0x45475646;
 
 export interface ResolvedMedia {
@@ -116,6 +117,7 @@ export class GateClient {
   private ws: WebSocket | null = null;
   private listeners = new Set<Listener>();
   private frameListeners = new Set<FrameListener>();
+  private readyFrameListeners = new Set<FrameListener>();
   private statusListeners = new Set<StatusListener>();
   private deniedListeners = new Set<(reason: string) => void>();
   private closed = false;
@@ -189,8 +191,9 @@ export class GateClient {
         }
         this.listeners.forEach((l) => l(msg));
       } else {
-        const frame = parsePreview(ev.data as ArrayBuffer);
-        if (frame) this.frameListeners.forEach((l) => l(frame));
+        const parsed = parsePreview(ev.data as ArrayBuffer);
+        if (parsed?.bus === "program") this.frameListeners.forEach((l) => l(parsed.frame));
+        if (parsed?.bus === "ready") this.readyFrameListeners.forEach((l) => l(parsed.frame));
       }
     };
     ws.onclose = () => {
@@ -216,6 +219,11 @@ export class GateClient {
   onFrame(l: FrameListener): () => void {
     this.frameListeners.add(l);
     return () => this.frameListeners.delete(l);
+  }
+
+  onReadyFrame(l: FrameListener): () => void {
+    this.readyFrameListeners.add(l);
+    return () => this.readyFrameListeners.delete(l);
   }
 
   onStatus(l: StatusListener): () => void {
@@ -330,6 +338,12 @@ export class GateClient {
   activateStack(stack: import("./types").SavedStack) {
     this.send({ type: "activate_stack", stack });
   }
+  prepareStack(stack: import("./types").SavedStack) {
+    this.send({ type: "prepare_stack", stack });
+  }
+  takeReady(readyId: string) {
+    this.send({ type: "take_ready", ready_id: readyId });
+  }
   startPerformanceRecording(name: string) {
     this.send({ type: "performance_record_start", name });
   }
@@ -401,8 +415,8 @@ export class GateClient {
       },
     });
   }
-  subscribePreview(fps: number, decimate: number) {
-    this.send({ type: "subscribe_preview", fps, decimate });
+  subscribePreview(fps: number, decimate: number, includeReady = false) {
+    this.send({ type: "subscribe_preview", fps, decimate, include_ready: includeReady });
   }
   sendAudioFrame(
     f: { level: number; bass: number; mid: number; treble: number; flux: number },
@@ -448,14 +462,18 @@ export class GateClient {
   }
 }
 
-function parsePreview(buf: ArrayBuffer): PreviewFrame | null {
+function parsePreview(buf: ArrayBuffer): { bus: "program" | "ready"; frame: PreviewFrame } | null {
   if (buf.byteLength < 12) return null;
   const view = new DataView(buf);
-  if (view.getUint32(0, true) !== PREVIEW_MAGIC) return null;
+  const magic = view.getUint32(0, true);
+  if (magic !== PREVIEW_MAGIC && magic !== READY_PREVIEW_MAGIC) return null;
   const frameNumber = view.getUint32(4, true);
   const spokes = view.getUint16(8, true);
   const pixels = view.getUint16(10, true);
   const rgb = new Uint8Array(buf, 12);
   if (rgb.length < spokes * pixels * 3) return null;
-  return { frameNumber, spokes, pixels, rgb };
+  return {
+    bus: magic === READY_PREVIEW_MAGIC ? "ready" : "program",
+    frame: { frameNumber, spokes, pixels, rgb },
+  };
 }

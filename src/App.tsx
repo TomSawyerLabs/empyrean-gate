@@ -10,7 +10,7 @@ import ReportModal from "./Report";
 import Settings from "./Settings";
 import Test from "./Test";
 import { contenders, peerLabel, peerVerdict, severity } from "./sacnPeers";
-import ShowReadiness from "./ShowReadiness";
+import Ready from "./Ready";
 import { useGate } from "./state";
 
 // The patch editor pulls in React Flow; lazy so phones on the play surfaces
@@ -818,7 +818,7 @@ export default function App() {
 
       <main>
         {tab === "live" && <Live />}
-        {tab === "ready" && <ShowReadiness />}
+        {tab === "ready" && <Ready />}
         {/* Keep the decoder mounted while the operator visits Live/Settings.
             An offscreen composited video continues producing frames on iPadOS;
             unmounting it would stop the Gate feed at every tab change. */}

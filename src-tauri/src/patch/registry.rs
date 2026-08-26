@@ -207,6 +207,14 @@ const fn out(shape: Shape) -> [PortDef; 1] {
 const COLOR_OUT: &[PortDef] = &out(Shape::FieldColor);
 const SCALAR_OUT: &[PortDef] = &out(Shape::Scalar);
 
+/// Keep this order in step with `layers::EffectKind::ALL`. `None` is useful
+/// while building a patch and makes an event mapping disable-able without
+/// deleting its wiring.
+const EFFECT_KINDS: &[&str] = &[
+    "None", "Burst", "Strobe", "Swoosh", "Collapse", "Bloom", "Pinwheel", "Twinkle", "Wipe",
+    "Star", "Heart", "Flower", "Diamond", "Triangle", "Moon", "Ring", "Rotate",
+];
+
 /// Shared color-mapping knobs used by every generator that owns its palette.
 const HUE: ParamDef = num("hue", "Hue", 0.0, 1.0, 0.6);
 const HUE_RANGE: ParamDef = num("hue_range", "Hue range", 0.0, 1.0, 0.2);
@@ -349,6 +357,31 @@ pub const TYPES: &[NodeType] = &[
             PortDef { name: "fill_in", shape: Shape::Event },
         ],
         params: &[],
+    },
+    NodeType {
+        id: "event_effect",
+        label: "Event effect",
+        category: Category::ScalarOp,
+        inputs: &[PortDef {
+            name: "trigger",
+            shape: Shape::Event,
+        }],
+        outputs: &[],
+        params: &[
+            sel("effect", "Effect", EFFECT_KINDS),
+            num("angle", "Angle (rad)", -3.142, 3.142, 0.0),
+            num("radius", "Radius", 0.0, 1.2, 0.5),
+            num("intensity", "Intensity", 0.0, 2.0, 1.2),
+            num("size", "Size", 0.1, 4.0, 1.0),
+            num("hue", "Hue (-1 = white)", -1.0, 1.0, -1.0),
+            num("saturation", "Saturation", 0.0, 1.0, 0.9),
+            num("brightness", "Brightness", 0.0, 1.0, 1.0),
+            num("duration", "Duration (0 = default)", 0.0, 10.0, 0.0),
+            num("rotation", "Shape rotation", -3.142, 3.142, 0.0),
+            num("grow", "Shape growth", -1.0, 1.0, 0.0),
+            num("edge", "Shape edge", 0.0, 1.0, 0.3),
+            num("fill", "Shape fill", 0.0, 1.0, 0.15),
+        ],
     },
     NodeType {
         id: "touch_dabs",

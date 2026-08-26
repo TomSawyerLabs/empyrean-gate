@@ -20,11 +20,13 @@ const PORT = Number(process.argv[2] ?? 9531);
 const fixture = (name: string) =>
   JSON.parse(readFileSync(join(ROOT, `tests/fixtures/${name}.json`), "utf8"));
 
-const config = fixture("default-config");
+const initialConfig = fixture("default-config");
+let config = structuredClone(initialConfig);
 
 const SPOKES = 64;
 const PIXELS = 64; // decimated preview
 const PREVIEW_MAGIC = 0x45475056;
+const READY_PREVIEW_MAGIC = 0x45475256;
 
 // Arms in the preview spiral. Anything that varies with the spoke index has to
 // close on itself — a whole number of cycles per revolution — or spoke 63 and
@@ -78,10 +80,10 @@ const status = {
   update_state: "up to date",
 };
 
-function previewFrame(t: number): Uint8Array {
+function previewFrame(t: number, magic = PREVIEW_MAGIC): Uint8Array {
   const packet = new Uint8Array(12 + SPOKES * PIXELS * 3);
   const header = new DataView(packet.buffer);
-  header.setUint32(0, PREVIEW_MAGIC, true);
+  header.setUint32(0, magic, true);
   header.setUint32(4, t, true);
   header.setUint16(8, SPOKES, true);
   header.setUint16(10, PIXELS, true);
@@ -89,7 +91,9 @@ function previewFrame(t: number): Uint8Array {
     const sweep = (ARMS * s * 2 * Math.PI) / SPOKES;
     for (let i = 0; i < PIXELS; i++) {
       const o = 12 + (s * PIXELS + i) * 3;
-      const v = Math.round(128 + 127 * Math.sin(i / 6 + sweep + t / 10));
+      const v = Math.round(128 + 127 * Math.sin(
+        i / 6 + sweep + t / 10 + (magic === READY_PREVIEW_MAGIC ? 2 : 0),
+      ));
       packet[o] = v;
       packet[o + 1] = Math.round(v * 0.4);
       packet[o + 2] = 255 - v;
@@ -118,6 +122,10 @@ const server = Bun.serve({
   port: PORT,
   fetch(req, srv) {
     const url = new URL(req.url);
+    if (url.pathname === "/mock/reset-config" && req.method === "POST") {
+      config = structuredClone(initialConfig);
+      return Response.json({ ok: true });
+    }
     if (url.pathname === "/ws") {
       return srv.upgrade(req) ? undefined : new Response("upgrade failed", { status: 400 });
     }
@@ -181,7 +189,7 @@ const server = Bun.serve({
       ws.send(JSON.stringify({ type: "state", config, status }));
     },
     message(ws, raw) {
-      let msg: { type?: string; client_id?: string };
+      let msg: { type?: string; client_id?: string; include_ready?: boolean; ready_id?: string; stack?: unknown };
       try {
         msg = JSON.parse(String(raw));
       } catch {
@@ -210,10 +218,35 @@ const server = Bun.serve({
           );
           clearInterval(timers.get(ws));
           let t = 0;
-          timers.set(
-            ws,
-            setInterval(() => ws.send(previewFrame(t++)), 50),
-          );
+          timers.set(ws, setInterval(() => {
+            ws.send(previewFrame(t));
+            if (msg.include_ready) ws.send(previewFrame(t, READY_PREVIEW_MAGIC));
+            t++;
+          }, 50));
+          break;
+        }
+        case "prepare_stack":
+          config.ready_stack = msg.stack;
+          ws.send(JSON.stringify({ type: "state", config, status }));
+          break;
+        case "take_ready": {
+          if (!config.ready_stack || config.ready_stack.id !== msg.ready_id) break;
+          const previous = {
+            id: "mock-previous-program",
+            name: "Previous program",
+            layers: config.layers,
+            master_speed: config.render.master_speed,
+            walk_enabled: config.render.walk_enabled,
+            walk_layers: config.render.walk_layers,
+            walk_min_layers: config.render.walk_min_layers,
+            walk_speed: config.render.walk_speed,
+            walk_depth: config.render.walk_depth,
+          };
+          const next = config.ready_stack;
+          config.layers = next.layers;
+          config.render.master_speed = next.master_speed;
+          config.ready_stack = previous;
+          ws.send(JSON.stringify({ type: "state", config, status }));
           break;
         }
         case "unsubscribe_preview":

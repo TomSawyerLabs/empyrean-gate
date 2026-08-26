@@ -5,6 +5,13 @@ import { useEffect, useRef, useState } from "react";
 import { useGate, useThrottled } from "./state";
 import { startImu, startMic } from "./sensors";
 import {
+  cloneDjLinkEffects,
+  defaultDjLinkEffects,
+  DJ_EFFECT_OPTIONS,
+  DJ_LINK_EVENTS,
+  djEffect,
+} from "./djLinkEffects";
+import {
   BLEND_MODES,
   LAYER_KINDS,
   LAYER_LABELS,
@@ -14,6 +21,9 @@ import {
   type AudioSourceConfig,
   type LayerCfg,
   type LayerKind,
+  type DjLinkEffectsConfig,
+  type DjLinkEventKind,
+  type EffectKind,
 } from "./types";
 
 export default function Settings() {
@@ -258,6 +268,7 @@ function RhythmPanel({ config }: { config: AppConfig }) {
   const commit = (patch: Partial<AppConfig["rhythm"]>) =>
     client.setConfig({ ...config, rhythm: { ...rhythm, ...patch } });
   const clock = status?.rhythm;
+  const djEffects = rhythm.pro_dj_link_effects ?? defaultDjLinkEffects();
 
   return (
     <section className="panel">
@@ -382,6 +393,10 @@ function RhythmPanel({ config }: { config: AppConfig }) {
             loop, on-air, and inferred Hot Cue/seek changes fire localized additive effects. If Auto
             cannot see full status, select the playing deck number.
           </p>
+          <DjLinkEffectsEditor
+            value={djEffects}
+            onChange={(pro_dj_link_effects) => commit({ pro_dj_link_effects })}
+          />
         </>
       )}
       {rhythm.source !== "layer_audio" && (
@@ -429,6 +444,67 @@ function RhythmPanel({ config }: { config: AppConfig }) {
         </div>
       )}
     </section>
+  );
+}
+
+function DjLinkEffectsEditor({
+  value,
+  onChange,
+}: {
+  value: DjLinkEffectsConfig;
+  onChange: (value: DjLinkEffectsConfig) => void;
+}) {
+  const update = (
+    event: DjLinkEventKind,
+    mutate: (effects: DjLinkEffectsConfig[DjLinkEventKind]) => void,
+  ) => {
+    const next = cloneDjLinkEffects(value);
+    mutate(next[event]);
+    onChange(next);
+  };
+
+  return (
+    <div className="dj-event-effects">
+      <div className="dj-event-effects-head">
+        <div>
+          <strong>DJ LINK event effects</strong>
+          <span>Used by Layers and saved with each scene. Empty means no effect.</span>
+        </div>
+        <button type="button" onClick={() => onChange(defaultDjLinkEffects())}>Reset defaults</button>
+      </div>
+      {DJ_LINK_EVENTS.map(({ kind: event, label }) => (
+        <div className="dj-event-effect-row" key={event}>
+          <span>{label}</span>
+          <div className="dj-event-effect-list">
+            {value[event].map((effect, index) => (
+              <label key={`${event}-${index}`}>
+                <select
+                  aria-label={`${label} effect ${index + 1}`}
+                  value={effect.kind}
+                  onChange={(e) => update(event, (effects) => {
+                    effects[index] = { ...effects[index], kind: e.target.value as EffectKind };
+                  })}
+                >
+                  {DJ_EFFECT_OPTIONS.map((option) => (
+                    <option key={option.kind} value={option.kind}>{option.label}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  aria-label={`Remove ${label} effect ${index + 1}`}
+                  onClick={() => update(event, (effects) => void effects.splice(index, 1))}
+                >×</button>
+              </label>
+            ))}
+            <button
+              type="button"
+              className="dj-event-effect-add"
+              onClick={() => update(event, (effects) => void effects.push(djEffect("burst")))}
+            >＋ effect</button>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

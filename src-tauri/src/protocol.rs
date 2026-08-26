@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 /// `u32 magic, u32 frame_number, u16 spokes, u16 pixels_per_spoke_after_decimation,`
 /// then `spokes * pixels` RGB triplets (pixel 0 = outer end of spoke).
 pub const PREVIEW_MAGIC: u32 = 0x4547_5056; // "VPGE"
+/// Same binary layout as `PREVIEW_MAGIC`, carrying the independently rendered
+/// off-air Ready bus. Sent only to clients that explicitly request both buses.
+pub const READY_PREVIEW_MAGIC: u32 = 0x4547_5256; // "VRGE"
 
 /// Binary video input frame (client -> backend), little endian:
 /// `u32 magic, u32 sequence, u16 width, u16 height`, then RGBA8 pixels.
@@ -54,6 +57,15 @@ pub enum ClientMsg {
     /// Unlike a full config write, this cannot be hidden by an active patch.
     ActivateStack {
         stack: crate::config::SavedStack,
+    },
+    /// Load the off-air render bus without changing the Gate output.
+    PrepareStack {
+        stack: crate::config::SavedStack,
+    },
+    /// Crossfade the prepared bus to air and move the old program look to Ready.
+    TakeReady {
+        /// Optimistic guard: a stale/double Take cannot immediately swap back.
+        ready_id: String,
     },
     PerformanceRecordStart {
         name: String,
@@ -111,6 +123,9 @@ pub enum ClientMsg {
         fps: f32,
         /// Keep every Nth pixel along each spoke (1 = full resolution).
         decimate: u32,
+        /// Also stream READY_PREVIEW_MAGIC frames for the off-air render bus.
+        #[serde(default)]
+        include_ready: bool,
     },
     UnsubscribePreview,
     /// Claim the single live video input. Binary VIDEO_FRAME_MAGIC messages from

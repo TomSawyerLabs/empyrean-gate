@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { CENTERED_SHAPE, EFFECTS, GROW_MODES, growValue, SHAPES, type GrowMode } from "./effects";
+import { cloneDjLinkEffects, defaultDjLinkEffects } from "./djLinkEffects";
 import EffectPad from "./EffectPad";
 import LayerQuickEdit, { type QuickEditAnchor } from "./LayerQuickEdit";
 import ShapeQuickEdit, { type ShapeEditAnchor } from "./ShapeQuickEdit";
@@ -41,6 +42,7 @@ function stackFromScene(scene: ScenePreset): SavedStack {
     walk_min_layers: 1,
     walk_speed: scene.walkSpeed,
     walk_depth: scene.walkDepth,
+    dj_link_effects: defaultDjLinkEffects(),
   };
 }
 
@@ -689,6 +691,7 @@ function ScenesPanel() {
     walk_min_layers: config.render.walk_min_layers,
     walk_speed: config.render.walk_speed,
     walk_depth: config.render.walk_depth,
+    dj_link_effects: cloneDjLinkEffects(config.rhythm.pro_dj_link_effects),
   });
 
   const saveCurrent = () => {
@@ -746,6 +749,7 @@ function ScenesPanel() {
       <p className="scene-library-lede">
         Authored compositions translated from saved Uprising pieces. Loading one hands
         over smoothly to the new renderer; then every layer remains editable below.
+        DJ LINK event effects configured in Settings are captured and restored with the scene.
       </p>
       <div className="manual-transition-control">
         <div>

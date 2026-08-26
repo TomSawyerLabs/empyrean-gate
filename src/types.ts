@@ -76,6 +76,8 @@ export interface SavedStack {
   walk_min_layers: number;
   walk_speed: number;
   walk_depth: number;
+  /** Scene-specific classic Layers reactions to granular DJ LINK events. */
+  dj_link_effects?: DjLinkEffectsConfig;
 }
 
 export type PerformanceAction =
@@ -226,7 +228,16 @@ export interface RhythmConfig {
   latency_ms: number;
   fallback_to_audio: boolean;
   fallback_audio_source: number;
+  /** Omitted by the backend while unchanged from the Ring-loop defaults. */
+  pro_dj_link_effects?: DjLinkEffectsConfig;
 }
+
+export type DjLinkEventKind =
+  | "play" | "cue" | "cue_release" | "on_air" | "off_air"
+  | "loop_start" | "loop_wrap" | "loop_end" | "jump"
+  | "phrase_change" | "fill_in";
+
+export type DjLinkEffectsConfig = Record<DjLinkEventKind, EffectCfg[]>;
 
 export interface RenderConfig {
   fps: number;
@@ -311,6 +322,8 @@ export interface AppConfig {
   autostart: boolean;
   layers: LayerCfg[];
   saved_stacks: SavedStack[];
+  /** Independently rendered off-air scene waiting for a manual take. */
+  ready_stack: SavedStack | null;
   saved_performances: SavedPerformance[];
   saved_playlists: SavedPlaylist[];
   show_scheduler: ShowSchedulerConfig;

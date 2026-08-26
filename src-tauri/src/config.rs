@@ -243,6 +243,88 @@ pub enum RhythmSource {
     ProDjLink,
 }
 
+/// Additive effects fired by each granular PRO DJ LINK event while the classic
+/// Layers renderer is active. Lists allow combinations such as Jump = Burst +
+/// Strobe; an empty list disables that event.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DjLinkEffectsConfig {
+    pub play: Vec<crate::layers::EffectCfg>,
+    pub cue: Vec<crate::layers::EffectCfg>,
+    pub cue_release: Vec<crate::layers::EffectCfg>,
+    pub on_air: Vec<crate::layers::EffectCfg>,
+    pub off_air: Vec<crate::layers::EffectCfg>,
+    pub loop_start: Vec<crate::layers::EffectCfg>,
+    pub loop_wrap: Vec<crate::layers::EffectCfg>,
+    pub loop_end: Vec<crate::layers::EffectCfg>,
+    pub jump: Vec<crate::layers::EffectCfg>,
+    pub phrase_change: Vec<crate::layers::EffectCfg>,
+    pub fill_in: Vec<crate::layers::EffectCfg>,
+}
+
+impl DjLinkEffectsConfig {
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+
+    pub fn event(&self, event: usize) -> &[crate::layers::EffectCfg] {
+        use crate::state::*;
+        match event {
+            DJ_EVENT_PLAY => &self.play,
+            DJ_EVENT_CUE => &self.cue,
+            DJ_EVENT_CUE_RELEASE => &self.cue_release,
+            DJ_EVENT_ON_AIR => &self.on_air,
+            DJ_EVENT_OFF_AIR => &self.off_air,
+            DJ_EVENT_LOOP_START => &self.loop_start,
+            DJ_EVENT_LOOP_WRAP => &self.loop_wrap,
+            DJ_EVENT_LOOP_END => &self.loop_end,
+            DJ_EVENT_JUMP => &self.jump,
+            DJ_EVENT_PHRASE => &self.phrase_change,
+            DJ_EVENT_FILL => &self.fill_in,
+            _ => &[],
+        }
+    }
+}
+
+fn dj_effect(
+    kind: crate::layers::EffectKind,
+    intensity: f32,
+    size: f32,
+    radius: f32,
+    duration: f32,
+) -> crate::layers::EffectCfg {
+    crate::layers::EffectCfg {
+        kind,
+        intensity,
+        size,
+        radius,
+        duration,
+        ..Default::default()
+    }
+}
+
+impl Default for DjLinkEffectsConfig {
+    fn default() -> Self {
+        use crate::layers::EffectKind as E;
+        Self {
+            play: vec![dj_effect(E::Burst, 1.4, 1.25, 0.7, 1.1)],
+            cue: vec![dj_effect(E::Burst, 1.15, 0.7, 0.82, 0.7)],
+            cue_release: vec![dj_effect(E::Collapse, 0.8, 0.7, 0.82, 0.65)],
+            on_air: vec![dj_effect(E::Swoosh, 1.5, 1.8, 0.8, 1.35)],
+            off_air: vec![dj_effect(E::Collapse, 1.1, 1.2, 0.8, 1.1)],
+            loop_start: vec![dj_effect(E::Ring, 1.7, 1.1, 0.5, 1.2)],
+            loop_wrap: vec![dj_effect(E::Ring, 1.35, 0.85, 0.5, 0.75)],
+            loop_end: vec![dj_effect(E::Ring, 1.15, 1.2, 0.5, 0.9)],
+            jump: vec![
+                dj_effect(E::Burst, 2.0, 1.5, 0.85, 1.25),
+                dj_effect(E::Strobe, 1.0, 1.0, 0.5, 0.22),
+            ],
+            phrase_change: Vec::new(),
+            fill_in: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RhythmConfig {
@@ -268,6 +350,10 @@ pub struct RhythmConfig {
     /// If the external clock stops arriving, keep the show moving from this audio detector.
     pub fallback_to_audio: bool,
     pub fallback_audio_source: u32,
+    /// Scene-owned classic-renderer reactions. Omitted from JSON while default
+    /// so existing config fixtures and files remain stable.
+    #[serde(default, skip_serializing_if = "DjLinkEffectsConfig::is_default")]
+    pub pro_dj_link_effects: DjLinkEffectsConfig,
 }
 
 impl Default for RhythmConfig {
@@ -282,6 +368,7 @@ impl Default for RhythmConfig {
             latency_ms: 0.0,
             fallback_to_audio: true,
             fallback_audio_source: 0,
+            pro_dj_link_effects: DjLinkEffectsConfig::default(),
         }
     }
 }
@@ -517,6 +604,8 @@ pub struct SavedStack {
     pub walk_min_layers: u32,
     pub walk_speed: f32,
     pub walk_depth: f32,
+    #[serde(default, skip_serializing_if = "DjLinkEffectsConfig::is_default")]
+    pub dj_link_effects: DjLinkEffectsConfig,
 }
 
 /// A pixel-free recording of a live performance. The initial look plus timestamped
@@ -676,6 +765,7 @@ impl Default for SavedStack {
             walk_min_layers: 1,
             walk_speed: 1.0,
             walk_depth: 1.0,
+            dj_link_effects: DjLinkEffectsConfig::default(),
         }
     }
 }
@@ -699,6 +789,9 @@ pub struct AppConfig {
     pub layers: Vec<LayerCfg>,
     /// Named layer-stack captures shared by all clients.
     pub saved_stacks: Vec<SavedStack>,
+    /// The independently rendered off-air look prepared for the next manual take.
+    /// `None` means the operator has not loaded the Ready bus yet.
+    pub ready_stack: Option<SavedStack>,
     /// Pixel-free, backend-replayable performance captures.
     pub saved_performances: Vec<SavedPerformance>,
     /// Reusable timed shows and the currently running selection.
@@ -744,6 +837,7 @@ impl Default for AppConfig {
             autostart: false,
             layers: default_layer_stack(),
             saved_stacks: Vec::new(),
+            ready_stack: None,
             saved_performances: Vec::new(),
             saved_playlists: Vec::new(),
             show_scheduler: ShowSchedulerConfig::default(),
@@ -1229,6 +1323,33 @@ mod tests {
         assert!(config.saved_playlists.is_empty());
         assert!(!config.show_scheduler.enabled);
         assert!(config.show_scheduler.active_playlist_id.is_empty());
+    }
+
+    #[test]
+    fn dj_link_layer_defaults_make_every_loop_event_a_ring() {
+        let effects = DjLinkEffectsConfig::default();
+        for event in [
+            crate::state::DJ_EVENT_LOOP_START,
+            crate::state::DJ_EVENT_LOOP_WRAP,
+            crate::state::DJ_EVENT_LOOP_END,
+        ] {
+            let configured = effects.event(event);
+            assert_eq!(configured.len(), 1);
+            assert_eq!(configured[0].kind, crate::layers::EffectKind::Ring);
+        }
+        assert_eq!(effects.jump.len(), 2, "compound reactions remain possible");
+        assert!(effects.phrase_change.is_empty());
+    }
+
+    #[test]
+    fn default_dj_link_effect_map_stays_implicit_in_saved_json() {
+        let value = serde_json::to_value(AppConfig::default()).unwrap();
+        assert!(value["rhythm"].get("pro_dj_link_effects").is_none());
+
+        let mut custom = AppConfig::default();
+        custom.rhythm.pro_dj_link_effects.loop_wrap[0].kind = crate::layers::EffectKind::Moon;
+        let value = serde_json::to_value(custom).unwrap();
+        assert_eq!(value["rhythm"]["pro_dj_link_effects"]["loop_wrap"][0]["kind"], "moon");
     }
 
     #[test]

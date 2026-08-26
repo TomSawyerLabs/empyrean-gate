@@ -131,6 +131,55 @@ mod tests {
         assert_eq!(dabs.len(), crate::layers::MAX_DABS);
         assert_eq!(dabs[0].angle, 100.0);
     }
+
+    #[test]
+    fn live_inputs_are_placed_in_the_rotated_composition_space() {
+        let state = SharedState::new(AppConfig::default());
+        state.rotation.lock().angle = 0.75;
+
+        state.paint(
+            crate::layers::PenKind::Comet,
+            &[crate::layers::DabPoint {
+                angle: 1.25,
+                radius: 0.5,
+                dir: 0.25,
+            }],
+            0.0,
+            1.0,
+            1.0,
+            0.1,
+            1.0,
+        );
+        let dab = &state.dabs.lock()[0];
+        assert_eq!(dab.angle, 0.5);
+        assert_eq!(dab.dir, -0.5);
+
+        state.trigger_effect(EffectCfg {
+            kind: EffectKind::Heart,
+            angle: 1.25,
+            rotation: 0.25,
+            ..Default::default()
+        });
+        let effects = state.effects.lock();
+        assert_eq!(effects[0].cfg.angle, 0.5);
+        assert_eq!(effects[0].cfg.rotation, -0.5);
+    }
+
+    #[test]
+    fn patch_effects_remain_composition_relative() {
+        let state = SharedState::new(AppConfig::default());
+        state.rotation.lock().angle = 0.75;
+        state.trigger_effect_from_patch(EffectCfg {
+            kind: EffectKind::Heart,
+            angle: 1.25,
+            rotation: 0.25,
+            ..Default::default()
+        });
+
+        let effects = state.effects.lock();
+        assert_eq!(effects[0].cfg.angle, 1.25);
+        assert_eq!(effects[0].cfg.rotation, 0.25);
+    }
 }
 
 /// Raw audio shapes shipped to the GPU each frame: the recent waveform (a ring
@@ -198,6 +247,8 @@ pub struct PreviewFrame {
     pub spokes: u32,
     pub pixels_per_spoke: u32,
     pub rgb: Vec<u8>,
+    /// Independently rendered off-air look. Empty until a Ready scene is loaded.
+    pub ready_rgb: Vec<u8>,
 }
 
 /// Rations concurrent preview streams (the bandwidth-heavy part of a client) to
@@ -306,6 +357,9 @@ pub struct SharedState {
     /// Explicit renderer changes bump this so the engine can snapshot the
     /// outgoing bus before applying the new layer stack or patch.
     pub render_transition_epoch: AtomicU64,
+    /// Bumped only by Program/Ready takes, so the render loop can exchange the
+    /// actual GPU engines and animation state rather than merely reload a look.
+    pub ready_take_epoch: AtomicU64,
     /// Live exposed-param changes queued for the active patch runtime — applied
     /// by the engine loop with NO pipeline rebuild (that's the point).
     pub patch_params: Mutex<Vec<(String, String, f32)>>,
@@ -430,6 +484,7 @@ impl SharedState {
             config_epoch: AtomicU32::new(0),
             patch_epoch: AtomicU32::new(0),
             render_transition_epoch: AtomicU64::new(0),
+            ready_take_epoch: AtomicU64::new(0),
             patch_params: Mutex::new(Vec::new()),
             effect_seq: AtomicU64::new(0),
             low_latency_render_seq: AtomicU64::new(0),
@@ -646,6 +701,10 @@ impl SharedState {
         self.render_transition_epoch.fetch_add(1, Ordering::SeqCst);
     }
 
+    pub fn request_ready_take(&self) {
+        self.ready_take_epoch.fetch_add(1, Ordering::SeqCst);
+    }
+
     pub fn epoch(&self) -> u32 {
         self.config_epoch.load(Ordering::SeqCst)
     }
@@ -710,6 +769,11 @@ impl SharedState {
         size: f32,
         intensity: f32,
     ) {
+        // The shader samples the whole composition at `physical angle - rotation`.
+        // Pointer coordinates arrive in physical/display space, so store them in
+        // that same composition space. Otherwise a dab lands one global rotation
+        // away from the finger. Directional pens need the identical basis change.
+        let rotation = self.rotation.lock().angle;
         let mut dabs = self.dabs.lock();
         // Retain only the newest bounded batch and evict old dabs once. Repeated
         // Vec::remove(0) made a single oversized paint packet quadratic work on
@@ -726,21 +790,37 @@ impl SharedState {
         for p in points {
             dabs.push(ActiveDab {
                 kind,
-                angle: p.angle,
+                angle: p.angle - rotation,
                 radius: p.radius.clamp(0.0, 1.2),
                 hue,
                 saturation: saturation.clamp(0.0, 1.0),
                 brightness: brightness.clamp(0.0, 1.0),
                 size: size.clamp(0.01, 1.0),
                 intensity: intensity.clamp(0.0, 2.0),
-                dir: p.dir,
+                dir: p.dir - rotation,
                 born: Instant::now(),
             });
         }
     }
 
-    pub fn trigger_effect(&self, cfg: EffectCfg) {
+    pub fn trigger_effect(&self, mut cfg: EffectCfg) {
         self.effect_seq.fetch_add(1, Ordering::Relaxed);
+        if cfg.kind != EffectKind::Rotate {
+            // Client and automation positions name physical points on the gate;
+            // the renderer consumes composition-space coordinates. Undo the
+            // current whole-gate rotation so taps and stamps initially appear
+            // exactly where they were aimed. Shapes also undo it from their own
+            // orientation, keeping (for example) a tapped heart upright.
+            let rotation = self.rotation.lock().angle;
+            cfg.angle -= rotation;
+            cfg.rotation -= rotation;
+        }
+        self.trigger_effect_from_patch(cfg);
+    }
+
+    /// Queue an effect emitted by the active patch without advancing the Tap
+    /// input sequence (otherwise Tap → Event effect would self-trigger forever).
+    pub fn trigger_effect_from_patch(&self, cfg: EffectCfg) {
         if cfg.kind == EffectKind::Rotate {
             let direction = if cfg.angle < 0.0 { -1.0 } else { 1.0 };
             let mut rotation = self.rotation.lock();
@@ -758,6 +838,23 @@ impl SharedState {
             cfg,
             born: Instant::now(),
         });
+    }
+
+    /// Fire classic Layers/Scene DJ reactions, localizing each configured
+    /// template to the deck that produced the event.
+    pub fn trigger_dj_link_effects(&self, effects: &[EffectCfg], player: u8) {
+        let angle = match player {
+            1 => -std::f32::consts::FRAC_PI_2,
+            2 => std::f32::consts::FRAC_PI_2,
+            _ => f32::from(player.saturating_sub(1)) * std::f32::consts::FRAC_PI_2,
+        };
+        let hue = if player == 1 { 0.58 } else { 0.08 };
+        for template in effects {
+            let mut effect = template.clone();
+            effect.angle = angle;
+            effect.hue = hue;
+            self.trigger_effect(effect);
+        }
     }
 
     pub fn start_video(&self, conn_id: u64, owner_id: &str, title: String, source_url: String) {

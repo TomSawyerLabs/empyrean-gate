@@ -178,7 +178,7 @@ impl BlendMode {
 }
 
 /// A layer as configured/edited in the UI and persisted in the config file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LayerCfg {
     pub kind: LayerKind,
@@ -346,7 +346,7 @@ impl EffectKind {
 }
 
 /// An effect trigger as sent by a client (keyboard, click/tap on the preview, remote phone).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EffectCfg {
     pub kind: EffectKind,

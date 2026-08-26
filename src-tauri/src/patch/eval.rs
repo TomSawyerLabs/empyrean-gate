@@ -9,7 +9,7 @@ use super::PatchDoc;
 use super::codegen::Program;
 use super::registry::{self, ParamKind};
 use crate::engine::AudioUniform;
-use crate::layers::MAX_AUDIO_SOURCES;
+use crate::layers::{EffectCfg, EffectKind, MAX_AUDIO_SOURCES};
 use crate::state::DJ_EVENT_COUNT;
 use std::collections::HashMap;
 use std::f32::consts::TAU;
@@ -109,6 +109,8 @@ pub struct Runtime {
     outputs: Vec<HashMap<String, f32>>,
     /// Event ports that fired this frame.
     events: Vec<Vec<&'static str>>,
+    /// One-shot effects emitted by Event effect nodes during the latest eval.
+    emitted_effects: Vec<EffectCfg>,
 }
 
 impl Runtime {
@@ -124,7 +126,14 @@ impl Runtime {
             slab,
             outputs: vec![HashMap::new(); n],
             events: vec![Vec::new(); n],
+            emitted_effects: Vec::new(),
         }
+    }
+
+    /// Drain effects emitted by the most recent frame. Keeping this separate
+    /// from `effect_seq` prevents an Event effect from recursively firing Tap.
+    pub fn take_emitted_effects(&mut self) -> Vec<EffectCfg> {
+        std::mem::take(&mut self.emitted_effects)
     }
 
     /// Apply a live param change (exposed-param play surface) without any
@@ -168,6 +177,7 @@ impl Runtime {
 
     /// Evaluate one frame; returns the parameter slab for the GPU.
     pub fn eval(&mut self, inp: &EvalInputs) -> &[f32] {
+        self.emitted_effects.clear();
         let dt = finite_or(inp.dt, 0.0).clamp(0.0, 0.5);
         let ms = finite_or(inp.master_speed, 0.0).max(0.0);
 
@@ -248,6 +258,34 @@ impl Runtime {
                             self.events[node].push(port);
                         }
                         st.prev_dj_seq[event] = dj.event_seq[event];
+                    }
+                }
+                "event_effect" => {
+                    if self.event_fired(node, "trigger") {
+                        // Select value zero is None; the remaining values are
+                        // deliberately the stable EffectKind::ALL order.
+                        let selected = self.param(node, "effect").round() as usize;
+                        if let Some(kind) = selected
+                            .checked_sub(1)
+                            .and_then(|i| EffectKind::ALL.get(i))
+                            .copied()
+                        {
+                            self.emitted_effects.push(EffectCfg {
+                                kind,
+                                angle: self.input(node, "angle"),
+                                radius: self.input(node, "radius"),
+                                intensity: self.input(node, "intensity"),
+                                size: self.input(node, "size"),
+                                hue: self.input(node, "hue"),
+                                saturation: self.input(node, "saturation"),
+                                brightness: self.input(node, "brightness"),
+                                duration: self.input(node, "duration"),
+                                rotation: self.input(node, "rotation"),
+                                grow: self.input(node, "grow"),
+                                edge: self.input(node, "edge"),
+                                fill: self.input(node, "fill"),
+                            });
+                        }
                     }
                 }
                 "scalar_math" => {
@@ -654,6 +692,46 @@ mod tests {
         rt.eval(&inp);
         rt.eval(&inp);
         assert!(rt.slab[brightness_slot] > 0.0, "jump fired the envelope");
+    }
+
+    #[test]
+    fn dj_link_event_effect_emits_the_selected_kind_once() {
+        let mut fx = node("fx", "event_effect");
+        // None is zero; Ring follows EffectKind::ALL[14].
+        fx.params.insert("effect".into(), 15.0);
+        fx.params.insert("intensity".into(), 1.7);
+        let doc = PatchDoc {
+            nodes: vec![
+                node("link", "dj_link"),
+                fx,
+                node("bg", "solid"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("link", "loop_wrap", "fx", "trigger"),
+                edge("link", "event_side", "fx", "angle"),
+                edge("bg", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let mut rt = runtime(doc);
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let mut inp = inputs(&audio);
+        inp.dj_link.event_side = -1.0;
+        inp.dj_link.event_seq[crate::state::DJ_EVENT_LOOP_WRAP] = 7;
+
+        rt.eval(&inp);
+        assert!(rt.take_emitted_effects().is_empty(), "no startup event");
+        inp.dj_link.event_seq[crate::state::DJ_EVENT_LOOP_WRAP] += 1;
+        rt.eval(&inp);
+        let emitted = rt.take_emitted_effects();
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].kind, EffectKind::Ring);
+        assert_eq!(emitted[0].angle, -1.0, "scalar DJ data can place effects");
+        assert_eq!(emitted[0].intensity, 1.7);
+
+        rt.eval(&inp);
+        assert!(rt.take_emitted_effects().is_empty(), "event fires only once");
     }
 
     #[test]

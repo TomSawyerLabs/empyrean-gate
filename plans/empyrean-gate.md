@@ -913,16 +913,13 @@ established pattern for machine settings this app needs.
 - [x] Kept the shared per-user Vite fixture cache as an optional development
       convenience without making Replay depend on that endpoint.
 
-## Round 14: operator show readiness
+## Round 14: Program / Ready scene switcher
 
-- [x] Add a responsive, live preflight panel that turns existing configuration and
-      runtime telemetry into actionable pass/warn/fail checks for the backend, GPU,
-      sACN destination/interface/actual packets, audio, rhythm, firewall, updates,
-      scheduled show, remote controllers, and master brightness.
-- [x] Treat disabled output as an explicit standby/dry-run state rather than a
-      failure or proof of readiness, and state the limits of machine-side telemetry
-      so the UI never implies that receivers, pixels, cabling, or production hardware
-      have been physically verified.
+- [x] Replace the duplicate machine-health checklist with a persistent, independently
+      rendered Ready bus: Program and Ready have separate live previews and loading a
+      scene into Ready cannot change the Gate output.
+- [x] Add an operator Take that crossfades Ready to Program and moves the previous
+      Program look back to Ready, plus safe off-air motion and layer-enable adjustments.
 
 ## Round 11: external rhythm sources
 

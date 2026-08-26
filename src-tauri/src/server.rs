@@ -20,7 +20,8 @@ use crate::config::ClientRecord;
 use crate::media::{MediaResolver, ResolveRequest};
 use crate::patch;
 use crate::protocol::{
-    BrowserAudioStream, ClientMsg, HandoverGrant, ServerMsg, PREVIEW_MAGIC, VIDEO_FRAME_MAGIC,
+    BrowserAudioStream, ClientMsg, HandoverGrant, ServerMsg, PREVIEW_MAGIC, READY_PREVIEW_MAGIC,
+    VIDEO_FRAME_MAGIC,
 };
 use crate::state::{PreviewFrame, SharedState};
 use axum::extract::connect_info::ConnectInfo;
@@ -602,6 +603,7 @@ async fn ws_upgrade(
 struct PreviewSub {
     min_interval: Duration,
     decimate: u32,
+    include_ready: bool,
     last_sent: Instant,
 }
 
@@ -734,6 +736,10 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                 }
                 let bytes = encode_preview(&frame, sub.decimate);
                 if tx.send(Message::Binary(bytes.into())).await.is_err() { break; }
+                if sub.include_ready && !frame.ready_rgb.is_empty() {
+                    let bytes = encode_preview_rgb(&frame, &frame.ready_rgb, sub.decimate, READY_PREVIEW_MAGIC);
+                    if tx.send(Message::Binary(bytes.into())).await.is_err() { break; }
+                }
             }
         }
     }
@@ -786,21 +792,25 @@ fn decimated_count(pixels: u32, decimate: u32) -> u32 {
 }
 
 fn encode_preview(frame: &PreviewFrame, decimate: u32) -> Vec<u8> {
+    encode_preview_rgb(frame, &frame.rgb, decimate, PREVIEW_MAGIC)
+}
+
+fn encode_preview_rgb(frame: &PreviewFrame, rgb: &[u8], decimate: u32, magic: u32) -> Vec<u8> {
     let d = decimate.max(1);
     let out_pixels = decimated_count(frame.pixels_per_spoke, d);
     let mut bytes = Vec::with_capacity(12 + (frame.spokes * out_pixels * 3) as usize);
-    bytes.extend_from_slice(&PREVIEW_MAGIC.to_le_bytes());
+    bytes.extend_from_slice(&magic.to_le_bytes());
     bytes.extend_from_slice(&(frame.frame_number as u32).to_le_bytes());
     bytes.extend_from_slice(&(frame.spokes as u16).to_le_bytes());
     bytes.extend_from_slice(&(out_pixels as u16).to_le_bytes());
     if d == 1 {
-        bytes.extend_from_slice(&frame.rgb);
+        bytes.extend_from_slice(rgb);
     } else {
         for spoke in 0..frame.spokes {
             let base = (spoke * frame.pixels_per_spoke) as usize;
             for i in (0..frame.pixels_per_spoke as usize).step_by(d as usize) {
                 let o = (base + i) * 3;
-                bytes.extend_from_slice(&frame.rgb[o..o + 3]);
+                bytes.extend_from_slice(&rgb[o..o + 3]);
             }
         }
     }
@@ -995,6 +1005,7 @@ fn stack_snapshot(
         walk_min_layers: cfg.render.walk_min_layers,
         walk_speed: cfg.render.walk_speed,
         walk_depth: cfg.render.walk_depth,
+        dj_link_effects: cfg.rhythm.pro_dj_link_effects.clone(),
     }
 }
 
@@ -1290,6 +1301,42 @@ async fn handle_msg(
                 c.render.walk_min_layers = stack.walk_min_layers;
                 c.render.walk_speed = stack.walk_speed;
                 c.render.walk_depth = stack.walk_depth;
+                c.rhythm.pro_dj_link_effects = stack.dj_link_effects;
+            });
+        }
+        ClientMsg::PrepareStack { stack } => {
+            state.update_config(|c| c.ready_stack = Some(stack));
+        }
+        ClientMsg::TakeReady { ready_id } => {
+            let current_ready = state.config.read().ready_stack.as_ref().map(|stack| stack.id.clone());
+            if current_ready.as_deref() != Some(ready_id.as_str()) {
+                let _ = send_json(tx, &ServerMsg::Error {
+                    message: "Ready changed before the take. Check Bus B and try again.".into(),
+                }).await;
+                return Ok(());
+            }
+            state.update_config(|c| {
+                let old_program = stack_snapshot(
+                    c,
+                    format!("ready-program-{}", uuid::Uuid::new_v4().simple()),
+                    "Previous program".into(),
+                );
+                let Some(next) = c.ready_stack.take() else { return };
+                c.active_patch = None;
+                c.show_scheduler.enabled = false;
+                c.layers = next.layers;
+                c.render.master_speed = next.master_speed;
+                c.render.walk_enabled = next.walk_enabled;
+                c.render.walk_layers = next.walk_layers;
+                c.render.walk_min_layers = next.walk_min_layers;
+                c.render.walk_speed = next.walk_speed;
+                c.render.walk_depth = next.walk_depth;
+                c.rhythm.pro_dj_link_effects = next.dj_link_effects;
+                c.ready_stack = Some(old_program);
+                // Publish the epochs while the config write lock is still held:
+                // the render loop can observe neither half of the swap alone.
+                state.request_ready_take();
+                state.request_render_transition();
             });
         }
         ClientMsg::PerformanceRecordStart { name } => {
@@ -1740,10 +1787,11 @@ async fn handle_msg(
         } => {
             state.paint(pen, &points, hue, saturation, brightness, size, intensity);
         }
-        ClientMsg::SubscribePreview { fps, decimate } => {
+        ClientMsg::SubscribePreview { fps, decimate, include_ready } => {
             *preview = Some(PreviewSub {
                 min_interval: Duration::from_secs_f32(1.0 / fps.clamp(1.0, 60.0)),
                 decimate: decimate.clamp(1, 64),
+                include_ready,
                 last_sent: Instant::now() - Duration::from_secs(1),
             });
             // Loopback clients bypass slot rationing (no NIC traffic).
@@ -1861,5 +1909,24 @@ mod diagnostics_tests {
         let state = SharedState::new(AppConfig::default());
         let loopback = "127.0.0.1:1234".parse().unwrap();
         assert!(diagnostics_authorized(&state, loopback, "", ""));
+    }
+
+    #[test]
+    fn program_and_ready_previews_use_distinct_compatible_packets() {
+        let frame = PreviewFrame {
+            frame_number: 7,
+            spokes: 2,
+            pixels_per_spoke: 3,
+            rgb: (0..18).collect(),
+            ready_rgb: (20..38).collect(),
+        };
+        let program = encode_preview(&frame, 2);
+        let ready = encode_preview_rgb(&frame, &frame.ready_rgb, 2, READY_PREVIEW_MAGIC);
+
+        assert_eq!(u32::from_le_bytes(program[0..4].try_into().unwrap()), PREVIEW_MAGIC);
+        assert_eq!(u32::from_le_bytes(ready[0..4].try_into().unwrap()), READY_PREVIEW_MAGIC);
+        assert_eq!(&program[4..12], &ready[4..12], "bus packets share frame geometry");
+        assert_eq!(u16::from_le_bytes(program[10..12].try_into().unwrap()), 2);
+        assert_ne!(&program[12..], &ready[12..]);
     }
 }
