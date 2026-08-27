@@ -25,6 +25,7 @@ import {
   type DjLinkEventKind,
   type EffectKind,
 } from "./types";
+import { hsvToHex, liveColor } from "./liveColors";
 
 export default function Settings() {
   const { config } = useGate();
@@ -173,8 +174,8 @@ function DjLinkDebugPanel() {
   }, [visible.length]);
 
   return (
-    <section className="panel dj-link-debug-panel">
-      <div className="dj-link-debug-head">
+    <details className="panel settings-disclosure dj-link-debug-panel">
+      <summary className="settings-disclosure-summary">
         <div>
           <h2>DJ LINK live inspector</h2>
           <p className="hint">
@@ -182,6 +183,10 @@ function DjLinkDebugPanel() {
             are retained in memory.
           </p>
         </div>
+        <span className="settings-disclosure-meta">{visible.length} entries</span>
+      </summary>
+      <div className="dj-link-debug-head">
+        <span className="hint">Inspect packet changes and the visuals they trigger.</span>
         <div className="dj-link-debug-actions">
           <label className="toggle-row">
             <input
@@ -223,7 +228,7 @@ function DjLinkDebugPanel() {
           ))
         )}
       </div>
-    </section>
+    </details>
   );
 }
 
@@ -393,10 +398,22 @@ function RhythmPanel({ config }: { config: AppConfig }) {
             loop, on-air, and inferred Hot Cue/seek changes fire localized additive effects. If Auto
             cannot see full status, select the playing deck number.
           </p>
-          <DjLinkEffectsEditor
-            value={djEffects}
-            onChange={(pro_dj_link_effects) => commit({ pro_dj_link_effects })}
-          />
+          <details className="settings-disclosure dj-event-effects-disclosure">
+            <summary className="settings-disclosure-summary">
+              <div>
+                <strong>DJ LINK event effects</strong>
+                <span className="hint">Configure reactions and their colors for 11 LINK events.</span>
+              </div>
+              <span className="settings-disclosure-meta">
+                {Object.values(djEffects).reduce((count, effects) => count + effects.length, 0)} effects
+              </span>
+            </summary>
+            <DjLinkEffectsEditor
+              value={djEffects}
+              onChange={(pro_dj_link_effects) => commit({ pro_dj_link_effects })}
+              showHeading={false}
+            />
+          </details>
         </>
       )}
       {rhythm.source !== "layer_audio" && (
@@ -450,9 +467,11 @@ function RhythmPanel({ config }: { config: AppConfig }) {
 export function DjLinkEffectsEditor({
   value,
   onChange,
+  showHeading = true,
 }: {
   value: DjLinkEffectsConfig;
   onChange: (value: DjLinkEffectsConfig) => void;
+  showHeading?: boolean;
 }) {
   const update = (
     event: DjLinkEventKind,
@@ -465,11 +484,13 @@ export function DjLinkEffectsEditor({
 
   return (
     <div className="dj-event-effects">
-      <div className="dj-event-effects-head">
-        <div>
-          <strong>DJ LINK event effects</strong>
-          <span>Used by Layers and saved with each scene. Empty means no effect.</span>
-        </div>
+      <div className={`dj-event-effects-head${showHeading ? "" : " compact"}`}>
+        {showHeading ? (
+          <div>
+            <strong>DJ LINK event effects</strong>
+            <span>Used by Layers and saved with each scene. Empty means no effect.</span>
+          </div>
+        ) : <span>Used by Layers and saved with each scene. “Deck” follows the player color.</span>}
         <button type="button" onClick={() => onChange(defaultDjLinkEffects())}>Reset defaults</button>
       </div>
       {DJ_LINK_EVENTS.map(({ kind: event, label }) => (
@@ -477,7 +498,7 @@ export function DjLinkEffectsEditor({
           <span>{label}</span>
           <div className="dj-event-effect-list">
             {value[event].map((effect, index) => (
-              <label key={`${event}-${index}`}>
+              <div className="dj-event-effect" key={`${event}-${index}`}>
                 <select
                   aria-label={`${label} effect ${index + 1}`}
                   value={effect.kind}
@@ -489,12 +510,39 @@ export function DjLinkEffectsEditor({
                     <option key={option.kind} value={option.kind}>{option.label}</option>
                   ))}
                 </select>
+                <input
+                  className="dj-event-effect-color"
+                  type="color"
+                  aria-label={`Choose ${label} effect ${index + 1} color${effect.hue < 0 ? " (currently deck color)" : ""}`}
+                  title={effect.hue < 0 ? "Choose a fixed color instead of the deck color" : "Choose effect color"}
+                  value={effect.hue < 0
+                    ? "#ffffff"
+                    : hsvToHex(effect.hue, effect.saturation, effect.brightness)}
+                  onChange={(e) => update(event, (effects) => {
+                    const color = liveColor("dj-link-effect", "DJ LINK effect", e.target.value);
+                    effects[index] = {
+                      ...effects[index],
+                      hue: color.hue,
+                      saturation: color.saturation,
+                      brightness: color.brightness,
+                    };
+                  })}
+                />
+                <button
+                  type="button"
+                  className={`dj-event-effect-deck-color${effect.hue < 0 ? " active" : ""}`}
+                  aria-label={`${effect.hue < 0 ? "Using" : "Use"} deck color for ${label} effect ${index + 1}`}
+                  aria-pressed={effect.hue < 0}
+                  onClick={() => update(event, (effects) => {
+                    effects[index] = { ...effects[index], hue: -1 };
+                  })}
+                >Deck</button>
                 <button
                   type="button"
                   aria-label={`Remove ${label} effect ${index + 1}`}
                   onClick={() => update(event, (effects) => void effects.splice(index, 1))}
                 >×</button>
-              </label>
+              </div>
             ))}
             <button
               type="button"

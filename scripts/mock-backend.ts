@@ -189,7 +189,7 @@ const server = Bun.serve({
       ws.send(JSON.stringify({ type: "state", config, status }));
     },
     message(ws, raw) {
-      let msg: { type?: string; client_id?: string; include_ready?: boolean; ready_id?: string; stack?: unknown };
+      let msg: { type?: string; client_id?: string; include_ready?: boolean; ready_id?: string; stack?: unknown; config?: unknown };
       try {
         msg = JSON.parse(String(raw));
       } catch {
@@ -228,6 +228,12 @@ const server = Bun.serve({
         case "prepare_stack":
           config.ready_stack = msg.stack;
           ws.send(JSON.stringify({ type: "state", config, status }));
+          break;
+        case "set_config":
+          // Echo only to the requesting browser. This matches the real backend's
+          // save acknowledgement without leaking a test's Settings edits into
+          // other fully-parallel pages sharing this mock process.
+          ws.send(JSON.stringify({ type: "state", config: msg.config, status }));
           break;
         case "take_ready": {
           if (!config.ready_stack || config.ready_stack.id !== msg.ready_id) break;

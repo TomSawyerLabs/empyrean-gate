@@ -180,6 +180,29 @@ mod tests {
         assert_eq!(effects[0].cfg.angle, 1.25);
         assert_eq!(effects[0].cfg.rotation, 0.25);
     }
+
+    #[test]
+    fn dj_link_effects_preserve_fixed_colors_and_default_to_deck_colors() {
+        let state = SharedState::new(AppConfig::default());
+        state.trigger_dj_link_effects(
+            &[
+                EffectCfg {
+                    hue: 0.35,
+                    saturation: 0.72,
+                    brightness: 0.81,
+                    ..Default::default()
+                },
+                EffectCfg::default(),
+            ],
+            1,
+        );
+
+        let effects = state.effects.lock();
+        assert_eq!(effects[0].cfg.hue, 0.35);
+        assert_eq!(effects[0].cfg.saturation, 0.72);
+        assert_eq!(effects[0].cfg.brightness, 0.81);
+        assert_eq!(effects[1].cfg.hue, 0.58);
+    }
 }
 
 /// Raw audio shapes shipped to the GPU each frame: the recent waveform (a ring
@@ -864,7 +887,9 @@ impl SharedState {
         for template in effects {
             let mut effect = template.clone();
             effect.angle = angle;
-            effect.hue = hue;
+            if effect.hue < 0.0 {
+                effect.hue = hue;
+            }
             self.trigger_effect(effect);
         }
     }
