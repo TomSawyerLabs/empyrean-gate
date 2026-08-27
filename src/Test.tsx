@@ -74,7 +74,7 @@ const PATTERNS: { id: TestPattern; label: string; proves: string }[] = [
   {
     id: "spoke_id",
     label: "Spoke ID",
-    proves: "Each strip's 1–64 number in binary near its outer end; its first and last LEDs are green.",
+    proves: "Each strip's 1–64 number in binary near its outer end; LED 3 and its last LED are green.",
   },
   {
     id: "chase",
