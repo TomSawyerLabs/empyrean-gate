@@ -26,6 +26,7 @@ import {
   type EffectKind,
 } from "./types";
 import { hsvToHex, liveColor } from "./liveColors";
+import { BRC_EVENT_CATEGORIES } from "./ambientScenes";
 
 export default function Settings() {
   const { config } = useGate();
@@ -40,10 +41,114 @@ export default function Settings() {
       <OutputPanel config={config} />
       <GeometryPanel config={config} />
       <ClientsPanel />
+      <BrcEventsPanel />
       <DiagnosticsPanel />
       <UpdatesPanel config={config} />
       <ThisDevicePanel />
     </div>
+  );
+}
+
+function BrcEventsPanel() {
+  const {
+    brcApiKey,
+    setBrcApiKey,
+    brcEvents,
+    brcEventState,
+    brcEventError,
+    brcEventLog,
+    refreshBrcEvents,
+    clearBrcEventLog,
+  } = useGate();
+  const [copyLabel, setCopyLabel] = useState("Copy log");
+
+  const copyLog = async () => {
+    const text = brcEventLog.map((entry) => JSON.stringify(entry)).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyLabel(`Copied ${brcEventLog.length}`);
+    } catch {
+      setCopyLabel("Copy failed");
+    }
+    window.setTimeout(() => setCopyLabel("Copy log"), 1800);
+  };
+
+  return (
+    <details className="panel settings-disclosure brc-events-panel">
+      <summary className="settings-disclosure-summary">
+        <div>
+          <h2>Black Rock City event dots</h2>
+          <p className="hint">Official 2026 schedule · live look-ahead / next scheduled window · color key and diagnostics</p>
+        </div>
+        <span className="settings-disclosure-meta">
+          {brcEventState === "loading" ? "checking…" : `${brcEvents.length} dots`}
+        </span>
+      </summary>
+      <div className="brc-events-settings">
+        <div className="brc-event-legend" aria-label="Black Rock City event dot color key">
+          {BRC_EVENT_CATEGORIES.map((category) => (
+            <span key={category.id}>
+              <i style={{ backgroundColor: category.color }} aria-hidden="true" />
+              {category.label}
+            </span>
+          ))}
+        </div>
+        <div className="brc-event-key-row">
+          <label>
+            Browser API-key override
+            <input
+              type="password"
+              autoComplete="off"
+              placeholder="Gate key is configured"
+              value={brcApiKey}
+              onChange={(event) => setBrcApiKey(event.target.value)}
+            />
+          </label>
+          <button type="button" disabled={brcEventState === "loading"} onClick={() => void refreshBrcEvents()}>
+            {brcEventState === "loading" ? "Checking…" : "Check now"}
+          </button>
+          <a href="https://api.burningman.org/request/" target="_blank" rel="noreferrer">Request a key</a>
+        </div>
+        <p className="hint brc-event-disclaimer">
+          The key configured on this Gate stays on this machine; a browser override stays in that browser.
+          Dots are a local “cool event” heuristic over unmodified official event details. Camp locations are
+          disclosed on the map. This app is not affiliated, endorsed, or verified by Burning Man Project.
+        </p>
+        {brcEventState === "error" && <p className="warn" role="alert">{brcEventError}</p>}
+        {brcEventState === "empty" && <p className="hint">No geocodable cool event starts in the next two hours.</p>}
+        <div className="brc-event-log-head">
+          <div>
+            <strong>Event debug log</strong>
+            <span className="hint">Parsed details, official type, chosen category, score, time, camp, address, and map point.</span>
+          </div>
+          <div>
+            <button type="button" disabled={brcEventLog.length === 0} onClick={() => void copyLog()}>{copyLabel}</button>
+            <button type="button" onClick={clearBrcEventLog}>Clear view</button>
+          </div>
+        </div>
+        <div className="brc-event-debug-stream">
+          {brcEventLog.length === 0 ? (
+            <div className="dj-link-debug-empty">Choose Check now or open a BRC scene in Media.</div>
+          ) : [...brcEventLog].reverse().map((entry) => (
+            <details className={`brc-event-debug-entry level-${entry.level}`} key={entry.sequence}>
+              <summary>
+                <time>{new Date(entry.timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</time>
+                <span>{entry.level}</span>
+                <strong>{entry.summary}</strong>
+              </summary>
+              <dl>
+                {Object.entries(entry.details).map(([name, value]) => (
+                  <div key={name}>
+                    <dt>{name}</dt>
+                    <dd>{String(value)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
+          ))}
+        </div>
+      </div>
+    </details>
   );
 }
 

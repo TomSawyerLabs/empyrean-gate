@@ -40,7 +40,11 @@ pub struct Cell {
     pub vigor: u8,
 }
 
-const DEAD: Cell = Cell { alive: false, hue: 0, vigor: 0 };
+const DEAD: Cell = Cell {
+    alive: false,
+    hue: 0,
+    vigor: 0,
+};
 
 pub struct LifeSim {
     theta: usize,
@@ -181,7 +185,11 @@ impl LifeSim {
     /// clamps.
     pub fn inject(&mut self, it: i32, ir: i32, half_theta: f32, half_r: f32, slot: u8) {
         let (ht, hr) = (half_theta.max(0.5), half_r.max(0.5));
-        let hue = if slot == ERASE { 0 } else { self.slot_hue(slot) };
+        let hue = if slot == ERASE {
+            0
+        } else {
+            self.slot_hue(slot)
+        };
         for dr in -(hr.ceil() as i32)..=(hr.ceil() as i32) {
             let nr = ir + dr;
             if nr < 0 || nr >= self.radial as i32 {
@@ -197,7 +205,11 @@ impl LifeSim {
                 if slot == ERASE {
                     self.cells[dst] = DEAD;
                 } else if self.rng.next_below(5) < SOUP_FILL as u64 {
-                    self.cells[dst] = Cell { alive: true, hue, vigor: VIGOR_MAX };
+                    self.cells[dst] = Cell {
+                        alive: true,
+                        hue,
+                        vigor: VIGOR_MAX,
+                    };
                 }
             }
         }
@@ -238,7 +250,11 @@ mod tests {
     fn set(sim: &mut LifeSim, cells: &[(usize, usize)], hue: u8) {
         for &(it, ir) in cells {
             let i = sim.idx(it, ir);
-            sim.cells[i] = Cell { alive: true, hue, vigor: VIGOR_FLOOR };
+            sim.cells[i] = Cell {
+                alive: true,
+                hue,
+                vigor: VIGOR_FLOOR,
+            };
         }
     }
 
@@ -283,14 +299,23 @@ mod tests {
         set(
             &mut sim,
             &[
-                (10, 10), (11, 10), (12, 10),
-                (10, 11), (11, 11), (12, 11),
-                (10, 12), (11, 12), (12, 12),
+                (10, 10),
+                (11, 10),
+                (12, 10),
+                (10, 11),
+                (11, 11),
+                (12, 11),
+                (10, 12),
+                (11, 12),
+                (12, 12),
             ],
             40,
         );
         sim.tick();
-        assert!(!sim.cells()[sim.idx(11, 11)].alive, "center should die of overcrowding");
+        assert!(
+            !sim.cells()[sim.idx(11, 11)].alive,
+            "center should die of overcrowding"
+        );
         // A lone cell dies of solitude.
         let mut sim = empty();
         set(&mut sim, &[(30, 30)], 40);
@@ -335,16 +360,28 @@ mod tests {
         for i in 0..50 {
             let it = 2 + (i % 15) * 4;
             let ir = 2 + (i / 15) * 4;
-            set(&mut sim, &[(it, ir), (it + 1, ir), (it, ir + 1), (it + 1, ir + 1)], 90);
+            set(
+                &mut sim,
+                &[(it, ir), (it + 1, ir), (it, ir + 1), (it + 1, ir + 1)],
+                90,
+            );
         }
         let start = sim.population();
         // The first tick registers the population; the counter starts after it.
         for _ in 0..=STATIC_TICKS {
             sim.tick();
         }
-        assert_eq!(sim.population(), start, "test setup should be all still lifes");
+        assert_eq!(
+            sim.population(),
+            start,
+            "test setup should be all still lifes"
+        );
         sim.watchdog();
-        assert_ne!(sim.population(), start, "no soup arrived for a static world");
+        assert_ne!(
+            sim.population(),
+            start,
+            "no soup arrived for a static world"
+        );
     }
 
     #[test]
@@ -354,7 +391,11 @@ mod tests {
             sim.tick();
             sim.watchdog();
         }
-        assert!(sim.population() > 60, "attract mode starved: {}", sim.population());
+        assert!(
+            sim.population() > 60,
+            "attract mode starved: {}",
+            sim.population()
+        );
     }
 
     #[test]

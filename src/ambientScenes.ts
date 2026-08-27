@@ -1,13 +1,56 @@
-export type AmbientSceneKind = "entheos-prism" | "entheos-aura" | "entheos-sigil" | "brc-map" | "brc-plan";
+export type AmbientSceneKind =
+  | "entheos-prism"
+  | "entheos-aura"
+  | "entheos-sigil"
+  | "brc-map"
+  | "brc-plan"
+  | "axis-mundi-portal";
 
-export interface BrcEventBeacon {
+export type BrcEventCategory = "music" | "performance" | "fire" | "gathering" | "food" | "wellness";
+
+export interface BrcEventDot {
+  id: string;
   title: string;
   camp: string;
   location: string;
   startsAt: string;
+  endsAt: string;
+  category: BrcEventCategory;
+  categoryLabel: string;
+  sourceType: string;
+  description: string;
+  score: number;
   x: number;
   y: number;
 }
+
+export interface BrcEventDiagnostic {
+  level: "info" | "warn";
+  summary: string;
+  details: Record<string, string | number | boolean | null>;
+}
+
+export interface BrcEventScan {
+  dots: BrcEventDot[];
+  diagnostics: BrcEventDiagnostic[];
+  eventCount: number;
+  upcomingCount: number;
+  coolCount: number;
+  windowMode: "live" | "next-scheduled";
+}
+
+export const BRC_EVENT_CATEGORIES: ReadonlyArray<{
+  id: BrcEventCategory;
+  label: string;
+  color: string;
+}> = [
+  { id: "music", label: "Music & dance", color: "#ff4fc3" },
+  { id: "performance", label: "Performance", color: "#ffd166" },
+  { id: "fire", label: "Fire & spectacle", color: "#ff593d" },
+  { id: "gathering", label: "Ritual, tour & gathering", color: "#9b7cff" },
+  { id: "food", label: "Food & drink", color: "#4ee6a8" },
+  { id: "wellness", label: "Wellness & workshop", color: "#52d9ff" },
+] as const;
 
 interface BurningManOccurrence {
   start_time: string;
@@ -15,6 +58,7 @@ interface BurningManOccurrence {
 }
 
 interface BurningManEvent {
+  uid?: string;
   title: string;
   description?: string;
   print_description?: string;
@@ -24,6 +68,7 @@ interface BurningManEvent {
 }
 
 interface BurningManCamp {
+  uid?: string;
   name: string;
   location_string?: string;
   location?: {
@@ -63,9 +108,16 @@ const STREET_RADII: Record<string, number> = {
   kundalini: 498.8 / 1536,
 };
 
-const COOL_WORDS = [
-  "dj", "dance", "party", "sunset", "sunrise", "fire", "flame", "live music",
-  "sound", "performance", "ceremony", "ritual", "parade", "mutant", "art tour",
+const CATEGORY_WORDS: ReadonlyArray<{
+  id: BrcEventCategory;
+  words: readonly string[];
+}> = [
+  { id: "fire", words: ["fire", "flame", "burn", "pyro", "spectacle"] },
+  { id: "music", words: ["dj", "dance", "party", "music", "sound", "concert", "karaoke", "disco"] },
+  { id: "performance", words: ["performance", "circus", "cabaret", "comedy", "theater", "theatre", "parade", "procession"] },
+  { id: "food", words: ["food", "coffee", "breakfast", "brunch", "lunch", "dinner", "snack", "cocktail", "drinks", "bar "] },
+  { id: "wellness", words: ["yoga", "meditation", "healing", "massage", "wellness", "workshop", "breathwork"] },
+  { id: "gathering", words: ["ritual", "ceremony", "sunrise", "sunset", "gathering", "meetup", "talk", "tour", "art car", "mutant vehicle"] },
 ];
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
@@ -74,10 +126,22 @@ const smooth = (value: number) => {
   return t * t * (3 - 2 * t);
 };
 
-function eventScore(event: BurningManEvent, startMs: number, nowMs: number): number {
+export function brcEventCategory(event: BurningManEvent): BrcEventCategory | null {
   const haystack = `${event.title} ${event.description ?? ""} ${event.print_description ?? ""} ${event.event_type?.label ?? ""}`.toLowerCase();
-  const keywordScore = COOL_WORDS.reduce((score, word) => score + (haystack.includes(word) ? 8 : 0), 0);
-  const categoryScore = /music|performance|parade|fire|dance/i.test(event.event_type?.label ?? "") ? 18 : 0;
+  const officialType = `${event.event_type?.label ?? ""} ${event.event_type?.abbr ?? ""}`.toLowerCase();
+  if (/food|beverage|drink/.test(officialType)) return "food";
+  if (/class|workshop|wellness|healing/.test(officialType)) return "wellness";
+  if (/fire|flame|burn|pyro/.test(haystack)) return "fire";
+  if (/music|party|dance/.test(officialType)) return "music";
+  if (/performance|parade|circus|theat/.test(officialType)) return "performance";
+  return CATEGORY_WORDS.find(({ words }) => words.some((word) => haystack.includes(word)))?.id ?? null;
+}
+
+function eventScore(event: BurningManEvent, category: BrcEventCategory, startMs: number, nowMs: number): number {
+  const haystack = `${event.title} ${event.description ?? ""} ${event.print_description ?? ""} ${event.event_type?.label ?? ""}`.toLowerCase();
+  const keywords = CATEGORY_WORDS.find((entry) => entry.id === category)?.words ?? [];
+  const keywordScore = keywords.reduce((score, word) => score + (haystack.includes(word) ? 8 : 0), 0);
+  const categoryScore = event.event_type?.label ? 12 : 0;
   const minutesAway = Math.max(0, (startMs - nowMs) / 60_000);
   return keywordScore + categoryScore + Math.max(0, 30 - minutesAway / 4);
 }
@@ -102,42 +166,139 @@ export function brcAddressToMapPoint(camp: BurningManCamp): { x: number; y: numb
   };
 }
 
-/**
- * Select the strongest official event beginning soon and locate its host camp.
- * The supplied fetcher is the Gate's restricted same-origin API bridge.
- */
-export async function fetchBrcEventBeacon(
+function apiRecords<T>(payload: unknown, keys: string[]): T[] {
+  if (Array.isArray(payload)) return payload as T[];
+  if (!payload || typeof payload !== "object") return [];
+  const record = payload as Record<string, unknown>;
+  for (const key of keys) {
+    if (Array.isArray(record[key])) return record[key] as T[];
+  }
+  return [];
+}
+
+/** Select and geocode several strong official events beginning within two hours. */
+export async function fetchBrcEventDots(
   apiFetch: BrcApiFetch,
   now = new Date(),
-): Promise<BrcEventBeacon | null> {
-  const events = (await apiFetch("event")) as BurningManEvent[];
+): Promise<BrcEventScan> {
+  const diagnostics: BrcEventDiagnostic[] = [];
+  const [eventPayload, campPayload] = await Promise.all([apiFetch("event"), apiFetch("camp")]);
+  const events = apiRecords<BurningManEvent>(eventPayload, ["events", "event", "data"]);
+  const camps = apiRecords<BurningManCamp>(campPayload, ["camps", "camp", "data"]);
+  const campsByUid = new Map(camps.flatMap((camp) => camp.uid ? [[camp.uid, camp] as const] : []));
   const nowMs = now.getTime();
-  const candidates = events.flatMap((event) =>
-    (event.occurrence_set ?? []).map((occurrence) => ({ event, occurrence, startMs: Date.parse(occurrence.start_time) })),
-  ).filter(({ event, startMs }) =>
-    Boolean(event.hosted_by_camp) && Number.isFinite(startMs) && startMs >= nowMs - 20 * 60_000 && startMs <= nowMs + 2 * 60 * 60_000,
-  ).sort((a, b) => eventScore(b.event, b.startMs, nowMs) - eventScore(a.event, a.startMs, nowMs));
+  const occurrences = events.flatMap((event) => (event.occurrence_set ?? []).map((occurrence) => {
+    const startMs = Date.parse(occurrence.start_time);
+    const category = brcEventCategory(event);
+    return { event, occurrence, startMs, category };
+  })).filter(({ event, startMs }) => Boolean(event.hosted_by_camp) && Number.isFinite(startMs));
+  let upcoming = occurrences.filter(({ startMs }) =>
+    startMs >= nowMs - 20 * 60_000 && startMs <= nowMs + 2 * 60 * 60_000,
+  );
+  let windowMode: BrcEventScan["windowMode"] = "live";
+  if (upcoming.length === 0) {
+    // Before gates open (or between schedule blocks), keep the map useful by
+    // previewing the first 24 hours of the next scheduled activity.
+    const nextStart = occurrences
+      .filter(({ startMs }) => startMs > nowMs)
+      .sort((a, b) => a.startMs - b.startMs)[0]?.startMs;
+    if (nextStart !== undefined) {
+      upcoming = occurrences.filter(({ startMs }) => startMs >= nextStart && startMs < nextStart + 24 * 60 * 60_000);
+      windowMode = "next-scheduled";
+    }
+  }
+  const candidates = upcoming.filter((candidate): candidate is typeof candidate & { category: BrcEventCategory } =>
+    candidate.category !== null,
+  ).sort((a, b) => eventScore(b.event, b.category, b.startMs, nowMs) - eventScore(a.event, a.category, a.startMs, nowMs));
+  const categoryGroups = new Map(BRC_EVENT_CATEGORIES.map(({ id }) => [
+    id,
+    candidates.filter((candidate) => candidate.category === id),
+  ]));
+  const priorityCandidates = Array.from({ length: 4 }, (_, rank) =>
+    BRC_EVENT_CATEGORIES.map(({ id }) => categoryGroups.get(id)?.[rank]).filter((candidate) => candidate !== undefined),
+  ).flat();
+  const prioritized = new Set(priorityCandidates);
+  const diversifiedCandidates = [...priorityCandidates, ...candidates.filter((candidate) => !prioritized.has(candidate))];
 
-  // A few events use custom locations or unparseable prose. Walk the best
-  // candidates until one resolves to a real 2026 clock/street address.
-  for (const candidate of candidates.slice(0, 12)) {
-    let camp: BurningManCamp;
-    try {
-      camp = (await apiFetch("camp", candidate.event.hosted_by_camp)) as BurningManCamp;
-    } catch {
+  diagnostics.push({
+    level: "info",
+    summary: `Loaded ${events.length} official events and ${camps.length} camps`,
+    details: {
+      events: events.length,
+      camps: camps.length,
+      upcoming: upcoming.length,
+      cool: candidates.length,
+      windowMode,
+      windowStart: upcoming[0]?.occurrence.start_time ?? null,
+    },
+  });
+
+  const dots: BrcEventDot[] = [];
+  const categoryCounts = new Map<BrcEventCategory, number>();
+  let missingCamp = 0;
+  let unparseableAddress = 0;
+  for (const candidate of diversifiedCandidates) {
+    if ((categoryCounts.get(candidate.category) ?? 0) >= 6) continue;
+    const camp = campsByUid.get(candidate.event.hosted_by_camp!);
+    if (!camp) {
+      missingCamp += 1;
       continue;
     }
     const point = brcAddressToMapPoint(camp);
-    if (!point) continue;
-    return {
+    if (!point) {
+      unparseableAddress += 1;
+      continue;
+    }
+    const categoryMeta = BRC_EVENT_CATEGORIES.find((entry) => entry.id === candidate.category)!;
+    const dot: BrcEventDot = {
+      id: `${candidate.event.uid ?? candidate.event.title}:${candidate.occurrence.start_time}`,
       title: candidate.event.title,
       camp: camp.name,
       location: camp.location_string ?? `${camp.location?.intersection ?? ""} & ${camp.location?.frontage ?? ""}`,
       startsAt: candidate.occurrence.start_time,
+      endsAt: candidate.occurrence.end_time,
+      category: candidate.category,
+      categoryLabel: categoryMeta.label,
+      sourceType: candidate.event.event_type?.label ?? candidate.event.event_type?.abbr ?? "Unspecified",
+      description: candidate.event.print_description || candidate.event.description || "",
+      score: Math.round(eventScore(candidate.event, candidate.category, candidate.startMs, nowMs)),
       ...point,
     };
+    dots.push(dot);
+    categoryCounts.set(dot.category, (categoryCounts.get(dot.category) ?? 0) + 1);
+    diagnostics.push({
+      level: "info",
+      summary: `${dot.categoryLabel}: ${dot.title}`,
+      details: {
+        camp: dot.camp,
+        location: dot.location,
+        startsAt: dot.startsAt,
+        endsAt: dot.endsAt,
+        officialType: dot.sourceType,
+        category: dot.category,
+        score: dot.score,
+        x: Number(dot.x.toFixed(4)),
+        y: Number(dot.y.toFixed(4)),
+        description: dot.description,
+      },
+    });
+    if (dots.length >= 24) break;
   }
-  return null;
+  if (missingCamp || unparseableAddress) {
+    diagnostics.push({
+      level: "warn",
+      summary: "Some upcoming events could not be placed on the street map",
+      details: { missingCamp, unparseableAddress },
+    });
+  }
+  return {
+    dots,
+    diagnostics,
+    eventCount: events.length,
+    upcomingCount: upcoming.length,
+    coolCount: candidates.length,
+    windowMode,
+  };
 }
 
 interface Scratch {
@@ -315,74 +476,209 @@ function drawEntheosAura(
 
 function drawEntheosSigil(
   ctx: CanvasRenderingContext2D,
-  image: HTMLImageElement,
+  environment: HTMLImageElement,
+  logo: HTMLImageElement,
   size: number,
   elapsedMs: number,
 ): void {
   const t = elapsedMs / 1000;
   const scratch = scratchFor(ctx, size);
   scratch.ctx.clearRect(0, 0, size, size);
-  drawSquare(scratch.ctx, image, size, 0.91 + Math.sin(t * 0.16) * 0.003);
+  drawSquare(scratch.ctx, logo, size, 0.67 + Math.sin(t * 0.10) * 0.0025);
   // The vector reconstruction uses white as a deliberate keyline, unlike the
   // checkerboard-backed source PNG, so preserve it here.
   illuminateLogo(scratch.ctx, size, elapsedMs, false, false);
 
+  // A narrow specular band crosses the exact vector artwork without moving
+  // or deforming its silhouette. The pass takes almost a minute, so it reads
+  // as changing light in a physical sculpture rather than an effect preset.
+  scratch.ctx.save();
+  scratch.ctx.globalCompositeOperation = "source-atop";
+  scratch.ctx.translate(size / 2, size / 2);
+  scratch.ctx.rotate(-0.34);
+  scratch.ctx.translate(-size / 2, -size / 2);
+  const sweepX = (((t / 52) % 1) * 1.7 - 0.35) * size;
+  const sweep = scratch.ctx.createLinearGradient(sweepX - size * 0.16, 0, sweepX + size * 0.16, 0);
+  sweep.addColorStop(0, "rgba(38,224,255,0)");
+  sweep.addColorStop(0.42, "rgba(38,224,255,.18)");
+  sweep.addColorStop(0.5, "rgba(255,255,255,.82)");
+  sweep.addColorStop(0.58, "rgba(255,63,195,.18)");
+  sweep.addColorStop(1, "rgba(255,63,195,0)");
+  scratch.ctx.fillStyle = sweep;
+  scratch.ctx.fillRect(0, 0, size, size);
+  scratch.ctx.restore();
+
   ctx.clearRect(0, 0, size, size);
-  // Two slow expanding light echoes add motion without bending the vector mark.
-  for (let echo = 1; echo <= 2; echo += 1) {
-    const phase = (t * 0.035 + echo * 0.36) % 1;
-    const scale = 1 + phase * 0.075;
+
+  ctx.fillStyle = "#010108";
+  ctx.fillRect(0, 0, size, size);
+  const center = size / 2;
+
+  // The glass architecture is an AI-assisted source plate; its camera is kept
+  // almost completely locked. Two minute-scale planes create the dimensional
+  // motion that video generators do well, while the exact logo remains native.
+  ctx.save();
+  ctx.translate(center, center);
+  ctx.rotate(Math.sin(t * 0.014) * 0.008);
+  ctx.translate(-center, -center);
+  ctx.globalCompositeOperation = "screen";
+  ctx.globalAlpha = 0.22;
+  ctx.filter = `blur(${Math.max(2, size * 0.018).toFixed(1)}px) saturate(1.2)`;
+  drawSquare(ctx, environment, size, 1.015 + Math.sin(t * 0.04) * 0.004);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(center, center);
+  ctx.rotate(Math.sin(t * 0.012) * -0.0045);
+  ctx.translate(-center, -center);
+  ctx.globalAlpha = 0.84;
+  ctx.filter = "contrast(1.08) saturate(1.06)";
+  drawSquare(ctx, environment, size, 0.955 + Math.sin(t * 0.038) * 0.0025);
+  ctx.restore();
+
+  // Deep, counter-moving caustics give the mark architectural depth while
+  // staying subordinate to its exact geometry.
+  const field = ctx.createRadialGradient(center, center, size * 0.05, center, center, size * 0.52);
+  field.addColorStop(0, "rgba(4,7,20,.08)");
+  field.addColorStop(0.43, "rgba(12,41,72,.26)");
+  field.addColorStop(0.72, "rgba(45,10,62,.18)");
+  field.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = field;
+  ctx.fillRect(0, 0, size, size);
+  ctx.save();
+  ctx.translate(center, center);
+  ctx.globalCompositeOperation = "screen";
+  ctx.lineCap = "round";
+  for (let ring = 0; ring < 5; ring += 1) {
+    const radius = size * (0.18 + ring * 0.072 + Math.sin(t * 0.045 + ring) * 0.004);
+    const start = t * (ring % 2 === 0 ? 0.012 : -0.009) + ring * 1.1;
+    ctx.strokeStyle = ring % 2 === 0 ? "rgba(46,220,255,.10)" : "rgba(255,63,195,.075)";
+    ctx.lineWidth = Math.max(0.7, size * 0.004);
+    ctx.setLineDash([size * 0.045, size * 0.10]);
+    ctx.lineDashOffset = -t * (0.16 + ring * 0.025);
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, start, start + Math.PI * 1.55);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Slow optical echoes add depth without bending the vector mark.
+  for (let echo = 1; echo <= 3; echo += 1) {
+    const phase = (t * 0.018 + echo * 0.29) % 1;
+    const scale = 1 + phase * 0.055;
     ctx.save();
     ctx.translate(size / 2, size / 2);
     ctx.scale(scale, scale);
     ctx.translate(-size / 2, -size / 2);
     ctx.globalCompositeOperation = "screen";
-    ctx.globalAlpha = (1 - phase) * (echo === 1 ? 0.2 : 0.1);
-    ctx.filter = `blur(${Math.max(1, size / 96).toFixed(1)}px)`;
+    ctx.globalAlpha = (1 - phase) * (echo === 1 ? 0.14 : 0.07);
+    ctx.filter = `blur(${Math.max(0.8, size / 150).toFixed(1)}px)`;
     ctx.drawImage(scratch.canvas, 0, 0);
     ctx.restore();
   }
   ctx.save();
   ctx.globalCompositeOperation = "screen";
-  ctx.globalAlpha = 0.97;
+  ctx.globalAlpha = 1;
   ctx.drawImage(scratch.canvas, 0, 0);
   ctx.restore();
 }
 
-function drawFireBeacon(
+function drawAxisMundiPortal(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  size: number,
+  elapsedMs: number,
+): void {
+  const t = elapsedMs / 1000;
+  const breath = Math.sin(t * 0.055);
+  const driftX = Math.sin(t * 0.021) * size * 0.0035;
+  const driftY = Math.cos(t * 0.018) * size * 0.0025;
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, size, size);
+
+  // A diffused rear plane supplies depth; the sharp source plate itself stays
+  // steady, following the stable-source guidance used by modern video models.
+  ctx.save();
+  ctx.translate(driftX * -1.8, driftY * -1.8);
+  ctx.globalCompositeOperation = "screen";
+  ctx.globalAlpha = 0.18 + breath * 0.025;
+  ctx.filter = `blur(${Math.max(3, size * 0.025).toFixed(1)}px) saturate(1.25)`;
+  drawSquare(ctx, image, size, 1.025 + breath * 0.006);
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(driftX, driftY);
+  ctx.globalAlpha = 0.98;
+  ctx.filter = "contrast(1.08) saturate(1.08)";
+  drawSquare(ctx, image, size, 0.95 + breath * 0.0025);
+  ctx.restore();
+
+  // Sparse sap-light motes orbit on minute-scale cycles. Cyan remains in the
+  // canopy and amber in the roots so the generated plate's hierarchy survives.
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  for (let mote = 0; mote < 22; mote += 1) {
+    const seed = mote * 2.399963;
+    const angle = seed + t * (0.008 + (mote % 5) * 0.0012);
+    const radius = size * (0.255 + ((mote * 29) % 15) * 0.011);
+    const x = size / 2 + Math.cos(angle) * radius;
+    const y = size / 2 + Math.sin(angle) * radius;
+    const upper = y < size / 2;
+    const alpha = 0.12 + (mote % 4) * 0.035;
+    ctx.fillStyle = upper ? `rgba(76,222,255,${alpha})` : `rgba(255,175,55,${alpha})`;
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(0.55, size * (0.002 + (mote % 3) * 0.0008)), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Protect the portal as a true black void after every glow pass.
+  const portalRadius = size * 0.155;
+  const voidGradient = ctx.createRadialGradient(size / 2, size / 2, portalRadius * 0.72, size / 2, size / 2, portalRadius * 1.13);
+  voidGradient.addColorStop(0, "rgba(0,0,0,1)");
+  voidGradient.addColorStop(0.78, "rgba(0,0,0,.98)");
+  voidGradient.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = voidGradient;
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, portalRadius * 1.13, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawEventDots(
   ctx: CanvasRenderingContext2D,
   size: number,
   elapsedMs: number,
-  beacon: BrcEventBeacon,
+  events: readonly BrcEventDot[],
 ): void {
   const t = elapsedMs / 1000;
-  const x = beacon.x * size;
-  const y = beacon.y * size;
-  const pulse = 0.82 + Math.sin(t * 4.4) * 0.18;
-  const radius = Math.max(4, size * 0.045) * pulse;
-  const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius * 2.2);
-  gradient.addColorStop(0, "rgba(255,255,210,1)");
-  gradient.addColorStop(0.18, "rgba(255,184,35,1)");
-  gradient.addColorStop(0.48, "rgba(255,43,24,.92)");
-  gradient.addColorStop(1, "rgba(255,0,20,0)");
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.arc(x, y, radius * 2.2, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.save();
+  ctx.globalCompositeOperation = "source-over";
+  events.forEach((event, index) => {
+    // Co-located events get a deterministic sub-pixel fan so their colors remain
+    // visible instead of painting over one another at 128x128 transport size.
+    const angle = index * 2.399963;
+    const offset = (index % 3) * Math.max(0.35, size * 0.0018);
+    const x = event.x * size + Math.cos(angle) * offset;
+    const y = event.y * size + Math.sin(angle) * offset;
+    const pulse = 0.92 + Math.sin(t * 2.2 + index * 0.83) * 0.08;
+    const radius = Math.max(1.35, size * 0.0085) * pulse;
+    const color = BRC_EVENT_CATEGORIES.find((entry) => entry.id === event.category)?.color ?? "#ffffff";
 
-  // A tiny licking flame reads more naturally than a sterile map pin.
-  const sway = Math.sin(t * 5.1) * radius * 0.38;
-  ctx.fillStyle = "#ff4028";
-  ctx.beginPath();
-  ctx.moveTo(x - radius * 0.72, y + radius * 0.55);
-  ctx.quadraticCurveTo(x - radius * 0.35, y - radius * 0.45, x + sway, y - radius * 1.65);
-  ctx.quadraticCurveTo(x + radius * 0.65, y - radius * 0.25, x + radius * 0.72, y + radius * 0.55);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = "#ffd14a";
-  ctx.beginPath();
-  ctx.ellipse(x + sway * 0.25, y + radius * 0.12, radius * 0.34, radius * 0.7, 0, 0, Math.PI * 2);
-  ctx.fill();
+    ctx.globalAlpha = 0.24;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 2.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "rgba(1,4,10,.95)";
+    ctx.lineWidth = Math.max(0.65, size * 0.0035);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  });
+  ctx.restore();
 }
 
 function drawBrcMap(
@@ -390,7 +686,7 @@ function drawBrcMap(
   _map: HTMLImageElement,
   size: number,
   elapsedMs: number,
-  beacon: BrcEventBeacon | null,
+  events: readonly BrcEventDot[],
 ): void {
   const t = elapsedMs / 1000;
   ctx.clearRect(0, 0, size, size);
@@ -404,9 +700,9 @@ function drawBrcMap(
   const streetRadii = [...new Set(Object.values(STREET_RADII))].sort((a, b) => a - b);
   const innerRadius = streetRadii[0] * size;
   const outerRadius = streetRadii[streetRadii.length - 1] * size;
-  const roadWidth = Math.max(2.25, size * 0.013);
-  const outlineWidth = roadWidth + Math.max(1.5, size * 0.008);
-  const breathe = 0.93 + Math.sin(t * 0.16) * 0.07;
+  const roadWidth = Math.max(1.05, size * 0.0068);
+  const outlineWidth = roadWidth + Math.max(1.05, size * 0.006);
+  const breathe = 0.965 + Math.sin(t * 0.08) * 0.035;
 
   ctx.save();
   ctx.lineCap = "round";
@@ -451,7 +747,11 @@ function drawBrcMap(
   // Broad, low-level block fill makes the city footprint readable even where
   // no road happens to hit a spoke, while preserving dark separation.
   ctx.lineCap = "butt";
-  ctx.strokeStyle = "rgba(8,75,124,.82)";
+  const cityGradient = ctx.createLinearGradient(0, cy - outerRadius, 0, cy + outerRadius);
+  cityGradient.addColorStop(0, "rgba(13,47,92,.92)");
+  cityGradient.addColorStop(0.48, "rgba(10,84,137,.90)");
+  cityGradient.addColorStop(1, "rgba(7,44,83,.94)");
+  ctx.strokeStyle = cityGradient;
   ctx.lineWidth = outerRadius - innerRadius;
   ctx.beginPath();
   ctx.arc(cx, cy, (innerRadius + outerRadius) / 2, startAngle, endAngle);
@@ -545,43 +845,30 @@ function drawBrcMap(
   ctx.fillRect(-templeSize / 2, -templeSize / 2, templeSize, templeSize);
   ctx.restore();
 
-  // Entheos is at 9:15 & Esplanade. Isolate it from the Esplanade keyline and
-  // make the five-point silhouette large enough to survive 128×128 transport.
+  // Entheos is a compact survey light at 9:15 & Esplanade. Its inside edge is
+  // tangent to Esplanade, matching the physical camp frontage without hiding
+  // the adjacent streets.
   const entheosAngle = ((9.25 * 30 - 450) * Math.PI) / 180;
   const entheosRadius = STREET_RADII.esplanade * size;
-  const ex = cx + Math.cos(entheosAngle) * entheosRadius;
-  const ey = cy + Math.sin(entheosAngle) * entheosRadius;
-  const starRadius = Math.max(6.5, size * 0.031) * (0.97 + Math.sin(t * 0.48) * 0.03);
-  ctx.fillStyle = "rgba(1,4,10,.88)";
+  const markerRadius = Math.max(1.8, size * 0.0105);
+  const markerDistance = entheosRadius + markerRadius;
+  const ex = cx + Math.cos(entheosAngle) * markerDistance;
+  const ey = cy + Math.sin(entheosAngle) * markerDistance;
+  const markerGlow = ctx.createRadialGradient(ex, ey, 0, ex, ey, markerRadius * 3.2);
+  markerGlow.addColorStop(0, "rgba(255,255,225,1)");
+  markerGlow.addColorStop(0.32, "rgba(255,64,164,.82)");
+  markerGlow.addColorStop(1, "rgba(255,20,130,0)");
+  ctx.fillStyle = markerGlow;
   ctx.beginPath();
-  ctx.arc(ex, ey, starRadius * 1.72, 0, Math.PI * 2);
+  ctx.arc(ex, ey, markerRadius * 3.2, 0, Math.PI * 2);
   ctx.fill();
-  const starGlow = ctx.createRadialGradient(ex, ey, 0, ex, ey, starRadius * 2.45);
-  starGlow.addColorStop(0, "rgba(255,255,221,.95)");
-  starGlow.addColorStop(0.28, "rgba(255,39,137,.9)");
-  starGlow.addColorStop(1, "rgba(255,20,120,0)");
-  ctx.fillStyle = starGlow;
+  ctx.fillStyle = "#fffbdc";
   ctx.beginPath();
-  ctx.arc(ex, ey, starRadius * 2.5, 0, Math.PI * 2);
+  ctx.arc(ex, ey, markerRadius, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#fff6c9";
-  ctx.strokeStyle = "#ff2489";
-  ctx.lineWidth = Math.max(1.2, size * 0.005);
-  ctx.beginPath();
-  for (let point = 0; point < 10; point += 1) {
-    const radius = point % 2 === 0 ? starRadius : starRadius * 0.43;
-    const angle = -Math.PI / 2 + (point * Math.PI) / 5;
-    const x = ex + Math.cos(angle) * radius;
-    const y = ey + Math.sin(angle) * radius;
-    if (point === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
   ctx.restore();
 
-  if (beacon) drawFireBeacon(ctx, size, elapsedMs, beacon);
+  drawEventDots(ctx, size, elapsedMs, events);
 }
 
 /**
@@ -594,9 +881,8 @@ function drawBrcPlan(
   _map: HTMLImageElement,
   size: number,
   elapsedMs: number,
-  beacon: BrcEventBeacon | null,
+  events: readonly BrcEventDot[],
 ): void {
-  const t = elapsedMs / 1000;
   const cx = size * 0.5;
   const cy = size * 0.49;
   const startAngle = -Math.PI / 6;
@@ -729,41 +1015,28 @@ function drawBrcPlan(
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Entheos: isolated dark halo, magenta rays, and a white five-point core.
+  // Entheos: the same compact survey light used by the night map. The inner
+  // edge touches Esplanade and does not obscure the literal street geometry.
   const entheosAngle = ((9.25 * 30 - 450) * Math.PI) / 180;
-  const ex = cx + Math.cos(entheosAngle) * innerRadius;
-  const ey = cy + Math.sin(entheosAngle) * innerRadius;
-  const starRadius = Math.max(6.5, size * 0.031) * (0.97 + Math.sin(t * 0.42) * 0.03);
-  ctx.fillStyle = "rgba(1,4,10,.88)";
+  const markerRadius = Math.max(1.8, size * 0.0105);
+  const markerDistance = innerRadius + markerRadius;
+  const ex = cx + Math.cos(entheosAngle) * markerDistance;
+  const ey = cy + Math.sin(entheosAngle) * markerDistance;
+  const markerGlow = ctx.createRadialGradient(ex, ey, 0, ex, ey, markerRadius * 3.2);
+  markerGlow.addColorStop(0, "rgba(255,255,225,1)");
+  markerGlow.addColorStop(0.32, "rgba(255,64,164,.82)");
+  markerGlow.addColorStop(1, "rgba(255,20,130,0)");
+  ctx.fillStyle = markerGlow;
   ctx.beginPath();
-  ctx.arc(ex, ey, starRadius * 2.15, 0, Math.PI * 2);
+  ctx.arc(ex, ey, markerRadius * 3.2, 0, Math.PI * 2);
   ctx.fill();
-  const starGlow = ctx.createRadialGradient(ex, ey, 0, ex, ey, starRadius * 2.5);
-  starGlow.addColorStop(0, "rgba(255,255,231,1)");
-  starGlow.addColorStop(0.22, "rgba(255,38,144,.96)");
-  starGlow.addColorStop(1, "rgba(255,18,112,0)");
-  ctx.fillStyle = starGlow;
+  ctx.fillStyle = "#fffbdc";
   ctx.beginPath();
-  ctx.arc(ex, ey, starRadius * 2.5, 0, Math.PI * 2);
+  ctx.arc(ex, ey, markerRadius, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#fff9d7";
-  ctx.strokeStyle = "#ff1681";
-  ctx.lineWidth = Math.max(1.4, size * 0.005);
-  ctx.beginPath();
-  for (let point = 0; point < 10; point += 1) {
-    const r = point % 2 === 0 ? starRadius : starRadius * 0.42;
-    const a = -Math.PI / 2 + point * Math.PI / 5;
-    const x = ex + Math.cos(a) * r;
-    const y = ey + Math.sin(a) * r;
-    if (point === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
   ctx.restore();
 
-  if (beacon) drawFireBeacon(ctx, size, elapsedMs, beacon);
+  drawEventDots(ctx, size, elapsedMs, events);
 }
 
 export function drawAmbientScene(
@@ -773,13 +1046,22 @@ export function drawAmbientScene(
   size: number,
   elapsedMs: number,
   kind: AmbientSceneKind,
-  beacon: BrcEventBeacon | null,
+  events: readonly BrcEventDot[] = [],
 ): void {
   if (kind === "entheos-prism") drawEntheosPrism(ctx, source, size, elapsedMs);
   else if (kind === "entheos-aura" && overlay?.complete && overlay.naturalWidth > 0) {
     drawEntheosAura(ctx, source, overlay, size, elapsedMs);
   }
-  else if (kind === "entheos-sigil") drawEntheosSigil(ctx, source, size, elapsedMs);
-  else if (kind === "brc-map") drawBrcMap(ctx, source, size, elapsedMs, beacon);
-  else if (kind === "brc-plan") drawBrcPlan(ctx, source, size, elapsedMs, beacon);
+  else if (kind === "entheos-sigil") {
+    drawEntheosSigil(
+      ctx,
+      source,
+      overlay?.complete && overlay.naturalWidth > 0 ? overlay : source,
+      size,
+      elapsedMs,
+    );
+  }
+  else if (kind === "brc-map") drawBrcMap(ctx, source, size, elapsedMs, events);
+  else if (kind === "brc-plan") drawBrcPlan(ctx, source, size, elapsedMs, events);
+  else if (kind === "axis-mundi-portal") drawAxisMundiPortal(ctx, source, size, elapsedMs);
 }

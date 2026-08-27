@@ -87,6 +87,7 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .route("/media/resolve", post(resolve_media))
         .route("/media/stream/{id}", get(stream_media))
         .route("/brc/event", post(brc_events))
+        .route("/brc/camp", post(brc_camps))
         .route("/brc/camp/{uid}", post(brc_camp))
         .route("/patch/registry", get(patch_registry))
         .route("/patch/presets", get(patch_presets))
@@ -201,11 +202,26 @@ struct DiagnosticsRequest {
 
 #[derive(serde::Deserialize)]
 struct BrcApiRequest {
+    #[serde(default)]
     api_key: String,
     #[serde(default)]
     client_id: String,
     #[serde(default)]
     token: String,
+}
+
+fn configured_brc_api_key() -> Option<String> {
+    if let Ok(key) = std::env::var("BRC_API_KEY") {
+        let key = key.trim().to_owned();
+        if !key.is_empty() {
+            return Some(key);
+        }
+    }
+    let path = crate::config::config_path().with_file_name("brc-api-key");
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|key| key.trim().to_owned())
+        .filter(|key| !key.is_empty())
 }
 
 async fn brc_events(
@@ -214,6 +230,14 @@ async fn brc_events(
     axum::Json(req): axum::Json<BrcApiRequest>,
 ) -> Response {
     brc_api(&ctx, addr, req, "https://api.burningman.org/api/event?year=2026").await
+}
+
+async fn brc_camps(
+    State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    axum::Json(req): axum::Json<BrcApiRequest>,
+) -> Response {
+    brc_api(&ctx, addr, req, "https://api.burningman.org/api/camp?year=2026").await
 }
 
 async fn brc_camp(
@@ -238,13 +262,18 @@ async fn brc_api(ctx: &Ctx, addr: SocketAddr, req: BrcApiRequest, url: &str) -> 
     if !client_authorized(&ctx.state, addr, &req.client_id, &req.token) {
         return (StatusCode::FORBIDDEN, "BRC API access denied").into_response();
     }
-    if req.api_key.is_empty() || req.api_key.len() > 512 {
-        return (StatusCode::BAD_REQUEST, "invalid Burning Man API key").into_response();
-    }
+    let api_key = if req.api_key.trim().is_empty() {
+        configured_brc_api_key()
+    } else {
+        Some(req.api_key.trim().to_owned())
+    };
+    let Some(api_key) = api_key.filter(|key| key.len() <= 512) else {
+        return (StatusCode::BAD_REQUEST, "Burning Man API key is not configured").into_response();
+    };
     let upstream = match ctx
         .brc_http
         .get(url)
-        .header("X-API-Key", req.api_key)
+        .header("X-API-Key", api_key)
         .send()
         .await
     {

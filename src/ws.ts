@@ -145,7 +145,7 @@ export class GateClient {
 
   /** Same-origin bridge for the official API, whose required key header cannot pass browser CORS. */
   async fetchBrcApi(apiKey: string, resource: BrcApiResource, uid?: string): Promise<unknown> {
-    const suffix = resource === "camp" ? `/${encodeURIComponent(uid ?? "")}` : "";
+    const suffix = resource === "camp" && uid ? `/${encodeURIComponent(uid)}` : "";
     const response = await fetch(`${this.httpBase}/brc/${resource}${suffix}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

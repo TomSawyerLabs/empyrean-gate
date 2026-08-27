@@ -862,6 +862,78 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
                 + marker + dust, 0.0, 1.0);
             return vec4f(rgb, alpha);
         }
+        // GoldenRose — two classic constructions chosen for a radial array:
+        //   polar rose:       r = cos(kθ), odd k ∈ {3, 5, 7, 9}
+        //   Vogel sunflower:  rₙ ∝ √n, θₙ = n·π(3-√5)
+        // The display's missing center is a monotone radial remap; angular
+        // relationships and the exact golden angle remain unchanged.
+        // pa = odd petal family, pb = curve width, pc = seed count, pd = glow.
+        case 23u: {
+            let u = 1.0 - ctx.r01; // inner edge -> outer edge
+            let petals = 3.0 + 2.0 * floor(clamp(L.param_a, 0.0, 0.9999) * 4.0);
+            let rose_rotation = L.phase * 0.026;
+            let rose_angle = ctx.theta + rose_rotation;
+            let rose_wave = cos(petals * rose_angle);
+            let rose_target = 0.065 + 0.88 * max(rose_wave, 0.0);
+            // The physical array samples this continuous curve only at LED
+            // centres.  Keep a mathematically exact bright boundary, then add
+            // a low, translucent interior wash so the petals remain legible
+            // from a distance instead of reading as unrelated dashes.
+            let curve_width = 0.018 + L.param_b * 0.040;
+            let rose_d = abs(u - rose_target);
+            let rose = exp(-(rose_d * rose_d) / (curve_width * curve_width))
+                * step(0.0, rose_wave);
+            let petal_fill = smoothstep(0.018, 0.075, rose_target - u)
+                * step(0.0, rose_wave)
+                * smoothstep(0.0, 0.16, rose_wave);
+            let petal_vein = exp(-pow(ang_dist(petals * rose_angle, 0.0) / 0.16, 2.0))
+                * smoothstep(0.08, 0.82, u)
+                * step(0.0, rose_wave);
+
+            // A subtle conjugate trace turns the single line into optical ink,
+            // while remaining the same polar equation at a nearby scale.
+            let echo_target = 0.065 + 0.84 * max(rose_wave, 0.0);
+            let echo_d = abs(u - echo_target);
+            let rose_echo = exp(-(echo_d * echo_d) / pow(curve_width * 0.62, 2.0))
+                * step(0.0, rose_wave) * 0.24;
+
+            let golden_angle = PI * (3.0 - sqrt(5.0));
+            let seed_count = 24.0 + floor(clamp(L.param_c, 0.0, 1.0) * 40.0);
+            let point_width = 0.010 + L.param_d * 0.010;
+            let arc_width = 0.027 + L.param_d * 0.020;
+            var seeds = 0.0;
+            var seed_rgb = vec3f(0.0);
+            for (var index = 0u; index < 64u; index++) {
+                let n = f32(index) + 0.5;
+                let seed_enabled = 1.0 - step(seed_count, n);
+                let seed_r = 0.055 + 0.89 * sqrt(n / seed_count);
+                let seed_angle = n * golden_angle - L.phase * 0.017;
+                let radial_d = (u - seed_r) / point_width;
+                let angular_d = ang_dist(ctx.theta, seed_angle) * max(seed_r, 0.16) / arc_width;
+                let point = exp(-(radial_d * radial_d + angular_d * angular_d) * 1.6) * seed_enabled;
+                let point_pulse = 0.82 + 0.18 * sin(L.phase * 0.11 + n * golden_angle);
+                let point_hue = L.hue + fract(n * 0.61803398875) * L.hue_range;
+                seed_rgb += hsv2rgb(point_hue, L.saturation, point * point_pulse);
+                seeds = max(seeds, point);
+            }
+
+            // The inverse golden ratio is a quiet reference circle, not a
+            // decorative arbitrary ring: 1/φ = (√5−1)/2.
+            let inv_phi = (sqrt(5.0) - 1.0) * 0.5;
+            let phi_ring = exp(-pow((u - inv_phi) / 0.008, 2.0)) * 0.12;
+            let rose_hue = L.hue + fract(rose_angle / TAU + 1.0) * L.hue_range;
+            let fill_rgb = hsv2rgb(rose_hue, L.saturation * 0.76, petal_fill * 0.19);
+            let rose_rgb = hsv2rgb(rose_hue, L.saturation * 0.46, rose + rose_echo);
+            let ink = vec3f(1.0, 0.96, 0.82) * rose * 0.82
+                + vec3f(1.0, 0.72, 0.24) * petal_vein * 0.38;
+            let ring_rgb = vec3f(0.24, 0.70, 0.88) * phi_ring;
+            let calm_audio = 1.0 + aud * A.level * 0.08;
+            let rgb = (fill_rgb + rose_rgb + ink + seed_rgb * 0.68 + ring_rgb)
+                * L.brightness * calm_audio;
+            let alpha = clamp(rose + rose_echo + petal_fill * 0.24
+                + petal_vein + seeds + phi_ring, 0.0, 1.0);
+            return vec4f(rgb, alpha);
+        }
         default: {
             return vec4f(0.0);
         }

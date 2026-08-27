@@ -23,7 +23,8 @@ export type LayerKind =
   | "video"
   | "entheos_weave"
   | "brc_map"
-  | "brc_plan";
+  | "brc_plan"
+  | "golden_rose";
 
 export type BlendMode = "add" | "multiply" | "screen" | "alpha_over" | "max";
 
@@ -885,6 +886,7 @@ export const LAYER_KINDS: LayerKind[] = [
   "entheos_weave",
   "brc_map",
   "brc_plan",
+  "golden_rose",
 ];
 
 export const BLEND_MODES: BlendMode[] = ["add", "multiply", "screen", "alpha_over", "max"];
@@ -913,6 +915,7 @@ export const LAYER_LABELS: Record<LayerKind, string> = {
   entheos_weave: "Entheos Sigil",
   brc_map: "Black Rock City Map",
   brc_plan: "BRC Literal Plan",
+  golden_rose: "Golden Rose",
 };
 
 /** Kind-specific labels for param_a..d, where meaningful. */
@@ -936,6 +939,7 @@ export const PARAM_LABELS: Partial<Record<LayerKind, [string?, string?, string?,
   entheos_weave: ["Outline width", "Star reach", "Orb glow", "Rotation"],
   brc_map: ["Street width", "Block fill", "Clock roads", "Rotation"],
   brc_plan: ["Street brightness", "Block fill", "Quarter-hour lines", "Rotation"],
+  golden_rose: ["Odd petal family", "Curve width", "Sunflower seeds", "Point glow"],
 };
 
 export function defaultLayer(kind: LayerKind): LayerCfg {

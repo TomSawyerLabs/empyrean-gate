@@ -59,10 +59,12 @@ pub enum LayerKind {
     BrcMap,
     /// Literal 2026 plan trace with continuous blocks and luminous street lines.
     BrcPlan,
+    /// Polar rose plus Vogel golden-angle phyllotaxis, designed for the radial array.
+    GoldenRose,
 }
 
 impl LayerKind {
-    pub const ALL: [LayerKind; 23] = [
+    pub const ALL: [LayerKind; 24] = [
         LayerKind::Solid,
         LayerKind::GradientRadial,
         LayerKind::NoiseField,
@@ -86,6 +88,7 @@ impl LayerKind {
         LayerKind::EntheosWeave,
         LayerKind::BrcMap,
         LayerKind::BrcPlan,
+        LayerKind::GoldenRose,
     ];
 
     pub fn gpu_id(self) -> u32 {
@@ -135,6 +138,13 @@ impl LayerKind {
                 index: 1,
                 steps: 10.0,
                 bias: 0.5,
+            }],
+            // petals = 3 + 2 * floor(param_a * 4): the odd rose families
+            // 3, 5, 7, and 9 retain one petal per harmonic.
+            LayerKind::GoldenRose => &[DiscreteParam {
+                index: 0,
+                steps: 4.0,
+                bias: 0.0,
             }],
             _ => &[],
         }

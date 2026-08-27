@@ -52,7 +52,10 @@ pub struct Cell {
     pub strength: u8,
 }
 
-const EMPTY: Cell = Cell { owner: NEUTRAL, strength: 0 };
+const EMPTY: Cell = Cell {
+    owner: NEUTRAL,
+    strength: 0,
+};
 
 #[derive(Clone, Copy, Debug)]
 struct Particle {
@@ -226,8 +229,9 @@ impl SpokewarSim {
                 let tt = self.rng.next_below(self.theta as u64) as f32;
                 let tr = self.radial as f32 * (0.15 + self.rng.next_below(50) as f32 / 100.0);
                 self.fire_squad(s, tt, tr);
-                self.ai_next[s as usize] =
-                    self.ticks + AI_MIN_TICKS + self.rng.next_below((AI_MAX_TICKS - AI_MIN_TICKS) as u64) as u32;
+                self.ai_next[s as usize] = self.ticks
+                    + AI_MIN_TICKS
+                    + self.rng.next_below((AI_MAX_TICKS - AI_MIN_TICKS) as u64) as u32;
             }
         }
         let mut i = 0;
@@ -257,7 +261,10 @@ impl SpokewarSim {
             let dst = self.idx(it, ir);
             let cell = self.cells[dst];
             if cell.owner == NEUTRAL || cell.owner == owner || cell.strength <= WEAK_CAPTURE {
-                self.cells[dst] = Cell { owner, strength: TERRITORY_MAX };
+                self.cells[dst] = Cell {
+                    owner,
+                    strength: TERRITORY_MAX,
+                };
                 i += 1;
             } else {
                 // Defended ground: burn strength, lose the particle.
@@ -265,7 +272,10 @@ impl SpokewarSim {
                 self.cells[dst] = if left <= 0 {
                     EMPTY
                 } else {
-                    Cell { owner: cell.owner, strength: left as u8 }
+                    Cell {
+                        owner: cell.owner,
+                        strength: left as u8,
+                    }
                 };
                 self.particles.swap_remove(i);
             }
@@ -326,7 +336,10 @@ mod tests {
         let s = sim();
         let cells = s.pack_cells();
         let rim = &cells[(s.radial() - 1) * s.theta()..];
-        assert!(rim.iter().filter(|&&c| c != 0).count() >= 4, "no lit base cells on the rim");
+        assert!(
+            rim.iter().filter(|&&c| c != 0).count() >= 4,
+            "no lit base cells on the rim"
+        );
         // And the innermost ring starts dark.
         assert!(cells[..s.theta()].iter().all(|&c| c == 0));
     }
@@ -357,7 +370,10 @@ mod tests {
         for it in 0..s.theta() {
             for ring in wall_r - 1..=wall_r + 1 {
                 let i = s.idx(it, ring);
-                s.cells[i] = Cell { owner: 1, strength: TERRITORY_MAX };
+                s.cells[i] = Cell {
+                    owner: 1,
+                    strength: TERRITORY_MAX,
+                };
             }
         }
         s.inject(8, 5, 0);
@@ -389,7 +405,10 @@ mod tests {
         let mut s = sim();
         s.ai_next = [u32::MAX; 8];
         let i = s.idx(10, 10);
-        s.cells[i] = Cell { owner: 2, strength: 8 };
+        s.cells[i] = Cell {
+            owner: 2,
+            strength: 8,
+        };
         for _ in 0..(8 / DECAY_STEP as u32 * DECAY_EVERY + DECAY_EVERY) {
             s.tick();
         }
@@ -411,7 +430,10 @@ mod tests {
         let mut s = sim();
         s.ai_next = [u32::MAX; 8];
         let i = s.idx(5, 20);
-        s.cells[i] = Cell { owner: 3, strength: 100 };
+        s.cells[i] = Cell {
+            owner: 3,
+            strength: 100,
+        };
         s.inject(30, 10, 3);
         s.set_bases(2);
         assert_eq!(s.cells()[i], EMPTY);

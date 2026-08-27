@@ -56,7 +56,10 @@ pub struct Cell {
     pub glow: u8,
 }
 
-const DARK: Cell = Cell { hue: NEUTRAL, glow: 0 };
+const DARK: Cell = Cell {
+    hue: NEUTRAL,
+    glow: 0,
+};
 
 #[derive(Clone, Copy, Debug)]
 struct Meteor {
@@ -180,14 +183,20 @@ impl FlakSim {
         if self.blooms.len() >= MAX_BLOOMS {
             return;
         }
-        self.blooms.push(Bloom { t, r, age: 0, owner });
+        self.blooms.push(Bloom {
+            t,
+            r,
+            age: 0,
+            owner,
+        });
     }
 
     /// One 50 ms step: spawn by pressure, fall, expand blooms, vaporize.
     pub fn tick(&mut self) {
         self.ticks += 1;
         let ticks = self.ticks;
-        self.recent.retain(|&t| ticks.saturating_sub(t) < PRESSURE_TICKS);
+        self.recent
+            .retain(|&t| ticks.saturating_sub(t) < PRESSURE_TICKS);
 
         for c in &mut self.cells {
             c.glow = c.glow.saturating_sub(GLOW_DECAY);
@@ -211,8 +220,8 @@ impl FlakSim {
         while self.spawn_acc >= 1.0 && self.meteors.len() < MAX_METEORS {
             self.spawn_acc -= 1.0;
             let t = self.rng.next_below(self.theta as u64 * 8) as f32 / 8.0;
-            let speed = SPEED_MIN
-                + (SPEED_MAX - SPEED_MIN) * self.rng.next_below(1000) as f32 / 1000.0;
+            let speed =
+                SPEED_MIN + (SPEED_MAX - SPEED_MIN) * self.rng.next_below(1000) as f32 / 1000.0;
             // A slight sideways drift so falls read as streaks, not elevator
             // rides down one spoke.
             let drift = (self.rng.next_below(1000) as f32 / 1000.0 - 0.5) * 0.5;
@@ -366,7 +375,12 @@ mod tests {
     fn a_bloom_vaporizes_meteors_in_range() {
         let mut s = sim();
         // Plant a meteor mid-field, then detonate on top of it.
-        s.meteors.push(Meteor { t: 20.0, r: 24.0, vt: 0.0, vr: -0.2 });
+        s.meteors.push(Meteor {
+            t: 20.0,
+            r: 24.0,
+            vt: 0.0,
+            vr: -0.2,
+        });
         s.inject(20, 24, 1);
         for _ in 0..4 {
             s.tick();
@@ -403,13 +417,19 @@ mod tests {
             s.tick();
             auto_blooms_early += s.blooms.iter().filter(|b| b.owner == NEUTRAL).count();
         }
-        assert_eq!(auto_blooms_early, 0, "auto-defense fired while a human was active");
+        assert_eq!(
+            auto_blooms_early, 0,
+            "auto-defense fired while a human was active"
+        );
         let mut auto_blooms_late = 0;
         for _ in 0..2000 {
             s.tick();
             auto_blooms_late += s.blooms.iter().filter(|b| b.owner == NEUTRAL).count();
         }
-        assert!(auto_blooms_late > 0, "auto-defense never fired in 100 quiet seconds");
+        assert!(
+            auto_blooms_late > 0,
+            "auto-defense never fired in 100 quiet seconds"
+        );
     }
 
     #[test]

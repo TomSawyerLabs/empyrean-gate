@@ -129,6 +129,29 @@ export const SCENE_PRESETS: ScenePreset[] = [
     ],
   },
   {
+    id: "math-camp-golden-rose",
+    name: "Math Camp · Golden Rose",
+    source: "r = cos(5θ) · Vogel phyllotaxis θₙ = nπ(3−√5)",
+    description: "A five-petal polar rose crossed by the golden-angle sunflower construction, rendered as exact shader geometry with a glacial counter-rotation.",
+    palette: ["#03040b", "#f8f2df", "#52e5ff", "#8c7bff", "#ffcf5b"],
+    masterSpeed: 0.34,
+    walkSpeed: 0.04,
+    walkDepth: 0.02,
+    layers: [
+      layer("solid", "Blackboard", {
+        blend: "alpha_over", opacity: 1, speed: 0, scale: 1,
+        audio_amount: 0, hue: 0.67, hue_range: 0, saturation: 0.55,
+        brightness: 0.012, walk_amount: 0,
+      }),
+      layer("golden_rose", "Rose × golden angle", {
+        blend: "screen", opacity: 1, speed: 0.16, scale: 1,
+        audio_amount: 0.02, hue: 0.52, hue_range: 0.34, saturation: 0.88,
+        brightness: 1.12, walk_amount: 0, param_a: 0.34, param_b: 0.38,
+        param_c: 0.78, param_d: 0.62,
+      }),
+    ],
+  },
+  {
     id: "warm-windstorm",
     name: "Warm Windstorm",
     source: "Uprising · Warm Windstorm",

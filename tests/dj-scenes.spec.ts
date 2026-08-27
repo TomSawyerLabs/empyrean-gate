@@ -16,6 +16,16 @@ test("new visual studies have distinct silhouettes, palettes, and motion", () =>
   expect(new Set(studies.map((scene) => scene!.palette.join(","))).size).toBe(3);
 });
 
+test("the Math Camp scene is an exact polar rose and golden-angle construction", () => {
+  const scene = SCENE_PRESETS.find((candidate) => candidate.id === "math-camp-golden-rose");
+  expect(scene).toBeTruthy();
+  expect(scene!.source).toContain("cos(5θ)");
+  expect(scene!.source).toContain("π(3−√5)");
+  expect(scene!.layers.map((layer) => layer.kind)).toEqual(["solid", "golden_rose"]);
+  expect(scene!.layers.every((layer) => layer.audio_amount <= 0.02)).toBe(true);
+  expect(scene!.layers.every((layer) => layer.walk_amount === 0)).toBe(true);
+});
+
 test("DJ mode scenes combine master-audio anchors with LINK-synchronized layers", () => {
   const subduction = SCENE_PRESETS.find((scene) => scene.id === "dj-subduction-array");
   const prism = SCENE_PRESETS.find((scene) => scene.id === "dj-prism-relay");

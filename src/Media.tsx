@@ -11,9 +11,7 @@ import {
 } from "./videoPlayback";
 import {
   drawAmbientScene,
-  fetchBrcEventBeacon,
   type AmbientSceneKind,
-  type BrcEventBeacon,
 } from "./ambientScenes";
 
 function newEntryId(): string {
@@ -52,32 +50,11 @@ const IMAGE_MOTIONS: ReadonlyArray<{ value: ImageMotion; label: string }> = [
 
 const BUNDLED_MEDIA = [
   {
-    playbackUrl: "/media/entheos.png",
-    title: "Entheos",
-    label: "Entheos",
-    description: "Original camp artwork",
-    motion: "ambient" as ImageMotion,
-    intensity: 0.55,
-    seconds: 60,
-    fit: "contain" as ImageFit,
-  },
-  {
-    playbackUrl: "/media/entheos.png",
-    title: "Entheos · Prism Flow",
-    label: "Entheos prism flow",
-    description: "Logo currents ripple independently",
-    kind: "ambient" as MediaKind,
-    ambientScene: "entheos-prism" as AmbientSceneKind,
-    motion: "still" as ImageMotion,
-    intensity: 0,
-    seconds: 120,
-    fit: "contain" as ImageFit,
-  },
-  {
-    playbackUrl: "/media/entheos-precise.svg",
-    title: "Entheos · Precise Sigil",
-    label: "Entheos precise sigil",
-    description: "Crisp vector mark with expanding light echoes",
+    playbackUrl: "/media/entheos-chromatic-temple-v2.png",
+    overlayUrl: "/media/entheos-precise.svg",
+    title: "Entheos · Chromatic Temple",
+    label: "Entheos chromatic temple",
+    description: "Exact sigil · slow prismatic light architecture",
     kind: "ambient" as MediaKind,
     ambientScene: "entheos-sigil" as AmbientSceneKind,
     motion: "still" as ImageMotion,
@@ -86,23 +63,10 @@ const BUNDLED_MEDIA = [
     fit: "contain" as ImageFit,
   },
   {
-    playbackUrl: "/media/entheos-living-aura.png",
-    overlayUrl: "/media/entheos.png",
-    title: "Entheos · Living Aura",
-    label: "Entheos living aura",
-    description: "Organic light breathes behind the mark",
-    kind: "ambient" as MediaKind,
-    ambientScene: "entheos-aura" as AmbientSceneKind,
-    motion: "still" as ImageMotion,
-    intensity: 0,
-    seconds: 120,
-    fit: "contain" as ImageFit,
-  },
-  {
     playbackUrl: "/media/brc-2026-map.png",
-    title: "Black Rock City · 2026",
-    label: "Black Rock City",
-    description: "Entheos star + high-contrast streets + event beacon",
+    title: "Black Rock City · Night Survey",
+    label: "BRC night survey",
+    description: "Precise street hierarchy · Entheos light · live event fire",
     kind: "ambient" as MediaKind,
     ambientScene: "brc-map" as AmbientSceneKind,
     motion: "still" as ImageMotion,
@@ -123,28 +87,18 @@ const BUNDLED_MEDIA = [
     fit: "contain" as ImageFit,
   },
   {
-    playbackUrl: "/media/axis-mundi-gate-scene.png",
-    title: "Axis Mundi · Full Gate scene",
-    label: "Axis Mundi scene",
-    description: "Cosmic tree + radial titles",
-    motion: "ambient" as ImageMotion,
-    intensity: 0.5,
+    playbackUrl: "/media/axis-mundi-portal-v2.png",
+    title: "Axis Mundi · Living Portal",
+    label: "Axis Mundi living portal",
+    description: "World-tree source plate · stable cinematic parallax",
+    kind: "ambient" as MediaKind,
+    ambientScene: "axis-mundi-portal" as AmbientSceneKind,
+    motion: "still" as ImageMotion,
+    intensity: 0,
     seconds: 120,
     fit: "contain" as ImageFit,
   },
-  {
-    playbackUrl: "/media/axis-mundi-tree-gate.png",
-    title: "Axis Mundi · Tree emblem",
-    label: "Axis Mundi tree",
-    description: "Transparent radial tree mark",
-    motion: "breathe" as ImageMotion,
-    intensity: 0.65,
-    seconds: 60,
-    fit: "contain" as ImageFit,
-  },
 ] as const;
-
-const BRC_API_KEY_STORAGE = "empyrean-gate.brc-api-key";
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const smooth = (value: number) => {
@@ -271,7 +225,16 @@ interface SoundtrackGraph {
 }
 
 export default function Media() {
-  const { client, config, connected, status } = useGate();
+  const {
+    client,
+    config,
+    connected,
+    status,
+    brcEvents,
+    brcEventState,
+    brcEventError,
+    refreshBrcEvents,
+  } = useGate();
   const [url, setUrl] = useState("");
   const [media, setMedia] = useState<LoadedMedia | null>(null);
   const [resolving, setResolving] = useState(false);
@@ -290,10 +253,6 @@ export default function Media() {
   const [imageCycleSeconds, setImageCycleSeconds] = useState(60);
   const [imageFit, setImageFit] = useState<ImageFit>("contain");
   const [fadeWhite, setFadeWhite] = useState(true);
-  const [brcApiKey, setBrcApiKey] = useState(() => localStorage.getItem(BRC_API_KEY_STORAGE) ?? "");
-  const [brcBeacon, setBrcBeacon] = useState<BrcEventBeacon | null>(null);
-  const [brcEventState, setBrcEventState] = useState<"idle" | "loading" | "ready" | "empty" | "error">("idle");
-  const [brcEventError, setBrcEventError] = useState("");
   const [sent, setSent] = useState(0);
   const [dropped, setDropped] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -318,8 +277,8 @@ export default function Media() {
     fit: imageFit,
     fadeWhite,
   };
-  const brcBeaconRef = useRef<BrcEventBeacon | null>(null);
-  brcBeaconRef.current = brcBeacon;
+  const brcEventsRef = useRef(brcEvents);
+  brcEventsRef.current = brcEvents;
 
   const linkBpm = status?.rhythm.bpm ?? 0;
   const linkActive = Boolean(
@@ -550,9 +509,9 @@ export default function Media() {
       resolvedBy: "Gate artwork",
       kind: "kind" in image ? image.kind : "image",
       ambientScene: "ambientScene" in image ? image.ambientScene : undefined,
-      overlayUrl: "overlayUrl" in image ? image.overlayUrl : undefined,
+      overlayUrl: "overlayUrl" in image && typeof image.overlayUrl === "string" ? image.overlayUrl : undefined,
     });
-    setFadeWhite(image.playbackUrl === "/media/entheos.png");
+    setFadeWhite(false);
     setImageMotion(image.motion);
     setImageMotionAmount(image.intensity);
     setImageCycleSeconds(image.seconds);
@@ -615,40 +574,17 @@ export default function Media() {
     client.stopVideo();
   };
 
-  const refreshBrcEvents = async () => {
-    const key = brcApiKey.trim();
-    if (!key) {
-      setBrcBeacon(null);
-      setBrcEventState("idle");
-      setBrcEventError("");
-      return;
-    }
-    localStorage.setItem(BRC_API_KEY_STORAGE, key);
-    setBrcEventState("loading");
-    setBrcEventError("");
-    try {
-      const beacon = await fetchBrcEventBeacon((resource, uid) => client.fetchBrcApi(key, resource, uid));
-      setBrcBeacon(beacon);
-      setBrcEventState(beacon ? "ready" : "empty");
-    } catch (eventError) {
-      setBrcEventState("error");
-      setBrcEventError(eventError instanceof Error ? eventError.message : String(eventError));
-    }
-  };
-
   // The event list changes slowly. Refresh while the BRC scene is selected,
   // but keep the rendered map entirely local and useful with no signal.
   useEffect(() => {
-    if (!media?.ambientScene?.startsWith("brc-") || !brcApiKey.trim()) return;
+    if (!media?.ambientScene?.startsWith("brc-")) return;
     const initial = window.setTimeout(() => void refreshBrcEvents(), 500);
     const interval = window.setInterval(() => void refreshBrcEvents(), 10 * 60_000);
     return () => {
       clearTimeout(initial);
       clearInterval(interval);
     };
-    // The function intentionally uses only the current key and scene selection.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [media?.ambientScene, brcApiKey]);
+  }, [media?.ambientScene, refreshBrcEvents]);
 
   // Ambient scenes animate in the large source preview before they go live, so
   // an operator can judge the look instead of choosing from a static thumbnail.
@@ -673,7 +609,7 @@ export default function Media() {
           preview.width,
           now - startedAt,
           media.ambientScene!,
-          brcBeaconRef.current,
+          brcEventsRef.current,
         );
         lastDraw = now;
       }
@@ -740,7 +676,7 @@ export default function Media() {
               textureSize,
               now - claimStartedAt.current,
               media.ambientScene,
-              brcBeaconRef.current,
+              brcEventsRef.current,
             );
             const rgba = ctx.getImageData(0, 0, textureSize, textureSize).data;
             if (client.sendVideoFrame(textureSize, textureSize, rgba)) {
@@ -1166,40 +1102,30 @@ export default function Media() {
           {media.ambientScene?.startsWith("brc-") && (
             <div className="media-brc-events">
               <div>
-                <strong>Upcoming-event beacon</strong>
+                <strong>Upcoming event dots</strong>
                 <span>
-                  Optional: checks the official 2026 event schedule every 10 minutes and lights the
-                  strongest music, performance, fire, art-tour, or ritual event beginning within two hours.
+                  Checks the official 2026 schedule every 10 minutes and places up to 24 small,
+                  category-colored dots for interesting events beginning within two hours—or the
+                  next scheduled event window when the city schedule has not started yet.
                 </span>
               </div>
-              <label>
-                Burning Man API key
-                <input
-                  type="password"
-                  autoComplete="off"
-                  placeholder="Stored only in this browser"
-                  value={brcApiKey}
-                  onChange={(event) => setBrcApiKey(event.target.value)}
-                />
-              </label>
-              <button type="button" onClick={() => void refreshBrcEvents()} disabled={!brcApiKey.trim() || brcEventState === "loading"}>
+              <button type="button" onClick={() => void refreshBrcEvents()} disabled={brcEventState === "loading"}>
                 {brcEventState === "loading" ? "Checking…" : "Check now"}
               </button>
-              <a href="https://api.burningman.org/request/" target="_blank" rel="noreferrer">Request a key</a>
-              {brcEventState === "ready" && brcBeacon && (
+              <a href="#settings">Color key & debug log</a>
+              {brcEventState === "ready" && (
                 <p className="media-brc-event-live">
-                  <span aria-hidden="true">🔥</span>
-                  <strong>{brcBeacon.title}</strong>
-                  <span>{brcBeacon.camp} · {brcBeacon.location} · {new Date(brcBeacon.startsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+                  <span aria-hidden="true">●</span>
+                  <strong>{brcEvents.length} upcoming dots live</strong>
+                  <span>{brcEvents.slice(0, 3).map((event) => event.title).join(" · ")}</span>
                 </p>
               )}
               {brcEventState === "empty" && <p className="hint">No geocodable event begins in the next two hours; the map stays clean.</p>}
               {brcEventState === "error" && <p className="media-error">{brcEventError}</p>}
               <p className="hint media-brc-privacy">
-                The key stays in this browser and is relayed transiently by the Gate only to api.burningman.org.
-                The offline LED schematic follows Burning Man’s official 2026 plan and GIS geometry;
-                event schedule accuracy remains the organizer’s responsibility. This app is not affiliated,
-                endorsed, or verified by Burning Man Project.
+                Dots use official event and camp data; open Settings for the color key, exact event details,
+                location disclosure, and API diagnostics. This app is not affiliated, endorsed, or verified
+                by Burning Man Project.
               </p>
             </div>
           )}

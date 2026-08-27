@@ -2,6 +2,7 @@
 // connection state, and a beat pulse per audio source.
 
 import {
+  useCallback,
   createContext,
   useContext,
   useEffect,
@@ -12,6 +13,20 @@ import {
 } from "react";
 import { GateClient } from "./ws";
 import type { AppConfig, ProDjLinkDebugEntry, RuntimeStatus, ServerMsg } from "./types";
+import {
+  fetchBrcEventDots,
+  type BrcEventDiagnostic,
+  type BrcEventDot,
+} from "./ambientScenes";
+
+const BRC_API_KEY_STORAGE = "empyrean-gate.brc-api-key";
+
+export type BrcEventState = "idle" | "loading" | "ready" | "empty" | "error";
+
+export interface BrcEventLogEntry extends BrcEventDiagnostic {
+  sequence: number;
+  timestamp: string;
+}
 
 interface Gate {
   client: GateClient;
@@ -28,6 +43,14 @@ interface Gate {
   beatAt: React.RefObject<number[]>;
   djLinkLog: ProDjLinkDebugEntry[];
   clearDjLinkLog: () => void;
+  brcApiKey: string;
+  setBrcApiKey: (key: string) => void;
+  brcEvents: BrcEventDot[];
+  brcEventState: BrcEventState;
+  brcEventError: string;
+  brcEventLog: BrcEventLogEntry[];
+  refreshBrcEvents: () => Promise<void>;
+  clearBrcEventLog: () => void;
 }
 
 const GateContext = createContext<Gate | null>(null);
@@ -42,6 +65,51 @@ export function GateProvider({ children }: { children: ReactNode }) {
   const [errors, setErrors] = useState<string[]>([]);
   const beatAt = useRef<number[]>([0, 0, 0, 0]);
   const [djLinkLog, setDjLinkLog] = useState<ProDjLinkDebugEntry[]>([]);
+  const [brcApiKey, setBrcApiKeyState] = useState(() => localStorage.getItem(BRC_API_KEY_STORAGE) ?? "");
+  const [brcEvents, setBrcEvents] = useState<BrcEventDot[]>([]);
+  const [brcEventState, setBrcEventState] = useState<BrcEventState>("idle");
+  const [brcEventError, setBrcEventError] = useState("");
+  const [brcEventLog, setBrcEventLog] = useState<BrcEventLogEntry[]>([]);
+  const brcLogSequence = useRef(0);
+  const brcRefreshPending = useRef(false);
+
+  const appendBrcLog = useCallback((entries: BrcEventDiagnostic[]) => {
+    const timestamp = new Date().toISOString();
+    setBrcEventLog((current) => [
+      ...current,
+      ...entries.map((entry) => ({ ...entry, timestamp, sequence: ++brcLogSequence.current })),
+    ].slice(-200));
+  }, []);
+
+  const setBrcApiKey = useCallback((key: string) => {
+    setBrcApiKeyState(key);
+    const trimmed = key.trim();
+    if (trimmed) localStorage.setItem(BRC_API_KEY_STORAGE, trimmed);
+    else localStorage.removeItem(BRC_API_KEY_STORAGE);
+  }, []);
+
+  const refreshBrcEvents = useCallback(async () => {
+    if (brcRefreshPending.current) return;
+    brcRefreshPending.current = true;
+    setBrcEventState("loading");
+    setBrcEventError("");
+    appendBrcLog([{ level: "info", summary: "Refreshing official 2026 event data", details: {} }]);
+    try {
+      const scan = await fetchBrcEventDots(
+        (resource, uid) => client.fetchBrcApi(brcApiKey.trim(), resource, uid),
+      );
+      setBrcEvents(scan.dots);
+      setBrcEventState(scan.dots.length ? "ready" : "empty");
+      appendBrcLog(scan.diagnostics);
+    } catch (eventError) {
+      const message = eventError instanceof Error ? eventError.message : String(eventError);
+      setBrcEventState("error");
+      setBrcEventError(message);
+      appendBrcLog([{ level: "warn", summary: "Event refresh failed", details: { error: message } }]);
+    } finally {
+      brcRefreshPending.current = false;
+    }
+  }, [appendBrcLog, brcApiKey, client]);
 
   useEffect(() => {
     const offMsg = client.onMessage((msg: ServerMsg) => {
@@ -95,6 +163,14 @@ export function GateProvider({ children }: { children: ReactNode }) {
     beatAt,
     djLinkLog,
     clearDjLinkLog: () => setDjLinkLog([]),
+    brcApiKey,
+    setBrcApiKey,
+    brcEvents,
+    brcEventState,
+    brcEventError,
+    brcEventLog,
+    refreshBrcEvents,
+    clearBrcEventLog: () => setBrcEventLog([]),
   };
   return <GateContext.Provider value={value}>{children}</GateContext.Provider>;
 }

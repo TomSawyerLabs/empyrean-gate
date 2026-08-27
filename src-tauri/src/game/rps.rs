@@ -59,10 +59,20 @@ impl RpsSim {
         let species = species.clamp(MIN_SPECIES, MAX_SPECIES);
         let mut rng = SplitMix64::new(seed);
         let cells = (0..theta * radial)
-            .map(|_| Cell { species: rng.next_below(species as u64) as u8, vigor: VIGOR_FLOOR })
+            .map(|_| Cell {
+                species: rng.next_below(species as u64) as u8,
+                vigor: VIGOR_FLOOR,
+            })
             .collect::<Vec<_>>();
         let scratch = cells.clone();
-        Self { theta, radial, species, cells, scratch, rng }
+        Self {
+            theta,
+            radial,
+            species,
+            cells,
+            scratch,
+            rng,
+        }
     }
 
     pub fn theta(&self) -> usize {
@@ -128,7 +138,10 @@ impl RpsSim {
                 }
                 let dst = self.idx(it, ir);
                 self.scratch[dst] = if count >= CONVERT_THRESHOLD {
-                    Cell { species: predator, vigor: VIGOR_MAX }
+                    Cell {
+                        species: predator,
+                        vigor: VIGOR_MAX,
+                    }
                 } else {
                     Cell {
                         species: cell.species,
@@ -157,7 +170,10 @@ impl RpsSim {
                 }
                 let nt = (it + dt).rem_euclid(self.theta as i32);
                 let dst = self.idx(nt as usize, nr as usize);
-                self.cells[dst] = Cell { species, vigor: VIGOR_MAX };
+                self.cells[dst] = Cell {
+                    species,
+                    vigor: VIGOR_MAX,
+                };
             }
         }
     }
@@ -191,7 +207,10 @@ mod tests {
     fn uniform(species: u8, fill: u8) -> RpsSim {
         let mut sim = RpsSim::new(64, 48, species, 1);
         for c in &mut sim.cells {
-            *c = Cell { species: fill, vigor: VIGOR_FLOOR };
+            *c = Cell {
+                species: fill,
+                vigor: VIGOR_FLOOR,
+            };
         }
         sim
     }
@@ -216,8 +235,14 @@ mod tests {
             sim.tick();
         }
         let after = census(&sim);
-        assert!(after[1] > before[1], "predator did not grow: {before:?} -> {after:?}");
-        assert!(after[2] < before[2], "prey was not consumed: {before:?} -> {after:?}");
+        assert!(
+            after[1] > before[1],
+            "predator did not grow: {before:?} -> {after:?}"
+        );
+        assert!(
+            after[2] < before[2],
+            "prey was not consumed: {before:?} -> {after:?}"
+        );
     }
 
     #[test]
@@ -228,9 +253,7 @@ mod tests {
         for _ in 0..8 {
             sim.tick();
         }
-        let seam = (56..64).any(|it| {
-            (18..30).any(|ir| sim.cells()[ir * 64 + it].species == 1)
-        });
+        let seam = (56..64).any(|it| (18..30).any(|ir| sim.cells()[ir * 64 + it].species == 1));
         assert!(seam, "front did not cross the θ seam");
     }
 
@@ -259,7 +282,10 @@ mod tests {
         let mut sim = uniform(3, 0); // species 1 and 2 extinct
         sim.watchdog();
         let n = census(&sim);
-        assert!(n[1] > 0 && n[2] > 0, "watchdog left a species extinct: {n:?}");
+        assert!(
+            n[1] > 0 && n[2] > 0,
+            "watchdog left a species extinct: {n:?}"
+        );
     }
 
     #[test]
@@ -273,7 +299,10 @@ mod tests {
         }
         let n = census(&sim);
         for s in 0..3 {
-            assert!(n[s] > 64, "species {s} nearly extinct after 400 ticks: {n:?}");
+            assert!(
+                n[s] > 64,
+                "species {s} nearly extinct after 400 ticks: {n:?}"
+            );
         }
     }
 
@@ -288,9 +317,12 @@ mod tests {
             sim.tick();
         }
         // Everything untouched for a while must have decayed to the floor.
-        let settled =
-            sim.cells().iter().filter(|c| c.vigor == VIGOR_FLOOR).count() as f32
-                / sim.cells().len() as f32;
+        let settled = sim
+            .cells()
+            .iter()
+            .filter(|c| c.vigor == VIGOR_FLOOR)
+            .count() as f32
+            / sim.cells().len() as f32;
         assert!(settled > 0.5, "interior did not settle: {settled}");
     }
 
