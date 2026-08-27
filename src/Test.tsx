@@ -74,7 +74,7 @@ const PATTERNS: { id: TestPattern; label: string; proves: string }[] = [
   {
     id: "spoke_id",
     label: "Spoke ID",
-    proves: "Each spoke's number in binary near its outer end. Identify one without stepping.",
+    proves: "Each strip's 1–64 number in binary near its outer end; LEDs 3 and 378 are green references.",
   },
   {
     id: "chase",

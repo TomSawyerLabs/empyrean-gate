@@ -48,8 +48,9 @@ pub enum TestPattern {
     /// Full brightness at the outer feed fading to black at the inner end. One
     /// glance confirms feed direction on all spokes at once.
     Gradient,
-    /// The spoke number in binary on the outermost pixels, after a white start
-    /// marker. Read which physical spoke is logical N without stepping.
+    /// The human-facing strip number (spoke index + 1) in binary near the outer
+    /// edge, with green reference LEDs at physical positions 3 and 378.
+    /// Read which physical spoke is logical N without stepping.
     SpokeId,
     /// A band travelling along every spoke. Smooth-motion and refresh sanity.
     Chase,
@@ -275,23 +276,33 @@ fn pixel(
         }
 
         TestPattern::SpokeId => {
-            // [marker][gap][bit MSB][gap]...[bit LSB]. Blocks scale with the
-            // strip so this stays readable at any pixel count.
+            // The installation labels strips 1..64, not the engine's 0..63.
+            // Seven MSB-first bit blocks stay readable in the preview and at a
+            // distance while remaining near the outer feed. Physical LEDs use
+            // the human-facing 1-based convention: LED 3 and LED 378 are green
+            // orientation/end markers.
+            const START_MARKER: u32 = 2;
+            const ID_START: u32 = 3;
+            const END_MARKER: u32 = 377;
+            if i == START_MARKER || i == END_MARKER {
+                return [0.0, 1.0, 0.0];
+            }
             let block = (pps / 40).max(2);
             let stride = block * 2;
-            let bits = bits_needed(geo.spokes);
-            if i < block {
-                return [1.0, 1.0, 1.0]; // start marker: read leftward from here
+            let bits = bits_needed(geo.spokes.saturating_add(1));
+            if i < ID_START {
+                return off;
             }
-            let after = i - block;
+            let after = i - ID_START;
             let slot = after / stride;
             let within = after % stride;
             if slot >= bits || within >= block {
                 return off;
             }
-            let bit = bits - 1 - slot; // MSB first, reading outward-in
-            if (spoke >> bit) & 1 == 1 {
-                base
+            let bit = bits - 1 - slot; // MSB first, reading outer-to-inner
+            let strip_number = spoke + 1;
+            if (strip_number >> bit) & 1 == 1 {
+                [0.0, 0.0, 1.0]
             } else {
                 [0.03, 0.03, 0.03] // dim, so the empty slots are still countable
             }
@@ -630,9 +641,10 @@ mod tests {
     }
 
     #[test]
-    fn spoke_id_encodes_the_spoke_number_in_binary() {
-        // 64 spokes needs 6 bits; block = max(2, 240/40) = 6, stride 12.
-        let g = geo(64, 240);
+    fn spoke_id_encodes_human_strip_numbers_with_green_reference_leds() {
+        // 64 human-facing strip numbers need 7 bits. At 378 pixels the bit
+        // blocks are 9 pixels wide with 9-pixel gaps, starting after LED 3.
+        let g = geo(64, 378);
         let cfg = TestConfig {
             pattern: TestPattern::SpokeId,
             brightness: 1.0,
@@ -640,26 +652,34 @@ mod tests {
             ..Default::default()
         };
         let buf = render(&cfg, &g, 0.0);
-        let block = 6u32;
-        let stride = 12u32;
-        let bits = bits_needed(64);
-        assert_eq!(bits, 6);
+        let stride = 18u32;
+        let bits = bits_needed(65);
+        assert_eq!(bits, 7);
 
         for spoke in [0u32, 1, 17, 63] {
+            let strip_number = spoke + 1;
             for slot in 0..bits {
                 let bit = bits - 1 - slot;
-                let i = block + slot * stride; // first pixel of the slot's block
+                let i = 3 + slot * stride; // first pixel of the slot's block
                 let p = (spoke * g.pixels_per_spoke + i) as usize;
-                let v = buf[p * 3];
-                if (spoke >> bit) & 1 == 1 {
-                    assert_eq!(v, 255, "spoke {spoke} bit {bit} should be set");
+                let rgb = &buf[p * 3..p * 3 + 3];
+                if (strip_number >> bit) & 1 == 1 {
+                    assert_eq!(
+                        rgb,
+                        [0, 0, 255],
+                        "strip {strip_number} bit {bit} should be set"
+                    );
                 } else {
-                    assert!(v > 0 && v < 32, "spoke {spoke} bit {bit} should read as dim");
+                    assert!(
+                        rgb[0] > 0 && rgb[0] < 32 && rgb[0] == rgb[1] && rgb[1] == rgb[2],
+                        "strip {strip_number} bit {bit} should read as dim"
+                    );
                 }
             }
-            // The white start marker is always there to read from.
-            let marker = (spoke * g.pixels_per_spoke) as usize;
-            assert_eq!(buf[marker * 3], 255);
+            let start = (spoke * g.pixels_per_spoke + 2) as usize * 3;
+            let end = (spoke * g.pixels_per_spoke + 377) as usize * 3;
+            assert_eq!(&buf[start..start + 3], [0, 255, 0]);
+            assert_eq!(&buf[end..end + 3], [0, 255, 0]);
         }
     }
 
