@@ -62,9 +62,9 @@ impl GameSim {
                 GameSim::Spokewar(spokewar::SpokewarSim::new(theta, radial, species, seed))
             }
             GameKind::Flak => GameSim::Flak(flak::FlakSim::new(theta, radial, species, seed)),
-            GameKind::RadialTetris => GameSim::RadialTetris(
-                radial_tetris::RadialTetrisSim::new(theta, radial, species, seed),
-            ),
+            GameKind::RadialTetris => GameSim::RadialTetris(radial_tetris::RadialTetrisSim::new(
+                theta, radial, species, seed,
+            )),
         }
     }
 
@@ -150,12 +150,7 @@ impl GameSim {
 
     pub fn detail(&self) -> Option<String> {
         match self {
-            GameSim::RadialTetris(sim) => Some(format!(
-                "{} falling · {} next · {} rings",
-                sim.current_name(),
-                sim.next_name(),
-                sim.cleared_rings()
-            )),
+            GameSim::RadialTetris(sim) => Some(sim.detail()),
             _ => None,
         }
     }

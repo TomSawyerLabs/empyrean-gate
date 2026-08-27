@@ -84,13 +84,14 @@ const GAMES: {
     name: "Ringfall",
     blurb:
       "Blocks fall inward from the rim. The bag mixes dots, dominoes, triominoes, " +
-      "and classic four-block pieces, so small gaps stay playable. Fill a complete " +
-      "ring to collapse it toward the center.",
+      "and classic four-block pieces. Radial gravity packs every spoke inward; " +
+      "fill a complete ring to collapse the whole stack toward the center.",
     knob: { label: "Colors", min: 2, max: 8, start: 6 },
     howTo:
       "Tap a spoke to move the falling piece directly there. The outlined ghost " +
       "shows where it will land; use the controls or keyboard to move, rotate, " +
-      "and drop it. Complete a ring to clear it inward.",
+      "and drop it. Blocks settle inward on every spoke, so aim for the highlighted " +
+      "inner gaps and complete a ring to clear it.",
   },
 ];
 
@@ -210,8 +211,26 @@ export default function Games() {
 
   if (!status) return <p className="hint">Waiting for backend…</p>;
 
+  const gameCanvas = (
+    <div className={`games-canvas-wrap ${active === "radial_tetris" ? "ringfall-canvas-wrap" : ""}`}>
+      <GateCanvas
+        onTap={(angle, radius) => {
+          if (!active) return;
+          // Ringfall's next action is often an immediate hard drop. Its lane
+          // selection must reach the engine before that command; the 33 ms
+          // crowd-input batch used by the paint-like games can reverse them.
+          if (active === "radial_tetris") {
+            client.gameInput(speciesRef.current, [{ angle, radius }]);
+            return;
+          }
+          pending.current.push({ angle, radius });
+        }}
+      />
+    </div>
+  );
+
   return (
-    <div className="games-page">
+    <div className={`games-page ${active === "radial_tetris" ? "ringfall-running" : ""}`}>
       <section className={`panel games-control ${active ? "running" : ""}`}>
         <h3>Games</h3>
         <p className="hint">
@@ -285,78 +304,82 @@ export default function Games() {
       <section className="panel games-play">
         <h3>{active ? `Play ${activeGame?.name ?? ""}` : "Play"}</h3>
         {active ? (
-          <>
-            <p className="games-howto">{activeGame?.howTo}</p>
-            <p className="games-join">
-              <strong>1.</strong> Pick a color &nbsp;<strong>2.</strong> Tap the
-              array below. That&apos;s joining — there are no seats and no
-              turns, and any number of people can play, sharing colors freely.
-            </p>
+          <div className={active === "radial_tetris" ? "ringfall-game-layout" : "games-active-content"}>
             {active === "radial_tetris" && (
-              <span className="hint games-picker-label">Your piece color</span>
-            )}
-            <div className="games-species">
-              {Array.from({ length: species }, (_, s) => (
-                <button
-                  key={s}
-                  className={`games-chip ${mySpecies === s ? "active" : ""}`}
-                  style={{ ["--chip" as string]: speciesColor(s, species) }}
-                  onClick={() => setMySpecies(s)}
-                >
-                  {s + 1}
-                </button>
-              ))}
-              {active === "life" && (
-                <button
-                  className={`games-chip erase ${mySpecies === ERASE_SPECIES ? "active" : ""}`}
-                  onClick={() => setMySpecies(ERASE_SPECIES)}
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-            {active === "radial_tetris" && (
-              <div className="ringfall-play">
-                <div className="ringfall-piece-key">
-                  <span className="hint">Frequent gap fillers</span>
-                  <div>
-                    {GAP_FILLERS.map((piece) => <PieceKey key={piece.label} {...piece} />)}
-                  </div>
-                </div>
-                <div className="ringfall-controls" role="group" aria-label="Ringfall controls">
-                  {RINGFALL_COMMANDS.map((control) => (
-                    <button
-                      key={control.command}
-                      className={control.strong ? "primary" : "ghost"}
-                      onClick={() => client.gameCommand(control.command)}
-                      aria-label={`${control.label} — ${control.detail}`}
-                    >
-                      <span className="ringfall-control-icon">{control.icon}</span>
-                      <span>
-                        <strong>{control.label}</strong>
-                        <small>{control.detail} · {control.key}</small>
-                      </span>
-                    </button>
-                  ))}
-                </div>
+              <div className="ringfall-stage">
+                <div className="ringfall-status"><span>LIVE BOARD</span><strong>{game?.summary ?? "Ringfall"}</strong></div>
+                {gameCanvas}
+                <p>Tap any spoke to aim there. Bright blocks are falling; the outlined piece is your landing ghost.</p>
               </div>
             )}
-          </>
+            <div className={active === "radial_tetris" ? "ringfall-side" : "games-active-controls"}>
+              <p className="games-howto">{activeGame?.howTo}</p>
+              <p className="games-join">
+                {active === "radial_tetris" ? (
+                  <><strong>Aim.</strong> Rotate. Drop. Complete any full ring to pull the whole stack inward.</>
+                ) : (
+                  <><strong>1.</strong> Pick a color &nbsp;<strong>2.</strong> Tap the array below. That&apos;s joining — there are no seats and no turns, and any number of people can play, sharing colors freely.</>
+                )}
+              </p>
+              {active === "radial_tetris" && (
+                <span className="hint games-picker-label">Your piece color</span>
+              )}
+              <div className="games-species">
+                {Array.from({ length: species }, (_, s) => (
+                  <button
+                    key={s}
+                    className={`games-chip ${mySpecies === s ? "active" : ""}`}
+                    style={{ ["--chip" as string]: speciesColor(s, species) }}
+                    onClick={() => setMySpecies(s)}
+                  >
+                    {s + 1}
+                  </button>
+                ))}
+                {active === "life" && (
+                  <button
+                    className={`games-chip erase ${mySpecies === ERASE_SPECIES ? "active" : ""}`}
+                    onClick={() => setMySpecies(ERASE_SPECIES)}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              {active === "radial_tetris" && (
+                <div className="ringfall-play">
+                  <div className="ringfall-piece-key">
+                    <span className="hint">Frequent gap fillers</span>
+                    <div>
+                      {GAP_FILLERS.map((piece) => <PieceKey key={piece.label} {...piece} />)}
+                    </div>
+                  </div>
+                  <div className="ringfall-controls" role="group" aria-label="Ringfall controls">
+                    {RINGFALL_COMMANDS.map((control) => (
+                      <button
+                        key={control.command}
+                        className={control.strong ? "primary" : "ghost"}
+                        onClick={() => client.gameCommand(control.command)}
+                        aria-label={`${control.label} — ${control.detail}`}
+                      >
+                        <span className="ringfall-control-icon">{control.icon}</span>
+                        <span>
+                          <strong>{control.label}</strong>
+                          <small>{control.detail} · {control.key}</small>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         ) : (
           <p className="hint">
             No game is running — the array is showing the normal scene. The
             preview below stays live either way.
           </p>
         )}
-        <div className="games-canvas-wrap">
-          <GateCanvas
-            onTap={(angle, radius) => {
-              if (!active) return;
-              pending.current.push({ angle, radius });
-            }}
-          />
-        </div>
-        {game?.summary ? <p className="hint">{game.summary}</p> : null}
+        {active !== "radial_tetris" && gameCanvas}
+        {active !== "radial_tetris" && game?.summary ? <p className="hint">{game.summary}</p> : null}
       </section>
     </div>
   );

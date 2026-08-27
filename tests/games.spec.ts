@@ -30,6 +30,18 @@ test("Ringfall exposes complete touch controls and sends immediate commands", as
 
   const controls = page.getByRole("group", { name: "Ringfall controls" });
   await expect(controls.getByRole("button")).toHaveCount(5);
+
+  const canvas = page.locator(".ringfall-canvas-wrap canvas");
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.click(box!.x + box!.width * 0.85, box!.y + box!.height * 0.5);
+  await controls.getByRole("button", { name: /Hard drop/ }).click();
+  await expect.poll(() => sent.some((message) => message.includes('"game_input"'))).toBe(true);
+  await expect.poll(() => sent.some((message) => message.includes('"hard_drop"'))).toBe(true);
+  const aimIndex = sent.findIndex((message) => message.includes('"game_input"'));
+  const dropIndex = sent.findIndex((message) => message.includes('"hard_drop"'));
+  expect(aimIndex).toBeLessThan(dropIndex);
+
   await controls.getByRole("button", { name: /Rotate piece/ }).click();
   await expect.poll(() => sent.some((message) =>
     message.includes('"game_command"') && message.includes('"rotate_clockwise"'),

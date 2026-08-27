@@ -5,11 +5,16 @@
 
 use super::{hsv_to_packed_rgb, GameCommand, SplitMix64};
 
-pub const TICK_SECS: f32 = 0.11;
+// A piece gets roughly 5.6 seconds to cross the twenty playable rings. The
+// original 110 ms step looked lively in attract mode but gave a person barely
+// two seconds to read, aim, rotate, and place a piece.
+pub const TICK_SECS: f32 = 0.28;
 const COLS: i32 = 16;
 const ROWS: i32 = 20;
 const EMPTY: u8 = 0xff;
-const HUMAN_TICKS: u8 = 32;
+// Once somebody touches the controls, let them own several decisions before
+// the zero-player attract mode resumes steering pieces for the room.
+const HUMAN_TICKS: u8 = 36;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Shape {
@@ -112,6 +117,8 @@ pub struct RadialTetrisSim {
     rng: SplitMix64,
     cleared: u32,
     flash: u8,
+    reset_flash: u8,
+    restarts: u32,
 }
 
 impl RadialTetrisSim {
@@ -137,6 +144,8 @@ impl RadialTetrisSim {
             rng,
             cleared: 0,
             flash: 0,
+            reset_flash: 0,
+            restarts: 0,
         };
         sim.spawn(first);
         sim
@@ -159,6 +168,75 @@ impl RadialTetrisSim {
     }
     pub fn next_name(&self) -> &'static str {
         SHAPES[self.next_kind as usize].name
+    }
+    pub fn inner_filled(&self) -> usize {
+        (0..COLS)
+            .filter(|&col| self.board[Self::index(col, 0)] != EMPTY)
+            .count()
+    }
+    fn best_gap_col(&self) -> Option<i32> {
+        let empty = |col: i32| self.board[Self::index(col, 0)] == EMPTY;
+        if !(0..COLS).any(empty) {
+            return None;
+        }
+        if (0..COLS).all(empty) {
+            return Some(0);
+        }
+        let mut best = (0, 0);
+        for start in 0..COLS {
+            if !empty(start) || empty(start - 1) {
+                continue;
+            }
+            let mut len = 0;
+            while len < COLS && empty(start + len) {
+                len += 1;
+            }
+            if len > best.1 {
+                best = (start, len);
+            }
+        }
+        Some((best.0 + (best.1 - 1) / 2).rem_euclid(COLS))
+    }
+    fn aim_hint(&self) -> Option<i32> {
+        let col = self.best_gap_col()?;
+        let hour = (6.0 - col as f32 * 12.0 / COLS as f32).round() as i32;
+        let hour = hour.rem_euclid(12);
+        Some(if hour == 0 { 12 } else { hour })
+    }
+    pub fn detail(&self) -> String {
+        if self.reset_flash > 0 {
+            return format!("Fresh board · {} rings", self.cleared);
+        }
+        if self.flash > 0 && self.cleared > 0 {
+            return format!("Ring cleared! · {} total", self.cleared);
+        }
+        let restarts = if self.restarts == 0 {
+            String::new()
+        } else {
+            format!(
+                " · {} fresh start{}",
+                self.restarts,
+                if self.restarts == 1 { "" } else { "s" }
+            )
+        };
+        let filled = self.inner_filled();
+        let aim = if filled == 0 {
+            String::new()
+        } else {
+            self.aim_hint()
+                .map(|hour| format!(" · aim {hour} o'clock"))
+                .unwrap_or_default()
+        };
+        format!(
+            "{} falling · {} next · inner {}/{}{} · {} rings{}",
+            self.current_name(),
+            self.next_name(),
+            filled,
+            COLS,
+            aim,
+            self.cleared,
+            restarts
+        )
     }
 
     fn draw_kind(rng: &mut SplitMix64) -> u8 {
@@ -218,7 +296,9 @@ impl RadialTetrisSim {
         }
         if !self.fits(piece) {
             self.board.fill(EMPTY);
-            self.flash = 9;
+            self.flash = 0;
+            self.reset_flash = 14;
+            self.restarts += 1;
             piece.row = ROWS - 1 - max_y;
         }
         self.active = piece;
@@ -282,6 +362,19 @@ impl RadialTetrisSim {
 
     fn move_to_col(&mut self, target: i32) {
         let target = target.rem_euclid(COLS);
+        // A canvas tap promises direct lane selection. Try the requested lane
+        // (and small seam-aware kicks) first instead of walking through every
+        // intervening lane and getting snagged on an unrelated tower.
+        for kick in [0, -1, 1, -2, 2] {
+            let mut next = self.active;
+            next.col = (target + kick).rem_euclid(COLS);
+            if self.fits(next) {
+                self.active = next;
+                return;
+            }
+        }
+        // If the target itself is crowded, preserve the useful old behavior:
+        // move as far toward it as the current row allows.
         for _ in 0..COLS {
             if self.active.col == target {
                 break;
@@ -294,12 +387,35 @@ impl RadialTetrisSim {
         }
     }
 
+    /// Once a piece locks, each spoke obeys radial gravity independently.
+    /// Classic rectangular Tetris can expose a buried hole by clearing the
+    /// rows above it; on a ring, a roofed inner hole made the only objective
+    /// permanently unreachable. Settling inward keeps the angular packing
+    /// puzzle while making every remaining gap honest and playable.
+    fn settle_columns(&mut self) {
+        for col in 0..COLS {
+            let mut write_row = 0;
+            for read_row in 0..ROWS {
+                let value = self.board[Self::index(col, read_row)];
+                if value == EMPTY {
+                    continue;
+                }
+                self.board[Self::index(col, write_row)] = value;
+                write_row += 1;
+            }
+            for row in write_row..ROWS {
+                self.board[Self::index(col, row)] = EMPTY;
+            }
+        }
+    }
+
     fn lock(&mut self) {
         for (col, row) in Self::blocks(self.active) {
             if (0..ROWS).contains(&row) {
                 self.board[Self::index(col, row)] = self.active.color;
             }
         }
+        self.settle_columns();
         let mut row = 0;
         while row < ROWS {
             if (0..COLS).all(|col| self.board[Self::index(col, row)] != EMPTY) {
@@ -344,6 +460,7 @@ impl RadialTetrisSim {
 
     pub fn tick(&mut self) {
         self.flash = self.flash.saturating_sub(1);
+        self.reset_flash = self.reset_flash.saturating_sub(1);
         if self.human_ticks > 0 {
             self.human_ticks -= 1;
         } else {
@@ -391,12 +508,22 @@ impl RadialTetrisSim {
                     hsv_to_packed_rgb(hue, 0.78, 1.0)
                 } else if board_slot != EMPTY {
                     let hue = board_slot as f32 / self.slots as f32;
-                    hsv_to_packed_rgb(hue, 0.84, if self.flash > 0 { 1.0 } else { 0.78 })
+                    hsv_to_packed_rgb(hue, 0.84, if self.flash > 0 { 1.0 } else { 0.68 })
                 } else if ghost_here && cell_edge {
-                    let hue = self.active.color as f32 / self.slots as f32;
-                    hsv_to_packed_rgb(hue, 0.55, 0.34)
+                    // A pale guide is recognizable as the landing preview even
+                    // when the active color matches blocks already underneath.
+                    hsv_to_packed_rgb(0.48, 0.22, 0.68)
+                } else if row == 0 && board_slot == EMPTY && cell_edge {
+                    // The objective is a complete innermost ring. Keep its
+                    // remaining holes faintly visible so the last placement is
+                    // a readable decision instead of radial-grid guesswork.
+                    hsv_to_packed_rgb(0.49, 0.78, 0.24)
                 } else if cell_edge {
-                    hsv_to_packed_rgb(0.68, 0.28, 0.045 + self.flash as f32 * 0.012)
+                    if self.reset_flash > 0 {
+                        hsv_to_packed_rgb(0.98, 0.78, 0.09 + self.reset_flash as f32 * 0.018)
+                    } else {
+                        hsv_to_packed_rgb(0.68, 0.25, 0.028 + self.flash as f32 * 0.014)
+                    }
                 } else {
                     0
                 };
@@ -466,6 +593,77 @@ mod tests {
         };
         sim.lock();
         assert_eq!(sim.cleared_rings(), 1);
+        // Clearing the full center ring pulls the dot above it into the newly
+        // opened innermost slot.
+        assert_eq!(sim.inner_filled(), 1);
+        assert!(sim.detail().starts_with("Ring cleared!"));
+    }
+
+    #[test]
+    fn detail_reports_progress_toward_the_innermost_ring() {
+        let mut sim = RadialTetrisSim::new(64, 48, 4, 31);
+        sim.board.fill(EMPTY);
+        for col in 0..7 {
+            sim.board[RadialTetrisSim::index(col, 0)] = 1;
+        }
+        assert_eq!(sim.inner_filled(), 7);
+        assert!(sim.detail().contains("inner 7/16"));
+    }
+
+    #[test]
+    fn aim_hint_points_to_the_middle_of_the_largest_gap() {
+        let mut sim = RadialTetrisSim::new(64, 48, 4, 37);
+        for col in 0..COLS {
+            sim.board[RadialTetrisSim::index(col, 0)] = 1;
+        }
+        sim.board[RadialTetrisSim::index(15, 0)] = EMPTY;
+        sim.board[RadialTetrisSim::index(0, 0)] = EMPTY;
+        sim.board[RadialTetrisSim::index(1, 0)] = EMPTY;
+        assert_eq!(sim.aim_hint(), Some(6));
+        assert!(sim.detail().contains("aim 6 o'clock"));
+    }
+
+    #[test]
+    fn direct_lane_selection_does_not_get_stuck_behind_an_unrelated_tower() {
+        let mut sim = RadialTetrisSim::new(64, 48, 4, 23);
+        sim.active = Piece {
+            kind: 0,
+            rotation: 0,
+            col: 0,
+            row: 5,
+            color: 1,
+        };
+        sim.board[RadialTetrisSim::index(1, 5)] = 2;
+        // theta cell 8 maps directly to logical column 2.
+        sim.inject(8, 3);
+        assert_eq!(sim.active.col, 2);
+        assert_eq!(sim.active.color, 3);
+    }
+
+    #[test]
+    fn radial_gravity_closes_buried_holes_after_a_piece_locks() {
+        let mut sim = RadialTetrisSim::new(64, 48, 4, 41);
+        sim.board.fill(EMPTY);
+        sim.board[RadialTetrisSim::index(3, 4)] = 1;
+        sim.board[RadialTetrisSim::index(3, 7)] = 2;
+        sim.settle_columns();
+        assert_eq!(sim.board[RadialTetrisSim::index(3, 0)], 1);
+        assert_eq!(sim.board[RadialTetrisSim::index(3, 1)], 2);
+        assert_eq!(sim.board[RadialTetrisSim::index(3, 2)], EMPTY);
+    }
+
+    #[test]
+    fn top_out_gets_a_visible_fresh_board_notice() {
+        let mut sim = RadialTetrisSim::new(64, 48, 4, 29);
+        for row in (ROWS - 6)..ROWS {
+            for col in 0..COLS {
+                sim.board[RadialTetrisSim::index(col, row)] = 1;
+            }
+        }
+        sim.spawn(0);
+        assert!(sim.board.iter().all(|&cell| cell == EMPTY));
+        assert_eq!(sim.restarts, 1);
+        assert!(sim.detail().starts_with("Fresh board"));
     }
 
     #[test]

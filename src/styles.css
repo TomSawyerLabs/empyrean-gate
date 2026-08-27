@@ -4990,6 +4990,10 @@ button:disabled {
   gap: 16px;
 }
 
+.games-page.ringfall-running {
+  max-width: 1120px;
+}
+
 .games-control,
 .games-play {
   display: flex;
@@ -5015,6 +5019,19 @@ button:disabled {
    full chooser, so switching games remains a deliberate two-step action. */
 .games-control.running .games-card:not(.active) {
   display: none;
+}
+
+.games-control.running > h3,
+.games-control.running > .hint {
+  display: none;
+}
+
+.games-control.running {
+  gap: 8px;
+}
+
+.games-control.running .games-card {
+  padding-block: 8px;
 }
 
 .games-card-text {
@@ -5112,6 +5129,68 @@ button:disabled {
      and the tap surface must never scroll the page out from under a finger. */
   height: min(46vh, 380px);
   touch-action: none;
+}
+
+.games-active-controls,
+.ringfall-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ringfall-game-layout {
+  display: grid;
+  grid-template-columns: minmax(440px, 1.08fr) minmax(390px, .92fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.ringfall-stage {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #39305d;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 50% 52%, rgba(69, 223, 206, .08), transparent 42%),
+    linear-gradient(145deg, #0d0b1b, #080713);
+  box-shadow: inset 0 0 42px rgba(124, 92, 255, .05);
+}
+
+.ringfall-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 24px;
+  color: #d9d4ef;
+}
+
+.ringfall-status span {
+  color: #45dfce;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .14em;
+}
+
+.ringfall-status strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ringfall-stage > p {
+  margin: 4px 4px 0;
+  color: #9f98bd;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.ringfall-canvas-wrap {
+  height: min(56vh, 520px);
+  min-height: 420px;
+  padding: 8px;
 }
 
 .ringfall-play {
@@ -5215,6 +5294,17 @@ button:disabled {
 
   .ringfall-controls button:last-child {
     grid-column: auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .ringfall-game-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ringfall-canvas-wrap {
+    height: min(58vh, 520px);
+    min-height: 300px;
   }
 }
 
