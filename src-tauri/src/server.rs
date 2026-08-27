@@ -49,6 +49,7 @@ struct Ctx {
     state: Arc<SharedState>,
     remote: RemoteChains,
     media: Arc<MediaResolver>,
+    brc_http: reqwest::Client,
 }
 
 pub fn spawn(state: Arc<SharedState>, remote: RemoteChains) -> std::thread::JoinHandle<()> {
@@ -71,8 +72,12 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         (cfg.server.bind.clone(), cfg.server.port)
     };
     let media = MediaResolver::new().expect("media resolver HTTP client");
+    let brc_http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .expect("BRC API HTTP client");
     let cache_media = media.clone();
-    let ctx = Ctx { state: state.clone(), remote, media };
+    let ctx = Ctx { state: state.clone(), remote, media, brc_http };
     let app = Router::new()
         .route("/health", get(health))
         .route("/ws", get(ws_upgrade))
@@ -81,6 +86,8 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .route("/handover", post(handover))
         .route("/media/resolve", post(resolve_media))
         .route("/media/stream/{id}", get(stream_media))
+        .route("/brc/event", post(brc_events))
+        .route("/brc/camp/{uid}", post(brc_camp))
         .route("/patch/registry", get(patch_registry))
         .route("/patch/presets", get(patch_presets))
         .route("/media/file/{id}", get(serve_media_file))
@@ -190,6 +197,84 @@ struct DiagnosticsRequest {
     client_id: String,
     #[serde(default)]
     token: String,
+}
+
+#[derive(serde::Deserialize)]
+struct BrcApiRequest {
+    api_key: String,
+    #[serde(default)]
+    client_id: String,
+    #[serde(default)]
+    token: String,
+}
+
+async fn brc_events(
+    State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    axum::Json(req): axum::Json<BrcApiRequest>,
+) -> Response {
+    brc_api(&ctx, addr, req, "https://api.burningman.org/api/event?year=2026").await
+}
+
+async fn brc_camp(
+    State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Path(uid): Path<String>,
+    axum::Json(req): axum::Json<BrcApiRequest>,
+) -> Response {
+    if uid.is_empty() || uid.len() > 64 || !uid.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        return (StatusCode::BAD_REQUEST, "invalid camp id").into_response();
+    }
+    brc_api(
+        &ctx,
+        addr,
+        req,
+        &format!("https://api.burningman.org/api/camp/{uid}"),
+    )
+    .await
+}
+
+async fn brc_api(ctx: &Ctx, addr: SocketAddr, req: BrcApiRequest, url: &str) -> Response {
+    if !client_authorized(&ctx.state, addr, &req.client_id, &req.token) {
+        return (StatusCode::FORBIDDEN, "BRC API access denied").into_response();
+    }
+    if req.api_key.is_empty() || req.api_key.len() > 512 {
+        return (StatusCode::BAD_REQUEST, "invalid Burning Man API key").into_response();
+    }
+    let upstream = match ctx
+        .brc_http
+        .get(url)
+        .header("X-API-Key", req.api_key)
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("Burning Man API could not be reached: {error}"),
+            )
+                .into_response();
+        }
+    };
+    let status = StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    if upstream.content_length().unwrap_or(0) > 16 * 1024 * 1024 {
+        return (StatusCode::BAD_GATEWAY, "Burning Man API response was too large").into_response();
+    }
+    match upstream.bytes().await {
+        Ok(bytes) if bytes.len() <= 16 * 1024 * 1024 => Response::builder()
+            .status(status)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(Body::from(bytes))
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+        Ok(_) => (StatusCode::BAD_GATEWAY, "Burning Man API response was too large").into_response(),
+        Err(error) => (
+            StatusCode::BAD_GATEWAY,
+            format!("Burning Man API response failed: {error}"),
+        )
+            .into_response(),
+    }
 }
 
 fn diagnostics_authorized(

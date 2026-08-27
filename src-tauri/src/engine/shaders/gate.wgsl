@@ -621,6 +621,247 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
             rgb *= L.brightness * (1.0 + aud * (A.level * 0.25 + A.bass * 0.35 + transient * 0.55));
             return vec4f(rgb, sample.a);
         }
+        // EntheosWeave — vector-derived geometry from the camp mark: six
+        // colored outer orbs, an enclosing ring, and a six-point central sigil.
+        // The silhouette stays locked; only light moves through it.
+        // pa = outline width, pb = star reach, pc = orb glow, pd = rotation.
+        case 20u: {
+            let u = 1.0 - ctx.r01; // inner edge -> outer edge
+            let rotation = (L.param_d - 0.5) * TAU;
+            let a = ctx.theta + rotation;
+            let sector_width = TAU / 6.0;
+            let sector = floor(fract(a / TAU + 1.0 + 1.0 / 12.0) * 6.0);
+            let local_angle = abs(((a + sector_width * 0.5 + TAU) % sector_width)
+                - sector_width * 0.5);
+            let hue = L.hue + (sector / 6.0) * L.hue_range;
+            let color = hsv2rgb(hue, L.saturation, 1.0);
+            let line_width = 0.009 + L.param_a * 0.018;
+            let slow_breath = 0.92 + 0.08 * sin(L.phase * 0.12 + sector * 0.72);
+
+            let ring_d = abs(u - 0.955);
+            let outer_ring = exp(-(ring_d * ring_d) / (line_width * line_width));
+
+            // Six circular jewels: a polar ellipse around each 60-degree axis,
+            // with an independent, very slow luminous breath.
+            let orb_angle = local_angle;
+            let orb_radius = u - 0.79;
+            let orb_metric = (orb_angle * orb_angle) / 0.09
+                + (orb_radius * orb_radius) / 0.0052;
+            let orb_fill = exp(-orb_metric * 2.1);
+            let orb_shell = exp(-pow((sqrt(orb_metric) - 0.88) / 0.16, 2.0));
+            let orb_halo = exp(-orb_metric * 0.72) * L.param_c * 0.2;
+
+            // Six individually separated blades, copied from the vector mark's
+            // construction rather than described only by a polar outline. The
+            // angular gap is deliberately broad enough to remain black between
+            // blades on the sparse physical spokes.
+            let blade_inner = 0.08;
+            let blade_tip = 0.62 + L.param_b * 0.16;
+            let blade_t = clamp((u - blade_inner) / (blade_tip - blade_inner), 0.0, 1.0);
+            let blade_half_width = mix(0.40, 0.045, blade_t);
+            let blade_body = step(local_angle, blade_half_width)
+                * step(blade_inner, u) * step(u, blade_tip);
+            let angular_edge_d = abs(local_angle - blade_half_width);
+            let blade_side_edge = exp(-pow(angular_edge_d / (0.018 + line_width * 0.62), 2.0))
+                * step(blade_inner, u) * step(u, blade_tip);
+            let blade_tip_edge = exp(-pow((u - blade_tip) / line_width, 2.0))
+                * step(local_angle, blade_half_width + 0.055);
+            let star_edge = max(blade_side_edge, blade_tip_edge);
+            let flowing_fill = (0.48 + 0.16 * sin(u * 19.0 - L.phase * 0.10 + sector))
+                * blade_body;
+
+            let white = vec3f(1.0, 0.97, 0.88);
+            let rgb = color * (flowing_fill + orb_fill * slow_breath + orb_halo)
+                + white * (star_edge + orb_shell * 0.82 + outer_ring * 0.9);
+            let v = clamp(flowing_fill + star_edge + orb_fill + orb_shell + outer_ring + orb_halo, 0.0, 1.0);
+            let calm_audio = 1.0 + aud * (A.level * 0.10 + A.bass * 0.08);
+            return vec4f(rgb * L.brightness * calm_audio, v);
+        }
+        // BrcMap — a deliberately exaggerated LED schematic. Concentric
+        // streets and clock avenues are several physical pixels wide, so they
+        // survive the Gate's coarse angular and radial sampling.
+        // pa = street width, pb = block fill, pc = clock roads, pd = rotation.
+        case 21u: {
+            let u = 1.0 - ctx.r01; // inner edge -> outer edge
+            let rotation = (L.param_d - 0.5) * TAU;
+            let a = ctx.theta - rotation;
+            // Shader angle PI is displayed at the top of the Gate preview.
+            let open_wedge = step(PI / 3.0, ang_dist(a, PI));
+            let city = step(0.19, u) * step(u, 0.73) * open_wedge;
+
+            // Eleven named streets, Esplanade through Kundalini. The width is
+            // expressed within one street cell so adjacent lanes remain dark.
+            let street_coord = (u - 0.19) * 10.0 / 0.54;
+            let street_cell = fract(street_coord);
+            let street_distance = min(street_cell, 1.0 - street_cell);
+            // Roughly two physical radial pixels per road at the default Gate
+            // geometry, with six-to-eight dark pixels between named streets.
+            let street_width = 0.055 + L.param_a * 0.065;
+            let streets = (1.0 - smoothstep(street_width, street_width + 0.035, street_distance)) * city;
+
+            // One avenue every clock-hour. At real spoke density a broad
+            // angular footprint is essential, but these remain secondary to
+            // the named street rings so the city does not become a starburst.
+            let avenue_distance = abs(sin(a * 6.0));
+            let avenue_width = 0.055 + L.param_c * 0.17;
+            let avenues = (1.0 - smoothstep(avenue_width, avenue_width + 0.13, avenue_distance)) * city;
+
+            let block_index = floor(max(street_coord, 0.0));
+            let clock_index = floor(fract((a + PI) / TAU) * 12.0);
+            let alternate = fract((block_index + clock_index) * 0.5);
+            let block_color = mix(vec3f(0.015, 0.19, 0.42), vec3f(0.02, 0.48, 0.82), alternate);
+            let blocks = block_color * L.brightness * (0.09 + L.param_b * 0.18) * city;
+            let street_index = floor(street_coord + 0.5);
+            let street_alternate = fract(street_index * 0.5);
+            let street_color = mix(vec3f(0.30, 0.85, 0.95), vec3f(1.0, 0.89, 0.58), street_alternate);
+            let road = street_color * L.brightness * streets
+                + vec3f(0.56, 0.89, 0.96) * L.brightness * 0.66 * avenues;
+
+            // Regular pentagonal trash-fence perimeter, with one vertex at
+            // 12:00. Its angular radius changes continuously along each edge,
+            // so it reads as the published BRC outline rather than a circle.
+            let fence_sector = TAU / 5.0;
+            let fence_half = fence_sector * 0.5;
+            let fence_local = abs(((a - PI + TAU + fence_half) % fence_sector) - fence_half);
+            let fence_radius = 0.81 / cos(fence_half - fence_local);
+            let fence_d = abs(ctx.rn - fence_radius);
+            let fence = exp(-pow(fence_d / 0.012, 2.0));
+
+            // The open-playa cross is the second major orientation cue in the
+            // 2026 plan. It stays much dimmer than the named street rings.
+            let axis_distance = abs(sin(a * 2.0));
+            let axes = (1.0 - smoothstep(0.018, 0.060, axis_distance))
+                * step(0.035, u) * step(u, 0.73);
+            let man_d = abs(u - 0.075);
+            let man = exp(-(man_d * man_d) / 0.0012);
+            let temple_a = exp(-pow(ang_dist(a, PI) / 0.16, 2.0));
+            let temple_r = exp(-pow((u - 0.155) / 0.032, 2.0));
+            let temple = temple_a * temple_r;
+            let pulse = 0.90 + 0.10 * sin(L.phase * 0.18);
+            let landmarks = vec3f(1.0, 0.24, 0.06) * man * pulse
+                + vec3f(0.15, 0.88, 1.0) * temple * pulse
+                + vec3f(1.0, 0.16, 0.05) * fence * 0.92
+                + vec3f(0.62, 0.90, 0.96) * axes * 0.32;
+
+            // Entheos camp: a compact location dot at 9:15. Its inner edge is
+            // tangent to Esplanade, so the marker never drifts into open playa.
+            let entheos_angle = -13.0 * PI / 24.0;
+            let esplanade_rn = mix(G.inner_over_outer, 1.0, 0.19);
+            let marker_radius = 0.050;
+            let marker_origin = (esplanade_rn + marker_radius)
+                * vec2f(cos(entheos_angle + rotation), sin(entheos_angle + rotation));
+            let marker_d = distance(ctx.pos, marker_origin);
+            let marker = 1.0 - smoothstep(marker_radius * 0.76, marker_radius, marker_d);
+            let marker_core = 1.0 - smoothstep(
+                marker_radius * 0.34,
+                marker_radius * 0.60,
+                marker_d,
+            );
+            let marker_knockout = 1.0 - smoothstep(
+                marker_radius * 1.02,
+                marker_radius * 1.30,
+                marker_d,
+            );
+            let entheos_marker = vec3f(1.0, 0.015, 0.48) * marker * 1.85
+                + vec3f(1.0, 0.98, 0.78) * marker_core * 2.25;
+
+            // Barely moving playa dust: broad, low-contrast haze rather than
+            // cartographic motion. Roads and landmarks stay rigid.
+        let dust_n = fbm3(vec3f(ctx.pos * 1.35, L.phase * 0.012), 3u) * 0.5 + 0.5;
+            let dust = pow(clamp(dust_n, 0.0, 1.0), 3.2)
+                * (0.025 + 0.012 * sin(L.phase * 0.055));
+            let dust_rgb = vec3f(0.55, 0.23, 0.07) * dust;
+            let rgb = (blocks + road + landmarks) * (1.0 - marker_knockout * 0.96)
+                + entheos_marker + dust_rgb;
+            let alpha = clamp(city * (0.18 + L.param_b * 0.34) + max(streets, avenues)
+                + fence + axes * 0.36 + man + temple + marker + dust, 0.0, 1.0);
+            return vec4f(rgb, alpha);
+        }
+        // BrcPlan — literal LED-negative trace of the published 2026 plan.
+        // Blocks are continuous blue fields; named and quarter-hour streets
+        // are explicit luminous strokes laid over them, never empty gaps.
+        case 22u: {
+            let u = 1.0 - ctx.r01;
+            let rotation = (L.param_d - 0.5) * TAU;
+            let a = ctx.theta - rotation;
+            let open_wedge = step(PI / 3.0, ang_dist(a, PI));
+            let city = step(0.19, u) * step(u, 0.73) * open_wedge;
+
+            // Eleven concentric named streets with narrow, continuous light.
+            let street_coord = (u - 0.19) * 10.0 / 0.54;
+            let street_cell = fract(street_coord);
+            let street_distance = min(street_cell, 1.0 - street_cell);
+            let street_width = 0.026 + L.param_a * 0.026;
+            let streets = (1.0 - smoothstep(street_width, street_width + 0.026, street_distance)) * city;
+
+            // Quarter-hour spokes: 48 divisions around the complete clock,
+            // restricted to the actual 2:00–10:00 city horseshoe.
+            let quarter_distance = abs(sin(a * 24.0));
+            let quarter_width = 0.030 + L.param_c * 0.040;
+            let quarters = (1.0 - smoothstep(quarter_width, quarter_width + 0.055, quarter_distance)) * city;
+            let half_distance = abs(sin(a * 12.0));
+            let half_hours = (1.0 - smoothstep(0.035, 0.095, half_distance)) * city;
+
+            // Solid blocks first, then ivory/cyan road ink. A tiny phase term
+            // changes luminance only; all plan geometry remains stationary.
+            let block_breath = 0.96 + 0.04 * sin(L.phase * 0.055);
+            let blocks = vec3f(0.015, 0.31, 0.68) * L.brightness
+                * (0.31 + L.param_b * 0.25) * city * block_breath;
+            let street_ink = vec3f(0.93, 0.98, 0.92) * streets * L.brightness;
+            let quarter_ink = vec3f(0.40, 0.88, 0.98) * quarters * L.brightness * 0.84;
+            let major_ink = vec3f(1.0, 0.89, 0.58) * half_hours * L.brightness * 0.72;
+
+            // Pentagonal perimeter with the 12:00 vertex at the top.
+            let fence_sector = TAU / 5.0;
+            let fence_half = fence_sector * 0.5;
+            let fence_local = abs(((a - PI + TAU + fence_half) % fence_sector) - fence_half);
+            let fence_radius = 0.81 / cos(fence_half - fence_local);
+            let fence = exp(-pow((ctx.rn - fence_radius) / 0.010, 2.0));
+
+            // Open-playa cross, Man, Temple, and Center Camp at 6:00.
+            let axes = (1.0 - smoothstep(0.014, 0.047, abs(sin(a * 2.0))))
+                * step(0.035, u) * step(u, 0.73);
+            let man = exp(-pow((u - 0.075) / 0.030, 2.0));
+            let temple = exp(-pow(ang_dist(a, PI) / 0.12, 2.0))
+                * exp(-pow((u - 0.155) / 0.026, 2.0));
+            let center_camp = exp(-pow(ang_dist(a, 0.0) / 0.17, 2.0))
+                * exp(-pow((u - 0.225) / 0.030, 2.0));
+
+            // Small, bright Entheos dot whose inner edge touches Esplanade.
+            let entheos_angle = -13.0 * PI / 24.0;
+            let esplanade_rn = mix(G.inner_over_outer, 1.0, 0.19);
+            let marker_radius = 0.050;
+            let marker_origin = (esplanade_rn + marker_radius)
+                * vec2f(cos(entheos_angle + rotation), sin(entheos_angle + rotation));
+            let marker_d = distance(ctx.pos, marker_origin);
+            let marker = 1.0 - smoothstep(marker_radius * 0.76, marker_radius, marker_d);
+            let marker_core = 1.0 - smoothstep(
+                marker_radius * 0.34,
+                marker_radius * 0.60,
+                marker_d,
+            );
+            let marker_knockout = 1.0 - smoothstep(
+                marker_radius * 1.02,
+                marker_radius * 1.30,
+                marker_d,
+            );
+
+            let plan = blocks + street_ink + quarter_ink + major_ink
+                + vec3f(0.58, 0.91, 0.98) * axes * 0.42
+                + vec3f(1.0, 0.20, 0.05) * fence
+                + vec3f(1.0, 0.42, 0.06) * man
+                + vec3f(0.18, 0.94, 1.0) * (temple + center_camp);
+            let entheos_marker = vec3f(1.0, 0.015, 0.48) * marker * 1.88
+                + vec3f(1.0, 0.98, 0.78) * marker_core * 2.28;
+            let dust_n = fbm3(vec3f(ctx.pos * 1.5, L.phase * 0.008), 2u) * 0.5 + 0.5;
+            let dust = pow(clamp(dust_n, 0.0, 1.0), 4.0) * 0.014;
+            let rgb = plan * (1.0 - marker_knockout * 0.96) + entheos_marker
+                + vec3f(0.32, 0.16, 0.05) * dust;
+            let alpha = clamp(city * (0.42 + L.param_b * 0.36) + streets + quarters
+                + half_hours + fence + axes * 0.42 + man + temple + center_camp
+                + marker + dust, 0.0, 1.0);
+            return vec4f(rgb, alpha);
+        }
         default: {
             return vec4f(0.0);
         }

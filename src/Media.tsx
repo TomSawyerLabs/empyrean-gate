@@ -9,6 +9,12 @@ import {
   videoPlaybackRate,
   type VideoTempoMode,
 } from "./videoPlayback";
+import {
+  drawAmbientScene,
+  fetchBrcEventBeacon,
+  type AmbientSceneKind,
+  type BrcEventBeacon,
+} from "./ambientScenes";
 
 function newEntryId(): string {
   return (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).replace(/-/g, "");
@@ -17,12 +23,14 @@ function newEntryId(): string {
 const FRAME_RATES = [10, 15, 24];
 const TEXTURE_SIZES = [64, 96, 128];
 type AudioMode = "none" | "video" | `source:${number}`;
-type MediaKind = "video" | "image";
+type MediaKind = "video" | "image" | "ambient";
 type ImageMotion = "still" | "ambient" | "breathe" | "drift" | "haze" | "fade";
 type ImageFit = "contain" | "cover";
 
 interface LoadedMedia extends ResolvedMedia {
   kind: MediaKind;
+  ambientScene?: AmbientSceneKind;
+  overlayUrl?: string;
 }
 
 interface ImageAnimationSettings {
@@ -42,7 +50,7 @@ const IMAGE_MOTIONS: ReadonlyArray<{ value: ImageMotion; label: string }> = [
   { value: "still", label: "Still" },
 ];
 
-const BUNDLED_IMAGES = [
+const BUNDLED_MEDIA = [
   {
     playbackUrl: "/media/entheos.png",
     title: "Entheos",
@@ -51,6 +59,67 @@ const BUNDLED_IMAGES = [
     motion: "ambient" as ImageMotion,
     intensity: 0.55,
     seconds: 60,
+    fit: "contain" as ImageFit,
+  },
+  {
+    playbackUrl: "/media/entheos.png",
+    title: "Entheos · Prism Flow",
+    label: "Entheos prism flow",
+    description: "Logo currents ripple independently",
+    kind: "ambient" as MediaKind,
+    ambientScene: "entheos-prism" as AmbientSceneKind,
+    motion: "still" as ImageMotion,
+    intensity: 0,
+    seconds: 120,
+    fit: "contain" as ImageFit,
+  },
+  {
+    playbackUrl: "/media/entheos-precise.svg",
+    title: "Entheos · Precise Sigil",
+    label: "Entheos precise sigil",
+    description: "Crisp vector mark with expanding light echoes",
+    kind: "ambient" as MediaKind,
+    ambientScene: "entheos-sigil" as AmbientSceneKind,
+    motion: "still" as ImageMotion,
+    intensity: 0,
+    seconds: 120,
+    fit: "contain" as ImageFit,
+  },
+  {
+    playbackUrl: "/media/entheos-living-aura.png",
+    overlayUrl: "/media/entheos.png",
+    title: "Entheos · Living Aura",
+    label: "Entheos living aura",
+    description: "Organic light breathes behind the mark",
+    kind: "ambient" as MediaKind,
+    ambientScene: "entheos-aura" as AmbientSceneKind,
+    motion: "still" as ImageMotion,
+    intensity: 0,
+    seconds: 120,
+    fit: "contain" as ImageFit,
+  },
+  {
+    playbackUrl: "/media/brc-2026-map.png",
+    title: "Black Rock City · 2026",
+    label: "Black Rock City",
+    description: "Entheos star + high-contrast streets + event beacon",
+    kind: "ambient" as MediaKind,
+    ambientScene: "brc-map" as AmbientSceneKind,
+    motion: "still" as ImageMotion,
+    intensity: 0,
+    seconds: 120,
+    fit: "contain" as ImageFit,
+  },
+  {
+    playbackUrl: "/media/brc-2026-map.png",
+    title: "Black Rock City · Literal Plan",
+    label: "BRC literal plan",
+    description: "Quarter-hour street lines traced over continuous blue blocks",
+    kind: "ambient" as MediaKind,
+    ambientScene: "brc-plan" as AmbientSceneKind,
+    motion: "still" as ImageMotion,
+    intensity: 0,
+    seconds: 120,
     fit: "contain" as ImageFit,
   },
   {
@@ -74,6 +143,8 @@ const BUNDLED_IMAGES = [
     fit: "contain" as ImageFit,
   },
 ] as const;
+
+const BRC_API_KEY_STORAGE = "empyrean-gate.brc-api-key";
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const smooth = (value: number) => {
@@ -219,10 +290,16 @@ export default function Media() {
   const [imageCycleSeconds, setImageCycleSeconds] = useState(60);
   const [imageFit, setImageFit] = useState<ImageFit>("contain");
   const [fadeWhite, setFadeWhite] = useState(true);
+  const [brcApiKey, setBrcApiKey] = useState(() => localStorage.getItem(BRC_API_KEY_STORAGE) ?? "");
+  const [brcBeacon, setBrcBeacon] = useState<BrcEventBeacon | null>(null);
+  const [brcEventState, setBrcEventState] = useState<"idle" | "loading" | "ready" | "empty" | "error">("idle");
+  const [brcEventError, setBrcEventError] = useState("");
   const [sent, setSent] = useState(0);
   const [dropped, setDropped] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const overlayImageRef = useRef<HTMLImageElement>(null);
+  const scenePreviewRef = useRef<HTMLCanvasElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const localObjectUrl = useRef<string | null>(null);
   const claimStartedAt = useRef(0);
@@ -241,6 +318,8 @@ export default function Media() {
     fit: imageFit,
     fadeWhite,
   };
+  const brcBeaconRef = useRef<BrcEventBeacon | null>(null);
+  brcBeaconRef.current = brcBeacon;
 
   const linkBpm = status?.rhythm.bpm ?? 0;
   const linkActive = Boolean(
@@ -360,7 +439,7 @@ export default function Media() {
     setDropped(0);
     setError(null);
     setMedia(next);
-    if (next.kind === "image") {
+    if (next.kind !== "video") {
       setAudioMode("none");
       setFadeWhite(true);
     } else {
@@ -463,13 +542,15 @@ export default function Media() {
     });
   };
 
-  const loadBundledImage = (image: (typeof BUNDLED_IMAGES)[number]) => {
+  const loadBundledMedia = (image: (typeof BUNDLED_MEDIA)[number]) => {
     replaceMedia({
       playbackUrl: image.playbackUrl,
       title: image.title,
       sourceUrl: `bundled artwork: ${image.playbackUrl}`,
       resolvedBy: "Gate artwork",
-      kind: "image",
+      kind: "kind" in image ? image.kind : "image",
+      ambientScene: "ambientScene" in image ? image.ambientScene : undefined,
+      overlayUrl: "overlayUrl" in image ? image.overlayUrl : undefined,
     });
     setFadeWhite(image.playbackUrl === "/media/entheos.png");
     setImageMotion(image.motion);
@@ -484,9 +565,16 @@ export default function Media() {
     const video = videoRef.current;
     const image = imageRef.current;
     if (!media || (media.kind === "video" && !video)) return;
-    if (media.kind === "image" && (!image || !image.complete || image.naturalWidth === 0)) {
+    if (media.kind !== "video" && (!image || !image.complete || image.naturalWidth === 0)) {
       setError("The image is still loading. Try again in a moment.");
       return;
+    }
+    if (media.kind === "ambient" && media.overlayUrl) {
+      const overlay = overlayImageRef.current;
+      if (!overlay || !overlay.complete || overlay.naturalWidth === 0) {
+        setError("The scene layers are still loading. Try again in a moment.");
+        return;
+      }
     }
     if (!configureVideoReaction(audioMode, audioAmount)) return;
     if (media.kind === "video" && audioMode === "video") {
@@ -502,7 +590,7 @@ export default function Media() {
     }
     claimStartedAt.current = performance.now();
     client.startVideo(media.title, media.sourceUrl);
-    if (media.kind === "image") {
+    if (media.kind !== "video") {
       pauseSoundtrack();
       setBroadcasting(true);
       return;
@@ -526,6 +614,74 @@ export default function Media() {
     pauseSoundtrack();
     client.stopVideo();
   };
+
+  const refreshBrcEvents = async () => {
+    const key = brcApiKey.trim();
+    if (!key) {
+      setBrcBeacon(null);
+      setBrcEventState("idle");
+      setBrcEventError("");
+      return;
+    }
+    localStorage.setItem(BRC_API_KEY_STORAGE, key);
+    setBrcEventState("loading");
+    setBrcEventError("");
+    try {
+      const beacon = await fetchBrcEventBeacon((resource, uid) => client.fetchBrcApi(key, resource, uid));
+      setBrcBeacon(beacon);
+      setBrcEventState(beacon ? "ready" : "empty");
+    } catch (eventError) {
+      setBrcEventState("error");
+      setBrcEventError(eventError instanceof Error ? eventError.message : String(eventError));
+    }
+  };
+
+  // The event list changes slowly. Refresh while the BRC scene is selected,
+  // but keep the rendered map entirely local and useful with no signal.
+  useEffect(() => {
+    if (!media?.ambientScene?.startsWith("brc-") || !brcApiKey.trim()) return;
+    const initial = window.setTimeout(() => void refreshBrcEvents(), 500);
+    const interval = window.setInterval(() => void refreshBrcEvents(), 10 * 60_000);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(interval);
+    };
+    // The function intentionally uses only the current key and scene selection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [media?.ambientScene, brcApiKey]);
+
+  // Ambient scenes animate in the large source preview before they go live, so
+  // an operator can judge the look instead of choosing from a static thumbnail.
+  useEffect(() => {
+    if (media?.kind !== "ambient" || !media.ambientScene) return;
+    const preview = scenePreviewRef.current;
+    const image = imageRef.current;
+    if (!preview || !image) return;
+    const ctx = preview.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+    preview.width = 384;
+    preview.height = 384;
+    let frame = 0;
+    let lastDraw = 0;
+    const startedAt = performance.now();
+    const draw = (now: number) => {
+      if (now - lastDraw >= 1000 / 30 && image.complete && image.naturalWidth > 0) {
+        drawAmbientScene(
+          ctx,
+          image,
+          overlayImageRef.current,
+          preview.width,
+          now - startedAt,
+          media.ambientScene!,
+          brcBeaconRef.current,
+        );
+        lastDraw = now;
+      }
+      frame = requestAnimationFrame(draw);
+    };
+    frame = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(frame);
+  }, [media]);
 
   useEffect(() => {
     if (!broadcasting || !media || !connected) return;
@@ -565,6 +721,36 @@ export default function Media() {
             lastSent = now;
           } catch {
             setError("The browser could not animate this image. Try a PNG, JPEG, or WebP file.");
+            setBroadcasting(false);
+            client.stopVideo();
+            return;
+          }
+        } else if (
+          media.kind === "ambient" &&
+          media.ambientScene &&
+          image &&
+          image.complete &&
+          image.naturalWidth > 0
+        ) {
+          try {
+            drawAmbientScene(
+              ctx,
+              image,
+              overlayImageRef.current,
+              textureSize,
+              now - claimStartedAt.current,
+              media.ambientScene,
+              brcBeaconRef.current,
+            );
+            const rgba = ctx.getImageData(0, 0, textureSize, textureSize).data;
+            if (client.sendVideoFrame(textureSize, textureSize, rgba)) {
+              setSent((n) => n + 1);
+            } else {
+              setDropped((n) => n + 1);
+            }
+            lastSent = now;
+          } catch {
+            setError("The browser could not render this ambient scene.");
             setBroadcasting(false);
             client.stopVideo();
             return;
@@ -714,13 +900,13 @@ export default function Media() {
         </div>
         <div className="media-bundled-images" aria-label="Saved media scenes">
           <span>Saved media scenes</span>
-          {BUNDLED_IMAGES.map((image) => (
+          {BUNDLED_MEDIA.map((image) => (
             <button
               type="button"
-              key={image.playbackUrl}
-              className={media?.playbackUrl === image.playbackUrl ? "active" : undefined}
-              aria-pressed={media?.playbackUrl === image.playbackUrl}
-              onClick={() => loadBundledImage(image)}
+              key={image.title}
+              className={media?.title === image.title ? "active" : undefined}
+              aria-pressed={media?.title === image.title}
+              onClick={() => loadBundledMedia(image)}
             >
               <strong>{image.label}</strong>
               <small>{image.description}</small>
@@ -865,6 +1051,33 @@ export default function Media() {
                   }
                 }}
               />
+            ) : media.kind === "ambient" ? (
+              <>
+                <canvas
+                  ref={scenePreviewRef}
+                  className="media-scene-preview"
+                  aria-label={`${media.title} animated preview`}
+                />
+                <img
+                  ref={imageRef}
+                  className="media-scene-source"
+                  key={media.playbackUrl}
+                  src={media.playbackUrl}
+                  alt=""
+                  onLoad={() => setError(null)}
+                  onError={() => setError("This browser could not load the ambient scene artwork.")}
+                />
+                {media.overlayUrl && (
+                  <img
+                    ref={overlayImageRef}
+                    className="media-scene-source"
+                    src={media.overlayUrl}
+                    alt=""
+                    onLoad={() => setError(null)}
+                    onError={() => setError("This browser could not load the Entheos overlay.")}
+                  />
+                )}
+              </>
             ) : (
               <img
                 ref={imageRef}
@@ -948,6 +1161,46 @@ export default function Media() {
                 <input type="checkbox" checked={fadeWhite} onChange={(e) => setFadeWhite(e.target.checked)} />
                 Fade white background
               </label>
+            </div>
+          )}
+          {media.ambientScene?.startsWith("brc-") && (
+            <div className="media-brc-events">
+              <div>
+                <strong>Upcoming-event beacon</strong>
+                <span>
+                  Optional: checks the official 2026 event schedule every 10 minutes and lights the
+                  strongest music, performance, fire, art-tour, or ritual event beginning within two hours.
+                </span>
+              </div>
+              <label>
+                Burning Man API key
+                <input
+                  type="password"
+                  autoComplete="off"
+                  placeholder="Stored only in this browser"
+                  value={brcApiKey}
+                  onChange={(event) => setBrcApiKey(event.target.value)}
+                />
+              </label>
+              <button type="button" onClick={() => void refreshBrcEvents()} disabled={!brcApiKey.trim() || brcEventState === "loading"}>
+                {brcEventState === "loading" ? "Checking…" : "Check now"}
+              </button>
+              <a href="https://api.burningman.org/request/" target="_blank" rel="noreferrer">Request a key</a>
+              {brcEventState === "ready" && brcBeacon && (
+                <p className="media-brc-event-live">
+                  <span aria-hidden="true">🔥</span>
+                  <strong>{brcBeacon.title}</strong>
+                  <span>{brcBeacon.camp} · {brcBeacon.location} · {new Date(brcBeacon.startsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+                </p>
+              )}
+              {brcEventState === "empty" && <p className="hint">No geocodable event begins in the next two hours; the map stays clean.</p>}
+              {brcEventState === "error" && <p className="media-error">{brcEventError}</p>}
+              <p className="hint media-brc-privacy">
+                The key stays in this browser and is relayed transiently by the Gate only to api.burningman.org.
+                The offline LED schematic follows Burning Man’s official 2026 plan and GIS geometry;
+                event schedule accuracy remains the organizer’s responsibility. This app is not affiliated,
+                endorsed, or verified by Burning Man Project.
+              </p>
             </div>
           )}
           {media.kind === "video" && (
@@ -1051,15 +1304,15 @@ export default function Media() {
           <div className="media-actions">
             {!broadcasting ? (
               <button className="primary" onClick={goLive} disabled={!connected}>
-                Play {media.kind} on Gate
+                Play {media.kind === "ambient" ? "scene" : media.kind} on Gate
               </button>
             ) : (
-              <button className="danger" onClick={stop}>Stop Gate {media.kind}</button>
+              <button className="danger" onClick={stop}>Stop Gate {media.kind === "ambient" ? "scene" : media.kind}</button>
             )}
             <span className="hint">
               {broadcasting
                 ? `${sent.toLocaleString()} frames sent${dropped ? ` · ${dropped} dropped to stay live` : ""}`
-                : `This ${media.kind} stays local until you play it on the Gate.`}
+                : `This ${media.kind === "ambient" ? "scene" : media.kind} stays local until you play it on the Gate.`}
             </span>
           </div>
         </section>

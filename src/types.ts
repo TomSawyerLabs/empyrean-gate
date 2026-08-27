@@ -20,7 +20,10 @@ export type LayerKind =
   | "warp"
   | "waveform"
   | "spectrum"
-  | "video";
+  | "video"
+  | "entheos_weave"
+  | "brc_map"
+  | "brc_plan";
 
 export type BlendMode = "add" | "multiply" | "screen" | "alpha_over" | "max";
 
@@ -879,6 +882,9 @@ export const LAYER_KINDS: LayerKind[] = [
   "waveform",
   "spectrum",
   "video",
+  "entheos_weave",
+  "brc_map",
+  "brc_plan",
 ];
 
 export const BLEND_MODES: BlendMode[] = ["add", "multiply", "screen", "alpha_over", "max"];
@@ -904,6 +910,9 @@ export const LAYER_LABELS: Record<LayerKind, string> = {
   waveform: "Waveform",
   spectrum: "Spectrum",
   video: "Video",
+  entheos_weave: "Entheos Sigil",
+  brc_map: "Black Rock City Map",
+  brc_plan: "BRC Literal Plan",
 };
 
 /** Kind-specific labels for param_a..d, where meaningful. */
@@ -924,6 +933,9 @@ export const PARAM_LABELS: Partial<Record<LayerKind, [string?, string?, string?,
   waveform: ["Ring radius", "Depth", "Thickness"],
   spectrum: ["Bar length", "From outer/inner"],
   video: ["Zoom", "Kaleidoscope", "Contrast", "Rotation"],
+  entheos_weave: ["Outline width", "Star reach", "Orb glow", "Rotation"],
+  brc_map: ["Street width", "Block fill", "Clock roads", "Rotation"],
+  brc_plan: ["Street brightness", "Block fill", "Quarter-hour lines", "Rotation"],
 };
 
 export function defaultLayer(kind: LayerKind): LayerCfg {

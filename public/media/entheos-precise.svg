@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Entheos vector sigil</title>
+  <desc id="desc">Six colored orbs surrounding a six-point directional star and the Entheos wordmark.</desc>
+  <defs>
+    <radialGradient id="orange"><stop offset="0" stop-color="#ffbd42"/><stop offset="1" stop-color="#ff790d"/></radialGradient>
+    <radialGradient id="yellow"><stop offset="0" stop-color="#fff977"/><stop offset="1" stop-color="#ffd900"/></radialGradient>
+    <radialGradient id="green"><stop offset="0" stop-color="#51e987"/><stop offset="1" stop-color="#16a94e"/></radialGradient>
+    <radialGradient id="blue"><stop offset="0" stop-color="#5f89ee"/><stop offset="1" stop-color="#2448a6"/></radialGradient>
+    <radialGradient id="violet"><stop offset="0" stop-color="#955bd1"/><stop offset="1" stop-color="#52218b"/></radialGradient>
+    <radialGradient id="red"><stop offset="0" stop-color="#ff4a4f"/><stop offset="1" stop-color="#dc0714"/></radialGradient>
+    <filter id="soft-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <circle cx="512" cy="512" r="468" fill="none" stroke="#fff" stroke-width="17"/>
+  <circle cx="512" cy="512" r="468" fill="none" stroke="#08080c" stroke-width="8"/>
+
+  <g stroke-linejoin="round">
+    <g><circle cx="512" cy="126" r="78" fill="url(#orange)" stroke="#fff" stroke-width="18"/><circle cx="512" cy="126" r="78" fill="none" stroke="#08080c" stroke-width="8"/></g>
+    <g><circle cx="846" cy="319" r="78" fill="url(#yellow)" stroke="#fff" stroke-width="18"/><circle cx="846" cy="319" r="78" fill="none" stroke="#08080c" stroke-width="8"/></g>
+    <g><circle cx="846" cy="705" r="78" fill="url(#green)" stroke="#fff" stroke-width="18"/><circle cx="846" cy="705" r="78" fill="none" stroke="#08080c" stroke-width="8"/></g>
+    <g><circle cx="512" cy="898" r="78" fill="url(#blue)" stroke="#fff" stroke-width="18"/><circle cx="512" cy="898" r="78" fill="none" stroke="#08080c" stroke-width="8"/></g>
+    <g><circle cx="178" cy="705" r="78" fill="url(#violet)" stroke="#fff" stroke-width="18"/><circle cx="178" cy="705" r="78" fill="none" stroke="#08080c" stroke-width="8"/></g>
+    <g><circle cx="178" cy="319" r="78" fill="url(#red)" stroke="#fff" stroke-width="18"/><circle cx="178" cy="319" r="78" fill="none" stroke="#08080c" stroke-width="8"/></g>
+  </g>
+
+  <g stroke="#fff" stroke-width="10" stroke-linejoin="miter" filter="url(#soft-glow)">
+    <g color="#315fc2"><path d="M512 126 382 500 512 428 642 500Z" fill="#050509"/><path d="m512 177-88 276 88-48 88 48Z" fill="currentColor" stroke="none"/></g>
+    <g color="#6d31a8" transform="rotate(60 512 512)"><path d="M512 126 382 500 512 428 642 500Z" fill="#050509"/><path d="m512 177-88 276 88-48 88 48Z" fill="currentColor" stroke="none"/></g>
+    <g color="#ed1823" transform="rotate(120 512 512)"><path d="M512 126 382 500 512 428 642 500Z" fill="#050509"/><path d="m512 177-88 276 88-48 88 48Z" fill="currentColor" stroke="none"/></g>
+    <g color="#ff941c" transform="rotate(180 512 512)"><path d="M512 126 382 500 512 428 642 500Z" fill="#050509"/><path d="m512 177-88 276 88-48 88 48Z" fill="currentColor" stroke="none"/></g>
+    <g color="#ffe116" transform="rotate(240 512 512)"><path d="M512 126 382 500 512 428 642 500Z" fill="#050509"/><path d="m512 177-88 276 88-48 88 48Z" fill="currentColor" stroke="none"/></g>
+    <g color="#24bd71" transform="rotate(300 512 512)"><path d="M512 126 382 500 512 428 642 500Z" fill="#050509"/><path d="m512 177-88 276 88-48 88 48Z" fill="currentColor" stroke="none"/></g>
+  </g>
+
+  <text x="512" y="578" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="164" font-weight="900" letter-spacing="-9" fill="#050509" stroke="#fff" stroke-width="13" paint-order="stroke fill" stroke-linejoin="round">ENTHEOS</text>
+</svg>

@@ -53,10 +53,16 @@ pub enum LayerKind {
     Spectrum,
     /// Live video texture supplied by a browser client and mapped across the ring.
     Video,
+    /// Six interlaced, slowly breathing color currents inspired by the Entheos mark.
+    EntheosWeave,
+    /// High-contrast Black Rock City street schematic designed for the radial LEDs.
+    BrcMap,
+    /// Literal 2026 plan trace with continuous blocks and luminous street lines.
+    BrcPlan,
 }
 
 impl LayerKind {
-    pub const ALL: [LayerKind; 20] = [
+    pub const ALL: [LayerKind; 23] = [
         LayerKind::Solid,
         LayerKind::GradientRadial,
         LayerKind::NoiseField,
@@ -77,6 +83,9 @@ impl LayerKind {
         LayerKind::Waveform,
         LayerKind::Spectrum,
         LayerKind::Video,
+        LayerKind::EntheosWeave,
+        LayerKind::BrcMap,
+        LayerKind::BrcPlan,
     ];
 
     pub fn gpu_id(self) -> u32 {

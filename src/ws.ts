@@ -26,6 +26,8 @@ export interface ResolvedMedia {
   resolvedBy: string;
 }
 
+export type BrcApiResource = "event" | "camp";
+
 type Listener = (msg: ServerMsg) => void;
 type FrameListener = (frame: PreviewFrame) => void;
 type StatusListener = (connected: boolean) => void;
@@ -139,6 +141,25 @@ export class GateClient {
       const query = params.size > 0 ? `?${params.toString()}` : "";
       history.replaceState(null, "", location.pathname + query + location.hash);
     }
+  }
+
+  /** Same-origin bridge for the official API, whose required key header cannot pass browser CORS. */
+  async fetchBrcApi(apiKey: string, resource: BrcApiResource, uid?: string): Promise<unknown> {
+    const suffix = resource === "camp" ? `/${encodeURIComponent(uid ?? "")}` : "";
+    const response = await fetch(`${this.httpBase}/brc/${resource}${suffix}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: apiKey,
+        client_id: this.clientId,
+        token: localStorage.getItem("empyrean-join-token") ?? "",
+      }),
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || `Burning Man ${resource} request returned ${response.status}`);
+    }
+    return response.json();
   }
 
   get deviceName(): string {
