@@ -49,7 +49,7 @@ pub enum TestPattern {
     /// glance confirms feed direction on all spokes at once.
     Gradient,
     /// The human-facing strip number (spoke index + 1) in binary near the outer
-    /// edge, with green reference LEDs at physical positions 3 and 378.
+    /// edge, with green reference LEDs at the first and last physical positions.
     /// Read which physical spoke is logical N without stepping.
     SpokeId,
     /// A band travelling along every spoke. Smooth-motion and refresh sanity.
@@ -278,13 +278,12 @@ fn pixel(
         TestPattern::SpokeId => {
             // The installation labels strips 1..64, not the engine's 0..63.
             // Seven MSB-first bit blocks stay readable in the preview and at a
-            // distance while remaining near the outer feed. Physical LEDs use
-            // the human-facing 1-based convention: LED 3 and LED 378 are green
-            // orientation/end markers.
-            const START_MARKER: u32 = 2;
-            const ID_START: u32 = 3;
-            const END_MARKER: u32 = 377;
-            if i == START_MARKER || i == END_MARKER {
+            // distance while remaining near the outer feed. The configured
+            // first and last physical LEDs are green orientation/end markers;
+            // deriving the inner marker from the geometry keeps it visible on
+            // both the installed 350-pixel config and the 378-pixel rig config.
+            const ID_START: u32 = 1;
+            if i == 0 || i == pps - 1 {
                 return [0.0, 1.0, 0.0];
             }
             let block = (pps / 40).max(2);
@@ -643,7 +642,7 @@ mod tests {
     #[test]
     fn spoke_id_encodes_human_strip_numbers_with_green_reference_leds() {
         // 64 human-facing strip numbers need 7 bits. At 378 pixels the bit
-        // blocks are 9 pixels wide with 9-pixel gaps, starting after LED 3.
+        // blocks are 9 pixels wide with 9-pixel gaps, starting after LED 1.
         let g = geo(64, 378);
         let cfg = TestConfig {
             pattern: TestPattern::SpokeId,
@@ -660,7 +659,7 @@ mod tests {
             let strip_number = spoke + 1;
             for slot in 0..bits {
                 let bit = bits - 1 - slot;
-                let i = 3 + slot * stride; // first pixel of the slot's block
+                let i = 1 + slot * stride; // first pixel of the slot's block
                 let p = (spoke * g.pixels_per_spoke + i) as usize;
                 let rgb = &buf[p * 3..p * 3 + 3];
                 if (strip_number >> bit) & 1 == 1 {
@@ -676,10 +675,28 @@ mod tests {
                     );
                 }
             }
-            let start = (spoke * g.pixels_per_spoke + 2) as usize * 3;
+            let start = (spoke * g.pixels_per_spoke) as usize * 3;
             let end = (spoke * g.pixels_per_spoke + 377) as usize * 3;
             assert_eq!(&buf[start..start + 3], [0, 255, 0]);
             assert_eq!(&buf[end..end + 3], [0, 255, 0]);
+        }
+    }
+
+    #[test]
+    fn spoke_id_uses_the_configured_last_led_instead_of_a_fixed_rig_length() {
+        let g = geo(64, 350);
+        let cfg = TestConfig {
+            pattern: TestPattern::SpokeId,
+            brightness: 1.0,
+            blink_hz: 0.0,
+            ..Default::default()
+        };
+        let buf = render(&cfg, &g, 0.0);
+        for spoke in [0u32, 31, 63] {
+            let first = (spoke * g.pixels_per_spoke) as usize * 3;
+            let last = (spoke * g.pixels_per_spoke + g.pixels_per_spoke - 1) as usize * 3;
+            assert_eq!(&buf[first..first + 3], [0, 255, 0]);
+            assert_eq!(&buf[last..last + 3], [0, 255, 0]);
         }
     }
 

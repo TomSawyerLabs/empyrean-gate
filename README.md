@@ -464,7 +464,7 @@ count, feed direction, null-pixel offsets), **ruler** (every 10th/50th/100th pix
 marked, so you can count the strip by eye), **universe marks** (first pixel of each
 universe, checked against the controller's patch), **gradient** (feed direction on
 every spoke at once), **spoke ID** (human-facing strip numbers 1–64 in binary near
-the outer edge, with green references at LEDs 3 and 378), **chase**, and
+the outer edge, with green references at the first and last LEDs), **chase**, and
 **blackout** (a rig still lit is holding a last look, not following us). All of them
 take a brightness, a blink rate, and a spoke selection: all, one spoke, one
 controller's spokes, or auto-cycling.

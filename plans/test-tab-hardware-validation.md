@@ -49,7 +49,7 @@ real output path. The UI shows both the requested byte and the post-gamma byte.
 | Ruler | Every 10th dim white, 50th blue, 100th red — count the strip by eye |
 | Universe marks | First pixel of each universe, alternating cyan/magenta |
 | Gradient | Bright at the outer feed → dark inner; direction on every spoke at once |
-| Spoke ID | Human-facing strip number (1–64) in binary near the outer edge; LEDs 3 and 378 green |
+| Spoke ID | Human-facing strip number (1–64) in binary near the outer edge; first and last LEDs green |
 | Chase | Travelling band; smooth motion means frames arrive steadily |
 | Blackout | Everything off — a rig still lit is holding a last look |
 
