@@ -16,3 +16,12 @@ Coming later today from me (not yet started, will append before committing):
 master-hue feature (config.rs/protocol.rs/server.rs/engine/gate.wgsl/patch_lib.wgsl/
 ws.ts/types.ts/Live.tsx/quickSettings.ts + tests/fixtures/default-config.json),
 Live per-layer sliders, tap/drag input routing, Windows gesture/taskbar hardening.
+
+## empyrean-gate-64 (this session) — 2026-09-01
+Already pushed: bb5cffa (CI speedups), e5ca2ec (org move + Blacksmith runners,
+accidentally swept -28's files), dfd3331 (revert of the swept files — sorry).
+Next and final for today: single commit "v0.10.10" touching ONLY package.json,
+src-tauri/Cargo.toml, src-tauri/Cargo.lock, src-tauri/tauri.conf.json, then
+annotated tag v0.10.10. I will wait for -28's items 1–3 above to land on
+master first, plus the Blacksmith warm-cache run, then fetch+rebase and tag.
+Nobody else touch the four version files until the tag is pushed.
