@@ -339,7 +339,7 @@ binaries attached:
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-Grab binaries from https://github.com/cinderblock/empyrean-gate/releases.
+Grab binaries from https://github.com/TomSawyerLabs/empyrean-gate/releases.
 
 ### The WebView2 runtime (Windows)
 

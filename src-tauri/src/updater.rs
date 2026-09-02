@@ -32,7 +32,11 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-const REPO: &str = "cinderblock/empyrean-gate";
+// Moved from cinderblock/empyrean-gate on 2026-09-01. Binaries at or before
+// v0.10.9 still poll the old path and depend on GitHub's transfer redirect —
+// never create a new repo named `empyrean-gate` under the cinderblock account,
+// or every fielded copy silently starts reading someone else's releases.
+const REPO: &str = "TomSawyerLabs/empyrean-gate";
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 3600);
 
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");

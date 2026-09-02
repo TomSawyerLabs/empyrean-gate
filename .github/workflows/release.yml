@@ -18,11 +18,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          # 16-vCPU Blacksmith runners for the two compile-bound long poles.
+          # macOS stays on GitHub's free runners: it was never the slowest job,
+          # and Blacksmith bills macOS at 10-20x its Linux rate. Keep the warm
+          # cache on the same provider as these jobs (see warm-cache.yml) —
+          # a cache written on one provider's backend may not be readable from
+          # the other's runners.
+          - os: blacksmith-16vcpu-windows-2025
             artifact: empyrean-gate-windows-x64
             binary: src-tauri/target/release/empyrean-gate.exe
             asset: empyrean-gate-windows-x64.exe
-          - os: ubuntu-latest
+          - os: blacksmith-16vcpu-ubuntu-2404
             artifact: empyrean-gate-linux-x64
             binary: src-tauri/target/release/empyrean-gate
             asset: empyrean-gate-linux-x64

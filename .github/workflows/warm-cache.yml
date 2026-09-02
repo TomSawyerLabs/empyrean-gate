@@ -27,8 +27,9 @@ name: Warm the release build cache
 # Cargo.lock does, which is why nightly is frequent enough even though master
 # moves many times a day.
 #
-# Standard runners, so this is free on a public repo. It costs wall clock on
-# GitHub's infrastructure and nothing else.
+# Windows and Linux run on Blacksmith runners (billed per minute, first 3000
+# min/month free) so the cache they save shares a backend with the release
+# jobs that restore it. macOS stays on GitHub's free standard runners.
 
 on:
   schedule:
@@ -60,7 +61,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        # Must match the runner provider of the jobs that restore this cache
+        # (release.yml, build.yml): a cache saved from a Blacksmith runner and
+        # one saved from a GitHub runner are not guaranteed to share a backend.
+        os: [blacksmith-16vcpu-windows-2025, blacksmith-16vcpu-ubuntu-2404, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5

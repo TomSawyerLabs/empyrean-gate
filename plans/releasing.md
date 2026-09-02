@@ -18,7 +18,7 @@ The only thing this machine does is **push a version tag**.
 
 ## Environment / context
 
-- Remote: `git@github.com:cinderblock/empyrean-gate.git`, branch `master`.
+- Remote: `https://github.com/TomSawyerLabs/empyrean-gate.git`, branch `master`.
 - Trigger: `on: push: tags: ["v*"]` in `.github/workflows/release.yml`.
 - Tags are **annotated** (`git tag -a`), matching v0.6.0 through v0.9.0.
 - The version lives in **four** files and they must agree:
@@ -155,6 +155,13 @@ gh cache list --limit 100 --json id,key,ref,sizeInBytes --jq '.[] | [.id, .sizeI
 Anything under `refs/heads/refs/tags/...` or a deleted branch is dead; delete it.
 
 ### What was considered and rejected
+
+> **2026-09-01 update:** the repo moved to the TomSawyerLabs org and the heavy
+> workflows (release.yml, build.yml, warm-cache.yml Windows/Linux) now run on
+> Blacksmith 16-vCPU runners — roughly half GitHub's larger-runner rates with
+> 3000 free min/month, so the spending-cap concern below is moot. checks.yml
+> deliberately stays on free GitHub runners: it runs on fork PRs, which
+> third-party runners may not serve.
 
 - **Larger GitHub runners.** Billed even on public repos: Windows 8-core
   $0.042/min, 16-core $0.082/min. At the observed cadence — 19 releases in 5 days

@@ -66,6 +66,11 @@ const PEER_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_DATA_GROUPS: usize = 24;
 /// How often the peer table is published into `RuntimeStatus`.
 const PUBLISH_INTERVAL: Duration = Duration::from_millis(500);
+/// Upper bound on one drain pass. On a live network the receive queue is never
+/// empty — our own looped-back output alone is ~fps × universes packets/s — so
+/// draining "until the queue is empty" starves everything after the drain loop:
+/// peer expiry, publishing, the epoch check, and shutdown.
+const DRAIN_BUDGET: Duration = Duration::from_millis(250);
 
 fn multicast_group(universe: u16) -> Ipv4Addr {
     Ipv4Addr::new(239, 255, (universe >> 8) as u8, (universe & 0xff) as u8)
@@ -305,8 +310,14 @@ fn run(state: Arc<SharedState>) {
             continue;
         };
 
-        // Drain whatever is waiting, then fall through on the read timeout.
-        while let Ok((n, from)) = s.recv_from(&mut buf) {
+        // Drain whatever is waiting, then fall through on the read timeout —
+        // but never drain past DRAIN_BUDGET, or a busy network keeps this loop
+        // spinning forever and the peer table is never published.
+        let drain_started = Instant::now();
+        while drain_started.elapsed() < DRAIN_BUDGET {
+            let Ok((n, from)) = s.recv_from(&mut buf) else {
+                break; // read timeout: queue is empty
+            };
             let std::net::SocketAddr::V4(from) = from else {
                 continue;
             };

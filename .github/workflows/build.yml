@@ -11,10 +11,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          # Same runner choice as release.yml — see the note there.
+          - os: blacksmith-16vcpu-windows-2025
             artifact: empyrean-gate-windows
             binary: src-tauri/target/release/empyrean-gate.exe
-          - os: ubuntu-latest
+          - os: blacksmith-16vcpu-ubuntu-2404
             artifact: empyrean-gate-linux
             binary: src-tauri/target/release/empyrean-gate
           - os: macos-latest
