@@ -59,6 +59,56 @@ function LayerChip({
   );
 }
 
+/** Always-visible level slider for one playing layer: the pattern's major knob
+ *  with no hidden gesture. The ✎ opens the same quick editor the long-press
+ *  does — a visible route to the rest of the knobs. */
+function LayerLevelRow({
+  layer,
+  index,
+  onEdit,
+}: {
+  layer: LayerCfg;
+  index: number;
+  onEdit: (x: number, y: number) => void;
+}) {
+  const { client } = useGate();
+  const throttled = useThrottled((l: LayerCfg) => client.updateLayer(index, l), 100);
+  // Local mirror + drag flag, same shape as LayerQuickEdit: instant thumb,
+  // and a config echo cannot yank it mid-gesture.
+  const [local, setLocal] = useState(layer.opacity);
+  const dragging = useRef(false);
+  useEffect(() => {
+    if (!dragging.current) setLocal(layer.opacity);
+  }, [layer.opacity]);
+  return (
+    <div className="layer-level-row">
+      <span className="layer-level-name">{layer.name || `Layer ${index + 1}`}</span>
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.01}
+        value={local}
+        aria-label={`${layer.name || `Layer ${index + 1}`} level`}
+        onPointerDown={() => (dragging.current = true)}
+        onPointerUp={() => (dragging.current = false)}
+        onChange={(event) => {
+          const value = Number(event.target.value);
+          setLocal(value);
+          throttled({ ...layer, opacity: value });
+        }}
+      />
+      <button
+        className="layer-level-edit"
+        aria-label={`Edit ${layer.name || `layer ${index + 1}`}`}
+        onClick={(event) => onEdit(event.clientX, event.clientY)}
+      >
+        ✎
+      </button>
+    </div>
+  );
+}
+
 /** A shape pad: tap arms the array with that figure, hold or right-click opens
  *  how figures are drawn. Same gesture as the layer chips, different subject. */
 function ShapePad({
@@ -527,9 +577,23 @@ export default function Live() {
           />
         ))}
       </div>
+      {config.layers.some((l) => l.enabled) && (
+        <div className="live-layer-levels">
+          {config.layers.map((layer, index) =>
+            layer.enabled ? (
+              <LayerLevelRow
+                key={`${layer.name}-${index}`}
+                layer={layer}
+                index={index}
+                onEdit={(x, y) => setQuickEdit({ index, x, y })}
+              />
+            ) : null,
+          )}
+        </div>
+      )}
       {/* The gesture is invisible without this, and a `title=` tooltip would be
           invisible on the touch screen this is mostly used from. */}
-      <p className="cluster-hint">Hold or right-click a layer to edit it</p>
+      <p className="cluster-hint">Tap a chip to toggle it · ✎ for every knob</p>
     </div>
   ) : null;
 

@@ -2763,6 +2763,37 @@ button.ghost {
   min-width: 0;
 }
 
+/* Always-visible level sliders for the playing layers — the pattern's major
+   knob without the hidden long-press. Grid + display:contents keeps the name,
+   slider, and edit columns aligned across rows. */
+.live-layer-levels {
+  display: grid;
+  grid-template-columns: minmax(52px, 0.5fr) 1fr auto;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.layer-level-row {
+  display: contents;
+}
+
+.layer-level-name {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.layer-level-edit {
+  padding: 2px 9px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 /* Master hue ("warm colors now") controls in the master cluster. */
 .master-ctl .check-row {
   display: flex;
