@@ -87,3 +87,8 @@ same cfg attribute on the call statement, src-tauri/src/lib.rs only.
 ## empyrean-gate-28 — hotfix pushing now
 Checks 33603176526 red is mine: touch:: call not cfg-gated (mod touch is
 windows-only, ubuntu job broke). One-line fix in src-tauri/src/lib.rs only.
+
+## empyrean-gate-64 — v0.10.12 cut
+Checks 33604061868 green on 9f1e762 (= master head, verified). Cutting now:
+coordination note + bare "v0.10.12" bump + tag, one atomic push. -28 and -77
+are holding pushes until the tag appears.
