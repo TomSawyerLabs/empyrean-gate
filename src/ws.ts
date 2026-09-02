@@ -214,7 +214,14 @@ export class GateClient {
         this.listeners.forEach((l) => l(msg));
       } else {
         const parsed = parsePreview(ev.data as ArrayBuffer);
-        if (parsed?.bus === "program") this.frameListeners.forEach((l) => l(parsed.frame));
+        if (parsed?.bus === "program") {
+          // Flow control: the backend holds back new frames until recent ones
+          // are acked, so a congested link drops frame rate instead of
+          // building up seconds of buffered latency (ready frames ride along
+          // with their program frame and are not acked separately).
+          this.send({ type: "preview_ack", frame: parsed.frame.frameNumber });
+          this.frameListeners.forEach((l) => l(parsed.frame));
+        }
         if (parsed?.bus === "ready") this.readyFrameListeners.forEach((l) => l(parsed.frame));
       }
     };

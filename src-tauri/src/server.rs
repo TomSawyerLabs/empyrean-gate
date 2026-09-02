@@ -719,6 +719,41 @@ struct PreviewSub {
     decimate: u32,
     include_ready: bool,
     last_sent: Instant,
+    /// Program frames sent but not yet acked by the client. A ready-bus frame
+    /// rides along with its program frame and is not counted separately.
+    in_flight: u32,
+    /// True once this connection has acked at least one frame. Clients running
+    /// a bundle that predates PreviewAck never set it and stream exactly as
+    /// before (wall-clock throttle only).
+    acking: bool,
+    last_ack: Instant,
+}
+
+/// Unacked program frames a remote client may have in flight. Small enough to
+/// bound buffered latency to a few frame intervals even when venue WiFi is
+/// queueing heavily; large enough that a healthy RTT never limits frame rate.
+const PREVIEW_MAX_IN_FLIGHT: u32 = 3;
+/// If acks stop this long (mid-reload, wedged tab), fall back to unthrottled
+/// streaming rather than freezing the preview forever.
+const PREVIEW_ACK_STALL: Duration = Duration::from_secs(3);
+
+impl PreviewSub {
+    /// Whether the flow-control gate allows sending the next frame now.
+    /// The wall-clock fps throttle is checked separately by the caller.
+    fn ack_gate_open(&self, is_local: bool, now: Instant) -> bool {
+        if is_local || !self.acking || self.in_flight < PREVIEW_MAX_IN_FLIGHT {
+            return true;
+        }
+        now.duration_since(self.last_ack) >= PREVIEW_ACK_STALL
+    }
+
+    fn note_ack(&mut self, now: Instant) {
+        // Cap before decrementing so a client that resumes acking after a stall
+        // (during which in_flight kept growing) recovers immediately.
+        self.in_flight = self.in_flight.min(PREVIEW_MAX_IN_FLIGHT).saturating_sub(1);
+        self.acking = true;
+        self.last_ack = now;
+    }
 }
 
 async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
@@ -831,7 +866,11 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                     if !state.preview_gate.lock().is_active(conn_id, max) { continue; }
                 }
                 if sub.last_sent.elapsed() < sub.min_interval { continue; }
+                // Latency gate: never let a slow link queue more than a few
+                // frames. Skipping is free — the next broadcast frame is newer.
+                if !sub.ack_gate_open(is_local, Instant::now()) { continue; }
                 sub.last_sent = Instant::now();
+                sub.in_flight = sub.in_flight.saturating_add(1);
                 let meta = (frame.spokes, frame.pixels_per_spoke, sub.decimate);
                 if meta != announced_meta {
                     announced_meta = meta;
@@ -1945,6 +1984,9 @@ async fn handle_msg(
                 decimate: decimate.clamp(1, 64),
                 include_ready,
                 last_sent: Instant::now() - Duration::from_secs(1),
+                in_flight: 0,
+                acking: false,
+                last_ack: Instant::now(),
             });
             // Loopback clients bypass slot rationing (no NIC traffic).
             if !addr.ip().is_loopback() {
@@ -1958,6 +2000,11 @@ async fn handle_msg(
             // Force a fresh PreviewMeta: the client may be a newly-mounted canvas
             // that never saw the one sent earlier on this connection.
             *reset_meta = true;
+        }
+        ClientMsg::PreviewAck { frame: _ } => {
+            if let Some(sub) = preview.as_mut() {
+                sub.note_ack(Instant::now());
+            }
         }
         ClientMsg::UnsubscribePreview => {
             *preview = None;
@@ -2080,5 +2127,38 @@ mod diagnostics_tests {
         assert_eq!(&program[4..12], &ready[4..12], "bus packets share frame geometry");
         assert_eq!(u16::from_le_bytes(program[10..12].try_into().unwrap()), 2);
         assert_ne!(&program[12..], &ready[12..]);
+    }
+
+    #[test]
+    fn preview_ack_gate_bounds_in_flight_frames() {
+        let now = Instant::now();
+        let mut sub = PreviewSub {
+            min_interval: Duration::ZERO,
+            decimate: 1,
+            include_ready: false,
+            last_sent: now,
+            in_flight: 0,
+            acking: false,
+            last_ack: now,
+        };
+
+        // Pre-ack clients (old bundles) are never gated, however far behind.
+        sub.in_flight = 100;
+        assert!(sub.ack_gate_open(false, now));
+
+        // Once acking, the gate closes at the in-flight cap and re-opens on ack.
+        sub.note_ack(now);
+        assert_eq!(sub.in_flight, PREVIEW_MAX_IN_FLIGHT - 1);
+        assert!(sub.ack_gate_open(false, now));
+        sub.in_flight = PREVIEW_MAX_IN_FLIGHT;
+        assert!(!sub.ack_gate_open(false, now));
+        sub.note_ack(now);
+        assert!(sub.ack_gate_open(false, now));
+
+        // Loopback clients bypass the gate; a stalled acker falls back to
+        // unthrottled streaming instead of freezing.
+        sub.in_flight = PREVIEW_MAX_IN_FLIGHT;
+        assert!(sub.ack_gate_open(true, now));
+        assert!(sub.ack_gate_open(false, now + PREVIEW_ACK_STALL));
     }
 }

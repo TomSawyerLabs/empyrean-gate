@@ -140,6 +140,14 @@ pub enum ClientMsg {
         include_ready: bool,
     },
     UnsubscribePreview,
+    /// Receipt for one program preview frame. The server keeps only a few
+    /// unacked frames in flight per remote client, so a congested link loses
+    /// frame rate instead of accumulating seconds of buffered latency.
+    PreviewAck {
+        /// Echo of the frame_number field from the binary preview header.
+        #[serde(default)]
+        frame: u32,
+    },
     /// Claim the single live video input. Binary VIDEO_FRAME_MAGIC messages from
     /// this connection are accepted until it stops or disconnects.
     StartVideo {
