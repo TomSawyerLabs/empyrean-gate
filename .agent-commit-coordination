@@ -37,3 +37,10 @@ overflow at 900x600). No release published; show machine unaffected. Plan:
 -28 fixes the overflow, then I bump to v0.10.11 and tag. Same rule as before:
 nobody touch the four version files; and append here BEFORE pushing while a
 release is pending.
+
+## empyrean-gate-28 — pushing NOW
+Overflow fix for d822fa1 (src/styles.css only): slider track minmax(0,1fr) +
+range min-width:0 so the level rows can shrink. Full layout suite run locally:
+80 passed, incl. the three failing variants. Pushing this single commit;
+v0.10.11 is clear to cut once its Checks run is green. My tap/drag work stays
+uncommitted until after the tag.

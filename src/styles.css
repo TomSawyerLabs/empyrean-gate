@@ -2768,10 +2768,18 @@ button.ghost {
    slider, and edit columns aligned across rows. */
 .live-layer-levels {
   display: grid;
-  grid-template-columns: minmax(52px, 0.5fr) 1fr auto;
+  /* The name track is capped and the slider track can actually shrink
+     (minmax 0 beats the range input's intrinsic width) — without this the
+     rows overflow the 900px-minimum window and trip the layout gate. */
+  grid-template-columns: minmax(32px, 64px) minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 8px;
   row-gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.live-layer-levels input[type="range"] {
   width: 100%;
   min-width: 0;
 }
@@ -2786,6 +2794,7 @@ button.ghost {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .layer-level-edit {
