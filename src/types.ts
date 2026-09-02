@@ -92,6 +92,7 @@ export type PerformanceAction =
   | { action: "remove_layer"; index: number }
   | { action: "move_layer"; from: number; to: number }
   | { action: "set_master"; brightness: number | null; speed: number | null }
+  | { action: "set_master_hue"; enabled: boolean | null; hue: number | null; amount: number | null; loose: boolean | null }
   | { action: "trigger_effect"; effect: EffectCfg }
   | { action: "paint"; pen: PenKind; points: { angle: number; radius: number }[]; hue: number; saturation: number; brightness: number; size: number; intensity: number }
   | { action: "patch_activate"; id: string | null }
@@ -250,6 +251,14 @@ export interface RenderConfig {
   fps: number;
   master_brightness: number;
   master_speed: number;
+  /** Master hue pull ("warm colors now") — live override, not part of stacks. */
+  master_hue_enabled: boolean;
+  /** Target hue in turns 0..1, same convention as LayerCfg.hue. */
+  master_hue: number;
+  /** Pull strength 0..1. */
+  master_hue_amount: number;
+  /** Loose mask: far-off hues keep their identity as flourishes. */
+  master_hue_loose: boolean;
   manual_transition_secs: number;
   manual_bpm: number | null;
   beat_time: "half" | "normal" | "double";

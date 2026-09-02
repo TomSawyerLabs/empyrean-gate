@@ -42,9 +42,11 @@ struct Globals {
     _pad_game0: f32,
     _pad_game1: f32,
     rotation: f32,
-    _pad_rotation0: f32,
-    _pad_rotation1: f32,
-    _pad_rotation2: f32,
+    // Master hue pull ("warm colors now"): target hue in turns, strength
+    // 0..1 (0 = off), and loose-mask flag as 0/1. See hue_pull().
+    hue_target: f32,
+    hue_amount: f32,
+    hue_loose: f32,
 }
 
 struct AudioU {
@@ -278,6 +280,43 @@ fn hsv2rgb(h: f32, s: f32, v: f32) -> vec3f {
         default: { rgb = vec3f(c, 0.0, x); }
     }
     return rgb + vec3f(v - c);
+}
+
+fn rgb2hsv(c: vec3f) -> vec3f {
+    let mx = max(c.r, max(c.g, c.b));
+    let mn = min(c.r, min(c.g, c.b));
+    let d = mx - mn;
+    var h = 0.0;
+    if d > 0.0 {
+        if mx == c.r {
+            h = (c.g - c.b) / d;
+        } else if mx == c.g {
+            h = (c.b - c.r) / d + 2.0;
+        } else {
+            h = (c.r - c.g) / d + 4.0;
+        }
+        h = fract(h / 6.0 + 1.0);
+    }
+    let s = select(0.0, d / mx, mx > 0.0);
+    return vec3f(h, s, mx);
+}
+
+// Master hue pull, applied to the final composite so it catches every source:
+// layers, transitions, touch effects, dabs, DJ overlays, game cells, patches.
+// Strict (hue_loose 0): every saturated pixel's hue lands amount-of-the-way at
+// the target — value and saturation are untouched, so patterns keep shape.
+// Loose (hue_loose 1): the pull fades out for hues far from the target, so
+// complements survive as flourishes. Whites and grays are never tinted.
+fn hue_pull(rgb: vec3f) -> vec3f {
+    if G.hue_amount <= 0.0 {
+        return rgb;
+    }
+    let hsv = rgb2hsv(rgb);
+    // Signed distance to the target around the wheel, in [-0.5, 0.5).
+    let d = fract(hsv.x - G.hue_target + 0.5) - 0.5;
+    let keep = G.hue_loose * smoothstep(0.12, 0.38, abs(d));
+    let w = G.hue_amount * (1.0 - keep) * min(hsv.y * 4.0, 1.0);
+    return hsv2rgb(hsv.x - d * w, hsv.y, hsv.z);
 }
 
 fn wang_hash(seed: u32) -> u32 {
@@ -1488,6 +1527,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         acc += dab_color(DABS[d], ctx, d);
     }
 
+    acc = hue_pull(acc);
     acc = acc * G.master;
 
     // Gentle soft clip: linear below 0.8, compressed knee above, hard cap at 1.

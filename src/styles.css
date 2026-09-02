@@ -2763,6 +2763,40 @@ button.ghost {
   min-width: 0;
 }
 
+/* Master hue ("warm colors now") controls in the master cluster. */
+.master-ctl .check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+input[type="range"].hue-slider {
+  height: 10px;
+  border-radius: 5px;
+  background: linear-gradient(
+    to right,
+    #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%
+  );
+}
+
+.hue-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  vertical-align: middle;
+}
+
+.hue-swatch.dim {
+  opacity: 0.45;
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+}
+
 .size-ctl .slider-row > span:not(.slider-val) {
   width: auto;
   flex: 0 0 32px;

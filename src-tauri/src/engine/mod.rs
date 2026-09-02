@@ -70,7 +70,13 @@ pub struct Globals {
     /// Whole-composition rotation, integrated on the CPU so it remains
     /// continuous as transient button pulses expire.
     pub rotation: f32,
-    pub _pad_rotation: [f32; 3],
+    /// Master hue pull (operator "warm colors now"). Target in turns; amount
+    /// 0 disables. `hue_loose` is a bool as f32: 1 fades the pull out for
+    /// hues far from the target so flourishes survive. These occupy what was
+    /// `_pad_rotation`, so the GPU struct layout is unchanged.
+    pub hue_target: f32,
+    pub hue_amount: f32,
+    pub hue_loose: f32,
 }
 
 #[repr(C)]
@@ -1139,6 +1145,23 @@ fn replay_performance_action(state: &Arc<SharedState>, action: &crate::config::P
                 }
                 if let Some(v) = speed {
                     c.render.master_speed = v.clamp(0.0, 8.0);
+                }
+            });
+        }
+        A::SetMasterHue { enabled, hue, amount, loose } => {
+            let (enabled, hue, amount, loose) = (*enabled, *hue, *amount, *loose);
+            state.update_config(move |c| {
+                if let Some(v) = enabled {
+                    c.render.master_hue_enabled = v;
+                }
+                if let Some(v) = hue {
+                    c.render.master_hue = v.rem_euclid(1.0);
+                }
+                if let Some(v) = amount {
+                    c.render.master_hue_amount = v.clamp(0.0, 1.0);
+                }
+                if let Some(v) = loose {
+                    c.render.master_hue_loose = v;
                 }
             });
         }
@@ -2798,7 +2821,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 game_beat: (-audio[0].beat_phase * 6.0).exp() * audio[0].bpm_conf,
                 _pad_game: [0.0; 2],
                 rotation: rotation_angle,
-                _pad_rotation: [0.0; 3],
+                hue_target: cfg.render.master_hue.rem_euclid(1.0),
+                hue_amount: if cfg.render.master_hue_enabled {
+                    cfg.render.master_hue_amount.clamp(0.0, 1.0)
+                } else {
+                    0.0
+                },
+                hue_loose: f32::from(u8::from(cfg.render.master_hue_loose)),
             },
             audio,
             layers,

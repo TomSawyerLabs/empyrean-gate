@@ -357,6 +357,9 @@ export class GateClient {
   setMaster(v: { brightness?: number; speed?: number }) {
     this.send({ type: "set_master", ...v });
   }
+  setMasterHue(v: { enabled?: boolean; hue?: number; amount?: number; loose?: boolean }) {
+    this.send({ type: "set_master_hue", ...v });
+  }
   activateStack(stack: import("./types").SavedStack) {
     this.send({ type: "activate_stack", stack });
   }

@@ -23,6 +23,7 @@ import CustomColorPicker from "./CustomColorPicker";
 import { QuickSettingsEditor, QuickSettingsPanel } from "./LiveQuickSettings";
 import {
   BUILTIN_LIVE_COLORS,
+  hsvToHex,
   loadCustomLiveColors,
   loadSelectedLiveColor,
   saveCustomLiveColors,
@@ -110,6 +111,8 @@ export default function Live() {
   const [queuePos, setQueuePos] = useState(0);
   const [brightness, setBrightnessLocal] = useState(1);
   const [masterSpeed, setMasterSpeedLocal] = useState(1);
+  const [masterHue, setMasterHueLocal] = useState(0);
+  const [masterHueAmount, setMasterHueAmountLocal] = useState(1);
   const [shortcuts, setShortcuts] = useState(loadQuickSettings);
   const [shortcutEditorId, setShortcutEditorId] = useState<string | null>(null);
   const [editingShortcuts, setEditingShortcuts] = useState(false);
@@ -123,6 +126,10 @@ export default function Live() {
     client.setMaster({ brightness: value }),
   );
   const setMasterSpeed = useThrottled((value: number) => client.setMaster({ speed: value }));
+  const setMasterHue = useThrottled((value: number) => client.setMasterHue({ hue: value }));
+  const setMasterHueAmount = useThrottled((value: number) =>
+    client.setMasterHue({ amount: value }),
+  );
 
   useEffect(() => {
     saveCustomLiveColors(customColors);
@@ -144,7 +151,14 @@ export default function Live() {
     if (!config) return;
     setBrightnessLocal(config.render.master_brightness);
     setMasterSpeedLocal(config.render.master_speed);
-  }, [config?.render.master_brightness, config?.render.master_speed]);
+    setMasterHueLocal(config.render.master_hue);
+    setMasterHueAmountLocal(config.render.master_hue_amount);
+  }, [
+    config?.render.master_brightness,
+    config?.render.master_speed,
+    config?.render.master_hue,
+    config?.render.master_hue_amount,
+  ]);
 
   // Viewer-slot queue: >0 means the preview is rationed and we're waiting.
   useEffect(() => {
@@ -410,6 +424,67 @@ export default function Live() {
         />
         <span className="slider-val">{masterSpeed.toFixed(2)}×</span>
       </label>
+      <label className="check-row master-hue-toggle">
+        <input
+          type="checkbox"
+          checked={config.render.master_hue_enabled}
+          onChange={(event) => client.setMasterHue({ enabled: event.target.checked })}
+        />
+        <span>Master hue</span>
+        {!config.render.master_hue_enabled && (
+          <span
+            className="hue-swatch dim"
+            style={{ background: hsvToHex(masterHue, 0.9, 1) }}
+          />
+        )}
+      </label>
+      {config.render.master_hue_enabled && (
+        <>
+          <label className="slider-row">
+            <span>Hue</span>
+            <input
+              className="hue-slider"
+              type="range"
+              min={0}
+              max={1}
+              step={0.005}
+              value={masterHue}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                setMasterHueLocal(value);
+                setMasterHue(value);
+              }}
+            />
+            <span className="slider-val">
+              <span className="hue-swatch" style={{ background: hsvToHex(masterHue, 0.9, 1) }} />
+            </span>
+          </label>
+          <label className="slider-row">
+            <span>Amount</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={masterHueAmount}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                setMasterHueAmountLocal(value);
+                setMasterHueAmount(value);
+              }}
+            />
+            <span className="slider-val">{masterHueAmount.toFixed(2)}</span>
+          </label>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={config.render.master_hue_loose}
+              onChange={(event) => client.setMasterHue({ loose: event.target.checked })}
+            />
+            <span>Loose — keep flourishes</span>
+          </label>
+        </>
+      )}
     </div>
   ) : null;
 

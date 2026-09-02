@@ -401,6 +401,18 @@ pub struct RenderConfig {
     pub fps: f32,
     pub master_brightness: f32,
     pub master_speed: f32,
+    /// Master hue ("warm colors now"): when enabled, the final composite is
+    /// pulled toward `master_hue`. Deliberately NOT part of `SavedStack` — it
+    /// is a live operator override and must survive scene changes.
+    pub master_hue_enabled: bool,
+    /// Target hue in turns 0..1, the same convention as `LayerCfg::hue`.
+    pub master_hue: f32,
+    /// Pull strength 0..1. At 1 every saturated pixel lands on the target hue
+    /// (value and saturation still vary, so patterns keep their shape).
+    pub master_hue_amount: f32,
+    /// Loose mask: hues near the target snap to it, far-off hues keep most of
+    /// their identity — flourishes survive instead of being crushed.
+    pub master_hue_loose: bool,
     /// Duration of an operator-triggered scene, stack, or patch handoff. The
     /// outgoing and incoming renderers remain live for the whole crossfade.
     pub manual_transition_secs: f32,
@@ -463,6 +475,10 @@ impl Default for RenderConfig {
             fps: 60.0,
             master_brightness: 1.0,
             master_speed: 1.0,
+            master_hue_enabled: false,
+            master_hue: 0.0,
+            master_hue_amount: 1.0,
+            master_hue_loose: false,
             manual_transition_secs: 3.0,
             manual_bpm: None,
             beat_time: BeatTime::Normal,
@@ -658,6 +674,7 @@ pub enum PerformanceAction {
     RemoveLayer { index: usize },
     MoveLayer { from: usize, to: usize },
     SetMaster { brightness: Option<f32>, speed: Option<f32> },
+    SetMasterHue { enabled: Option<bool>, hue: Option<f32>, amount: Option<f32>, loose: Option<bool> },
     TriggerEffect { effect: crate::layers::EffectCfg },
     Paint {
         pen: crate::layers::PenKind,

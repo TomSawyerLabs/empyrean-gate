@@ -53,6 +53,18 @@ pub enum ClientMsg {
         #[serde(default)]
         speed: Option<f32>,
     },
+    /// Patch the master hue pull; every field is optional so the UI can flip
+    /// one switch without re-sending the rest.
+    SetMasterHue {
+        #[serde(default)]
+        enabled: Option<bool>,
+        #[serde(default)]
+        hue: Option<f32>,
+        #[serde(default)]
+        amount: Option<f32>,
+        #[serde(default)]
+        loose: Option<bool>,
+    },
     /// Atomically hand rendering back to the classic layer stack and load it.
     /// Unlike a full config write, this cannot be hidden by an active patch.
     ActivateStack {

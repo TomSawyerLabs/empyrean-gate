@@ -1028,6 +1028,11 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
             &name(),
             json!({ "brightness": brightness, "speed": speed }),
         ),
+        ClientMsg::SetMasterHue { enabled, hue, amount, loose } => rec.event(
+            "master_hue",
+            &name(),
+            json!({ "enabled": enabled, "hue": hue, "amount": amount, "loose": loose }),
+        ),
         ClientMsg::SetSacnEnabled { enabled } => {
             rec.event("sacn", &name(), json!({ "enabled": enabled }))
         }
@@ -1144,6 +1149,12 @@ fn record_performance(state: &SharedState, msg: &ClientMsg, is_loopback: bool) {
         ClientMsg::SetMaster { brightness, speed } => A::SetMaster {
             brightness: *brightness,
             speed: *speed,
+        },
+        ClientMsg::SetMasterHue { enabled, hue, amount, loose } => A::SetMasterHue {
+            enabled: *enabled,
+            hue: *hue,
+            amount: *amount,
+            loose: *loose,
         },
         ClientMsg::ActivateStack { stack } => A::SetLook {
             stack: stack.clone(),
@@ -1406,6 +1417,22 @@ async fn handle_msg(
                 }
                 if let Some(s) = speed {
                     c.render.master_speed = s.clamp(0.0, 8.0);
+                }
+            });
+        }
+        ClientMsg::SetMasterHue { enabled, hue, amount, loose } => {
+            state.update_config(|c| {
+                if let Some(e) = enabled {
+                    c.render.master_hue_enabled = e;
+                }
+                if let Some(h) = hue {
+                    c.render.master_hue = h.rem_euclid(1.0);
+                }
+                if let Some(a) = amount {
+                    c.render.master_hue_amount = a.clamp(0.0, 1.0);
+                }
+                if let Some(l) = loose {
+                    c.render.master_hue_loose = l;
                 }
             });
         }
