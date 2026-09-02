@@ -2504,15 +2504,6 @@ button.ghost {
   gap: 6px;
 }
 
-/* Stacked meters (pkt/s over fps): rows are equal-width — same chart width,
-   same min-width value column — so the charts line up vertically. */
-.meter-stack {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-}
-
 .sparkbars svg {
   display: block;
 }
@@ -2521,18 +2512,6 @@ button.ghost {
   font-size: 13px;
   color: var(--text);
   white-space: nowrap;
-  /* Fixed-width value column: stacked meters keep their bars in one column
-     regardless of how many digits each value happens to have, and ticking
-     digits don't wiggle the row. Wide enough for "1760 pkt/s". */
-  min-width: 10ch;
-  text-align: left;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Not the global .warn — that one also shrinks the font, which would put the
-   two stacked meters at different sizes and break their alignment. */
-.spark-warn {
-  color: var(--danger);
 }
 
 .spark-label {

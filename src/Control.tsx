@@ -238,28 +238,25 @@ export default function Control() {
           />
           <span className="slider-val">{speed.toFixed(2)}</span>
         </label>
-        {status?.sacn_enabled && <p className="warn">sACN output is LIVE</p>}
-        {status && (
-          // Siblings in one stack so the two charts share a column — one of
-          // them living inline inside the paragraph above put its bars at a
-          // completely different x offset (and font size) than the other.
-          <div className="meter-stack">
-            {status.sacn_enabled && (
-              <Sparkbars
-                data={status.pps_history}
-                color="#7c5cff"
-                label="pkt/s"
-                value={String(status.sacn_pps)}
-                warn={status.sacn_pps === 0}
-              />
-            )}
+        {status?.sacn_enabled && (
+          <p className="warn">
+            sACN output is LIVE{" "}
             <Sparkbars
-              data={status.fps_history}
-              color="#38d1c2"
-              label="fps"
-              value={String(status.fps_history.at(-1) ?? 0)}
+              data={status.pps_history}
+              color="#7c5cff"
+              label="pkt/s"
+              value={String(status.sacn_pps)}
+              warn={status.sacn_pps === 0}
             />
-          </div>
+          </p>
+        )}
+        {status && (
+          <Sparkbars
+            data={status.fps_history}
+            color="#38d1c2"
+            label="fps"
+            value={String(status.fps_history.at(-1) ?? 0)}
+          />
         )}
       </section>
 

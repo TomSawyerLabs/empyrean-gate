@@ -42,7 +42,7 @@ export default function Sparkbars({
           );
         })}
       </svg>
-      <span className={`spark-value ${warn ? "spark-warn" : ""}`}>
+      <span className={`spark-value ${warn ? "warn" : ""}`}>
         {value} <span className="spark-label">{label}</span>
       </span>
     </span>

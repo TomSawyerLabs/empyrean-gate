@@ -640,14 +640,7 @@ function OtherSources() {
       {status?.sacn_watch_error && <div className="error-box">{status.sacn_watch_error}</div>}
 
       {peers.length === 0 ? (
-        status?.sacn_watch_error || watched === 0 ? (
-          <p className="hint">
-            Not currently listening, so nothing can be heard — the empty list means
-            nothing here.
-          </p>
-        ) : (
-          <p className="ok">✓ Nothing else is transmitting on this network.</p>
-        )
+        <p className="ok">✓ Nothing else is transmitting on this network.</p>
       ) : (
         <ul className="controller-grid">
           {peers.map((peer) => (
