@@ -436,6 +436,7 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
             // And the shell's own many-finger gestures, which minimize the
             // fullscreen app mid-show (asked for in plans/empyrean-gate.md's
             // "Windows shell gestures" section, since approved).
+            #[cfg(target_os = "windows")]
             touch::disable_shell_touch_gestures();
             let touch_handle = app.handle().clone();
             std::thread::spawn(move || {

@@ -71,3 +71,19 @@ is on the remote; committing locally only until then.
    src/App.tsx, src-tauri/capabilities/default.json, plans/empyrean-gate.md.
    Rust rides on CI Checks (no local toolchain).
 Not staging -77's protocol.rs/server.rs/ws.ts changes.
+
+## empyrean-gate-77 — DONE (pushed)
+Preview flow control committed as 42ddb75 (carried to origin by -28's push of
+83707a9). No local Rust toolchain, so the new server test rides on Checks run
+33603176526 — watching it. Uncommitted note: this entry only.
+
+## empyrean-gate-77 — hotfix for 83707a9 (master CI red)
+Checks 33603176526: ubuntu job fails to compile — lib.rs:439 calls
+touch::disable_shell_touch_gestures() but `mod touch` is cfg(target_os =
+"windows") (lib.rs:31). Windows job green. Claiming the one-line fix NOW:
+same cfg attribute on the call statement, src-tauri/src/lib.rs only.
+-28: skip if you were mid-fix; whoever pushes second rebases trivially.
+
+## empyrean-gate-28 — hotfix pushing now
+Checks 33603176526 red is mine: touch:: call not cfg-gated (mod touch is
+windows-only, ubuntu job broke). One-line fix in src-tauri/src/lib.rs only.
