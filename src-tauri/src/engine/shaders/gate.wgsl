@@ -335,6 +335,10 @@ fn meteor_event(L: Layer, ctx: Ctx, epoch: u32, progress: f32) -> vec4f {
 
 fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
     let A = AUDIO[L.audio_source];
+    // Audio-scaled amplitudes follow mix(1.0, floor + band_gain, aud):
+    // audio_amount buys reactivity, never baseline brightness. At aud=0 a
+    // layer reaches its full nominal brightness; the quiet-room dim floor
+    // only appears to the extent the layer opted into audio.
     let aud = L.audio_amount;
     let tilt = vec2f(G.tilt_x, G.tilt_y) * L.tilt_amount;
 
@@ -388,7 +392,7 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
             }
             v = v / norm * 0.5 + 0.5;
             v = pow(v, 2.0);
-            let amp = L.brightness * (0.4 + aud * (A.bass * 1.4));
+            let amp = L.brightness * mix(1.0, 0.4 + A.bass * 1.4, aud);
             let hue = L.hue + (ctx.rn - 0.5) * L.hue_range;
             return vec4f(hsv2rgb(hue, L.saturation, v * amp), v);
         }
@@ -399,7 +403,7 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
             let v0 = sin(arms * ctx.theta + twist * ctx.rn * TAU - L.phase + G.yaw * L.tilt_amount);
             let sharp = 1.0 + L.param_c * 8.0;
             let v = pow(max(v0, 0.0), sharp);
-            let amp = L.brightness * (0.5 + aud * A.mid);
+            let amp = L.brightness * mix(1.0, 0.5 + A.mid, aud);
             let hue = L.hue + ctx.rn * L.hue_range;
             return vec4f(hsv2rgb(hue, L.saturation, v * amp), v);
         }
@@ -439,7 +443,7 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
             let f = L.phase;
             let rnd0 = hash01(idx * 2654435761u + cell * 40503u);
             let rnd1 = hash01(idx * 2654435761u + (cell + 1u) * 40503u);
-            let density = L.param_a * (0.3 + aud * A.treble * 1.5);
+            let density = L.param_a * mix(1.0, 0.3 + A.treble * 1.5, aud);
             let lit0 = step(1.0 - density * 0.2, rnd0);
             let lit1 = step(1.0 - density * 0.2, rnd1);
             let v0 = lit0 * (1.0 - f) * (1.0 - f);
@@ -456,7 +460,7 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
             let front = A2.beat_phase;
             let d = abs(dir - front);
             let v = exp(-(d * d) / (width * width)) * (1.0 - A2.beat_phase * 0.5);
-            let strength = mix(0.6, A2.onset * 0.7 + 0.5, aud);
+            let strength = mix(1.0, A2.onset * 0.7 + 0.5, aud);
             let hue = L.hue + front * L.hue_range;
             return vec4f(hsv2rgb(hue, L.saturation, v * L.brightness * strength), v);
         }
@@ -474,7 +478,7 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
         case 11u: {
             let turns = max(1.0, floor(L.param_a * 4.0 + 0.5));
             let hue = L.hue + (ctx.theta / TAU) * turns + ctx.rn * L.hue_range + L.phase * 0.03;
-            let v = L.brightness * (0.8 + aud * A.level * 0.6);
+            let v = L.brightness * mix(1.0, 0.8 + A.level * 0.6, aud);
             return vec4f(hsv2rgb(hue, L.saturation, max(v, 0.0)), 1.0);
         }
         // Wedges — rotating pie slices; onset flashes the dark slices up
@@ -498,7 +502,7 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
                 + sin(distance(ctx.pos, p2) * freq * TAU + L.phase * 0.8);
             v = v * 0.25 + 0.5;
             v = pow(v, 1.0 + L.param_c * 4.0);
-            let amp = L.brightness * (0.6 + aud * A.mid * 0.8);
+            let amp = L.brightness * mix(1.0, 0.6 + A.mid * 0.8, aud);
             let hue = L.hue + v * L.hue_range;
             return vec4f(hsv2rgb(hue, L.saturation, v * amp), v);
         }
