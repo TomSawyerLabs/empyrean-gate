@@ -64,6 +64,18 @@ jobs:
       - name: Typecheck frontend
         run: bun run typecheck
 
+      # Browser binaries keyed by lockfile; `playwright install` below skips
+      # the download for anything already present. The apt-installed system
+      # deps (--with-deps) still run — they are not under this path.
+      - uses: actions/cache@v4
+        if: runner.os == 'Linux'
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          # A stale hit is safe: install verifies versions and fetches only
+          # what is missing, which is still most of the download saved.
+          restore-keys: playwright-${{ runner.os }}-
+
       # One platform is enough: the layout gate checks CSS box geometry, which
       # does not vary by runner OS. Releases are what reach the show machine, so
       # it runs here as well as in checks.yml.
@@ -82,13 +94,11 @@ jobs:
       - name: Build standalone binary
         run: bun tauri build --no-bundle
 
-      - name: Rust unit tests
+      # One invocation for both targets — two separate `cargo test` runs each
+      # pay their own resolve/compile round-trip.
+      - name: Rust unit + benchmark harness tests
         working-directory: src-tauri
-        run: cargo test --release --lib
-
-      - name: Benchmark harness tests
-        working-directory: src-tauri
-        run: cargo test --release --bin engine-smoke
+        run: cargo test --release --lib --bin engine-smoke
 
       # Linux only, and IN ADDITION to the bare binary. The bare one needs
       # libwebkit2gtk already installed; the AppImage carries it. Both are still

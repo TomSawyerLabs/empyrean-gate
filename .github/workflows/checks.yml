@@ -22,6 +22,17 @@ jobs:
       - name: Typecheck frontend
         run: bun run typecheck
 
+      # Browser binaries keyed by lockfile; the install below skips the
+      # download for anything already present. The apt-installed system deps
+      # (--with-deps) still run — they are not under this path. A stale
+      # restore-keys hit is safe: install verifies versions and fetches only
+      # what is missing.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: playwright-${{ runner.os }}-
+
       - name: Install browsers (Chromium for the gate, WebKit for behaviour)
         run: bunx playwright install --with-deps chromium webkit
 

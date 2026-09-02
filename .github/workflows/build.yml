@@ -35,11 +35,17 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Restore the release-profile cache warm-cache.yml maintains on master,
+      # instead of the default per-job key — which, on a fresh branch, has never
+      # been written and made every first manual build start cold (~26 min on
+      # Windows vs ~15 warm). `save-if: false` for the same reason as
+      # release.yml: a cache saved from a feature branch is readable only by
+      # that branch and would just eat quota.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          # A failed job's compilation still primes the cache for the next run.
-          cache-on-failure: true
+          shared-key: release-build
+          save-if: false
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
@@ -85,16 +91,14 @@ jobs:
         run: cargo build --release --bin engine-smoke
 
       # sACN wire-format tests (packet layout, stream termination, discovery
-      # paging). No GPU needed. --release reuses the dependency artifacts the
-      # builds above already produced, instead of compiling the tree again in
-      # the debug profile.
-      - name: Rust unit tests
+      # paging) plus the benchmark harness. No GPU needed. --release reuses the
+      # dependency artifacts the builds above already produced, instead of
+      # compiling the tree again in the debug profile. One invocation for both
+      # targets: two separate `cargo test` runs each pay their own
+      # resolve/compile round-trip.
+      - name: Rust unit + benchmark harness tests
         working-directory: src-tauri
-        run: cargo test --release --lib
-
-      - name: Benchmark harness tests
-        working-directory: src-tauri
-        run: cargo test --release --bin engine-smoke
+        run: cargo test --release --lib --bin engine-smoke
 
       # CI runners have no GPU; just confirm the error path is the designed one
       # (clear "no Vulkan adapter" message, nonzero exit) rather than a crash.
