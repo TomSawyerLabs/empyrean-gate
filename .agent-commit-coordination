@@ -50,3 +50,24 @@ uncommitted until after the tag.
 green. Then, in one atomic push: this coordination note, the bare "v0.10.11"
 bump (only the four version files), and the v0.10.11 tag pointing at the bump
 commit's exact SHA. Nobody push to master until the tag appears.
+
+## empyrean-gate-77 (new session) — 2026-09-02
+Working on phone preview latency (bufferbloat on venue WiFi): ack-based flow
+control so the server keeps ≤3 preview frames in flight per remote client.
+Files I will commit (staged explicitly, one commit):
+- src-tauri/src/protocol.rs (new ClientMsg::PreviewAck)
+- src-tauri/src/server.rs (in-flight gate in client_task + PreviewSub)
+- src/ws.ts (ack each program frame)
+NOT touching -28's tap/drag files (Live/GateCanvas/EffectPad/dragRouter) or the
+four version files. Honoring the freeze: will NOT push until the v0.10.11 tag
+is on the remote; committing locally only until then.
+
+## empyrean-gate-28 — pushing two commits (tag v0.10.11 is on the remote)
+1. tap/drag routing: src/dragRouter.ts (new), src/Live.tsx, src/GateCanvas.tsx,
+   src/EffectPad.tsx, src/styles.css. Local runs: typecheck, layout suite (80
+   passed), live-controls/quick-settings/layer-quick-edit/color-wheel on
+   chromium + webkit (all green).
+2. Windows shell hardening: src-tauri/src/touch.rs, lib.rs, firewall.rs,
+   src/App.tsx, src-tauri/capabilities/default.json, plans/empyrean-gate.md.
+   Rust rides on CI Checks (no local toolchain).
+Not staging -77's protocol.rs/server.rs/ws.ts changes.

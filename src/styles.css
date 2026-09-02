@@ -2763,6 +2763,17 @@ button.ghost {
   min-width: 0;
 }
 
+/* Drag-across pads (data-drag-fire): without this the browser claims a touch
+   drag as a scroll before the router can drum across the row. */
+.pens,
+.effects,
+.shape-grid,
+.shape-grow-row,
+.swatches,
+.tempo-time-grid {
+  touch-action: none;
+}
+
 /* Always-visible level sliders for the playing layers — the pattern's major
    knob without the hidden long-press. Grid + display:contents keeps the name,
    slider, and edit columns aligned across rows. */

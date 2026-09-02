@@ -20,6 +20,7 @@ import ShapeQuickEdit, { type ShapeEditAnchor } from "./ShapeQuickEdit";
 import { loadShapeStyle, saveShapeStyle, type ShapeStyle } from "./shapeStyle";
 import { useHoldMenu } from "./longPress";
 import CustomColorPicker from "./CustomColorPicker";
+import { installDragRouter } from "./dragRouter";
 import { QuickSettingsEditor, QuickSettingsPanel } from "./LiveQuickSettings";
 import {
   BUILTIN_LIVE_COLORS,
@@ -124,7 +125,12 @@ function ShapePad({
 }) {
   const hold = useHoldMenu({ onOpen: onEditStyle, onClick: onSelect });
   return (
-    <button className={`shape-btn ${active ? "active" : ""}`} aria-pressed={active} {...hold}>
+    <button
+      className={`shape-btn ${active ? "active" : ""}`}
+      aria-pressed={active}
+      data-drag-fire
+      {...hold}
+    >
       <ShapeIcon kind={shape.kind} />
       {shape.label}
       <span className="key-hint">{shape.key}</span>
@@ -171,6 +177,15 @@ export default function Live() {
   // every other mode — there the side columns already show everything.
   const [showMore, setShowMore] = useState(false);
   const beatDotRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+
+  // Drag-across triggering: every pad marked data-drag-fire also fires when a
+  // pressed pointer slides onto it. See dragRouter.ts for the rules.
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page) return;
+    return installDragRouter(page);
+  }, []);
 
   const setBrightness = useThrottled((value: number) =>
     client.setMaster({ brightness: value }),
@@ -300,6 +315,7 @@ export default function Live() {
         <button
           key={t.kind}
           className={`pen-btn ${tool === t.kind ? "active" : ""}`}
+          data-drag-fire
           onClick={() => setTool(t.kind)}
         >
           <ToolIcon kind={t.kind} />
@@ -338,6 +354,7 @@ export default function Live() {
           <button
             key={m.mode}
             className={growMode === m.mode ? "active" : ""}
+            data-drag-fire
             onClick={() => setGrowMode(m.mode)}
             aria-pressed={growMode === m.mode}
           >
@@ -359,6 +376,7 @@ export default function Live() {
           key={entry.id}
           className={`swatch ${color.id === entry.id ? "active" : ""}`}
           style={{ background: entry.hex }}
+          data-drag-fire
           onClick={() => setColor(entry)}
           aria-label={entry.label}
         />
@@ -400,6 +418,7 @@ export default function Live() {
           <button
             key={time}
             className={`effect-btn ${config.render.beat_time === time ? "active" : ""}`}
+            data-drag-fire
             onClick={() => setTempo({ beat_time: time })}
             aria-label={`${label} time`}
           >
@@ -719,7 +738,7 @@ export default function Live() {
   );
 
   return (
-    <div className={`live-page ${showMore ? "more-open" : ""}`}>
+    <div ref={pageRef} className={`live-page ${showMore ? "more-open" : ""}`}>
       {/* Brush size sits with the brushes, not with the palette — and it evens
           the two columns out, which is what keeps column B from overflowing on
           an iPad in landscape. */}

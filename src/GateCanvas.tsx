@@ -285,18 +285,29 @@ export default function GateCanvas({
   };
 
   // Explicit tool modes — no gesture guessing. Tap mode (onTap set): every press
-  // fires immediately on pointer-DOWN (snappy for tapping on the beat) and drags
-  // never draw. Draw mode (drawPen set): the press paints from the first contact;
-  // taps are just one-dab strokes. Per pointer, so multitouch works in both.
+  // fires immediately on pointer-DOWN (snappy for tapping on the beat), and a
+  // drag keeps firing along the sweep — one trigger per DRAG_SPACING of travel,
+  // rate-capped, so a swipe reads as a trail rather than one orphaned burst.
+  // Draw mode (drawPen set): the press paints from the first contact; taps are
+  // just one-dab strokes. Per pointer, so multitouch works in both.
   const cart = (polar: { angle: number; radius: number }) => ({
     x: polar.radius * Math.cos(polar.angle),
     y: polar.radius * Math.sin(polar.angle),
   });
 
+  /** Travel (in NDC units, full view ≈ 2) between drag retriggers. */
+  const DRAG_SPACING = 0.15;
+  /** Floor between retriggers, so a fast flick can't flood the effect list. */
+  const DRAG_MIN_MS = 60;
+  const tapTracks = useRef(new Map<number, { x: number; y: number; t: number }>());
+
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (onTap) {
       const p = toPolar(e);
       onTap(p.angle, Math.min(1, p.radius));
+      const c = cart(p);
+      tapTracks.current.set(e.pointerId, { x: c.x, y: c.y, t: performance.now() });
+      e.currentTarget.setPointerCapture(e.pointerId);
       return;
     }
     if (!drawPen) return;
@@ -308,7 +319,24 @@ export default function GateCanvas({
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drawPen) return;
+    if (!drawPen) {
+      if (!onTap) return;
+      const track = tapTracks.current.get(e.pointerId);
+      if (!track) return;
+      const polar = toPolar(e);
+      const c = cart(polar);
+      const now = performance.now();
+      if (
+        Math.hypot(c.x - track.x, c.y - track.y) >= DRAG_SPACING &&
+        now - track.t >= DRAG_MIN_MS
+      ) {
+        track.x = c.x;
+        track.y = c.y;
+        track.t = now;
+        onTap(polar.angle, Math.min(1, polar.radius));
+      }
+      return;
+    }
     const p = pointers.current.get(e.pointerId);
     if (!p) return;
     const native = e.nativeEvent as PointerEvent;
@@ -329,6 +357,7 @@ export default function GateCanvas({
 
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     pointers.current.delete(e.pointerId);
+    tapTracks.current.delete(e.pointerId);
   };
 
   return (
@@ -338,7 +367,10 @@ export default function GateCanvas({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={(e) => pointers.current.delete(e.pointerId)}
+      onPointerCancel={(e) => {
+        pointers.current.delete(e.pointerId);
+        tapTracks.current.delete(e.pointerId);
+      }}
       style={{ touchAction: "none", cursor: drawPen ? "crosshair" : onTap ? "pointer" : "default" }}
     />
   );

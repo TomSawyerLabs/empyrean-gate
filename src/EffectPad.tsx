@@ -46,7 +46,7 @@ export default function EffectPad({ effect, trigger, color, className = "effect-
 
   if (effect.kind !== "rotate") {
     return (
-      <button className={className} onClick={() => fire()}>
+      <button className={className} data-drag-fire onClick={() => fire()}>
         {effect.label}
         {showKey && effect.key && <span className="key-hint">{effect.key}</span>}
       </button>
