@@ -838,29 +838,29 @@ white rectangle — which is at least half of what was reported, and is worth
 fixing regardless of the root cause. Aux window creation is also logged now, so
 a white window on the show machine leaves a trace to read.
 
-### Windows shell gestures (asked 2026-08-22, not applied)
+### Windows shell gestures (asked 2026-08-22, applied 2026-09-02)
 
-The in-webview gestures are handled (round 14). The remaining ones are the
+The in-webview gestures are handled (round 14). The remaining ones were the
 *shell's* — edge swipes for Action Center / Task View / the taskbar, and the
-Win11 three/four-finger touch gestures. **No application can disable those**; they
-are owned by explorer.exe and are machine policy.
+Win11 three/four-finger touch gestures. No per-window API can swallow those;
+they are owned by explorer.exe. The user asked for them off after a 4/5-finger
+pinch minimized the app mid-show, so as of 2026-09-02:
 
-Checked on this machine: `HKLM\SOFTWARE\Policies\Microsoft\Windows\EdgeUI` does
-not exist (so edge swipe is on), OS is Windows 11 Pro N build 26200.
-
-Options, in increasing order of heaviness — NONE applied, awaiting the user:
-1. `HKLM\SOFTWARE\Policies\Microsoft\Windows\EdgeUI` → `AllowEdgeSwipe`=0 (DWORD).
-   Documented for Win10; Win11 26xxx coverage is not guaranteed and needs testing
-   on the actual machine.
-2. Settings → Bluetooth & devices → Touch → turn off three- and four-finger
-   gestures. Per-user, no policy needed.
-3. Taskbar auto-hide, to take the bottom edge out of play.
-4. Assigned Access / kiosk mode for the show account — the only complete answer,
-   and the most disruptive.
-
-If wanted, (1) belongs in the existing elevated Authorize script alongside the
-firewall rule and Windows Update active hours — one UAC prompt, already the
-established pattern for machine settings this app needs.
+1. **Applied** — `HKCU\Control Panel\Desktop\TouchGestureSetting=0` (the
+   Settings → Bluetooth & devices → Touch toggle) is written by
+   `touch::disable_shell_touch_gestures()` at every app start. Per-user, no
+   elevation; may need one sign-out to fully apply the first time.
+2. **Applied** — `HKLM\SOFTWARE\Policies\Microsoft\Windows\EdgeUI` →
+   `AllowEdgeSwipe=0` joined the elevated Authorize script in `firewall.rs`
+   (one UAC prompt, same pattern as the firewall rule and active hours).
+   Documented for Win10; verify on the Win11 26xxx show machine after the next
+   Authorize click.
+3. **Applied differently** — instead of taskbar auto-hide, show mode now also
+   sets always-on-top with fullscreen (`App.tsx` useShowMode), so the taskbar
+   cannot sit over the bottom edge and eat slider input.
+4. Assigned Access / kiosk mode for the show account remains the fallback if
+   any of the above fails on the real machine — the only complete answer, and
+   the most disruptive.
 
 ### Still to confirm with the user (needs the real touch display)
 

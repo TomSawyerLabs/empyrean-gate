@@ -17,6 +17,44 @@ pub fn disable_feedback_visuals(hwnd: isize) {
     imp::disable_tree(hwnd as imp::Hwnd);
 }
 
+/// Turn off Windows 11's three-/four-finger shell touch gestures for this user
+/// (the Settings → Bluetooth & devices → Touch toggle). A many-finger pinch on
+/// the show surface otherwise minimizes the fullscreen app mid-show — those
+/// gestures belong to explorer.exe, so no per-window API can swallow them; the
+/// per-user setting is the only lever that doesn't need machine policy.
+/// Idempotent; a change may only fully apply from the next sign-in.
+pub fn disable_shell_touch_gestures() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let out = std::process::Command::new("reg")
+            .args([
+                "add",
+                r"HKCU\Control Panel\Desktop",
+                "/v",
+                "TouchGestureSetting",
+                "/t",
+                "REG_DWORD",
+                "/d",
+                "0",
+                "/f",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+        match out {
+            Ok(o) if o.status.success() => {
+                log::info!("touch: shell three-/four-finger gestures disabled for this user");
+            }
+            Ok(o) => log::warn!(
+                "touch: could not disable shell touch gestures: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            ),
+            Err(e) => log::warn!("touch: cannot run reg.exe: {e}"),
+        }
+    }
+}
+
 mod imp {
     use std::ffi::c_void;
 

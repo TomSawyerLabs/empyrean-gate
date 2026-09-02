@@ -111,7 +111,12 @@ function useShowMode(leaveAt: string | null | undefined): [boolean, (on: boolean
     if (!IN_TAURI) return;
     void (async () => {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      await getCurrentWindow().setFullscreen(on);
+      const win = getCurrentWindow();
+      await win.setFullscreen(on);
+      // Topmost while in show mode: without it the Windows taskbar can raise
+      // itself over the fullscreen window (edge swipe, focus hiccups) and then
+      // eats every touch aimed at controls along the bottom edge.
+      await win.setAlwaysOnTop(on);
     })();
   }, [on]);
 

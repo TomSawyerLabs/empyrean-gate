@@ -433,6 +433,10 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
             // every window (again shortly after, once WebView2 has created the
             // child HWNDs that touch input actually lands on).
             harden_touch_visuals(app.handle());
+            // And the shell's own many-finger gestures, which minimize the
+            // fullscreen app mid-show (asked for in plans/empyrean-gate.md's
+            // "Windows shell gestures" section, since approved).
+            touch::disable_shell_touch_gestures();
             let touch_handle = app.handle().clone();
             std::thread::spawn(move || {
                 for _ in 0..4 {

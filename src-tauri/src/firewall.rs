@@ -93,6 +93,8 @@ pub fn authorize(port: u16) -> anyhow::Result<()> {
              reg add $wu /v ActiveHoursStart /t REG_DWORD /d 15 /f | Out-Null\r\n\
              reg add $wu /v ActiveHoursEnd /t REG_DWORD /d 9 /f | Out-Null\r\n\
              reg add $wu /v SmartActiveHoursState /t REG_DWORD /d 0 /f | Out-Null\r\n\
+             $eu = 'HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\EdgeUI'\r\n\
+             reg add $eu /v AllowEdgeSwipe /t REG_DWORD /d 0 /f | Out-Null\r\n\
              exit $fw\r\n",
             name = rule_name(),
         );
