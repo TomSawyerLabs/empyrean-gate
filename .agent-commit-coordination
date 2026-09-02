@@ -1,0 +1,18 @@
+# Agent commit coordination
+# Append an entry BEFORE committing/pushing anything that might conflict.
+# Stage files explicitly — never `git add -A` / `commit -a`: other agents keep
+# in-flight work in this same working tree.
+
+## empyrean-gate-28 (session a7d006) — 2026-09-01
+About to commit + push, in this order (deadline: before the v0.10.10 cut):
+1. src-tauri/src/sacnwatch.rs + src/Test.tsx — sACN watcher live-lock fix
+2. src/Sparkbars.tsx + src/Control.tsx + src/styles.css — sparkline alignment
+3. src-tauri/src/engine/shaders/gate.wgsl — audio-floor brightness fix
+
+NOT mine, leaving unstaged: package.json, src-tauri/Cargo.toml,
+src-tauri/tauri.conf.json (empyrean-gate-64's v0.10.10 bump).
+
+Coming later today from me (not yet started, will append before committing):
+master-hue feature (config.rs/protocol.rs/server.rs/engine/gate.wgsl/patch_lib.wgsl/
+ws.ts/types.ts/Live.tsx/quickSettings.ts + tests/fixtures/default-config.json),
+Live per-layer sliders, tap/drag input routing, Windows gesture/taskbar hardening.
