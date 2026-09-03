@@ -31,6 +31,7 @@ import {
   ReactFlowProvider,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { MiniMeter, MiniRing } from "./MiniViz";
 import { useGate } from "./state";
 import {
   shapeAccepts,
@@ -97,20 +98,54 @@ function emptyPatch(): PatchDoc {
 
 // --- custom flow node ------------------------------------------------------
 
-type PatchFlowNode = FlowNode<{ node: PatchNode; def: PatchNodeType | undefined }, "patch">;
+type PatchFlowNode = FlowNode<
+  {
+    node: PatchNode;
+    def: PatchNodeType | undefined;
+    /** Doc id these nodes belong to — minis only flow for the active patch. */
+    docId: string;
+    /** Output ports with at least one outgoing wire (meters show these). */
+    wiredOut: string[];
+  },
+  "patch"
+>;
 
 const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<PatchFlowNode>) {
   const { node, def } = data;
+  const { config } = useGate();
   if (!def) {
     return <div className="pnode pnode-unknown">unknown: {node.kind}</div>;
   }
   const ins = inputPorts(def);
+  // Mini visualizers, per output style: field outputs get a thumbnail laid out
+  // like the hardware; scalar outputs get amplitude meters. Only for the patch
+  // that is actually on air — that is the graph the backend is evaluating.
+  const live = data.docId !== "" && config?.active_patch === data.docId;
+  const outShape = def.outputs.find((p) => p.name === "out")?.shape;
+  const showRing = live && (outShape === "field_color" || outShape === "field_scalar");
+  const meterPorts = live
+    ? def.outputs.filter(
+        (p) => p.shape === "scalar" && (p.name === "out" || data.wiredOut.includes(p.name)),
+      )
+    : [];
   return (
     <div className={`pnode cat-${def.category} ${selected ? "selected" : ""}`}>
       <div className="pnode-head">
         {def.label}
         {node.name && <span className="pnode-name"> · {node.name}</span>}
       </div>
+      {showRing && (
+        <div className="pnode-mini">
+          <MiniRing mini={`node:${node.id}`} label={node.name || def.label} />
+        </div>
+      )}
+      {meterPorts.length > 0 && (
+        <div className="pnode-meters">
+          {meterPorts.map((p) => (
+            <MiniMeter key={p.name} mini={`scalar:${node.id}:${p.name}`} label={p.name} />
+          ))}
+        </div>
+      )}
       <div className="pnode-body">
         <div className="pnode-col">
           {ins.map((p) => (
@@ -152,7 +187,12 @@ function toFlowNodes(doc: PatchDoc, registry: Registry): PatchFlowNode[] {
     id: n.id,
     type: "patch" as const,
     position: { x: n.pos[0], y: n.pos[1] },
-    data: { node: n, def: registry.get(n.kind) },
+    data: {
+      node: n,
+      def: registry.get(n.kind),
+      docId: doc.id,
+      wiredOut: doc.edges.filter((e) => e.from.node === n.id).map((e) => e.from.port),
+    },
   }));
 }
 

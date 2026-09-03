@@ -136,6 +136,18 @@ impl Runtime {
         std::mem::take(&mut self.emitted_effects)
     }
 
+    /// A CPU node's output as of the latest `eval`, for the mini-preview
+    /// amplitude meters. Unknown node/port reads as 0 (a node that has not
+    /// evaluated yet is indistinguishable from one outputting zero, which is
+    /// exactly what a meter should show).
+    pub fn scalar_value(&self, node: usize, port: &str) -> f32 {
+        self.outputs
+            .get(node)
+            .and_then(|o| o.get(port))
+            .copied()
+            .unwrap_or(0.0)
+    }
+
     /// Apply a live param change (exposed-param play surface) without any
     /// recompile — the next `eval` picks the value up from the doc.
     pub fn set_param(&mut self, node_id: &str, param: &str, value: f32) {

@@ -2,6 +2,7 @@
 // this-device remote inputs (mic / IMU).
 
 import { useEffect, useRef, useState } from "react";
+import { MiniRing } from "./MiniViz";
 import { useGate, useThrottled } from "./state";
 import { startImu, startMic } from "./sensors";
 import {
@@ -955,6 +956,7 @@ function LayerEditor({ layer, index }: { layer: LayerCfg; index: number }) {
       onPointerUp={() => (dragging.current = false)}
     >
       <div className="layer-head">
+        <MiniRing mini={`layer:${index}`} label={local.name || `Layer ${index + 1}`} />
         <input
           type="checkbox"
           checked={local.enabled}

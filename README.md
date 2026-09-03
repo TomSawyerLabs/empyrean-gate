@@ -67,7 +67,12 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   whatever the layer kind's own four params are actually called ("Arms", "Twist",
   "Sharpness" for a Spiral). The array stays lit and undimmed behind it, because
   the point is to watch what the slider does. Reordering and deleting stay in
-  Settings, one button away.
+  Settings, one button away. **Every listed layer also carries a mini
+  visualizer** — a live thumbnail of that layer's own solo contribution,
+  rendered on a dedicated low-res GPU bus and laid out like the real hardware —
+  so it is obvious at a glance what each one adds to the composite. In the
+  Patch editor the same idea follows the wire types: field nodes get the ring
+  thumbnail, scalar outputs get small amplitude meters with history.
 - **Effects**: transients that fire over the whole stack. Eight of them *move* —
   burst / strobe / swoosh / collapse / bloom / pinwheel / twinkle / wipe — from the
   keyboard (1–8), a pad, or a remote client. Six are **shapes** — star / heart /

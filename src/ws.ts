@@ -8,6 +8,7 @@ import type {
   GameKind,
   GameCommand,
   LayerCfg,
+  MiniBatch,
   PatchDoc,
   PreviewFrame,
   ReportInfo,
@@ -17,6 +18,7 @@ import type {
 
 const PREVIEW_MAGIC = 0x45475056;
 const READY_PREVIEW_MAGIC = 0x45475256;
+const MINI_PREVIEW_MAGIC = 0x45474d56;
 const VIDEO_FRAME_MAGIC = 0x45475646;
 
 export interface ResolvedMedia {
@@ -30,6 +32,7 @@ export type BrcApiResource = "event" | "camp";
 
 type Listener = (msg: ServerMsg) => void;
 type FrameListener = (frame: PreviewFrame) => void;
+type MiniListener = (batch: MiniBatch) => void;
 type StatusListener = (connected: boolean) => void;
 
 const DEV_BACKEND_KEY = "empyrean-dev-backend-port";
@@ -121,6 +124,7 @@ export class GateClient {
   private listeners = new Set<Listener>();
   private frameListeners = new Set<FrameListener>();
   private readyFrameListeners = new Set<FrameListener>();
+  private miniListeners = new Set<MiniListener>();
   private statusListeners = new Set<StatusListener>();
   private deniedListeners = new Set<(reason: string) => void>();
   private closed = false;
@@ -213,7 +217,13 @@ export class GateClient {
         }
         this.listeners.forEach((l) => l(msg));
       } else {
-        const parsed = parsePreview(ev.data as ArrayBuffer);
+        const buf = ev.data as ArrayBuffer;
+        const mini = parseMiniBatch(buf);
+        if (mini) {
+          this.miniListeners.forEach((l) => l(mini));
+          return;
+        }
+        const parsed = parsePreview(buf);
         if (parsed?.bus === "program") {
           // Flow control: the backend holds back new frames until recent ones
           // are acked, so a congested link drops frame rate instead of
@@ -253,6 +263,11 @@ export class GateClient {
   onReadyFrame(l: FrameListener): () => void {
     this.readyFrameListeners.add(l);
     return () => this.readyFrameListeners.delete(l);
+  }
+
+  onMiniBatch(l: MiniListener): () => void {
+    this.miniListeners.add(l);
+    return () => this.miniListeners.delete(l);
   }
 
   onStatus(l: StatusListener): () => void {
@@ -454,6 +469,12 @@ export class GateClient {
   subscribePreview(fps: number, decimate: number, includeReady = false) {
     this.send({ type: "subscribe_preview", fps, decimate, include_ready: includeReady });
   }
+  subscribeMiniPreviews(fps: number) {
+    this.send({ type: "subscribe_mini_previews", fps });
+  }
+  unsubscribeMiniPreviews() {
+    this.send({ type: "unsubscribe_mini_previews" });
+  }
   sendAudioFrame(
     f: { level: number; bass: number; mid: number; treble: number; flux: number },
     stream: "microphone" | "video" = "microphone",
@@ -496,6 +517,36 @@ export class GateClient {
   reportFileUrl(id: string, file: string): string {
     return `${this.httpBase}/reports/${id}/${file}`;
   }
+}
+
+function parseMiniBatch(buf: ArrayBuffer): MiniBatch | null {
+  if (buf.byteLength < 20) return null;
+  const view = new DataView(buf);
+  if (view.getUint32(0, true) !== MINI_PREVIEW_MAGIC) return null;
+  const batch = view.getUint32(4, true);
+  const spokes = view.getUint16(8, true);
+  const pixels = view.getUint16(10, true);
+  const kind = view.getUint8(12) === 1 ? 1 : (0 as const);
+  const cellCount = view.getUint16(14, true);
+  const scalarCount = view.getUint16(16, true);
+  const cellLen = spokes * pixels * 3;
+  let offset = 20;
+  if (buf.byteLength < offset + cellCount * (4 + cellLen) + scalarCount * 8) return null;
+  const cells: MiniBatch["cells"] = [];
+  for (let c = 0; c < cellCount; c++) {
+    const id = view.getUint16(offset, true);
+    offset += 4;
+    cells.push({ id, rgb: new Uint8Array(buf, offset, cellLen) });
+    offset += cellLen;
+  }
+  const scalars: MiniBatch["scalars"] = [];
+  for (let s = 0; s < scalarCount; s++) {
+    const id = view.getUint16(offset, true);
+    const value = view.getFloat32(offset + 4, true);
+    offset += 8;
+    scalars.push({ id, value });
+  }
+  return { batch, kind, spokes, pixels, cells, scalars };
 }
 
 function parsePreview(buf: ArrayBuffer): { bus: "program" | "ready"; frame: PreviewFrame } | null {

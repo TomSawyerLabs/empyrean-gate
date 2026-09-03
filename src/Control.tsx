@@ -7,6 +7,7 @@ import { CENTERED_SHAPE, EFFECTS, GROW_MODES, growValue, SHAPES, type GrowMode }
 import { cloneDjLinkEffects, defaultDjLinkEffects } from "./djLinkEffects";
 import EffectPad from "./EffectPad";
 import LayerQuickEdit, { type QuickEditAnchor } from "./LayerQuickEdit";
+import { MiniRing } from "./MiniViz";
 import ShapeQuickEdit, { type ShapeEditAnchor } from "./ShapeQuickEdit";
 import { loadShapeStyle, saveShapeStyle, type ShapeStyle } from "./shapeStyle";
 import { useHoldMenu } from "./longPress";
@@ -1145,6 +1146,7 @@ function LayerFader({
           send({ enabled: e.target.checked, opacity: value });
         }}
       />
+      <MiniRing mini={`layer:${index}`} label={name} />
       <LayerFaderName name={name} onQuickEdit={onQuickEdit} />
       <input
         type="range"

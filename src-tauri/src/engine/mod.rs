@@ -19,6 +19,8 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
+pub mod minis;
+
 /// A scene may use every operator-visible layer slot; a true crossfade needs room
 /// for one complete outgoing stack and one complete incoming stack at once.
 const MAX_RENDER_LAYERS: usize = MAX_LAYERS * 2;
@@ -1506,6 +1508,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             None
         }
     };
+    // Per-layer / per-patch-node thumbnails on a fourth, low-resolution bus.
+    // Idle (no dispatches, no traffic) until a client subscribes.
+    let mut mini_bus = minis::MiniBus::new(64 * minis::MINI_PIXELS);
     let mut ready_key = String::new();
     let mut ready_phases = Vec::<f64>::new();
     let mut ready_walks = Vec::<LayerWalk>::new();
@@ -1563,6 +1568,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut patch_key: Option<(String, u32)> = None;
     let mut patch_wgsl: Option<String> = None;
     let mut live_patch_id: Option<String> = None;
+    // Companion preview program for the mini bus (per-node thumbnails).
+    let mut patch_preview: Option<minis::PatchPreviewInfo> = None;
 
     // Hardware test mode: a CPU-generated frame that replaces the rendered one
     // on its way to sACN and the preview. See `testmode.rs`.
@@ -1714,6 +1721,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     patch_rt = None;
                     patch_wgsl = None;
                     live_patch_id = None;
+                    patch_preview = None;
                     let _ = engine.set_patch_shader(None);
                 }
                 Some((id, _)) => {
@@ -1729,6 +1737,21 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         Ok((doc, prog)) => match engine.set_patch_shader(Some(&prog.wgsl)) {
                             Ok(()) => {
                                 patch_wgsl = Some(prog.wgsl.clone());
+                                patch_preview = Some(minis::PatchPreviewInfo {
+                                    key: format!("{id}:{patch_epoch}"),
+                                    wgsl: prog.preview_wgsl.clone(),
+                                    node_ids: prog
+                                        .preview_nodes
+                                        .iter()
+                                        .map(|&n| doc.nodes[n].id.clone())
+                                        .collect(),
+                                    scalar_refs: prog
+                                        .preview_scalars
+                                        .iter()
+                                        .map(|(n, port)| (doc.nodes[*n].id.clone(), port.to_string()))
+                                        .collect(),
+                                    scalar_nodes: prog.preview_scalars.clone(),
+                                });
                                 patch_rt = Some(crate::patch::eval::Runtime::new(doc, prog));
                                 live_patch_id = Some(id.clone());
                             }
@@ -1738,6 +1761,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                                     patch_rt = None;
                                     patch_wgsl = None;
                                     live_patch_id = None;
+                                    patch_preview = None;
                                     let _ = engine.set_patch_shader(None);
                                 }
                             }
@@ -1748,6 +1772,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                                 patch_rt = None;
                                 patch_wgsl = None;
                                 live_patch_id = None;
+                                patch_preview = None;
                                 let _ = engine.set_patch_shader(None);
                             }
                         }
@@ -2401,6 +2426,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
 
         let mut layers = Vec::with_capacity(render_layers.len().min(render_layer_limit));
         let mut bus_layer_phase_rates = Vec::with_capacity(render_layer_limit);
+        // Config layer index behind each packed GPU slot (None for a
+        // transition's outgoing copies) — the mini bus labels its solo
+        // thumbnails with this, since disabled/walked-out layers are skipped
+        // here and GPU slot order therefore drifts from config order.
+        let mut layer_slot_cfg: Vec<Option<usize>> = Vec::with_capacity(render_layer_limit);
         let mut gpu_transition_split = 0u32;
         for (i, l) in render_layers.iter().take(render_layer_limit).enumerate() {
             // Envelope eases layers in/out of the mix over a few seconds.
@@ -2447,6 +2477,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             let (gpu_phase, gpu_epoch) = l.split_phase(layer_phases[i]);
             layers.push(l.to_gpu(gpu_phase, gpu_epoch));
             bus_layer_phase_rates.push(l.speed * render_master_speed);
+            layer_slot_cfg.push(if render_transition_active {
+                i.checked_sub(render_transition_split)
+            } else {
+                Some(i)
+            });
         }
         *state.layer_phases.lock() = layer_phases.clone();
 
@@ -2941,6 +2976,16 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             ready_key.clear();
             ready_rgb.clear();
         }
+
+        // Mini previews: solo thumbnails of each contribution (idle without
+        // subscribers). Reads the packed GPU layers out of `inputs`.
+        mini_bus.tick(
+            state,
+            &inputs,
+            &layer_slot_cfg,
+            patch_preview.as_ref(),
+            patch_rt.as_ref(),
+        );
 
         // Read before the vectors move into FrameInputs; the recorder reports
         // what this frame actually had live, not what survives to the next one.

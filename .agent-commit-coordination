@@ -148,3 +148,16 @@ untouched), src/Live.tsx (drop the display-side multiplier), this file.
 Side effect: video tempo-follow now tracks true LINK tempo, unaffected by
 beat time. Local: typecheck, layout 80, live-controls/video-playback/dj-scenes
 19 green. Rust rides on Checks. Not touching the hue-wheel/slider work.
+
+## empyrean-gate-ring — pushing the mini-visualizer feature, then RELEASING
+One feature commit (all files verified mine via git status — tree had no other
+uncommitted work): src-tauri/src/{state,protocol,server}.rs, src-tauri/src/
+engine/{mod.rs,minis.rs (new)}, src-tauri/src/patch/{codegen,eval}.rs,
+src/{types,ws,miniPreview (new)}.ts, src/{MiniViz (new),Settings,Live,Control,
+Patch}.tsx, src/styles.css, scripts/mini-preview-test.ts (new), README.md,
+plans/mini-visualizers.md (new), this file. Local runs: tsc, cargo check +
+237 lib tests, layout 80 passed, behavior 64 passed, end-to-end MINI PASS.
+Per Cameron: after Checks goes green on this commit I will bump v0.10.13
+(four version files only) and push the tag so the show machine can update.
+Nobody else touch the four version files until the v0.10.13 tag is on the
+remote.

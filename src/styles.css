@@ -2816,7 +2816,8 @@ button.ghost {
   /* The name track is capped and the slider track can actually shrink
      (minmax 0 beats the range input's intrinsic width) — without this the
      rows overflow the 900px-minimum window and trip the layout gate. */
-  grid-template-columns: minmax(32px, 64px) minmax(0, 1fr) auto;
+  /* mini | name | slider | edit */
+  grid-template-columns: auto minmax(32px, 64px) minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 8px;
   row-gap: 4px;
@@ -6263,4 +6264,66 @@ button.hue-swatch-button[aria-expanded="true"] {
   grid-column: 1 / -1;
   justify-self: center;
   width: 100%;
+}
+
+/* --- Mini visualizers (per-layer / per-patch-node contribution previews) --- */
+
+.mini-ring {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Settings layer cards have the room for a readable thumbnail. */
+.layer-head .mini-ring {
+  width: 44px;
+  height: 44px;
+}
+
+.mini-meter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.mini-meter svg {
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+
+.mini-meter-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 24px;
+}
+
+.mini-meter-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  min-width: 34px;
+  text-align: right;
+}
+
+.pnode-mini {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 2px;
+}
+
+.pnode-mini .mini-ring {
+  width: 72px;
+  height: 72px;
+}
+
+.pnode-meters {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 10px 0;
 }

@@ -20,10 +20,10 @@ use crate::config::ClientRecord;
 use crate::media::{MediaResolver, ResolveRequest};
 use crate::patch;
 use crate::protocol::{
-    BrowserAudioStream, ClientMsg, HandoverGrant, ServerMsg, PREVIEW_MAGIC, READY_PREVIEW_MAGIC,
-    VIDEO_FRAME_MAGIC,
+    BrowserAudioStream, ClientMsg, HandoverGrant, MiniScalarRef, ServerMsg, MINI_PREVIEW_MAGIC,
+    PREVIEW_MAGIC, READY_PREVIEW_MAGIC, VIDEO_FRAME_MAGIC,
 };
-use crate::state::{PreviewFrame, SharedState};
+use crate::state::{MiniBatch, MiniKind, PreviewFrame, SharedState};
 use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::body::Body;
@@ -743,6 +743,16 @@ const PREVIEW_MAX_IN_FLIGHT: u32 = 3;
 /// streaming rather than freezing the preview forever.
 const PREVIEW_ACK_STALL: Duration = Duration::from_secs(3);
 
+/// Per-connection mini-preview subscription. No slot rationing and no ack
+/// flow: batches are small (a few KB at ≤10 Hz), throttled by `min_interval`,
+/// and always describe the newest state, so a lagging client just skips.
+struct MiniSub {
+    min_interval: Duration,
+    last_sent: Instant,
+    /// Last `meta_epoch` announced to this client (None = never).
+    announced: Option<u64>,
+}
+
 impl PreviewSub {
     /// Whether the flow-control gate allows sending the next frame now.
     /// The wall-clock fps throttle is checked separately by the caller.
@@ -766,6 +776,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
     let state = ctx.state.clone();
     let mut events_rx = state.events.subscribe();
     let mut preview_rx = state.preview.subscribe();
+    let mut minis_rx = state.minis.subscribe();
     let (mut tx, mut rx) = socket.split();
 
     let conn_id = state.conn_seq.fetch_add(1, Ordering::SeqCst);
@@ -775,6 +786,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
     // This connection's last-announced access level; `Some` once hello landed.
     let mut last_admin: Option<bool> = None;
     let mut preview: Option<PreviewSub> = None;
+    let mut minis: Option<MiniSub> = None;
     let mut announced_meta = (0u32, 0u32, 0u32);
     let mut queued_notified: Option<u32> = None;
     // Loopback clients (the desktop window, aux windows, local browsers) are
@@ -802,7 +814,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                                     break;
                                 }
                                 let mut reset_meta = false;
-                                if handle_msg(&ctx, m, &mut client_id, conn_id, addr, &mut preview, &mut reset_meta, &mut tx).await.is_err() {
+                                if handle_msg(&ctx, m, &mut client_id, conn_id, addr, &mut preview, &mut minis, &mut reset_meta, &mut tx).await.is_err() {
                                     break;
                                 }
                                 if is_hello {
@@ -918,7 +930,44 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                     if tx.send(Message::Binary(bytes.into())).await.is_err() { break; }
                 }
             }
+            batch = minis_rx.recv() => {
+                if !authenticated { continue; }
+                let batch = match batch {
+                    Ok(b) => b,
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => break,
+                };
+                let Some(sub) = minis.as_mut() else { continue };
+                if sub.announced != Some(batch.meta_epoch) {
+                    sub.announced = Some(batch.meta_epoch);
+                    let m = ServerMsg::MiniPreviewMeta {
+                        spokes: batch.spokes,
+                        pixels: batch.pixels,
+                        patch_nodes: batch.patch_nodes.as_ref().clone(),
+                        patch_scalars: batch
+                            .patch_scalars
+                            .iter()
+                            .map(|(node, port)| MiniScalarRef {
+                                node: node.clone(),
+                                port: port.clone(),
+                            })
+                            .collect(),
+                    };
+                    if send_json(&mut tx, &m).await.is_err() { break; }
+                }
+                // Mode-flip clear batches (both lists empty) skip the throttle,
+                // or a stale layer thumbnail could outlive a patch activation.
+                let empty = batch.cells.is_empty() && batch.scalars.is_empty();
+                if !empty && sub.last_sent.elapsed() < sub.min_interval { continue; }
+                sub.last_sent = Instant::now();
+                let bytes = encode_minis(&batch);
+                if tx.send(Message::Binary(bytes.into())).await.is_err() { break; }
+            }
         }
+    }
+
+    if minis.is_some() {
+        state.mini_watchers.fetch_sub(1, Ordering::Relaxed);
     }
 
     {
@@ -1043,6 +1092,42 @@ fn encode_preview_rgb(frame: &PreviewFrame, rgb: &[u8], decimate: u32, magic: u3
                 bytes.extend_from_slice(&rgb[o..o + 3]);
             }
         }
+    }
+    bytes
+}
+
+/// One MINI_PREVIEW_MAGIC message: header, ring cells, scalar meters. Layout
+/// documented at the magic's definition in `protocol.rs`.
+fn encode_minis(batch: &MiniBatch) -> Vec<u8> {
+    let cell_len = (batch.spokes * batch.pixels * 3) as usize;
+    let mut bytes = Vec::with_capacity(
+        20 + batch.cells.len() * (4 + cell_len) + batch.scalars.len() * 8,
+    );
+    bytes.extend_from_slice(&MINI_PREVIEW_MAGIC.to_le_bytes());
+    bytes.extend_from_slice(&(batch.batch as u32).to_le_bytes());
+    bytes.extend_from_slice(&(batch.spokes as u16).to_le_bytes());
+    bytes.extend_from_slice(&(batch.pixels as u16).to_le_bytes());
+    bytes.push(match batch.kind {
+        MiniKind::Layers => 0,
+        MiniKind::Patch => 1,
+    });
+    bytes.push(0);
+    bytes.extend_from_slice(&(batch.cells.len() as u16).to_le_bytes());
+    bytes.extend_from_slice(&(batch.scalars.len() as u16).to_le_bytes());
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    for (id, rgb) in &batch.cells {
+        bytes.extend_from_slice(&id.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&rgb[..cell_len.min(rgb.len())]);
+        if rgb.len() < cell_len {
+            // Geometry changed mid-sweep; keep the framing intact.
+            bytes.resize(bytes.len() + cell_len - rgb.len(), 0);
+        }
+    }
+    for (id, value) in &batch.scalars {
+        bytes.extend_from_slice(&id.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&value.to_le_bytes());
     }
     bytes
 }
@@ -1344,6 +1429,7 @@ async fn handle_msg(
     conn_id: u64,
     addr: SocketAddr,
     preview: &mut Option<PreviewSub>,
+    minis: &mut Option<MiniSub>,
     reset_meta: &mut bool,
     tx: &mut WsSink,
 ) -> Result<(), ()> {
@@ -2139,6 +2225,21 @@ async fn handle_msg(
         ClientMsg::PreviewAck { frame: _ } => {
             if let Some(sub) = preview.as_mut() {
                 sub.note_ack(Instant::now());
+            }
+        }
+        ClientMsg::SubscribeMiniPreviews { fps } => {
+            if minis.is_none() {
+                state.mini_watchers.fetch_add(1, Ordering::Relaxed);
+            }
+            *minis = Some(MiniSub {
+                min_interval: Duration::from_secs_f32(1.0 / fps.clamp(1.0, 30.0)),
+                last_sent: Instant::now() - Duration::from_secs(1),
+                announced: None,
+            });
+        }
+        ClientMsg::UnsubscribeMiniPreviews => {
+            if minis.take().is_some() {
+                state.mini_watchers.fetch_sub(1, Ordering::Relaxed);
             }
         }
         ClientMsg::UnsubscribePreview => {

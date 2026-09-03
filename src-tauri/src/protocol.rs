@@ -16,6 +16,14 @@ pub const PREVIEW_MAGIC: u32 = 0x4547_5056; // "VPGE"
 /// off-air Ready bus. Sent only to clients that explicitly request both buses.
 pub const READY_PREVIEW_MAGIC: u32 = 0x4547_5256; // "VRGE"
 
+/// Binary mini-preview batch (per-layer / per-patch-node solo renders), little
+/// endian: `u32 magic, u32 batch, u16 spokes, u16 pixels, u8 kind (0 = layers,
+/// 1 = patch nodes), u8 pad, u16 cell_count, u16 scalar_count, u16 pad`, then
+/// `cell_count` × (`u16 id, u16 pad`, `spokes * pixels` RGB triplets), then
+/// `scalar_count` × (`u16 id, u16 pad, f32 value`). Ids are config layer
+/// indices (layers) or indices into the `mini_preview_meta` lists (patch).
+pub const MINI_PREVIEW_MAGIC: u32 = 0x4547_4D56; // "VMGE"
+
 /// Binary video input frame (client -> backend), little endian:
 /// `u32 magic, u32 sequence, u16 width, u16 height`, then RGBA8 pixels.
 pub const VIDEO_FRAME_MAGIC: u32 = 0x4547_5646; // "FVGE"
@@ -140,6 +148,15 @@ pub enum ClientMsg {
         include_ready: bool,
     },
     UnsubscribePreview,
+    /// Stream MINI_PREVIEW_MAGIC batches: a tiny solo render of every playing
+    /// layer (or every field node of the active patch) plus patch scalar
+    /// values, so each contribution to the composite is visible on its own.
+    SubscribeMiniPreviews {
+        /// Max batches per second this client wants.
+        #[serde(default = "default_mini_fps")]
+        fps: f32,
+    },
+    UnsubscribeMiniPreviews,
     /// Receipt for one program preview frame. The server keeps only a few
     /// unacked frames in flight per remote client, so a congested link loses
     /// frame rate instead of accumulating seconds of buffered latency.
@@ -318,6 +335,17 @@ fn default_dab_size() -> f32 {
     0.12
 }
 
+fn default_mini_fps() -> f32 {
+    10.0
+}
+
+/// One scalar meter of the active patch: a CPU node's output port.
+#[derive(Debug, Clone, Serialize)]
+pub struct MiniScalarRef {
+    pub node: String,
+    pub port: String,
+}
+
 fn default_report_seconds() -> f32 {
     10.0
 }
@@ -357,6 +385,16 @@ pub enum ServerMsg {
         decimate: u32,
         outer_radius_ft: f32,
         inner_radius_ft: f32,
+    },
+    /// Geometry + id tables for MINI_PREVIEW_MAGIC batches. Re-sent whenever
+    /// the mini geometry or the active patch's node/scalar lists change.
+    MiniPreviewMeta {
+        spokes: u32,
+        pixels: u32,
+        /// Patch node ids in cell-slot order; empty when no patch is active.
+        patch_nodes: Vec<String>,
+        /// (node id, output port) pairs in scalar-slot order.
+        patch_scalars: Vec<MiniScalarRef>,
     },
     Error {
         message: String,

@@ -751,6 +751,13 @@ export type ServerMsg =
       outer_radius_ft: number;
       inner_radius_ft: number;
     }
+  | {
+      type: "mini_preview_meta";
+      spokes: number;
+      pixels: number;
+      patch_nodes: string[];
+      patch_scalars: { node: string; port: string }[];
+    }
   | { type: "error"; message: string }
   | { type: "denied"; reason: string }
   | { type: "role"; admin: boolean }
@@ -875,6 +882,19 @@ export interface PreviewFrame {
   spokes: number;
   pixels: number;
   rgb: Uint8Array;
+}
+
+/** One decoded MINI_PREVIEW_MAGIC batch: tiny solo renders of each layer (or
+ * each field node of the active patch) plus patch scalar meter values. */
+export interface MiniBatch {
+  batch: number;
+  /** 0 = layer stack (ids are config layer indices), 1 = patch nodes (ids
+   * index the latest mini_preview_meta lists). */
+  kind: 0 | 1;
+  spokes: number;
+  pixels: number;
+  cells: { id: number; rgb: Uint8Array }[];
+  scalars: { id: number; value: number }[];
 }
 
 export const LAYER_KINDS: LayerKind[] = [

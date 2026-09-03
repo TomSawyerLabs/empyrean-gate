@@ -33,6 +33,7 @@ import {
 } from "./liveColors";
 import { loadQuickSettings, saveQuickSettings } from "./quickSettings";
 import { contenders } from "./sacnPeers";
+import { MiniRing } from "./MiniViz";
 import ShapeIcon from "./ShapeIcon";
 import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
@@ -83,6 +84,7 @@ function LayerLevelRow({
   }, [layer.opacity]);
   return (
     <div className="layer-level-row">
+      <MiniRing mini={`layer:${index}`} label={layer.name || `Layer ${index + 1}`} />
       <span className="layer-level-name">{layer.name || `Layer ${index + 1}`}</span>
       <input
         type="range"

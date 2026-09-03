@@ -22,6 +22,14 @@ use std::fmt::Write as _;
 /// Capacity of the GPU parameter slab (f32 slots). 256 nodes × ~8 params fits.
 pub const MAX_SLAB_FLOATS: usize = 2048;
 
+/// Mini-preview cell cap: bounds the preview dispatch (spokes × pixels × N
+/// invocations) and the batch bandwidth. Patches past the cap preview their
+/// first N field nodes in graph order.
+pub const MAX_PREVIEW_NODES: usize = 32;
+/// Scalar-meter cap for the same reason (each is only 8 bytes per batch, but
+/// the meta list and the UI both want a bound).
+pub const MAX_PREVIEW_SCALARS: usize = 64;
+
 const PRELUDE: &str = include_str!("../engine/shaders/patch_lib.wgsl");
 
 /// Everything the engine + evaluator need to run one compiled patch.
@@ -34,6 +42,15 @@ pub struct Program {
     pub cpu_order: Vec<usize>,
     /// (to_node, to_port) → (from_node, from_port), for CPU-side input lookup.
     pub wires: HashMap<(usize, String), (usize, String)>,
+    /// Companion module for per-node mini previews: same node functions and
+    /// parameter slab, but the entry point renders `preview_nodes[slot]`'s own
+    /// output into `OUT[slot * spokes * pixels + pix]`. Empty when the patch
+    /// has no field nodes to preview.
+    pub preview_wgsl: String,
+    /// Doc node index rendered by each preview cell slot.
+    pub preview_nodes: Vec<usize>,
+    /// CPU node scalar outputs (doc node index, port) for amplitude meters.
+    pub preview_scalars: Vec<(usize, &'static str)>,
 }
 
 /// One f32 in the parameter slab, filled by the evaluator every frame.
@@ -232,7 +249,43 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         }
         g.node_fn(&mut code, i)?;
     }
+    // Fork before the entry point: the preview module reuses the same node
+    // functions (and therefore the same parameter-slab layout) with a per-node
+    // thumbnail main instead of the composited one.
+    let mut preview_code = code.clone();
     g.main_fn(&mut code, output, auto_effects, auto_dabs)?;
+
+    let preview_nodes: Vec<usize> = gpu_order
+        .iter()
+        .copied()
+        .filter(|&i| i != output)
+        .filter(|&i| {
+            let ty = registry::lookup(&doc.nodes[i].kind).expect("validated kind");
+            matches!(
+                ty.output_shape("out"),
+                Some(Shape::FieldColor | Shape::FieldScalar)
+            )
+        })
+        .take(MAX_PREVIEW_NODES)
+        .collect();
+    let preview_wgsl = if preview_nodes.is_empty() {
+        String::new()
+    } else {
+        g.preview_main_fn(&mut preview_code, &preview_nodes)?;
+        preview_code
+    };
+    let preview_scalars: Vec<(usize, &'static str)> = cpu_order
+        .iter()
+        .copied()
+        .flat_map(|i| {
+            let ty = registry::lookup(&doc.nodes[i].kind).expect("validated kind");
+            ty.outputs
+                .iter()
+                .filter(|p| p.shape == Shape::Scalar)
+                .map(move |p| (i, p.name))
+        })
+        .take(MAX_PREVIEW_SCALARS)
+        .collect();
 
     Ok(Program {
         wgsl: code,
@@ -240,6 +293,9 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         slots,
         cpu_order,
         wires,
+        preview_wgsl,
+        preview_nodes,
+        preview_scalars,
     })
 }
 
@@ -919,6 +975,71 @@ impl Gen<'_> {
     }
 }
 
+impl Gen<'_> {
+    /// The mini-preview entry point: one thumbnail per field node. Invocation
+    /// space is `spokes * pixels * slots`; each slot renders its node's output
+    /// alone — no master, effects or dabs, so the cell shows exactly what that
+    /// node hands downstream.
+    fn preview_main_fn(&self, code: &mut String, nodes: &[usize]) -> Result<(), String> {
+        let mut cases = String::new();
+        for (slot, &i) in nodes.iter().enumerate() {
+            let ty = registry::lookup(&self.doc.nodes[i].kind).expect("validated kind");
+            let expr = match ty.output_shape("out") {
+                Some(Shape::FieldColor) => format!("n{i}_f(ctx).rgb"),
+                Some(Shape::FieldScalar) => format!("vec3f(clamp(n{i}_f(ctx), 0.0, 1.0))"),
+                other => {
+                    return Err(format!(
+                        "node kind \"{}\" ({other:?}) is not previewable",
+                        self.doc.nodes[i].kind
+                    ));
+                }
+            };
+            let _ = writeln!(cases, "        case {slot}u: {{ acc = {expr}; }}");
+        }
+        write!(
+            code,
+            "\n@compute @workgroup_size(256)\n\
+             fn main(@builtin(global_invocation_id) gid: vec3u) {{\n\
+             \x20   let idx = gid.x;\n\
+             \x20   let total = G.spokes * G.pixels;\n\
+             \x20   if idx >= total * {slots}u {{\n\
+             \x20       return;\n\
+             \x20   }}\n\
+             \x20   let slot = idx / total;\n\
+             \x20   let pix = idx % total;\n\
+             \x20   let spoke = pix / G.pixels;\n\
+             \x20   let i = pix % G.pixels;\n\
+             \x20   let theta = f32(spoke) / f32(G.spokes) * TAU - G.rotation;\n\
+             \x20   let r01 = f32(i) / f32(max(G.pixels - 1u, 1u));\n\
+             \x20   let rn = mix(1.0, G.inner_over_outer, r01);\n\
+             \x20   var ctx: Ctx;\n\
+             \x20   ctx.spoke = u32(fract(theta / TAU + 1.0) * f32(G.spokes)) % G.spokes;\n\
+             \x20   ctx.i = i;\n\
+             \x20   ctx.theta = theta;\n\
+             \x20   ctx.r01 = r01;\n\
+             \x20   ctx.rn = rn;\n\
+             \x20   ctx.pos = rn * vec2f(cos(theta), sin(theta));\n\
+             \x20   var acc = vec3f(0.0);\n\
+             \x20   switch slot {{\n\
+             {cases}\
+             \x20       default: {{}}\n\
+             \x20   }}\n\
+             \x20   let knee = vec3f(0.8);\n\
+             \x20   let over = max(acc - knee, vec3f(0.0));\n\
+             \x20   acc = min(acc, knee) + over / (1.0 + over * 2.5);\n\
+             \x20   acc = clamp(acc, vec3f(0.0), vec3f(1.0));\n\
+             \x20   let r = u32(acc.r * 255.0 + 0.5);\n\
+             \x20   let g = u32(acc.g * 255.0 + 0.5);\n\
+             \x20   let b = u32(acc.b * 255.0 + 0.5);\n\
+             \x20   OUT[idx] = r | (g << 8u) | (b << 16u);\n\
+             }}\n",
+            slots = nodes.len(),
+        )
+        .unwrap();
+        Ok(())
+    }
+}
+
 /// Interns short, registry-defined port names so `slot_of` can key on
 /// `&'static str`. Only ever called with registry port names (a small fixed
 /// set), so the "leak" is bounded.
@@ -1060,6 +1181,38 @@ mod tests {
         validator
             .validate(&module)
             .unwrap_or_else(|e| panic!("generated WGSL failed validation: {e:?}"));
+    }
+
+    #[test]
+    fn preview_module_validates_and_lists_field_nodes() {
+        let doc = valid_demo();
+        let prog = compile(&doc).expect("compiles");
+        // Every field node (and only those) gets a preview cell, in graph order.
+        assert!(!prog.preview_nodes.is_empty());
+        for &i in &prog.preview_nodes {
+            assert!(
+                is_gpu_kind(&doc.nodes[i].kind) && doc.nodes[i].kind != "output",
+                "cell for non-field node {}",
+                doc.nodes[i].kind
+            );
+        }
+        // CPU scalar outputs become meters — the audio node's bands among them.
+        assert!(
+            prog.preview_scalars
+                .iter()
+                .any(|(node, port)| doc.nodes[*node].kind == "audio" && *port == "bass"),
+            "audio bass meter missing: {:?}",
+            prog.preview_scalars
+        );
+        // The companion module is real WGSL with its own main.
+        let module = naga::front::wgsl::parse_str(&prog.preview_wgsl)
+            .unwrap_or_else(|e| panic!("preview WGSL failed to parse: {e}\n{}", prog.preview_wgsl));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .expect("preview WGSL validates");
     }
 
     #[test]

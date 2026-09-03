@@ -274,6 +274,35 @@ pub struct PreviewFrame {
     pub ready_rgb: Vec<u8>,
 }
 
+/// Which half of the show a mini-preview batch describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MiniKind {
+    /// One cell per rendered layer of the Program stack, keyed by config index.
+    Layers,
+    /// One cell per field node of the active patch, keyed by slot order.
+    Patch,
+}
+
+/// One batch of per-layer / per-patch-node solo renders from the mini bus.
+/// Cells are tiny ring frames (spokes × pixels RGB); scalars are the CPU
+/// node outputs of the active patch, for amplitude meters.
+pub struct MiniBatch {
+    pub batch: u64,
+    pub kind: MiniKind,
+    pub spokes: u32,
+    pub pixels: u32,
+    /// (id, rgb). Layers: id = config layer index. Patch: index into `patch_nodes`.
+    pub cells: Vec<(u16, Vec<u8>)>,
+    /// (index into `patch_scalars`, value). Empty for `Layers` batches.
+    pub scalars: Vec<(u16, f32)>,
+    /// Bumped whenever the meta below changes; client tasks re-announce on change.
+    pub meta_epoch: u64,
+    /// Patch node ids in cell-slot order (empty when no patch is active).
+    pub patch_nodes: Arc<Vec<String>>,
+    /// (node id, output port) in scalar-slot order.
+    pub patch_scalars: Arc<Vec<(String, String)>>,
+}
+
 /// Rations concurrent preview streams (the bandwidth-heavy part of a client) to
 /// `max` slots; everyone else waits FIFO. Control traffic is never gated.
 #[derive(Default)]
@@ -470,6 +499,11 @@ pub struct SharedState {
     pub events: broadcast::Sender<ServerMsg>,
     /// Full-resolution frames; each client task decimates/throttles for itself.
     pub preview: broadcast::Sender<Arc<PreviewFrame>>,
+    /// Per-layer / per-patch-node mini previews (see `MiniBatch`). Rendered only
+    /// while `mini_watchers` is non-zero — thumbnails cost GPU + bandwidth.
+    pub minis: broadcast::Sender<Arc<MiniBatch>>,
+    /// Connections currently subscribed to mini previews.
+    pub mini_watchers: AtomicU64,
     pub video: Mutex<VideoInput>,
     /// A second launch asked us to come forward (POST /focus) instead of taking
     /// the port from us; the Tauri layer polls this and focuses the window.
@@ -501,6 +535,7 @@ impl SharedState {
     pub fn new(config: AppConfig) -> Arc<Self> {
         let (events, _) = broadcast::channel(256);
         let (preview, _) = broadcast::channel(4);
+        let (minis, _) = broadcast::channel(4);
         Arc::new(Self {
             config: RwLock::new(config),
             config_save: Mutex::new(()),
@@ -550,6 +585,8 @@ impl SharedState {
             conn_seq: AtomicU64::new(1),
             events,
             preview,
+            minis,
+            mini_watchers: AtomicU64::new(0),
             video: Mutex::new(VideoInput::default()),
             focus_requested: AtomicBool::new(false),
             took_over_older: AtomicBool::new(false),
