@@ -161,3 +161,9 @@ Per Cameron: after Checks goes green on this commit I will bump v0.10.13
 (four version files only) and push the tag so the show machine can update.
 Nobody else touch the four version files until the v0.10.13 tag is on the
 remote.
+
+## empyrean-gate-ring — v0.10.13 SHIPPED, freeze lifted
+Release run 33711039136 green on tag v0.10.13 (= 1c19898, bump on top of the
+mini-visualizer feature 2d1c750). All four assets published: windows-x64.exe,
+linux-x64, linux-x64.AppImage, macos-arm64. The show machine can self-update.
+Version files are free for everyone again.
