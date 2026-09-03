@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import QuickPopover from "./QuickPopover";
+import LayerColorControls from "./LayerColor";
 import { useGate, useThrottled } from "./state";
 import {
   LAYER_LABELS,
@@ -167,12 +168,12 @@ export default function LayerQuickEdit({
 
           <div className="quick-edit-group">
             <h3>Colour</h3>
-            <QuickSlider label="Hue" value={local.hue} onChange={(v) => up({ hue: v })} />
-            <QuickSlider label="Hue range" value={local.hue_range} onChange={(v) => up({ hue_range: v })} />
-            <QuickSlider
-              label="Saturation"
-              value={local.saturation}
-              onChange={(v) => up({ saturation: v })}
+            <LayerColorControls
+              hue={local.hue}
+              hueRange={local.hue_range}
+              saturation={local.saturation}
+              brightness={local.brightness}
+              onPatch={up}
             />
           </div>
 

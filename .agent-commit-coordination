@@ -129,3 +129,13 @@ Sliders for the Settings numeric fields (Output + Geometry panels):
 - src/styles.css — append-only at EOF (.field-row.with-slider rules)
 Will stage via git apply --cached to keep the admin hunks out of my commit.
 Leaving "Max live viewers" input alone: it sits inside the admin edit zone.
+
+## empyrean-gate (Fable session) — 2026-09-02, colour visibility for hue knobs
+Hue/hue-range/saturation sliders get colour-truthful tracks + swatches and an
+inline ColorWheel picker, shared across the three layer editors. Claiming:
+- src/LayerColor.tsx (new shared component)
+- src/Settings.tsx (LayerEditor colour rows only, ~line 1004)
+- src/LayerQuickEdit.tsx (Colour group)
+- src/ReadyLayerEditor.tsx (Colour section)
+- src/styles.css (append-only at EOF)
+Tree is clean right now; will fetch+rebase before push.

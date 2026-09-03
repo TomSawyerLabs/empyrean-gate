@@ -6214,3 +6214,53 @@ button:disabled {
   grid-area: input;
   width: 70px;
 }
+
+/* Layer colour rows (LayerColor.tsx): the hue track is painted by the shared
+   .hue-slider rule; these are the pieces around it. */
+
+/* Dynamic-gradient track (saturation: white → the layer's hue, inline style). */
+input[type="range"].gradient-slider {
+  height: 10px;
+  border-radius: 5px;
+}
+
+/* The current-colour swatch doubles as the wheel toggle — strip the button
+   chrome down to the swatch the .hue-swatch rule already draws. */
+button.hue-swatch-button {
+  padding: 0;
+  background-image: none;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  flex-shrink: 0;
+}
+
+button.hue-swatch-button:hover,
+button.hue-swatch-button[aria-expanded="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* The hues a layer actually sweeps: base hue at the left edge, base + range at
+   the right (gate.wgsl adds x * hue_range, x in 0..1 — it never sweeps down). */
+.hue-range-swatch {
+  flex-shrink: 0;
+  width: 34px;
+  height: 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+/* The inline wheel sits between the slider rows; in Settings' multi-column
+   layer grid it takes a full row instead of squeezing into one cell. */
+.layer-color-wheel {
+  max-width: 300px;
+}
+
+.layer-color-wheel .color-wheel {
+  margin: 4px 0 8px;
+}
+
+.layer-sliders .layer-color-wheel {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: 100%;
+}

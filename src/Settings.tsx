@@ -27,6 +27,7 @@ import {
 } from "./types";
 import { hsvToHex, liveColor } from "./liveColors";
 import { BRC_EVENT_CATEGORIES } from "./ambientScenes";
+import LayerColorControls from "./LayerColor";
 
 export default function Settings() {
   const { config } = useGate();
@@ -1001,9 +1002,13 @@ function LayerEditor({ layer, index }: { layer: LayerCfg; index: number }) {
         <Slider label="Speed" value={local.speed} min={-4} max={4} onChange={(v) => up({ speed: v })} />
         <Slider label="Scale" value={local.scale} min={0.05} max={5} onChange={(v) => up({ scale: v })} />
         <Slider label="Audio" value={local.audio_amount} onChange={(v) => up({ audio_amount: v })} />
-        <Slider label="Hue" value={local.hue} onChange={(v) => up({ hue: v })} />
-        <Slider label="Hue range" value={local.hue_range} onChange={(v) => up({ hue_range: v })} />
-        <Slider label="Saturation" value={local.saturation} onChange={(v) => up({ saturation: v })} />
+        <LayerColorControls
+          hue={local.hue}
+          hueRange={local.hue_range}
+          saturation={local.saturation}
+          brightness={local.brightness}
+          onPatch={up}
+        />
         <Slider label="Brightness" value={local.brightness} max={2} onChange={(v) => up({ brightness: v })} />
         <Slider label="Tilt (IMU)" value={local.tilt_amount} onChange={(v) => up({ tilt_amount: v })} />
         <Slider label="Walk" value={local.walk_amount} onChange={(v) => up({ walk_amount: v })} />

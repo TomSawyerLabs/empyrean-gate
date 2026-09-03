@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import LayerColorControls from "./LayerColor";
 import { useThrottled } from "./state";
 import {
   BLEND_MODES,
@@ -106,9 +107,13 @@ export default function ReadyLayerEditor({
           <ReadySlider label="Walk" value={local.walk_amount} onChange={(value) => update({ walk_amount: value })} />
         </section>
         <section><h4>Colour</h4>
-          <ReadySlider label="Hue" value={local.hue} onChange={(value) => update({ hue: value })} />
-          <ReadySlider label="Hue range" value={local.hue_range} onChange={(value) => update({ hue_range: value })} />
-          <ReadySlider label="Saturation" value={local.saturation} onChange={(value) => update({ saturation: value })} />
+          <LayerColorControls
+            hue={local.hue}
+            hueRange={local.hue_range}
+            saturation={local.saturation}
+            brightness={local.brightness}
+            onPatch={update}
+          />
         </section>
         <section><h4>Input</h4>
           <ReadySlider label="Audio" value={local.audio_amount} onChange={(value) => update({ audio_amount: value })} />
