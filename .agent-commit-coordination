@@ -109,3 +109,12 @@ tests/fixtures/default-config.json, this file. Local: typecheck, layout suite
 (80 passed), behavior suite (64 passed, chromium+webkit). Rust rides on the
 Checks run — new server tests + regenerating fixtures if I got the hand-edit
 wrong. No release from this session; per Cameron, push only.
+
+## empyrean-gate (new session, Fable) — 2026-09-02
+Sliders for the Settings numeric fields (Output + Geometry panels):
+- src/Settings.tsx — NumberField becomes slider+number hybrid + ranges at the
+  13 call sites (lines ~874 and ~1396-1545 only; NOT touching the uncommitted
+  admin-role work at ~749-830, whoever owns it — it stays unstaged)
+- src/styles.css — append-only at EOF (.field-row.with-slider rules)
+Will stage via git apply --cached to keep the admin hunks out of my commit.
+Leaving "Max live viewers" input alone: it sits inside the admin edit zone.

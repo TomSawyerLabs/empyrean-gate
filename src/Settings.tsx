@@ -876,26 +876,48 @@ function NumberField({
   value,
   onCommit,
   step = 1,
+  min,
+  max,
 }: {
   label: string;
   value: number;
   onCommit: (v: number) => void;
   step?: number;
+  min?: number;
+  max?: number;
 }) {
   const [text, setText] = useState(String(value));
   useEffect(() => setText(String(value)), [value]);
+  const commit = () => {
+    const v = Number(text);
+    if (!Number.isNaN(v) && v !== value) onCommit(v);
+  };
+  const hasRange = min !== undefined && max !== undefined;
+  const slider = Number(text);
   return (
-    <label className="field-row">
+    <label className={hasRange ? "field-row with-slider" : "field-row"}>
       <span>{label}</span>
+      {hasRange && (
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={Number.isNaN(slider) ? value : slider}
+          onChange={(e) => setText(e.target.value)}
+          onPointerUp={commit}
+          onKeyUp={commit}
+          onBlur={commit}
+        />
+      )}
+      {/* No min/max here on purpose: the slider covers the common range, typing
+          stays unrestricted for the rig that exceeds it. */}
       <input
         type="number"
         value={text}
         step={step}
         onChange={(e) => setText(e.target.value)}
-        onBlur={() => {
-          const v = Number(text);
-          if (!Number.isNaN(v) && v !== value) onCommit(v);
-        }}
+        onBlur={commit}
       />
     </label>
   );
@@ -1396,40 +1418,60 @@ function OutputPanel({ config }: { config: AppConfig }) {
         <NumberField
           label={out.sync_to_render ? "fps cap" : "Fixed fps"}
           value={out.fps}
+          min={1}
+          max={120}
           onCommit={(v) => commit({ fps: v })}
         />
         <NumberField
           label="Sync universe (0 = off)"
           value={out.sync_universe}
+          min={0}
+          max={1024}
           onCommit={(v) => commit({ sync_universe: v })}
         />
         <NumberField
           label="Start universe"
           value={out.start_universe}
+          min={1}
+          max={1024}
           onCommit={(v) => commit({ start_universe: v })}
         />
         <NumberField
           label="Pixels / universe"
           value={out.pixels_per_universe}
+          min={1}
+          max={170}
           onCommit={(v) => commit({ pixels_per_universe: v })}
         />
         <NumberField
           label="Universes / spoke (0 = packed)"
           value={out.universe_stride}
+          min={0}
+          max={16}
           onCommit={(v) => commit({ universe_stride: v })}
         />
         <NumberField
           label="Strings / controller"
           value={out.strings_per_controller}
+          min={1}
+          max={16}
           onCommit={(v) => commit({ strings_per_controller: v })}
         />
         <NumberField
           label="LED gamma"
           value={out.led_gamma}
           step={0.1}
+          min={1}
+          max={4}
           onCommit={(v) => commit({ led_gamma: v })}
         />
-        <NumberField label="Priority" value={out.priority} onCommit={(v) => commit({ priority: v })} />
+        <NumberField
+          label="Priority"
+          value={out.priority}
+          min={0}
+          max={200}
+          onCommit={(v) => commit({ priority: v })}
+        />
       </div>
       <p className="hint">
         Universe map: spoke 0 = {addr(out.start_universe, 1)} → {spokeEnd(0)}, spoke 1 starts
@@ -1520,27 +1562,41 @@ function GeometryPanel({ config }: { config: AppConfig }) {
     <section className="panel">
       <h2>Geometry</h2>
       <div className="field-grid">
-        <NumberField label="Spokes" value={g.spokes} onCommit={(v) => commit({ spokes: v })} />
+        <NumberField
+          label="Spokes"
+          value={g.spokes}
+          min={1}
+          max={128}
+          onCommit={(v) => commit({ spokes: v })}
+        />
         <NumberField
           label="Pixels / spoke"
           value={g.pixels_per_spoke}
+          min={1}
+          max={512}
           onCommit={(v) => commit({ pixels_per_spoke: v })}
         />
         <NumberField
           label="Outer radius (ft)"
           value={g.outer_radius_ft}
           step={0.5}
+          min={1}
+          max={60}
           onCommit={(v) => commit({ outer_radius_ft: v })}
         />
         <NumberField
           label="Inner radius (ft)"
           value={g.inner_radius_ft}
           step={0.5}
+          min={0}
+          max={60}
           onCommit={(v) => commit({ inner_radius_ft: v })}
         />
         <NumberField
           label="LEDs / meter"
           value={g.leds_per_meter}
+          min={1}
+          max={144}
           onCommit={(v) => commit({ leds_per_meter: v })}
         />
       </div>

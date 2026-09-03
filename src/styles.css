@@ -6171,3 +6171,31 @@ button:disabled {
 .dj-track-phrase.kind-up {
   border-color: color-mix(in srgb, #ffb84f 70%, transparent);
 }
+
+/* Settings NumberField with a range: label across the top, slider taking the
+   width, the number box staying for precision (the slider's max is the common
+   range, not the legal one — universes go far beyond what a thumb can land on). */
+.field-row.with-slider {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label label"
+    "slider input";
+  gap: 4px 8px;
+}
+
+.field-row.with-slider > span {
+  grid-area: label;
+}
+
+.field-row.with-slider input[type="range"] {
+  grid-area: slider;
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.field-row.with-slider input[type="number"] {
+  grid-area: input;
+  width: 70px;
+}
