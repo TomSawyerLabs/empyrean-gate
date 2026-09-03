@@ -139,3 +139,12 @@ inline ColorWheel picker, shared across the three layer editors. Claiming:
 - src/ReadyLayerEditor.tsx (Colour section)
 - src/styles.css (append-only at EOF)
 Tree is clean right now; will fetch+rebase before push.
+
+## empyrean-gate-91 — displayed BPM no longer scales with beat time
+Cameron: the BPM readout must show the music tempo; Half/Double is a visuals
+modifier. One commit, staging only: src-tauri/src/engine/mod.rs (status
+RhythmStatus/AudioSourceStatus branches report true tempo; GPU uniforms
+untouched), src/Live.tsx (drop the display-side multiplier), this file.
+Side effect: video tempo-follow now tracks true LINK tempo, unaffected by
+beat time. Local: typecheck, layout 80, live-controls/video-playback/dj-scenes
+19 green. Rust rides on Checks. Not touching the hue-wheel/slider work.

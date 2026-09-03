@@ -248,13 +248,12 @@ export default function Live() {
     return () => cancelAnimationFrame(raf);
   }, [beatAt]);
 
-  const multiplier =
-    config?.render.beat_time === "half" ? 0.5 : config?.render.beat_time === "double" ? 2 : 1;
   const activeSource = status?.audio.find((a) => a.active);
-  const effectiveAutoBpm = status?.rhythm?.bpm ?? activeSource?.bpm ?? 0;
-  const inferredBpm = effectiveAutoBpm / multiplier;
+  // Status BPM is the true musical tempo. Half/Double changes how visuals
+  // divide the beat (and the pulse dot shows it); the number never moves.
+  const autoBpm = status?.rhythm?.bpm ?? activeSource?.bpm ?? 0;
   const manualBpm = config?.render.manual_bpm ?? null;
-  const bpm = manualBpm !== null ? manualBpm * multiplier : effectiveAutoBpm;
+  const bpm = manualBpm ?? autoBpm;
   const externalClockTrusted = Boolean(
     status?.rhythm?.active &&
     !status.rhythm?.using_fallback &&
@@ -442,7 +441,7 @@ export default function Live() {
         <button
           className={manualBpm !== null ? "active" : ""}
           onClick={() =>
-            setTempo({ manual_bpm: Math.round(Math.min(240, Math.max(10, inferredBpm || 120))) })
+            setTempo({ manual_bpm: Math.round(Math.min(240, Math.max(10, autoBpm || 120))) })
           }
         >
           Manual

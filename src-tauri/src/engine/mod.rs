@@ -3378,12 +3378,16 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         })
                         .collect()
                 };
+                // Status BPM fields report the TRUE musical tempo everywhere.
+                // The Half/Double beat-time modifier changes how visuals divide
+                // the beat — it lives in the phase (see `effective_beat_phase`
+                // on the GPU uniforms above), never in the reported number.
                 st.rhythm = if let Some(bpm) = cfg.render.manual_bpm {
                     crate::protocol::RhythmStatus {
                         active: true,
                         source: "manual".into(),
                         detail: "manual override".into(),
-                        bpm: bpm * cfg.render.beat_time.multiplier(),
+                        bpm,
                         beat_phase: audio[0].beat_phase,
                         running: true,
                         ..Default::default()
@@ -3401,7 +3405,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         } else {
                             cfg.rhythm.midi_port.clone().unwrap_or_default()
                         },
-                        bpm: external_clock.bpm * cfg.render.beat_time.multiplier(),
+                        bpm: external_clock.bpm,
                         beat_phase: audio[0].beat_phase,
                         running: external_clock.running,
                         age_ms: external_clock.age_ms,
@@ -3427,7 +3431,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                                 "MIDI"
                             }
                         ),
-                        bpm: audio[0].bpm,
+                        bpm: fallback.bpm,
                         beat_phase: audio[0].beat_phase,
                         running: fallback.active,
                         age_ms: external_clock.age_ms,
@@ -3474,10 +3478,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         .map(|s| s.id.as_str())
                         .unwrap_or("none");
                     crate::protocol::RhythmStatus {
-                        active: audio_inputs[display].active && audio[display].bpm > 0.0,
+                        active: audio_inputs[display].active && audio_inputs[display].bpm > 0.0,
                         source: "layer_audio".into(),
                         detail: format!("per-layer audio; showing {id}"),
-                        bpm: audio[display].bpm,
+                        bpm: audio_inputs[display].bpm,
                         beat_phase: audio[display].beat_phase,
                         running: audio_inputs[display].active,
                         ..Default::default()
@@ -3501,7 +3505,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                             bass: a.bass,
                             mid: a.mid,
                             treble: a.treble,
-                            bpm: audio[i].bpm,
+                            // The uniform's bpm runs at the beat-time display
+                            // rate; undo the exact 0.5/1/2 factor so the panel
+                            // shows the tempo of the music.
+                            bpm: audio[i].bpm / cfg.render.beat_time.multiplier(),
                             bpm_confidence: audio[i].bpm_conf,
                             beat_phase: audio[i].beat_phase,
                         }
