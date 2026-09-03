@@ -110,6 +110,17 @@ tests/fixtures/default-config.json, this file. Local: typecheck, layout suite
 Checks run — new server tests + regenerating fixtures if I got the hand-edit
 wrong. No release from this session; per Cameron, push only.
 
+## empyrean-gate-ring (this session) — 2026-09-02
+Pushing now: 47a2877 "Line the ring's two meters up with each other"
+(src/Live.tsx + src/styles.css ring-center meter grid — an older local commit,
+rebased onto e1840b6; distinct from -28's Control sparkline column 45d72f5).
+THEN starting a larger feature: per-layer + per-patch-node mini visualizers
+(new render bus in src-tauri/src/engine/mod.rs, new binary message in
+protocol.rs/server.rs/state.rs, patch preview codegen in src-tauri/src/patch/,
+frontend src/miniPreview.ts (new) + MiniViz component + rows in Settings/Live/
+Control/Ready/Patch + styles.css). Will commit in logical steps and append
+here again before each push. Not touching the four version files.
+
 ## empyrean-gate (new session, Fable) — 2026-09-02
 Sliders for the Settings numeric fields (Output + Geometry panels):
 - src/Settings.tsx — NumberField becomes slider+number hybrid + ranges at the
