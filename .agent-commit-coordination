@@ -175,3 +175,8 @@ resolves it to the current address (old bare-IP values still match). One
 commit: src/App.tsx, tests/connect-interface.spec.ts (new), package.json
 (test:behavior list only — NOT a version change), this file. Local: tsc,
 behavior 68 passed, layout 80 passed.
+
+## empyrean-gate-ring — v0.10.14 SHIPPED
+Release run 33712678617 green on tag v0.10.14 (= 5849d85, bump on top of the
+connect-QR interface-memory fix e51c72d). All four assets published; version
+files free again. Nothing further planned from this session.
