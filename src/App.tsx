@@ -289,12 +289,19 @@ const CONNECT_INTERFACE_KEY = "empyrean-connect-interface";
 function ConnectModal({ onClose }: { onClose: () => void }) {
   const { client, config, status } = useGate();
   const interfaces = status?.interfaces ?? [];
-  const addresses = interfaces.map((i) => i.split("—").pop()?.trim() ?? i);
+  const nameOf = (i: string) => i.split("—")[0]?.trim() ?? i;
+  const addrOf = (i: string) => i.split("—").pop()?.trim() ?? i;
+  const addresses = interfaces.map(addrOf);
   // The picked interface survives restarts — a show machine has several NICs
-  // and the right one doesn't change between nights. A remembered address that
-  // no longer exists (USB adapter unplugged) falls back to the first.
-  const [ip, setIp] = useState<string>(() => localStorage.getItem(CONNECT_INTERFACE_KEY) ?? "");
-  const chosen = (ip && addresses.includes(ip) ? ip : addresses[0]) ?? "";
+  // and the right one doesn't change between nights. What is remembered is the
+  // interface NAME, not its address: Ethernet addresses come from DHCP and a
+  // remembered bare IP stopped matching at the next venue, so the picker fell
+  // back to the first interface every time. A value stored by an older build
+  // IS a bare IP; match it by address so it keeps working until re-picked.
+  const [pick, setPick] = useState<string>(() => localStorage.getItem(CONNECT_INTERFACE_KEY) ?? "");
+  const remembered =
+    interfaces.find((i) => nameOf(i) === pick) ?? interfaces.find((i) => addrOf(i) === pick);
+  const chosen = (remembered ? addrOf(remembered) : addresses[0]) ?? "";
   // The admin token is redacted from configs sent to remote clients, so the
   // Admin option only ever appears on the Gate machine itself.
   const adminToken = config?.server.admin_token ?? "";
@@ -311,8 +318,10 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
           <select
             value={chosen}
             onChange={(e) => {
-              setIp(e.target.value);
-              localStorage.setItem(CONNECT_INTERFACE_KEY, e.target.value);
+              const match = interfaces.find((i) => addrOf(i) === e.target.value);
+              const value = match ? nameOf(match) : e.target.value;
+              setPick(value);
+              localStorage.setItem(CONNECT_INTERFACE_KEY, value);
             }}
           >
             {interfaces.map((i) => {

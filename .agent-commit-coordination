@@ -167,3 +167,11 @@ Release run 33711039136 green on tag v0.10.13 (= 1c19898, bump on top of the
 mini-visualizer feature 2d1c750). All four assets published: windows-x64.exe,
 linux-x64, linux-x64.AppImage, macos-arm64. The show machine can self-update.
 Version files are free for everyone again.
+
+## empyrean-gate-ring — connect-QR interface memory fix
+The picker remembered the bare IP; DHCP moved it and the pick fell back to the
+first interface (Tailscale) every open. Now remembers the interface NAME and
+resolves it to the current address (old bare-IP values still match). One
+commit: src/App.tsx, tests/connect-interface.spec.ts (new), package.json
+(test:behavior list only — NOT a version change), this file. Local: tsc,
+behavior 68 passed, layout 80 passed.
