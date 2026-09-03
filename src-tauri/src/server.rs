@@ -177,7 +177,8 @@ fn client_authorized(
         return true;
     }
     cfg.clients.iter().any(|c| c.id == client_id)
-        || (!token.is_empty() && token == cfg.server.join_token)
+        || (!token.is_empty()
+            && (token == cfg.server.join_token || token == cfg.server.admin_token))
 }
 
 fn media_authorized(state: &SharedState, addr: SocketAddr, req: &ResolveRequest) -> bool {
@@ -316,7 +317,9 @@ fn diagnostics_authorized(
     if cfg.clients.iter().any(|client| client.id == client_id && client.revoked) {
         return false;
     }
-    addr.ip().is_loopback() || (!token.is_empty() && token == cfg.server.join_token)
+    addr.ip().is_loopback()
+        || (!token.is_empty()
+            && (token == cfg.server.join_token || token == cfg.server.admin_token))
 }
 
 async fn recent_diagnostics(
@@ -327,8 +330,11 @@ async fn recent_diagnostics(
     if !diagnostics_authorized(&ctx.state, addr, &req.client_id, &req.token) {
         return (StatusCode::FORBIDDEN, "diagnostics access denied").into_response();
     }
-    let join_token = ctx.state.config.read().server.join_token.clone();
-    match crate::diagnostics::recent_text(&[&join_token, &req.token]) {
+    let (join_token, admin_token) = {
+        let cfg = ctx.state.config.read();
+        (cfg.server.join_token.clone(), cfg.server.admin_token.clone())
+    };
+    match crate::diagnostics::recent_text(&[&join_token, &admin_token, &req.token]) {
         Ok(text) => Response::builder()
             .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
             .header(
@@ -766,6 +772,8 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
     state.status.lock().clients += 1;
     let mut client_id = String::new();
     let mut authenticated = false;
+    // This connection's last-announced access level; `Some` once hello landed.
+    let mut last_admin: Option<bool> = None;
     let mut preview: Option<PreviewSub> = None;
     let mut announced_meta = (0u32, 0u32, 0u32);
     let mut queued_notified: Option<u32> = None;
@@ -799,11 +807,16 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                                 }
                                 if is_hello {
                                     authenticated = true;
-                                    let hello = ServerMsg::State {
+                                    let hello = redact_for_remote(ServerMsg::State {
                                         config: Box::new(state.config.read().clone()),
                                         status: state.status.lock().clone(),
-                                    };
+                                    }, is_local);
                                     if send_json(&mut tx, &hello).await.is_err() {
+                                        break;
+                                    }
+                                    let admin = client_is_admin(&state, addr, &client_id);
+                                    last_admin = Some(admin);
+                                    if send_json(&mut tx, &ServerMsg::Role { admin }).await.is_err() {
                                         break;
                                     }
                                 }
@@ -836,6 +849,14 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                     }).await;
                     break;
                 }
+                // Live role changes (Clients-panel grant/withdraw, admin QR
+                // scanned on another connection of the same device) reach the
+                // UI on the same tick cadence as revocation.
+                let admin = client_is_admin(&state, addr, &client_id);
+                if last_admin.is_some_and(|prev| prev != admin) {
+                    if send_json(&mut tx, &ServerMsg::Role { admin }).await.is_err() { break; }
+                }
+                if last_admin.is_some() { last_admin = Some(admin); }
                 // Queue position updates for clients waiting on a preview slot.
                 if preview.is_some() && !is_local {
                     let pos = state.preview_gate.lock().position(conn_id);
@@ -846,7 +867,10 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                     }
                 }
                 match ev {
-                    Ok(ev) => { if send_json(&mut tx, &ev).await.is_err() { break; } }
+                    Ok(ev) => {
+                        let ev = redact_for_remote(ev, is_local);
+                        if send_json(&mut tx, &ev).await.is_err() { break; }
+                    }
                     Err(RecvError::Lagged(_)) => continue,
                     Err(RecvError::Closed) => break,
                 }
@@ -930,6 +954,59 @@ fn deactivate_video_audio(ctx: &Ctx) {
     }
 }
 
+/// Whether this connection may drive the show (config, scenes, layers, masters,
+/// test mode, updates). Loopback always may; a remote client needs the admin
+/// flag on its record — earned by joining with the admin token, or granted from
+/// the Clients panel.
+fn client_is_admin(state: &SharedState, addr: SocketAddr, client_id: &str) -> bool {
+    if addr.ip().is_loopback() {
+        return true;
+    }
+    !client_id.is_empty()
+        && state
+            .config
+            .read()
+            .clients
+            .iter()
+            .any(|c| c.id == client_id && c.admin)
+}
+
+/// The show-control half of the protocol. Everything not listed here is a play
+/// surface (drawing, effects, game input, patch params, previews, telemetry)
+/// and stays open to every authenticated client. Messages with their own
+/// stricter loopback-only gates (client administration, patch editing, game
+/// mode) are not listed either — their handlers refuse remotes outright.
+fn requires_admin(msg: &ClientMsg) -> bool {
+    use ClientMsg as M;
+    match msg {
+        M::SetConfig { .. }
+        | M::SetMaster { .. }
+        | M::SetMasterHue { .. }
+        | M::ActivateStack { .. }
+        | M::PrepareStack { .. }
+        | M::TakeReady { .. }
+        | M::PerformanceRecordStart { .. }
+        | M::PerformanceRecordStop { .. }
+        | M::PerformancePlay { .. }
+        | M::SetSacnEnabled { .. }
+        | M::AddLayer { .. }
+        | M::UpdateLayer { .. }
+        | M::RemoveLayer { .. }
+        | M::MoveLayer { .. }
+        | M::StartVideo { .. }
+        | M::SetTestMode { .. }
+        | M::SetTestConfig { .. }
+        | M::DiscoverControllers
+        | M::AuthorizeFirewall
+        | M::InstallUpdate
+        | M::SetLaunchAtStartup { .. } => true,
+        // Stopping your own video is cleanup; force-stopping someone else's is
+        // an operator action.
+        M::StopVideo { force } => *force,
+        _ => false,
+    }
+}
+
 fn is_revoked(state: &SharedState, client_id: &str) -> bool {
     state
         .config
@@ -968,6 +1045,18 @@ fn encode_preview_rgb(frame: &PreviewFrame, rgb: &[u8], decimate: u32, magic: u3
         }
     }
     bytes
+}
+
+/// The admin token travels only to loopback clients. Every state snapshot a
+/// remote connection receives — the hello greeting and each broadcast — passes
+/// through here, so a guest can never lift the admin QR out of its own config.
+fn redact_for_remote(mut ev: ServerMsg, is_local: bool) -> ServerMsg {
+    if !is_local {
+        if let ServerMsg::State { config, .. } = &mut ev {
+            config.server.admin_token.clear();
+        }
+    }
+    ev
 }
 
 type WsSink = futures_util::stream::SplitSink<WebSocket, Message>;
@@ -1259,6 +1348,19 @@ async fn handle_msg(
     tx: &mut WsSink,
 ) -> Result<(), ()> {
     let state = &ctx.state;
+    // Guests keep their play surfaces; show control needs an admin connection.
+    // Checked before the capture hooks below so a refused action never lands in
+    // the timeline or in a performance recording.
+    if requires_admin(&msg) && !client_is_admin(state, addr, client_id) {
+        let _ = send_json(
+            tx,
+            &ServerMsg::Error {
+                message: "This control needs an admin connection — scan the Admin QR from the Gate machine.".into(),
+            },
+        )
+        .await;
+        return Ok(());
+    }
     // Feedback capture: every operator action that can change what the array
     // does, logged in one place so new message kinds can't quietly go unrecorded.
     record_timeline(state, &msg, client_id);
@@ -1278,13 +1380,16 @@ async fn handle_msg(
                 return deny(tx, "Invalid client identity.").await;
             }
             let is_local = addr.ip().is_loopback();
-            let (known, revoked, token_ok, client_capacity_reached) = {
+            let (known, revoked, token_ok, admin_join, client_capacity_reached) = {
                 let cfg = state.config.read();
                 let rec = cfg.clients.iter().find(|c| c.id == id);
+                let admin_join =
+                    !cfg.server.admin_token.is_empty() && token == cfg.server.admin_token;
                 (
                     rec.is_some(),
                     rec.is_some_and(|r| r.revoked),
-                    token == cfg.server.join_token,
+                    token == cfg.server.join_token || admin_join,
+                    admin_join,
                     cfg.clients.len() >= crate::config::MAX_CLIENT_RECORDS,
                 )
             };
@@ -1318,7 +1423,17 @@ async fn handle_msg(
                             id: id.clone(),
                             name: display_name,
                             revoked: false,
+                            admin: admin_join || is_local,
                         });
+                    });
+                } else if admin_join {
+                    // A known guest re-scanning the admin QR is a grant, not a
+                    // repeat join. (Joining with the guest token never demotes —
+                    // that stays an explicit Clients-panel action.)
+                    state.update_config(|c| {
+                        if let Some(r) = c.clients.iter_mut().find(|r| r.id == id) {
+                            r.admin = true;
+                        }
                     });
                 }
             }
@@ -1382,6 +1497,24 @@ async fn handle_msg(
                 c.server.join_token = crate::config::generate_token();
             });
         }
+        ClientMsg::RotateAdminToken => {
+            if !require_local_operator(tx, addr, "Admin-token rotation").await {
+                return Ok(());
+            }
+            state.update_config(|c| {
+                c.server.admin_token = crate::config::generate_token();
+            });
+        }
+        ClientMsg::SetClientAdmin { id, admin } => {
+            if !require_local_operator(tx, addr, "Client administration").await {
+                return Ok(());
+            }
+            state.update_config(|c| {
+                if let Some(r) = c.clients.iter_mut().find(|r| r.id == id) {
+                    r.admin = admin;
+                }
+            });
+        }
         ClientMsg::SetRequireToken { require } => {
             if !require_local_operator(tx, addr, "Access-policy changes").await {
                 return Ok(());
@@ -1429,12 +1562,14 @@ async fn handle_msg(
                 // write clobber them.
                 let clients = c.clients.clone();
                 let join_token = c.server.join_token.clone();
+                let admin_token = c.server.admin_token.clone();
                 let require_token = c.server.require_token;
                 let active_patch = c.active_patch.clone();
                 let launch_at_startup = c.windows.launch_at_startup;
                 *c = *config;
                 c.clients = clients;
                 c.server.join_token = join_token;
+                c.server.admin_token = admin_token;
                 c.server.require_token = require_token;
                 c.active_patch = active_patch;
                 c.windows.launch_at_startup = launch_at_startup;
@@ -2082,6 +2217,7 @@ mod diagnostics_tests {
             id: "operator".into(),
             name: "Operator".into(),
             revoked: false,
+            admin: false,
         });
         let state = SharedState::new(config);
 
@@ -2098,6 +2234,7 @@ mod diagnostics_tests {
             id: "revoked".into(),
             name: "Revoked".into(),
             revoked: true,
+            admin: false,
         });
         let state = SharedState::new(config);
         assert!(!diagnostics_authorized(&state, remote(), "revoked", "show-secret"));
@@ -2108,6 +2245,75 @@ mod diagnostics_tests {
         let state = SharedState::new(AppConfig::default());
         let loopback = "127.0.0.1:1234".parse().unwrap();
         assert!(diagnostics_authorized(&state, loopback, "", ""));
+    }
+
+    #[test]
+    fn admin_token_also_authorizes_diagnostics_and_media() {
+        let mut config = AppConfig::default();
+        config.server.join_token = "show-secret".into();
+        config.server.admin_token = "operator-secret".into();
+        let state = SharedState::new(config);
+        assert!(diagnostics_authorized(&state, remote(), "unknown", "operator-secret"));
+        assert!(client_authorized(&state, remote(), "unknown", "operator-secret"));
+    }
+
+    #[test]
+    fn show_control_needs_admin_but_play_surfaces_do_not() {
+        assert!(requires_admin(&ClientMsg::SetSacnEnabled { enabled: false }));
+        assert!(requires_admin(&ClientMsg::SetMaster { brightness: Some(0.0), speed: None }));
+        assert!(requires_admin(&ClientMsg::SetTestMode { active: true }));
+        assert!(requires_admin(&ClientMsg::StopVideo { force: true }));
+        assert!(!requires_admin(&ClientMsg::StopVideo { force: false }));
+        assert!(!requires_admin(&ClientMsg::GetState));
+        assert!(!requires_admin(&ClientMsg::GameCommand {
+            command: crate::game::GameCommand::HardDrop,
+        }));
+        assert!(!requires_admin(&ClientMsg::PatchParam {
+            node: "n".into(),
+            param: "p".into(),
+            value: 0.5,
+        }));
+    }
+
+    #[test]
+    fn admin_flag_gates_remote_connections_only() {
+        let mut config = AppConfig::default();
+        config.clients.push(ClientRecord {
+            id: "crew".into(),
+            name: "Crew".into(),
+            revoked: false,
+            admin: true,
+        });
+        config.clients.push(ClientRecord {
+            id: "guest".into(),
+            name: "Guest".into(),
+            revoked: false,
+            admin: false,
+        });
+        let state = SharedState::new(config);
+        let loopback: SocketAddr = "127.0.0.1:1234".parse().unwrap();
+        assert!(client_is_admin(&state, loopback, ""));
+        assert!(client_is_admin(&state, remote(), "crew"));
+        assert!(!client_is_admin(&state, remote(), "guest"));
+        assert!(!client_is_admin(&state, remote(), ""));
+    }
+
+    #[test]
+    fn remote_state_snapshots_never_carry_the_admin_token() {
+        let mut config = AppConfig::default();
+        config.server.admin_token = "operator-secret".into();
+        let msg = ServerMsg::State {
+            config: Box::new(config),
+            status: crate::protocol::RuntimeStatus::default(),
+        };
+        let ServerMsg::State { config, .. } = redact_for_remote(msg.clone(), false) else {
+            panic!("redaction changed the message kind");
+        };
+        assert!(config.server.admin_token.is_empty());
+        let ServerMsg::State { config, .. } = redact_for_remote(msg, true) else {
+            panic!("redaction changed the message kind");
+        };
+        assert_eq!(config.server.admin_token, "operator-secret");
     }
 
     #[test]

@@ -98,3 +98,14 @@ Release published with all four assets (tap/drag routing, Windows hardening,
 -77 flow control included). Master is unblocked for everyone. Note 16008e0:
 the bump commit missed Cargo.lock's own-package version; fixed on master.
 No further releases planned from -64 today.
+
+## empyrean-gate-91 (new session) — 2026-09-02
+Pushing ONE commit: guest/admin connection roles (admin_token + ClientRecord
+.admin, server-side gating in handle_msg, redacted State for remotes, trimmed
+guest UI) plus the connect dialog remembering its interface pick. Staging
+explicitly: src-tauri/src/{config,protocol,server}.rs, src-tauri/src/engine/
+mod.rs, src/{App,Live,Settings,state}.tsx, src/types.ts, src/styles.css,
+tests/fixtures/default-config.json, this file. Local: typecheck, layout suite
+(80 passed), behavior suite (64 passed, chromium+webkit). Rust rides on the
+Checks run — new server tests + regenerating fixtures if I got the hand-edit
+wrong. No release from this session; per Cameron, push only.

@@ -193,6 +193,9 @@ export interface ServerConfig {
   max_preview_clients: number;
   auth_token: string | null;
   join_token: string;
+  /** Redacted (empty) in configs sent to remote clients — only the Gate
+   *  machine can mint admin QR codes. */
+  admin_token: string;
   require_token: boolean;
 }
 
@@ -200,6 +203,7 @@ export interface ClientRecord {
   id: string;
   name: string;
   revoked: boolean;
+  admin: boolean;
 }
 
 export interface ClientInfo {
@@ -207,6 +211,7 @@ export interface ClientInfo {
   name: string;
   connected: boolean;
   revoked: boolean;
+  admin: boolean;
 }
 
 export type AudioSourceConfig = {
@@ -748,6 +753,7 @@ export type ServerMsg =
     }
   | { type: "error"; message: string }
   | { type: "denied"; reason: string }
+  | { type: "role"; admin: boolean }
   | { type: "report_saved"; report: ReportInfo }
   | { type: "preview_queue"; position: number }
   | { type: "patches"; patches: PatchSummary[] }

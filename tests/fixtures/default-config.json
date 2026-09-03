@@ -30,6 +30,7 @@
     "max_preview_clients": 10,
     "auth_token": null,
     "join_token": "",
+    "admin_token": "",
     "require_token": true
   },
   "audio": {

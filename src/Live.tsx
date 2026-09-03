@@ -154,7 +154,7 @@ const TOOLS: { kind: ToolKind; label: string }[] = [
 ];
 
 export default function Live() {
-  const { client, config, status, beatAt } = useGate();
+  const { client, config, status, beatAt, admin } = useGate();
   const [tool, setTool] = useState<LiveTool>("tap");
   const [growMode, setGrowMode] = useState<GrowMode>("static");
   const [quickEdit, setQuickEdit] = useState<QuickEditAnchor | null>(null);
@@ -290,6 +290,8 @@ export default function Live() {
         setTool((current) => (current === shape.kind ? "tap" : shape.kind));
         return;
       }
+      // Tempo is show control; guests keep the shape keys above.
+      if (!admin) return;
       const beatTime =
         e.key === "-" || e.code === "NumpadSubtract"
           ? "half"
@@ -304,7 +306,7 @@ export default function Live() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [config, client]);
+  }, [config, client, admin]);
 
   const shapeTool: ShapeKind | null = isShape(tool) ? tool : null;
   const penTool = tool === "tap" || isShape(tool) ? null : tool;
@@ -407,7 +409,10 @@ export default function Live() {
     </div>
   );
 
-  const tempoCtl = config ? (
+  // Tempo, masters, quick settings, and the layer stack are show control: the
+  // backend refuses them from guest connections, so guests don't see them.
+  // Drawing, shapes, effects, and colors below stay for everyone.
+  const tempoCtl = admin && config ? (
     <div className="cluster tempo-menu" aria-label="Lighting tempo">
       <div className="tempo-time-grid">
         {([
@@ -459,7 +464,7 @@ export default function Live() {
     </div>
   ) : null;
 
-  const master = config ? (
+  const master = admin && config ? (
     <div className="cluster master-ctl">
       <label className="slider-row">
         <span>Brightness</span>
@@ -561,7 +566,7 @@ export default function Live() {
   // deck-edit mode. With the deck gone the cluster carries its own toggle: a mode
   // switch rather than a long-press, because a "hold" shortcut already owns the
   // long press.
-  const quick = (
+  const quick = admin ? (
     <div className={`cluster quick-ctl ${editingShortcuts ? "editing" : ""}`}>
       <QuickSettingsPanel
         shortcuts={shortcuts}
@@ -581,9 +586,9 @@ export default function Live() {
         </div>
       )}
     </div>
-  );
+  ) : null;
 
-  const layers = config ? (
+  const layers = admin && config ? (
     <div className="cluster live-layer-list-wrap">
       <div className="live-layer-list">
         {config.layers.map((layer, index) => (
@@ -721,7 +726,7 @@ export default function Live() {
       </div>
       <div className="corner-stack tr">
         <div className="corner-card">{effects}</div>
-        <div className="corner-card">{tempoCtl}</div>
+        {tempoCtl && <div className="corner-card">{tempoCtl}</div>}
       </div>
       <div className="corner bl">{colors}</div>
       <div className="corner br">{sizeCtl}</div>

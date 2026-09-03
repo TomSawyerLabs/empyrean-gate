@@ -749,6 +749,8 @@ function ClientsPanel() {
         Devices that have connected. Revoking kicks a device immediately and blocks its id.
         With open join (below unchecked) a determined device could rejoin with a fresh
         identity — require the join token and rotate it for a real lockout.
+        Admin devices get show control (settings, scenes, layers, updates); everyone
+        else keeps the play surfaces. Grant admin here or via the Admin QR in ⊕ Connect.
       </p>
       <label className="toggle-row">
         <input
@@ -758,6 +760,9 @@ function ClientsPanel() {
         />
         Require join token (new devices must scan the Connect QR)
         <button onClick={() => client.send({ type: "rotate_join_token" })}>Rotate token</button>
+        <button onClick={() => client.send({ type: "rotate_admin_token" })}>
+          Rotate admin token
+        </button>
       </label>
       <label className="field-row" style={{ maxWidth: 320 }}>
         <span>Max live viewers (WiFi guard)</span>
@@ -799,6 +804,16 @@ function ClientsPanel() {
             <span className="hint">{c.id === client.clientId ? "this device" : c.id}</span>
           </div>
           <div className="client-actions">
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={c.admin}
+                onChange={(e) =>
+                  client.send({ type: "set_client_admin", id: c.id, admin: e.target.checked })
+                }
+              />
+              <span>Admin</span>
+            </label>
             {c.revoked ? (
               <button onClick={() => client.send({ type: "unrevoke_client", id: c.id })}>
                 Restore

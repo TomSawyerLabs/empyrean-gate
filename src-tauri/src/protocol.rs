@@ -199,6 +199,14 @@ pub enum ClientMsg {
     /// Operator: replace the join token (invalidates old QR codes when
     /// `require_token` is on).
     RotateJoinToken,
+    /// Operator: replace the admin token. Devices already recorded as admin
+    /// keep the role; the old admin QR stops granting it.
+    RotateAdminToken,
+    /// Operator: grant or withdraw show control for a known client.
+    SetClientAdmin {
+        id: String,
+        admin: bool,
+    },
     SetRequireToken {
         require: bool,
     },
@@ -358,6 +366,12 @@ pub enum ServerMsg {
     Denied {
         reason: String,
     },
+    /// This connection's access level, sent right after the hello state and
+    /// again whenever the operator changes it. Guests trim their UI to the
+    /// play surfaces; the server enforces the split regardless.
+    Role {
+        admin: bool,
+    },
     /// A feedback bundle was written. Sent to every client so the reports list
     /// is live on whichever device the operator picks up next.
     ReportSaved {
@@ -418,6 +432,7 @@ pub struct ClientInfo {
     pub name: String,
     pub connected: bool,
     pub revoked: bool,
+    pub admin: bool,
 }
 
 /// An audio device as shown in the settings UI.

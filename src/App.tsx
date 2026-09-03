@@ -33,6 +33,11 @@ const NAV_TABS: ReadonlyArray<{ id: TabId; label: string }> = TABS;
 
 type TabId = (typeof TABS)[number]["id"];
 
+/// What a guest connection (joined without the admin token) gets to see. The
+/// backend refuses show-control messages from guests anyway; this keeps the UI
+/// honest about it instead of offering controls that error.
+const GUEST_TAB_IDS: ReadonlyArray<TabId> = ["live", "games"];
+
 function tabFromHash(): TabId {
   const h = location.hash.replace("#", "");
   // Old bookmarks / PWA shortcuts used #view and #draw; both merged into Live.
@@ -200,10 +205,10 @@ function DisconnectedOverlay({ disabled = false }: { disabled?: boolean }) {
 /// a frame, which is the whole reason it exists. What was missing was any way to
 /// see it coming or to say "not during this set".
 function ShowModeUpdate() {
-  const { client, status, config } = useGate();
+  const { client, status, config, admin } = useGate();
   const [busy, setBusy] = useState(false);
   const next = status?.update_available;
-  if (!next || !config) return null;
+  if (!next || !config || !admin) return null;
 
   const auto = config.update.auto_install;
   const note = status?.update_state;
@@ -243,11 +248,16 @@ function ShowModeUpdate() {
 /// Small version tag in the corner. Click checks for updates; when a newer
 /// release is known it lights up and a click hot-swaps to it (seamless takeover).
 function VersionChip() {
-  const { client, status } = useGate();
+  const { client, status, admin } = useGate();
   const [busy, setBusy] = useState(false);
   if (!status?.version) return null;
   const next = status.update_available;
   const note = status.update_state;
+
+  // Guests can look but not touch: updating is show control.
+  if (!admin) {
+    return <span className="version-chip">v{status.version}</span>;
+  }
 
   if (next) {
     return (
@@ -274,20 +284,37 @@ function VersionChip() {
   );
 }
 
+const CONNECT_INTERFACE_KEY = "empyrean-connect-interface";
+
 function ConnectModal({ onClose }: { onClose: () => void }) {
   const { client, config, status } = useGate();
   const interfaces = status?.interfaces ?? [];
-  const [ip, setIp] = useState<string>("");
-  const chosen = ip || interfaces[0]?.split("—").pop()?.trim() || "";
+  const addresses = interfaces.map((i) => i.split("—").pop()?.trim() ?? i);
+  // The picked interface survives restarts — a show machine has several NICs
+  // and the right one doesn't change between nights. A remembered address that
+  // no longer exists (USB adapter unplugged) falls back to the first.
+  const [ip, setIp] = useState<string>(() => localStorage.getItem(CONNECT_INTERFACE_KEY) ?? "");
+  const chosen = (ip && addresses.includes(ip) ? ip : addresses[0]) ?? "";
+  // The admin token is redacted from configs sent to remote clients, so the
+  // Admin option only ever appears on the Gate machine itself.
+  const adminToken = config?.server.admin_token ?? "";
+  const [access, setAccess] = useState<"guest" | "admin">("guest");
+  const token = access === "admin" && adminToken ? adminToken : config?.server.join_token ?? "";
   const port = config?.server.port ?? 9520;
-  const url = `http://${chosen}:${port}/?join=${config?.server.join_token ?? ""}`;
+  const url = `http://${chosen}:${port}/?join=${token}`;
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>Connect a device</h2>
         <p className="hint">Scan from a phone/iPad on the same network, then Add to Home Screen.</p>
         {interfaces.length > 1 && (
-          <select value={chosen} onChange={(e) => setIp(e.target.value)}>
+          <select
+            value={chosen}
+            onChange={(e) => {
+              setIp(e.target.value);
+              localStorage.setItem(CONNECT_INTERFACE_KEY, e.target.value);
+            }}
+          >
             {interfaces.map((i) => {
               const addr = i.split("—").pop()?.trim() ?? i;
               return (
@@ -297,6 +324,29 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
               );
             })}
           </select>
+        )}
+        {adminToken && (
+          <div className="connect-access" role="group" aria-label="Access level">
+            <button
+              className={access === "guest" ? "active" : ""}
+              onClick={() => setAccess("guest")}
+            >
+              Guest
+            </button>
+            <button
+              className={access === "admin" ? "active" : ""}
+              onClick={() => setAccess("admin")}
+            >
+              Admin
+            </button>
+          </div>
+        )}
+        {adminToken && (
+          <p className="hint">
+            {access === "admin"
+              ? "Admin: full show control — settings, scenes, layers, updates."
+              : "Guest: drawing, effects, and games only. Most people get this one."}
+          </p>
         )}
         {chosen ? (
           <img
@@ -433,6 +483,7 @@ function TopbarMenu({
   onConnect,
   onNewWindow,
   newWindowBusy,
+  tabs,
 }: {
   tab: TabId;
   onSelectTab: (t: TabId) => void;
@@ -441,6 +492,7 @@ function TopbarMenu({
   onConnect: () => void;
   onNewWindow: () => void;
   newWindowBusy: boolean;
+  tabs: ReadonlyArray<{ id: TabId; label: string }>;
 }) {
   const { connected, status } = useGate();
 
@@ -469,7 +521,7 @@ function TopbarMenu({
           </button>
         </div>
         <nav className="topbar-menu-tabs">
-          {NAV_TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.id}
               className={tab === t.id ? "active" : ""}
@@ -524,7 +576,7 @@ function TopbarMenu({
 }
 
 export default function App() {
-  const { connected, status, errors, dismissError, client, config, denied, savedPulse } = useGate();
+  const { connected, status, errors, dismissError, client, config, denied, savedPulse, admin } = useGate();
   const [tab, setTab] = useState<TabId>(tabFromHash);
   const [showConnect, setShowConnect] = useState(false);
   const [showReport, setShowReport] = useState(false);
@@ -576,6 +628,12 @@ export default function App() {
     location.hash = t;
     setTab(t);
   };
+
+  // Guests get the play surfaces only. A stale hash (bookmark, PWA shortcut,
+  // typed URL) pointing at an admin tab lands on Live instead of rendering a
+  // surface whose every control the backend would refuse.
+  const navTabs = admin ? NAV_TABS : NAV_TABS.filter((t) => GUEST_TAB_IDS.includes(t.id));
+  const visibleTab: TabId = admin || GUEST_TAB_IDS.includes(tab) ? tab : "live";
 
   // Global keyboard: number keys fire motion effects; R rotates the whole
   // composition. The shape keys are Live's,
@@ -637,12 +695,14 @@ export default function App() {
           <button className="show-report" onClick={() => setShowReport(true)}>
             ⚑ Report
           </button>
-          <button
-            className={`show-report ${status?.performance_recording ? "recording" : ""}`}
-            onClick={togglePerformanceRecording}
-          >
-            {status?.performance_recording ? "■ Stop recording" : "● Record"}
-          </button>
+          {admin && (
+            <button
+              className={`show-report ${status?.performance_recording ? "recording" : ""}`}
+              onClick={togglePerformanceRecording}
+            >
+              {status?.performance_recording ? "■ Stop recording" : "● Record"}
+            </button>
+          )}
           <button className="show-exit" onClick={() => setShowMode(false)}>
             ⤢ Exit show mode <span className="chip-key">Esc</span>
           </button>
@@ -661,14 +721,14 @@ export default function App() {
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((open) => !open)}
         >
-          ☰ <span className="topbar-menu-here">{TABS.find((t) => t.id === tab)?.label}</span>
+          ☰ <span className="topbar-menu-here">{TABS.find((t) => t.id === visibleTab)?.label}</span>
         </button>
         <h1>Empyrean Gate</h1>
         <nav>
-          {NAV_TABS.map((t) => (
+          {navTabs.map((t) => (
             <button
               key={t.id}
-              className={tab === t.id ? "active" : ""}
+              className={visibleTab === t.id ? "active" : ""}
               onClick={() => selectTab(t.id)}
             >
               {t.label}
@@ -684,14 +744,16 @@ export default function App() {
         >
           ⚑ <span className="btn-label">Report</span>
         </button>
-        <button
-          className={`ghost record-btn ${status?.performance_recording ? "recording" : ""}`}
-          aria-label={status?.performance_recording ? "Stop and save performance" : "Record performance"}
-          onClick={togglePerformanceRecording}
-        >
-          {status?.performance_recording ? "■" : "●"}{" "}
-          <span className="btn-label">{status?.performance_recording ? "Stop" : "Record"}</span>
-        </button>
+        {admin && (
+          <button
+            className={`ghost record-btn ${status?.performance_recording ? "recording" : ""}`}
+            aria-label={status?.performance_recording ? "Stop and save performance" : "Record performance"}
+            onClick={togglePerformanceRecording}
+          >
+            {status?.performance_recording ? "■" : "●"}{" "}
+            <span className="btn-label">{status?.performance_recording ? "Stop" : "Record"}</span>
+          </button>
+        )}
         <button
           className="ghost"
           aria-label={showMode ? "Exit show mode" : "Show mode"}
@@ -741,9 +803,11 @@ export default function App() {
               auto-exit in {Math.ceil(status.test.expires_secs / 60)} min
             </span>
           )}
-          <button className="ghost" onClick={() => client.setTestMode(false)}>
-            Disarm
-          </button>
+          {admin && (
+            <button className="ghost" onClick={() => client.setTestMode(false)}>
+              Disarm
+            </button>
+          )}
         </div>
       )}
       {/* Game mode replaces the scene with a game world; like test mode the
@@ -822,37 +886,41 @@ export default function App() {
       )}
 
       <main>
-        {tab === "live" && <Live />}
-        {tab === "ready" && <Ready />}
+        {visibleTab === "live" && <Live />}
+        {visibleTab === "ready" && <Ready />}
         {/* Keep the decoder mounted while the operator visits Live/Settings.
             An offscreen composited video continues producing frames on iPadOS;
-            unmounting it would stop the Gate feed at every tab change. */}
-        <div
-          className={tab === "media" ? "media-tab-active" : "media-tab-background"}
-          aria-hidden={tab !== "media"}
-          inert={tab !== "media"}
-          // Parked far off-screen on purpose while another tab is showing. The
-          // layout gate (tests/layout.spec.ts) treats out-of-viewport geometry
-          // as a bug unless it is declared here.
-          data-layout-exempt={tab === "media" ? undefined : ""}
-        >
-          <Media />
-        </div>
-        {tab === "replay" && <Replay />}
-        {tab === "patch" && (
+            unmounting it would stop the Gate feed at every tab change. Guests
+            never reach the Media tab, so they skip the decoder entirely. */}
+        {admin && (
+          <div
+            className={visibleTab === "media" ? "media-tab-active" : "media-tab-background"}
+            aria-hidden={visibleTab !== "media"}
+            inert={visibleTab !== "media"}
+            // Parked far off-screen on purpose while another tab is showing. The
+            // layout gate (tests/layout.spec.ts) treats out-of-viewport geometry
+            // as a bug unless it is declared here.
+            data-layout-exempt={visibleTab === "media" ? undefined : ""}
+          >
+            <Media />
+          </div>
+        )}
+        {visibleTab === "replay" && <Replay />}
+        {visibleTab === "patch" && (
           <Suspense fallback={<div className="patch-empty">Loading editor…</div>}>
             <Patch />
           </Suspense>
         )}
-        {tab === "control" && <Control />}
-        {tab === "games" && <Games />}
-        {tab === "test" && <Test />}
-        {tab === "settings" && <Settings />}
+        {visibleTab === "control" && <Control />}
+        {visibleTab === "games" && <Games />}
+        {visibleTab === "test" && <Test />}
+        {visibleTab === "settings" && <Settings />}
       </main>
 
       {menuOpen && (
         <TopbarMenu
-          tab={tab}
+          tab={visibleTab}
+          tabs={navTabs}
           onSelectTab={selectTab}
           onClose={() => setMenuOpen(false)}
           onShowMode={() => setShowMode(true)}
@@ -864,7 +932,7 @@ export default function App() {
       {showConnect && <ConnectModal onClose={() => setShowConnect(false)} />}
       {showReport && <ReportModal onClose={() => setShowReport(false)} />}
       <CloseGuard />
-      <DisconnectedOverlay disabled={tab === "replay"} />
+      <DisconnectedOverlay disabled={visibleTab === "replay"} />
     </div>
   );
 }

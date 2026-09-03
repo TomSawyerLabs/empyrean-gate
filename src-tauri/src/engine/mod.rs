@@ -3374,6 +3374,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                             name: c.name.clone(),
                             connected: connected.values().any(|id| *id == c.id),
                             revoked: c.revoked,
+                            admin: c.admin,
                         })
                         .collect()
                 };

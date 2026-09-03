@@ -149,6 +149,11 @@ pub struct ServerConfig {
     /// "rotate" action replaces it (locking out devices that only had the old one,
     /// when `require_token` is on).
     pub join_token: String,
+    /// Second join token that grants show control (see `ClientRecord::admin`).
+    /// Only ever sent to loopback clients — the connect dialog on the Gate
+    /// machine offers it as the "Admin" QR; remote clients receive a redacted
+    /// config so a guest can never read it out of their own state.
+    pub admin_token: String,
     /// When true, unknown clients must present the join token (scan the QR) to
     /// connect. Loopback clients (the desktop app's own webview) always may.
     /// Off = open LAN access; revocation is then only a client-id blocklist.
@@ -163,6 +168,7 @@ impl Default for ServerConfig {
             max_preview_clients: 10,
             auth_token: None,
             join_token: String::new(),
+            admin_token: String::new(),
             // A fresh show machine should not accept arbitrary control messages
             // from every device on the venue LAN. The desktop remains exempt and
             // its Connect QR carries the generated token.
@@ -179,6 +185,11 @@ pub struct ClientRecord {
     pub id: String,
     pub name: String,
     pub revoked: bool,
+    /// Show control: config, scenes, layers, masters, test mode, updates.
+    /// Granted by joining with the admin token (or from the Clients panel);
+    /// everyone else gets the play surfaces only. Loopback connections are
+    /// always admin regardless of this flag.
+    pub admin: bool,
 }
 
 /// Random URL-safe token used by join links and authenticated local handover.
@@ -1079,6 +1090,10 @@ pub fn load() -> AppConfig {
     let mut dirty = recovered; // rewrite a good main config after any fallback
     if cfg.server.join_token.is_empty() {
         cfg.server.join_token = generate_token();
+        dirty = true;
+    }
+    if cfg.server.admin_token.is_empty() {
+        cfg.server.admin_token = generate_token();
         dirty = true;
     }
     if cfg.output.cid.is_empty() {

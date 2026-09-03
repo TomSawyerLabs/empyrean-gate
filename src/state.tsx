@@ -33,6 +33,11 @@ interface Gate {
   config: AppConfig | null;
   status: RuntimeStatus | null;
   connected: boolean;
+  /** Show control (config, scenes, layers, masters). Defaults to true so the
+   *  Gate machine, layout tests, and older backends that never send a role
+   *  keep the full UI; a new backend demotes guests right after hello. The
+   *  server enforces the split regardless of what the UI shows. */
+  admin: boolean;
   /** Set when the server refused this client (revoked / token required). */
   denied: string | null;
   /** Bumps every time the backend confirms a config change (saved + broadcast). */
@@ -60,6 +65,7 @@ export function GateProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
   const [connected, setConnected] = useState(false);
+  const [admin, setAdmin] = useState(true);
   const [denied, setDenied] = useState<string | null>(null);
   const [savedPulse, setSavedPulse] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
@@ -135,6 +141,9 @@ export function GateProvider({ children }: { children: ReactNode }) {
             return [...entries.slice(-399), msg.entry];
           });
           break;
+        case "role":
+          setAdmin(msg.admin);
+          break;
         case "error":
           setErrors((e) => [...e.slice(-4), msg.message]);
           break;
@@ -156,6 +165,7 @@ export function GateProvider({ children }: { children: ReactNode }) {
     config,
     status,
     connected,
+    admin,
     denied,
     savedPulse,
     errors,
