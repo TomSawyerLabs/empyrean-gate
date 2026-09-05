@@ -1396,6 +1396,22 @@ mod beat_time_tests {
     }
 
     #[test]
+    fn wire_fade_up_is_eased_and_reaches_both_endpoints() {
+        let frame = [0u8, 128, 255];
+        let mut out = Vec::new();
+        super::scale_frame(&frame, 0.0, &mut out);
+        assert_eq!(out, vec![0, 0, 0]);
+        super::scale_frame(&frame, 1.0, &mut out);
+        assert_eq!(out, frame);
+        super::scale_frame(&frame, 0.5, &mut out);
+        assert_eq!(out, vec![0, 64, 128]);
+        // Smoothstepped, not linear: a quarter of the way in is well under a
+        // quarter of the brightness.
+        super::scale_frame(&frame, 0.25, &mut out);
+        assert_eq!(out[2], 40); // 255 * smoothstep(0.25) = 255 * 0.15625
+    }
+
+    #[test]
     fn renderer_handoff_is_eased_and_reaches_both_endpoints() {
         let outgoing = [0, 20, 255];
         let incoming = [200, 220, 5];
@@ -1411,6 +1427,34 @@ mod beat_time_tests {
 
 /// Seconds for the scene ↔ game-world crossfade on enter/exit.
 const GAME_FADE_SECS: f32 = 2.0;
+
+// Nothing turns on instantly (plans/no-hard-cuts.md): every on/off that reaches
+// light output rides one of these short envelopes instead of hard-cutting.
+
+/// Seconds for the show ↔ test-frame crossfade on arm/disarm. Short enough not
+/// to slow commissioning, long enough that the rig never snaps.
+const TEST_FADE_SECS: f32 = 0.75;
+/// Seconds for a layer's enable toggle to fade it in or out of the mix.
+const LAYER_TOGGLE_SECS: f32 = 1.0;
+/// Time constant for master-brightness moves (the Blackout quick-setting, a
+/// slider jump) — one-pole, so a step becomes a glide.
+const MASTER_BRIGHTNESS_TAU: f32 = 0.15;
+/// Seconds for the rig to fade up from black when sACN output turns on.
+/// Turning output OFF stays instant: termination packets are the point.
+const OUTPUT_ON_SECS: f32 = 1.0;
+/// Time constant for the master hue enable/amount glide.
+const MASTER_HUE_TAU: f32 = 0.3;
+
+/// Scale a frame of perceptual RGB bytes by an eased 0..1 mix (smoothstep is
+/// applied here so callers track a plain linear envelope). Used to fade the
+/// wire up from black without touching the previewed frame.
+fn scale_frame(rgb: &[u8], linear: f32, out: &mut Vec<u8>) {
+    let p = linear.clamp(0.0, 1.0);
+    let mix = p * p * (3.0 - 2.0 * p);
+    out.clear();
+    out.reserve(rgb.len());
+    out.extend(rgb.iter().map(|&b| (b as f32 * mix + 0.5) as u8));
+}
 
 /// The engine-local side of game mode: the simulation plus the two packed
 /// grid snapshots the shader interpolates between. Owned by the frame loop
@@ -1572,8 +1616,21 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut patch_preview: Option<minis::PatchPreviewInfo> = None;
 
     // Hardware test mode: a CPU-generated frame that replaces the rendered one
-    // on its way to sACN and the preview. See `testmode.rs`.
+    // on its way to sACN and the preview. See `testmode.rs`. Arm/disarm is a
+    // crossfade, not a cut — the show keeps rendering underneath anyway, so
+    // `test_mix` ramps between the two completed frames (plans/no-hard-cuts.md).
     let mut test_rgb: Vec<u8> = Vec::new();
+    let mut test_mix = 0.0f32;
+    let mut test_fade_rgb: Vec<u8> = Vec::new();
+
+    // plans/no-hard-cuts.md: enable-toggle envelopes. Layers fade in/out of the
+    // mix, master brightness and hue glide, and the wire fades up from black
+    // when output turns on (`wire_rgb` is its scratch buffer).
+    let mut layer_enable_env: Vec<f32> = Vec::new();
+    let mut master_env = 0.0f32;
+    let mut hue_env = 0.0f32;
+    let mut output_env = 0.0f32;
+    let mut wire_rgb: Vec<u8> = Vec::new();
 
     // Game mode (plans/game-mode.md): the loop owns the simulation, sampled
     // against the control surface each frame. `game_fade` ramps the scene ↔
@@ -1834,6 +1891,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         if test_expired {
             state.broadcast_state();
         }
+        // Linear ramp; `eased_crossfade` applies the smoothstep. Auto-exit
+        // lands here too, so even a forgotten rig fades back to the show.
+        test_mix = (test_mix + if test_active { dt } else { -dt } / TEST_FADE_SECS).clamp(0.0, 1.0);
 
         // Resolve the active timed show and build a temporary layer stack. During
         // a transition the shader composes both scenes independently, then mixes
@@ -1942,6 +2002,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         layer_target[i] = layer_target[old_len + i];
                         layer_env[i] = layer_env[old_len + i];
                     }
+                    if old_len + i < layer_enable_env.len() {
+                        layer_enable_env[i] = layer_enable_env[old_len + i];
+                    }
                 }
                 transition_from = None;
             }
@@ -2007,6 +2070,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         layer_walks.resize(render_layers.len(), LayerWalk::default());
         layer_target.resize(render_layers.len(), true);
         layer_env.resize(render_layers.len(), 1.0);
+        // New slots from a scene transition are the incoming stack — the shader
+        // already crossfades those, so they enter at full envelope. Any other
+        // growth is an added layer (or first boot): start at zero and slide on.
+        layer_enable_env.resize(
+            render_layers.len(),
+            if render_transition_active { 1.0 } else { 0.0 },
+        );
 
         if let Some(bpm) = cfg.render.manual_bpm {
             let next = manual_beat_phase + dt * bpm.clamp(10.0, 400.0) / 60.0;
@@ -2441,11 +2511,19 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             };
             let goal = if target { 1.0 } else { 0.0 };
             layer_env[i] += (goal - layer_env[i]) * (dt / 4.0).min(1.0);
-            if !l.enabled {
+            // The enable toggle rides its own short envelope so switching a
+            // layer on (or adding one) never pops it into the frame.
+            layer_enable_env[i] = (layer_enable_env[i]
+                + if l.enabled { dt } else { -dt } / LAYER_TOGGLE_SECS)
+                .clamp(0.0, 1.0);
+            if !l.enabled && layer_enable_env[i] <= 0.0 {
+                // Fully faded out and off — same frozen-phase skip as before.
                 continue;
             }
+            let e = layer_enable_env[i];
+            let enable_fade = e * e * (3.0 - 2.0 * e);
             let level = audio[(l.audio_source as usize).min(MAX_AUDIO_SOURCES - 1)].level;
-            if layer_env[i] < 0.005 {
+            if layer_env[i] * enable_fade < 0.005 {
                 // Fully faded out by the walk — keep its phase moving, skip the GPU.
                 layer_phases[i] +=
                     (l.phase_rate(level) * l.speed * render_master_speed * dt) as f64;
@@ -2463,7 +2541,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             } else {
                 l.clone()
             };
-            l.opacity *= layer_env[i];
+            l.opacity *= layer_env[i] * enable_fade;
             layer_phases[i] += (l.phase_rate(level) * l.speed * render_master_speed * dt) as f64;
             if let Some(p) = l.phase_period() {
                 layer_phases[i] = layer_phases[i].rem_euclid(p);
@@ -2817,6 +2895,25 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             rotation.angle
         };
 
+        // Master brightness never steps: the Blackout quick-setting and slider
+        // jumps glide over ~MASTER_BRIGHTNESS_TAU instead. Starting at zero
+        // also makes first light after launch a fade-up, not a slam. The
+        // drop-detector and audio-follower multipliers keep their own
+        // deliberately faster dynamics.
+        master_env += (render_master_brightness - master_env)
+            * (1.0 - (-dt / MASTER_BRIGHTNESS_TAU).exp());
+        if (master_env - render_master_brightness).abs() < 1e-4 {
+            master_env = render_master_brightness;
+        }
+        // Same treatment for the master hue toggle/amount: the whole-composite
+        // colour shift glides in rather than snapping.
+        let hue_goal = if cfg.render.master_hue_enabled {
+            cfg.render.master_hue_amount.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        hue_env += (hue_goal - hue_env) * (1.0 - (-dt / MASTER_HUE_TAU).exp());
+
         let inputs = FrameInputs {
             globals: Globals {
                 spokes: cfg.geometry.spokes,
@@ -2825,9 +2922,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 effect_count: effects.len() as u32,
                 time: state.started.elapsed().as_secs_f32(),
                 dt,
-                master: render_master_brightness
-                    * master_drop_brightness
-                    * audio_follow_brightness,
+                master: master_env * master_drop_brightness * audio_follow_brightness,
                 inner_over_outer: (cfg.geometry.inner_radius_ft
                     / cfg.geometry.outer_radius_ft.max(0.001))
                 .clamp(0.0, 1.0),
@@ -2857,11 +2952,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 _pad_game: [0.0; 2],
                 rotation: rotation_angle,
                 hue_target: cfg.render.master_hue.rem_euclid(1.0),
-                hue_amount: if cfg.render.master_hue_enabled {
-                    cfg.render.master_hue_amount.clamp(0.0, 1.0)
-                } else {
-                    0.0
-                },
+                hue_amount: hue_env,
                 hue_loose: f32::from(u8::from(cfg.render.master_hue_loose)),
             },
             audio,
@@ -3110,8 +3201,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             // be showing. That comparison is half of what makes a test useful.
             // The engine keeps rendering underneath (it costs ~2 ms and keeps
             // the loop, the show clock and the readback pipeline undisturbed),
-            // its output is simply discarded while armed.
-            let rgb: &[u8] = if test_active {
+            // its output is simply discarded while armed. Arm and disarm ride
+            // `test_mix`, a brief crossfade between the two completed frames —
+            // once settled, the frame is exactly the test pattern, so it stays
+            // usable as hardware evidence.
+            let rgb: &[u8] = if test_mix > 0.0 {
                 crate::testmode::render_into(
                     &test_cfg,
                     &cfg.geometry,
@@ -3119,7 +3213,12 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     test_t,
                     &mut test_rgb,
                 );
-                &test_rgb
+                if test_mix >= 1.0 || test_rgb.len() != normal_rgb.len() {
+                    &test_rgb
+                } else {
+                    eased_crossfade(normal_rgb, &test_rgb, test_mix, &mut test_fade_rgb);
+                    &test_fade_rgb
+                }
             } else {
                 normal_rgb
             };
@@ -3150,6 +3249,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     s.send_terminate();
                 }
             }
+            // Output turning ON fades the rig up from black instead of slamming
+            // it to the current frame. Only on the wire — the preview keeps
+            // showing the show, exactly as it does while output is off.
+            if sending && !was_sending {
+                output_env = 0.0;
+            }
+            if sending {
+                output_env = (output_env + dt / OUTPUT_ON_SECS).min(1.0);
+            }
             was_sending = sending;
             if sending && let Some(s) = sacn.as_mut() {
                 let cap = cfg.output.fps.clamp(1.0, 120.0);
@@ -3171,8 +3279,17 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     // point that cannot race a re-plan or the hold being lifted.
                     if state.sacn_resume_pending.swap(false, Ordering::SeqCst) {
                         s.resume_after(state.sacn_resume_sequence.load(Ordering::SeqCst));
+                        // Continuing a predecessor's stream mid-show — the rig
+                        // is already lit, so a fade-up here would be a dip.
+                        output_env = 1.0;
                     }
-                    pkts_this_sec += s.send_frame(rgb) as u32;
+                    let wire: &[u8] = if output_env < 1.0 {
+                        scale_frame(rgb, output_env, &mut wire_rgb);
+                        &wire_rgb
+                    } else {
+                        rgb
+                    };
+                    pkts_this_sec += s.send_frame(wire) as u32;
                     // Published for the handover grant: a successor continues this
                     // numbering instead of restarting it (see HandoverGrant).
                     state.sacn_sequence.store(s.sequence(), Ordering::Relaxed);

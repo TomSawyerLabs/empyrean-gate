@@ -11,6 +11,9 @@
 //! asked for and nothing else, or it cannot be used as evidence about the
 //! hardware. LED gamma is NOT bypassed: the frame goes out through the same
 //! `SacnSender` gamma LUT the show uses, so a test exercises the real output path.
+//! (Arming and disarming ride a sub-second crossfade in the engine so the rig
+//! never snaps — see plans/no-hard-cuts.md — but a settled test frame is still
+//! exactly the requested pattern.)
 //!
 //! State lives in `SharedState`, never in `AppConfig` — test mode must not be able
 //! to survive a restart into a show.
