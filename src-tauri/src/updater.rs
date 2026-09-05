@@ -99,6 +99,25 @@ fn set_update_status_staged(
     state.broadcast_state();
 }
 
+/// Progress of the in-flight download, for the UI's bar. No broadcast: the
+/// status stream ticks at 2 Hz, which is plenty for a progress bar.
+fn set_download_progress(state: &SharedState, bytes: u64, total: u64) {
+    let mut st = state.status.lock();
+    st.update_download_bytes = bytes;
+    st.update_download_total = total;
+}
+
+/// Everything needed to fetch and verify one release asset.
+#[derive(Clone)]
+struct Release {
+    version: String,
+    url: String,
+    sha256: String,
+    /// Asset size from the release metadata; drives the progress bar and the
+    /// resume guard. 0 when the API didn't say (then there is no resume).
+    size: u64,
+}
+
 /// True when `target` already holds a plausible copy of the release.
 ///
 /// Survives a restart: the versioned sibling from a previous session's staging is
@@ -127,7 +146,7 @@ pub fn spawn(state: Arc<SharedState>) {
 fn updater_thread(state: Arc<SharedState>) {
     // First auto-check shortly after startup, then every CHECK_INTERVAL.
     let mut next_check = Instant::now() + Duration::from_secs(30);
-    let mut latest: Option<(String, String, String)> = None; // version, URL, sha256
+    let mut latest: Option<Release> = None;
     let mut successor_launched = false;
 
     while !state.shutdown.load(Ordering::Relaxed) {
@@ -146,10 +165,11 @@ fn updater_thread(state: Arc<SharedState>) {
         if manual_check || (auto_check && Instant::now() >= next_check) {
             next_check = Instant::now() + CHECK_INTERVAL;
             match check_latest() {
-                Ok(Some((version, url, digest))) => {
+                Ok(Some(release)) => {
+                    let version = release.version.clone();
                     if is_newer(&version) {
                         log::info!("update available: v{version} (running v{})", effective_version());
-                        latest = Some((version.clone(), url.clone(), digest.clone()));
+                        latest = Some(release.clone());
                         set_update_status(&state, Some(version.clone()), "");
                         if state.config.read().update.auto_install {
                             state.update_install_requested.store(true, Ordering::SeqCst);
@@ -158,7 +178,8 @@ fn updater_thread(state: Arc<SharedState>) {
                             // still has to be able to take the update on one tap
                             // between sets — and downloading 40 MB at that moment
                             // is the part that would make them not bother.
-                            match stage(&version, &url, &digest, &state) {
+                            set_update_status(&state, Some(version.clone()), "downloading…");
+                            match stage(&release, &state) {
                                 Ok(_) => set_update_status_staged(
                                     &state,
                                     Some(version),
@@ -186,9 +207,10 @@ fn updater_thread(state: Arc<SharedState>) {
         }
 
         if install {
-            if let Some((version, url, digest)) = latest.clone() {
+            if let Some(release) = latest.clone() {
+                let version = release.version.clone();
                 set_update_status(&state, Some(version.clone()), "downloading…");
-                match download_and_launch(&version, &url, &digest, &state) {
+                match download_and_launch(&release, &state) {
                     Ok(()) => {
                         // The successor's takeover will shut us down; just wait.
                         successor_launched = true;
@@ -218,8 +240,8 @@ fn is_newer(candidate: &str) -> bool {
     }
 }
 
-/// Latest release's (version, asset download url) for this platform.
-fn check_latest() -> anyhow::Result<Option<(String, String, String)>> {
+/// Latest release for this platform, as far as the GitHub API knows.
+fn check_latest() -> anyhow::Result<Option<Release>> {
     let Some(asset) = asset_name() else {
         anyhow::bail!("no release asset for this platform");
     };
@@ -255,7 +277,8 @@ fn check_latest() -> anyhow::Result<Option<(String, String, String)>> {
         .filter(|value| value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()))
         .ok_or_else(|| anyhow::anyhow!("release asset '{asset}' has no valid SHA-256 digest"))?
         .to_ascii_lowercase();
-    Ok(Some((version, url, digest)))
+    let size = release_asset["size"].as_u64().unwrap_or(0);
+    Ok(Some(Release { version, url, sha256: digest, size }))
 }
 
 fn versioned_path(version: &str) -> anyhow::Result<PathBuf> {
@@ -272,76 +295,59 @@ fn versioned_path(version: &str) -> anyhow::Result<PathBuf> {
 ///
 /// Two steps rather than one so that staging can happen at check time and the
 /// install can be a spawn — see `stage`.
-fn download_and_launch(
-    version: &str,
-    url: &str,
-    expected_sha256: &str,
-    state: &SharedState,
-) -> anyhow::Result<()> {
-    let target = stage(version, url, expected_sha256, state)?;
+fn download_and_launch(release: &Release, state: &SharedState) -> anyhow::Result<()> {
+    let target = stage(release, state)?;
     launch(&target, state)
 }
 
 /// Put the release on disk beside the running exe and return where it landed.
 ///
 /// Idempotent: an existing plausible copy is left alone, so repeated checks and
-/// restarts do not re-download it.
-fn stage(
-    version: &str,
-    url: &str,
-    expected_sha256: &str,
-    _state: &SharedState,
-) -> anyhow::Result<PathBuf> {
-    let target = versioned_path(version)?;
+/// restarts do not re-download it. Interrupted transfers leave their partial
+/// `.download` file behind on purpose — the next attempt (immediate retry,
+/// operator click, or 6-hourly check) resumes it instead of starting the
+/// whole download over.
+fn stage(release: &Release, state: &SharedState) -> anyhow::Result<PathBuf> {
+    let target = versioned_path(&release.version)?;
     if already_staged(&target)
-        && matches!(sha256_file(&target), Ok(digest) if digest == expected_sha256)
+        && matches!(sha256_file(&target), Ok(digest) if digest == release.sha256)
     {
-        log::info!("v{version} is already staged at {}", target.display());
+        log::info!("v{} is already staged at {}", release.version, target.display());
         return Ok(target);
     }
     let tmp = target.with_extension("download");
 
-    log::info!("downloading v{version} from {url}");
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(600)))
-        .build()
-        .into();
-    let mut resp = agent
-        .get(url)
-        .header("User-Agent", "empyrean-gate-updater")
-        .call()?;
-    let mut reader = resp.body_mut().as_reader();
-    let mut file = std::fs::File::create(&tmp)
-        .map_err(|e| anyhow::anyhow!("cannot write next to the current exe ({e}); is the directory writable?"))?;
-    use sha2::Digest;
-    use std::io::{Read, Write};
-    let mut hasher = sha2::Sha256::new();
-    let mut buffer = [0u8; 64 * 1024];
-    let mut bytes = 0u64;
-    loop {
-        let read = reader.read(&mut buffer)?;
-        if read == 0 {
-            break;
+    // Venue internet drops mid-transfer; each retry picks up the partial.
+    let mut attempt = 0;
+    let downloaded = loop {
+        attempt += 1;
+        match download(&tmp, release, state) {
+            Ok(bytes) => break Ok(bytes),
+            Err(e) if attempt < 3 && !state.shutdown.load(Ordering::Relaxed) => {
+                log::warn!("download attempt {attempt} failed ({e:#}); retrying");
+                std::thread::sleep(Duration::from_secs(2));
+            }
+            Err(e) => break Err(e),
         }
-        file.write_all(&buffer[..read])?;
-        hasher.update(&buffer[..read]);
-        bytes += read as u64;
-    }
-    file.sync_all()?;
-    drop(file);
+    };
+    set_download_progress(state, 0, 0);
+    let bytes = downloaded?;
+
     anyhow::ensure!(
         bytes > 1_000_000,
         "downloaded file is implausibly small ({bytes} bytes)"
     );
-    let actual_sha256 = hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    anyhow::ensure!(
-        actual_sha256 == expected_sha256,
-        "downloaded binary failed SHA-256 verification (expected {expected_sha256}, got {actual_sha256})"
-    );
+    // Hash the finished file from disk rather than the stream — a resumed
+    // transfer only ever saw the tail, so the stream hash would be meaningless.
+    let actual_sha256 = sha256_file(&tmp)?;
+    if actual_sha256 != release.sha256 {
+        // A corrupt partial would fail every future resume the same way.
+        let _ = std::fs::remove_file(&tmp);
+        anyhow::bail!(
+            "downloaded binary failed SHA-256 verification (expected {}, got {actual_sha256})",
+            release.sha256
+        );
+    }
 
     #[cfg(unix)]
     {
@@ -359,6 +365,78 @@ fn stage(
     std::fs::rename(&tmp, &target)?;
     log::info!("staged {} ({bytes} bytes)", target.display());
     Ok(target)
+}
+
+/// One transfer into `tmp`, resuming an existing partial via an HTTP Range
+/// request when possible. Returns the file's total size on completion.
+/// Progress is written into the status stream as it goes.
+fn download(tmp: &std::path::Path, release: &Release, state: &SharedState) -> anyhow::Result<u64> {
+    use std::io::{Read, Write};
+
+    let existing = std::fs::metadata(tmp).map(|m| m.len()).unwrap_or(0);
+    // Only a strict prefix of a known total is resumable. Anything else — no
+    // size from the API, or a leftover that is somehow at/over the full size
+    // yet failed verification — starts over.
+    let resume_from = if existing > 0 && existing < release.size {
+        existing
+    } else {
+        0
+    };
+
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(600)))
+        .build()
+        .into();
+    let mut req = agent
+        .get(&release.url)
+        .header("User-Agent", "empyrean-gate-updater");
+    if resume_from > 0 {
+        req = req.header("Range", format!("bytes={resume_from}-"));
+    }
+    let mut resp = req.call()?;
+
+    // 206 = the range was honored, append to the partial. Anything else means
+    // the server sent the whole file (or the Range header was lost across the
+    // CDN redirect), so the partial is dead weight and the write starts over —
+    // correctness never depends on the server supporting ranges.
+    let (mut file, mut bytes) = if resume_from > 0 && resp.status() == 206 {
+        log::info!(
+            "resuming download of v{} at {resume_from} of {} bytes",
+            release.version,
+            release.size
+        );
+        (std::fs::OpenOptions::new().append(true).open(tmp)?, resume_from)
+    } else {
+        log::info!("downloading v{} from {}", release.version, release.url);
+        let file = std::fs::File::create(tmp).map_err(|e| {
+            anyhow::anyhow!("cannot write next to the current exe ({e}); is the directory writable?")
+        })?;
+        (file, 0u64)
+    };
+
+    set_download_progress(state, bytes, release.size);
+    let mut reader = resp.body_mut().as_reader();
+    let mut buffer = [0u8; 64 * 1024];
+    let mut last_report = Instant::now();
+    loop {
+        if state.shutdown.load(Ordering::Relaxed) {
+            // The partial stays behind; the next boot resumes it.
+            anyhow::bail!("shutting down");
+        }
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        file.write_all(&buffer[..read])?;
+        bytes += read as u64;
+        if last_report.elapsed() > Duration::from_millis(200) {
+            last_report = Instant::now();
+            set_download_progress(state, bytes, release.size);
+        }
+    }
+    file.sync_all()?;
+    set_download_progress(state, bytes, release.size);
+    Ok(bytes)
 }
 
 fn sha256_file(path: &std::path::Path) -> anyhow::Result<String> {

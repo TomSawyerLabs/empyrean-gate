@@ -9,10 +9,14 @@ import { expect, test } from "@playwright/test";
 
 /// Patches are addressed to one page: the suite runs parallel against a single
 /// mock backend, so a global override would leak into other cases.
-async function withUpdateAvailable(page: import("@playwright/test").Page, id: string) {
+async function withUpdateAvailable(
+  page: import("@playwright/test").Page,
+  id: string,
+  patch: Record<string, unknown> = {},
+) {
   await page.addInitScript((v) => localStorage.setItem("empyrean-client-id", v), id);
   await page.request.post(`/mock/status?client=${id}`, {
-    data: { update_available: "9.9.9", update_state: "ready to install", update_staged: true },
+    data: { update_available: "9.9.9", update_state: "ready to install", update_staged: true, ...patch },
   });
 }
 
@@ -47,6 +51,24 @@ test("an available update is visible and refusable without leaving show mode", a
   const auto = page.getByRole("checkbox", { name: /Auto-update/ });
   await expect(auto).toBeVisible();
   await expect(auto).not.toBeChecked(); // auto_install defaults to false
+});
+
+test("an in-flight download shows its progress in show mode", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await withUpdateAvailable(page, "show-update-progress", {
+    update_state: "downloading…",
+    update_staged: false,
+    update_download_bytes: 21_000_000,
+    update_download_total: 42_000_000,
+  });
+  await enterShowMode(page);
+  await page.goto("/#live");
+  await ready(page);
+
+  // Percent in the button text plus the thin bar under it — the operator can
+  // tell a stalled download from a slow one without leaving the show surface.
+  await expect(page.getByRole("button", { name: /Downloading v9\.9\.9… 50%/ })).toBeVisible();
+  await expect(page.locator(".show-update-bar")).toBeVisible();
 });
 
 test("the retained top bar can leave show mode", async ({ page }) => {

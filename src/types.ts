@@ -562,6 +562,10 @@ export interface RuntimeStatus {
   update_state: string;
   /** The release is already downloaded, so installing it is a spawn, not a wait. */
   update_staged: boolean;
+  /** Bytes downloaded so far of an in-flight update download (0 when idle). */
+  update_download_bytes: number;
+  /** Total size of the update download from the release metadata (0 when idle). */
+  update_download_total: number;
   video: VideoSourceStatus;
   /** True while a compiled node-graph patch renders instead of the layer stack. */
   patch_active: boolean;

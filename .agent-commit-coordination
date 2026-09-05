@@ -180,3 +180,11 @@ behavior 68 passed, layout 80 passed.
 Release run 33712678617 green on tag v0.10.14 (= 5849d85, bump on top of the
 connect-QR interface-memory fix e51c72d). All four assets published; version
 files free again. Nothing further planned from this session.
+
+## empyrean-gate (new Fable session) — 2026-09-05
+Pushing ONE commit: update-download progress bar + HTTP-range resume. Tree was
+clean at session start; staging explicitly: src-tauri/src/{updater,protocol}.rs,
+src/{App.tsx,Settings.tsx,types.ts,styles.css}, tests/show-mode-updates.spec.ts,
+tests/fixtures/default-status.json (regenerated), README.md,
+plans/update-download-progress.md (new), this file. Local: cargo test 237,
+tsc, layout 80, behavior 70 (chromium+webkit). Not touching version files.

@@ -390,6 +390,13 @@ taking one between sets is a tap rather than a tap and a 40 MB wait. That does m
 release is pulled without being asked for; the staged copy sits beside the running binary
 and is cleaned up at the next startup.
 
+While a download is in flight, every surface shows its **progress** — a bar with byte
+counts in Settings → Updates, a percentage on the version chip and on the show-mode
+install button. And because venue internet drops mid-transfer, an interrupted download
+**resumes where it left off** (HTTP range request against the partial file) instead of
+starting the 40 MB over — across retries, across restarts, and across the next 6-hourly
+check.
+
 The app checks GitHub Releases (startup + every 6 h; toggle in
 Settings → Updates) and shows a lit version chip in the top bar when a newer release
 exists — click it (or use Settings) to update. Mid-show updates cost about one frame.

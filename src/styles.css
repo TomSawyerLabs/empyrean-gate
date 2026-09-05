@@ -375,6 +375,45 @@ main {
   font-size: 11px;
 }
 
+.show-update-bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(56, 209, 194, 0.18);
+}
+
+.show-update-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent2);
+  /* Status ticks at 2 Hz; the transition keeps the bar moving between them. */
+  transition: width 0.45s linear;
+}
+
+/* Update download progress in the Settings → Updates panel. */
+.update-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.update-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid rgba(56, 209, 194, 0.35);
+  background: rgba(56, 209, 194, 0.12);
+}
+
+.update-progress-track i {
+  display: block;
+  height: 100%;
+  background: var(--accent2);
+  transition: width 0.45s linear;
+}
+
 .show-exit,
 .show-report {
   display: flex;

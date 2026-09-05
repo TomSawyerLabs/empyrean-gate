@@ -688,6 +688,23 @@ function UpdatesPanel({ config }: { config: AppConfig }) {
           </button>
         )}
       </div>
+      {status && status.update_download_total > 0 && (
+        <div className="update-progress">
+          <div className="update-progress-track">
+            <i
+              style={{
+                width: `${Math.min(100, (status.update_download_bytes / status.update_download_total) * 100)}%`,
+              }}
+            />
+          </div>
+          <span className="hint">
+            Downloading v{status.update_available} —{" "}
+            {(status.update_download_bytes / 1e6).toFixed(1)} of{" "}
+            {(status.update_download_total / 1e6).toFixed(1)} MB. Interrupted downloads
+            resume where they left off.
+          </span>
+        </div>
+      )}
       <label className="toggle-row">
         <input
           type="checkbox"

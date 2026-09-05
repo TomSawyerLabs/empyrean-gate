@@ -841,6 +841,11 @@ pub struct RuntimeStatus {
     /// so installing it is a process spawn rather than a download. Lets the UI
     /// promise "Update now" instead of "Download and update".
     pub update_staged: bool,
+    /// Bytes downloaded so far of an in-flight update download (0 when idle).
+    pub update_download_bytes: u64,
+    /// Total size of the update download, from the release asset metadata
+    /// (0 when idle). Drives the progress bar and the resume guard.
+    pub update_download_total: u64,
     pub video: VideoSourceStatus,
     /// True while a compiled node-graph patch is rendering instead of the
     /// layer stack.

@@ -51,6 +51,8 @@
   "update_available": null,
   "update_state": "",
   "update_staged": false,
+  "update_download_bytes": 0,
+  "update_download_total": 0,
   "video": {
     "active": false,
     "owner_id": "",

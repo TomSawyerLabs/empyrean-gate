@@ -197,6 +197,18 @@ function DisconnectedOverlay({ disabled = false }: { disabled?: boolean }) {
   );
 }
 
+/// Percent of an in-flight update download, or null when nothing is
+/// downloading (0/0 is the updater's idle state).
+function downloadPct(
+  status: { update_download_bytes: number; update_download_total: number } | null | undefined,
+): number | null {
+  if (!status || status.update_download_total <= 0) return null;
+  return Math.min(
+    100,
+    Math.round((status.update_download_bytes / status.update_download_total) * 100),
+  );
+}
+
 /// The update controls that show mode gets, since it hides the top bar the
 /// version chip lives in. Renders nothing at all until there is an update to
 /// act on — the show surface is deliberately near-empty.
@@ -212,6 +224,7 @@ function ShowModeUpdate() {
 
   const auto = config.update.auto_install;
   const note = status?.update_state;
+  const pct = downloadPct(status);
   return (
     <div className="show-update">
       <button
@@ -222,12 +235,19 @@ function ShowModeUpdate() {
           client.send({ type: "install_update" });
         }}
       >
-        {busy || note === "handing over…"
-          ? `Updating to v${next}…`
-          : status?.update_staged
-            ? `⤓ Update to v${next} now`
-            : `⤓ Get v${next}`}
+        {pct !== null
+          ? `⤓ Downloading v${next}… ${pct}%`
+          : busy || note === "handing over…"
+            ? `Updating to v${next}…`
+            : status?.update_staged
+              ? `⤓ Update to v${next} now`
+              : `⤓ Get v${next}`}
       </button>
+      {pct !== null && (
+        <span className="show-update-bar">
+          <i style={{ width: `${pct}%` }} />
+        </span>
+      )}
       <label className="show-update-auto">
         <input
           type="checkbox"
@@ -259,6 +279,7 @@ function VersionChip() {
     return <span className="version-chip">v{status.version}</span>;
   }
 
+  const pct = downloadPct(status);
   if (next) {
     return (
       <button
@@ -269,7 +290,11 @@ function VersionChip() {
         }}
       >
         v{status.version} → v{next}
-        {busy || note ? ` · ${note || "updating…"}` : " · click to update"}
+        {pct !== null
+          ? ` · downloading ${pct}%`
+          : busy || note
+            ? ` · ${note || "updating…"}`
+            : " · click to update"}
       </button>
     );
   }
