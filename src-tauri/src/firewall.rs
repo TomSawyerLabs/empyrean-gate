@@ -18,11 +18,22 @@
 //!   update restarts can only land 09:00–15:00 — people are at the gate until
 //!   well past 5am. Manual (SmartActiveHoursState=0) so Windows can't drift
 //!   them back toward "overnight".
+//! - **Listen notifications off + block-rule cleanup**: the "Allow this app?"
+//!   dialog is program-triggered, so it pops for every new versioned exe even
+//!   with the port rule in place — and dismissing it plants program-scoped
+//!   BLOCK rules that override our port allow (seen live 2026-09-06: LAN
+//!   clients timed out while the allow rule looked fine). Disabling
+//!   NotifyOnListen means inbound is governed purely by rules — our port rule
+//!   admits LAN clients, everything else is silently dropped, which is what a
+//!   dedicated show machine wants. Any block rules a past dismissal already
+//!   planted for an empyrean-gate exe are deleted.
 //!
 //! Non-Windows platforms are no-ops.
 
-/// True when the port allow rule for `port` is missing (Windows only) — the UI
-/// shows an "authorize" banner then.
+/// True when the machine policy needs the Authorize click (Windows only) — the
+/// port allow rule is missing, a program-scoped block rule targets our exe, or
+/// listen notifications are still enabled (so a future update could get its
+/// dialog dismissed into a block rule). The UI shows the "authorize" banner.
 pub fn rule_missing(port: u16) -> bool {
     #[cfg(windows)]
     {
@@ -46,8 +57,21 @@ fn rule_exists_windows(port: u16) -> Option<bool> {
     // Query structured PowerShell objects instead of searching localized netsh
     // prose for the port digits (which could mistake 19520 for 9520 and ignored
     // direction, action, protocol, and remote-address scope).
+    //
+    // The allow rule alone is not enough: a dismissed "Allow this app?" dialog
+    // plants program-scoped BLOCK rules that override it (block beats allow),
+    // and as long as NotifyOnListen is on, the next self-update can be blocked
+    // the same way. All three conditions gate the same Authorize click.
+    let exe = std::env::current_exe()
+        .map(|p| p.to_string_lossy().replace('\'', "''"))
+        .unwrap_or_default();
     let command = format!(
-        "$rules = @(Get-NetFirewallRule -DisplayName '{name}' -ErrorAction SilentlyContinue | \
+        "if (Get-NetFirewallProfile | Where-Object {{ $_.NotifyOnListen -eq 'True' }}) {{ exit 1 }} \
+         $blocked = @(Get-NetFirewallApplicationFilter | \
+           Where-Object {{ $_.Program -eq '{exe}' }} | Get-NetFirewallRule | \
+           Where-Object {{ $_.Enabled -eq 'True' -and $_.Action -eq 'Block' }}); \
+         if ($blocked.Count -gt 0) {{ exit 1 }} \
+         $rules = @(Get-NetFirewallRule -DisplayName '{name}' -ErrorAction SilentlyContinue | \
          Where-Object {{ $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and \
          $_.Action -eq 'Allow' }}); \
          foreach ($rule in $rules) {{ \
@@ -95,6 +119,11 @@ pub fn authorize(port: u16) -> anyhow::Result<()> {
              reg add $wu /v SmartActiveHoursState /t REG_DWORD /d 0 /f | Out-Null\r\n\
              $eu = 'HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\EdgeUI'\r\n\
              reg add $eu /v AllowEdgeSwipe /t REG_DWORD /d 0 /f | Out-Null\r\n\
+             Get-NetFirewallApplicationFilter | \
+               Where-Object {{ $_.Program -like '*empyrean-gate*' }} | Get-NetFirewallRule | \
+               Where-Object {{ $_.Action -eq 'Block' }} | \
+               Remove-NetFirewallRule -ErrorAction SilentlyContinue\r\n\
+             netsh advfirewall set allprofiles settings inboundusernotification disable | Out-Null\r\n\
              exit $fw\r\n",
             name = rule_name(),
         );

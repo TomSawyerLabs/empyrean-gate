@@ -181,6 +181,16 @@ Release run 33712678617 green on tag v0.10.14 (= 5849d85, bump on top of the
 connect-QR interface-memory fix e51c72d). All four assets published; version
 files free again. Nothing further planned from this session.
 
+## empyrean-gate (Fable session) — 2026-09-06, firewall block-rule hardening
+Live incident: dismissed "Allow this app?" dialog on the show machine planted
+program-scoped BLOCK rules that overrode the port allow rule (LAN clients
+timed out; fixed live over SSH). One commit, staging only:
+src-tauri/src/firewall.rs (check also detects block rules + NotifyOnListen;
+authorize script deletes empyrean block rules + disables listen notifications),
+this file. No local Rust toolchain — rides on Checks; check command validated
+end-to-end against the live machine (exit 0) and this laptop (exit 1).
+Not touching version files.
+
 ## empyrean-gate (new Fable session) — 2026-09-05
 Pushing ONE commit: update-download progress bar + HTTP-range resume. Tree was
 clean at session start; staging explicitly: src-tauri/src/{updater,protocol}.rs,
