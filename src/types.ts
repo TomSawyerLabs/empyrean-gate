@@ -92,7 +92,7 @@ export type PerformanceAction =
   | { action: "remove_layer"; index: number }
   | { action: "move_layer"; from: number; to: number }
   | { action: "set_master"; brightness: number | null; speed: number | null }
-  | { action: "set_master_hue"; enabled: boolean | null; hue: number | null; amount: number | null; loose: boolean | null }
+  | { action: "set_master_hue"; enabled: boolean | null; hue: number | null; amount: number | null; loose: number | null }
   | { action: "trigger_effect"; effect: EffectCfg }
   | { action: "paint"; pen: PenKind; points: { angle: number; radius: number }[]; hue: number; saturation: number; brightness: number; size: number; intensity: number }
   | { action: "patch_activate"; id: string | null }
@@ -278,7 +278,8 @@ export interface RenderConfig {
   /** Pull strength 0..1. */
   master_hue_amount: number;
   /** Loose mask: far-off hues keep their identity as flourishes. */
-  master_hue_loose: boolean;
+  /** Flourish keep-amount 0..1 (0 = strict pull). Bool through v0.10.15. */
+  master_hue_loose: number;
   manual_transition_secs: number;
   manual_bpm: number | null;
   beat_time: "half" | "normal" | "double";

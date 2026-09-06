@@ -2,7 +2,7 @@
 // quick faders (or the active patch's exposed params). Built for touch (big
 // targets), works everywhere.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CENTERED_SHAPE, EFFECTS, GROW_MODES, growValue, SHAPES, type GrowMode } from "./effects";
 import { cloneDjLinkEffects, defaultDjLinkEffects } from "./djLinkEffects";
 import EffectPad from "./EffectPad";
@@ -117,6 +117,33 @@ function humanize(seconds: number): string {
   return `${(seconds / 86400).toFixed(1)} days`;
 }
 
+/** Pointer-gesture props for a mirrored slider (see useMirrored). Spread onto
+ *  the range input so the mirror knows a finger owns the thumb. */
+type MirrorDragProps = {
+  onPointerDown: () => void;
+  onPointerUp: () => void;
+  onPointerCancel: () => void;
+};
+
+/** Local mirror of a server-owned slider value: the thumb moves the instant
+ *  the finger does instead of waiting for the set_config round trip, and the
+ *  mirror re-syncs whenever the backend's value changes (a remote client, a
+ *  scene load, the autopilot). While a drag is in flight the mirror is the
+ *  truth — the echo of our own throttled send cannot yank the thumb back to a
+ *  100ms-old position mid-gesture. Same pattern as Live's LayerLevelRow. */
+function useMirrored(remote: number): [number, (value: number) => void, MirrorDragProps] {
+  const [local, setLocal] = useState(remote);
+  const dragging = useRef(false);
+  useEffect(() => {
+    if (!dragging.current) setLocal(remote);
+  }, [remote]);
+  return [local, setLocal, {
+    onPointerDown: () => (dragging.current = true),
+    onPointerUp: () => (dragging.current = false),
+    onPointerCancel: () => (dragging.current = false),
+  }];
+}
+
 /** The autopilot's time horizons, computed from the current config. */
 function autopilotForecast(
   enabledLayers: number,
@@ -145,19 +172,22 @@ export default function Control() {
     }
   });
 
-  // Local mirror of master sliders so they track remote changes when idle.
-  const [brightness, setBrightnessLocal] = useState(1);
-  const [speed, setSpeedLocal] = useState(1);
+  // Local mirrors of the sliders so they track remote changes when idle but
+  // answer only to the finger mid-drag.
+  const [brightness, setBrightnessLocal, brightnessDrag] = useMirrored(
+    config?.render.master_brightness ?? 1,
+  );
+  const [speed, setSpeedLocal, speedDrag] = useMirrored(config?.render.master_speed ?? 1);
+  const [walkSpeed, setWalkSpeedLocal, walkSpeedDrag] = useMirrored(
+    config?.render.walk_speed ?? 1,
+  );
+  const [walkDepth, setWalkDepthLocal, walkDepthDrag] = useMirrored(
+    config?.render.walk_depth ?? 1,
+  );
   const [growMode, setGrowMode] = useState<GrowMode>("static");
   const [quickEdit, setQuickEdit] = useState<QuickEditAnchor | null>(null);
   const [shapeEdit, setShapeEdit] = useState<ShapeEditAnchor | null>(null);
   const [shapeStyle, setShapeStyle] = useState<ShapeStyle>(loadShapeStyle);
-  useEffect(() => {
-    if (config) {
-      setBrightnessLocal(config.render.master_brightness);
-      setSpeedLocal(config.render.master_speed);
-    }
-  }, [config]);
 
   return (
     <div className="control-page">
@@ -215,6 +245,7 @@ export default function Control() {
             max={1}
             step={0.01}
             value={brightness}
+            {...brightnessDrag}
             onChange={(e) => {
               const v = Number(e.target.value);
               setBrightnessLocal(v);
@@ -231,6 +262,7 @@ export default function Control() {
             max={4}
             step={0.05}
             value={speed}
+            {...speedDrag}
             onChange={(e) => {
               const v = Number(e.target.value);
               setSpeedLocal(v);
@@ -290,8 +322,13 @@ export default function Control() {
             min={0.1}
             max={5}
             step={0.1}
-            value={config?.render.walk_speed ?? 1}
-            onChange={(e) => setRender({ walk_speed: Number(e.target.value) })}
+            value={walkSpeed}
+            {...walkSpeedDrag}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setWalkSpeedLocal(v);
+              setRender({ walk_speed: v });
+            }}
           />
         </label>
         <label className="slider-row">
@@ -301,8 +338,13 @@ export default function Control() {
             min={0}
             max={3}
             step={0.1}
-            value={config?.render.walk_depth ?? 1}
-            onChange={(e) => setRender({ walk_depth: Number(e.target.value) })}
+            value={walkDepth}
+            {...walkDepthDrag}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setWalkDepthLocal(v);
+              setRender({ walk_depth: v });
+            }}
           />
         </label>
         <p className="hint">
@@ -672,12 +714,23 @@ function ScenesPanel() {
   const { client, config, status } = useGate();
   const [capturing, setCapturing] = useState(false);
   const [stackName, setStackName] = useState("");
-  const [sceneSpeed, setSceneSpeedLocal] = useState(1);
+  const [sceneSpeed, setSceneSpeedLocal, sceneSpeedDrag] = useMirrored(
+    config?.render.master_speed ?? 1,
+  );
   const setSceneSpeed = useThrottled((speed: number) => client.setMaster({ speed }));
-
-  useEffect(() => {
-    if (config) setSceneSpeedLocal(config.render.master_speed);
-  }, [config?.render.master_speed]);
+  // Mirrored + throttled: this used to send a full set_config for every pixel
+  // of drag, and the thumb waited for each echo.
+  const [transitionSecs, setTransitionSecsLocal, transitionDrag] = useMirrored(
+    config?.render.manual_transition_secs ?? 0,
+  );
+  const setTransitionSecs = useThrottled((secs: number) => {
+    if (config) {
+      client.setConfig({
+        ...config,
+        render: { ...config.render, manual_transition_secs: secs },
+      });
+    }
+  });
 
   if (!config) return null;
 
@@ -765,13 +818,15 @@ function ScenesPanel() {
           <span>Used for manual scene, stack, and patch switches.</span>
         </div>
         <input type="range" min={0} max={10} step={0.25}
-          value={config.render.manual_transition_secs}
-          onChange={(event) => client.setConfig({
-            ...config,
-            render: { ...config.render, manual_transition_secs: Number(event.target.value) },
-          })}
+          value={transitionSecs}
+          {...transitionDrag}
+          onChange={(event) => {
+            const secs = Number(event.target.value);
+            setTransitionSecsLocal(secs);
+            setTransitionSecs(secs);
+          }}
         />
-        <output>{config.render.manual_transition_secs.toFixed(2)} s</output>
+        <output>{transitionSecs.toFixed(2)} s</output>
       </div>
       {config.saved_performances.length > 0 && (
         <div className="saved-stack-section">
@@ -832,6 +887,7 @@ function ScenesPanel() {
             max={2}
             step={0.05}
             value={sceneSpeed}
+            {...sceneSpeedDrag}
             onChange={(event) => {
               const value = Number(event.target.value);
               setSceneSpeedLocal(value);
@@ -985,6 +1041,10 @@ function BeatTapsPanel() {
   const commit = useThrottled((patch: Partial<NonNullable<typeof bt>>) => {
     if (config && bt) client.setConfig({ ...config, beat_taps: { ...bt, ...patch } });
   });
+  // Mirrors so the sliders track the finger, not the config round trip.
+  const [spin, setSpinLocal, spinDrag] = useMirrored(bt?.spin ?? 0);
+  const [radius, setRadiusLocal, radiusDrag] = useMirrored(bt?.radius ?? 0);
+  const [intensity, setIntensityLocal, intensityDrag] = useMirrored(bt?.intensity ?? 1);
   if (!config || !bt) return null;
   return (
     <section className="panel">
@@ -1020,11 +1080,16 @@ function BeatTapsPanel() {
           min={-0.25}
           max={0.25}
           step={0.005}
-          value={bt.spin}
-          onChange={(e) => commit({ spin: Number(e.target.value) })}
+          value={spin}
+          {...spinDrag}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            setSpinLocal(v);
+            commit({ spin: v });
+          }}
         />
         <span className="slider-val">
-          {bt.spin === 0 ? "0" : `${(1 / Math.abs(bt.spin)).toFixed(0)} beats/lap${bt.spin < 0 ? " ↺" : " ↻"}`}
+          {spin === 0 ? "0" : `${(1 / Math.abs(spin)).toFixed(0)} beats/lap${spin < 0 ? " ↺" : " ↻"}`}
         </span>
       </label>
       <label className="slider-row">
@@ -1034,10 +1099,15 @@ function BeatTapsPanel() {
           min={0}
           max={1}
           step={0.02}
-          value={bt.radius}
-          onChange={(e) => commit({ radius: Number(e.target.value) })}
+          value={radius}
+          {...radiusDrag}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            setRadiusLocal(v);
+            commit({ radius: v });
+          }}
         />
-        <span className="slider-val">{bt.radius.toFixed(2)}</span>
+        <span className="slider-val">{radius.toFixed(2)}</span>
       </label>
       <label className="slider-row">
         <span>Intensity</span>
@@ -1046,10 +1116,15 @@ function BeatTapsPanel() {
           min={0.1}
           max={1.5}
           step={0.05}
-          value={bt.intensity}
-          onChange={(e) => commit({ intensity: Number(e.target.value) })}
+          value={intensity}
+          {...intensityDrag}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            setIntensityLocal(v);
+            commit({ intensity: v });
+          }}
         />
-        <span className="slider-val">{bt.intensity.toFixed(2)}</span>
+        <span className="slider-val">{intensity.toFixed(2)}</span>
       </label>
       <label className="toggle-row">
         <input

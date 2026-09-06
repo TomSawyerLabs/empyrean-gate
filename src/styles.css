@@ -898,10 +898,12 @@ main {
 
 /* A show surface is poked with a finger in the dark. Pad the hit area out to
    ~26px without fattening the track — `background-clip` keeps the painted groove
-   inside the content box. */
+   inside the content box. Control is the same surface held at arm's length, so
+   its faders get the same target. */
 .live-side input[type="range"],
 .corner input[type="range"],
-.live-extras input[type="range"] {
+.live-extras input[type="range"],
+.control-page input[type="range"] {
   height: 6px;
   padding-block: 10px;
   background-clip: content-box;
@@ -909,9 +911,35 @@ main {
 
 .live-side input[type="range"]::-webkit-slider-thumb,
 .corner input[type="range"]::-webkit-slider-thumb,
-.live-extras input[type="range"]::-webkit-slider-thumb {
+.live-extras input[type="range"]::-webkit-slider-thumb,
+.control-page input[type="range"]::-webkit-slider-thumb {
   width: 20px;
   height: 20px;
+}
+
+/* A drag that starts on a fader is a fader gesture, never a scroll. Without
+   this a slightly-diagonal touch drag let the browser claim the gesture as a
+   pan and the thumb stopped dead under the finger. Columns and pages still
+   scroll from everywhere that isn't a slider. */
+.live-side input[type="range"],
+.corner input[type="range"],
+.live-extras input[type="range"],
+.control-page input[type="range"],
+.layer-quick-edit input[type="range"],
+.shape-quick-edit input[type="range"] {
+  touch-action: none;
+}
+
+/* Pressed feedback the moment the finger lands — there is no cursor on this
+   screen, so the thumb itself is the acknowledgement. The global thumb rule
+   already carries the transform transition. */
+.live-side input[type="range"]:active::-webkit-slider-thumb,
+.corner input[type="range"]:active::-webkit-slider-thumb,
+.live-extras input[type="range"]:active::-webkit-slider-thumb,
+.control-page input[type="range"]:active::-webkit-slider-thumb,
+.layer-quick-edit input[type="range"]:active::-webkit-slider-thumb,
+.shape-quick-edit input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.4);
 }
 
 /* Fail loudly, not silently. A slider narrower than this is not a control, it is
@@ -2938,13 +2966,6 @@ input[type="range"].hue-slider {
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.35);
   vertical-align: middle;
-}
-
-.hue-swatch.dim {
-  opacity: 0.45;
-  width: 14px;
-  height: 14px;
-  margin-left: auto;
 }
 
 .size-ctl .slider-row > span:not(.slider-val) {

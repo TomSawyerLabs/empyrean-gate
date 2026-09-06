@@ -171,6 +171,7 @@ export default function Live() {
   const [masterSpeed, setMasterSpeedLocal] = useState(1);
   const [masterHue, setMasterHueLocal] = useState(0);
   const [masterHueAmount, setMasterHueAmountLocal] = useState(1);
+  const [masterHueLoose, setMasterHueLooseLocal] = useState(0);
   const [shortcuts, setShortcuts] = useState(loadQuickSettings);
   const [shortcutEditorId, setShortcutEditorId] = useState<string | null>(null);
   const [editingShortcuts, setEditingShortcuts] = useState(false);
@@ -194,8 +195,16 @@ export default function Live() {
   );
   const setMasterSpeed = useThrottled((value: number) => client.setMaster({ speed: value }));
   const setMasterHue = useThrottled((value: number) => client.setMasterHue({ hue: value }));
+  // The Amount slider IS the on/off switch: 0 disables, anything above enables.
+  // The backend keeps its enabled flag (old configs still work); the UI just
+  // never shows a separate toggle for it.
   const setMasterHueAmount = useThrottled((value: number) =>
-    client.setMasterHue({ amount: value }),
+    client.setMasterHue({ enabled: value > 0, amount: value }),
+  );
+  // Flourishes is a plain 0..1 slider too: 0 = strict pull, up = far-off hues
+  // keep their identity. (A bool through v0.10.15; the shader always scaled.)
+  const setMasterHueLoose = useThrottled((value: number) =>
+    client.setMasterHue({ loose: value }),
   );
 
   useEffect(() => {
@@ -214,17 +223,28 @@ export default function Live() {
     saveShapeStyle(shapeStyle);
   }, [shapeStyle]);
 
+  // Config echoes must not yank a thumb out from under a finger: while a master
+  // fader is mid-drag the local mirrors are the truth, and the echo of our own
+  // throttled send re-syncs everything after release.
+  const masterDragging = useRef(false);
   useEffect(() => {
-    if (!config) return;
+    if (!config || masterDragging.current) return;
     setBrightnessLocal(config.render.master_brightness);
     setMasterSpeedLocal(config.render.master_speed);
     setMasterHueLocal(config.render.master_hue);
-    setMasterHueAmountLocal(config.render.master_hue_amount);
+    // Amount doubles as the on/off switch, so a disabled master hue reads 0
+    // regardless of the amount the backend remembered.
+    setMasterHueAmountLocal(
+      config.render.master_hue_enabled ? config.render.master_hue_amount : 0,
+    );
+    setMasterHueLooseLocal(config.render.master_hue_loose);
   }, [
     config?.render.master_brightness,
     config?.render.master_speed,
     config?.render.master_hue,
     config?.render.master_hue_amount,
+    config?.render.master_hue_enabled,
+    config?.render.master_hue_loose,
   ]);
 
   // Viewer-slot queue: >0 means the preview is rationed and we're waiting.
@@ -269,6 +289,16 @@ export default function Live() {
     if (!config) return;
     client.setConfig({ ...config, render: { ...config.render, ...patch } });
   };
+
+  // The BPM fader mirrors locally and throttles its sends like the master
+  // faders do: every nudge round-trips a full set_config, and a slider that
+  // waits for that echo stutters under a finger.
+  const [bpmLocal, setBpmLocal] = useState(120);
+  const bpmDragging = useRef(false);
+  useEffect(() => {
+    if (manualBpm !== null && !bpmDragging.current) setBpmLocal(manualBpm);
+  }, [manualBpm]);
+  const sendManualBpm = useThrottled((value: number) => setTempo({ manual_bpm: value }));
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -456,14 +486,30 @@ export default function Live() {
             min={10}
             max={240}
             step={1}
-            value={manualBpm}
-            onChange={(e) => setTempo({ manual_bpm: Number(e.target.value) })}
+            value={bpmLocal}
+            onPointerDown={() => (bpmDragging.current = true)}
+            onPointerUp={() => (bpmDragging.current = false)}
+            onPointerCancel={() => (bpmDragging.current = false)}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              setBpmLocal(value);
+              sendManualBpm(value);
+            }}
           />
-          <span>{manualBpm.toFixed(0)}</span>
+          <span>{bpmLocal.toFixed(0)}</span>
         </label>
       )}
     </div>
   ) : null;
+
+  // Every master fader owns the pointer for its whole gesture (see
+  // masterDragging above). Native range inputs already capture the pointer, so
+  // this only has to mark the gesture's start and end.
+  const masterDrag = {
+    onPointerDown: () => (masterDragging.current = true),
+    onPointerUp: () => (masterDragging.current = false),
+    onPointerCancel: () => (masterDragging.current = false),
+  };
 
   const master = admin && config ? (
     <div className="cluster master-ctl">
@@ -475,6 +521,7 @@ export default function Live() {
           max={1}
           step={0.01}
           value={brightness}
+          {...masterDrag}
           onChange={(event) => {
             const value = Number(event.target.value);
             setBrightnessLocal(value);
@@ -491,6 +538,7 @@ export default function Live() {
           max={4}
           step={0.05}
           value={masterSpeed}
+          {...masterDrag}
           onChange={(event) => {
             const value = Number(event.target.value);
             setMasterSpeedLocal(value);
@@ -499,67 +547,66 @@ export default function Live() {
         />
         <span className="slider-val">{masterSpeed.toFixed(2)}×</span>
       </label>
-      <label className="check-row master-hue-toggle">
+      {/* No on/off toggle for master hue: the Amount slider is the switch.
+          Anything above 0 pulls the composite toward the hue; 0 is off. */}
+      <label className="slider-row">
+        <span>Hue</span>
         <input
-          type="checkbox"
-          checked={config.render.master_hue_enabled}
-          onChange={(event) => client.setMasterHue({ enabled: event.target.checked })}
+          className="hue-slider"
+          type="range"
+          min={0}
+          max={1}
+          step={0.005}
+          value={masterHue}
+          {...masterDrag}
+          onChange={(event) => {
+            const value = Number(event.target.value);
+            setMasterHueLocal(value);
+            setMasterHue(value);
+          }}
         />
-        <span>Master hue</span>
-        {!config.render.master_hue_enabled && (
-          <span
-            className="hue-swatch dim"
-            style={{ background: hsvToHex(masterHue, 0.9, 1) }}
-          />
-        )}
+        <span className="slider-val">
+          <span className="hue-swatch" style={{ background: hsvToHex(masterHue, 0.9, 1) }} />
+        </span>
       </label>
-      {config.render.master_hue_enabled && (
-        <>
-          <label className="slider-row">
-            <span>Hue</span>
-            <input
-              className="hue-slider"
-              type="range"
-              min={0}
-              max={1}
-              step={0.005}
-              value={masterHue}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                setMasterHueLocal(value);
-                setMasterHue(value);
-              }}
-            />
-            <span className="slider-val">
-              <span className="hue-swatch" style={{ background: hsvToHex(masterHue, 0.9, 1) }} />
-            </span>
-          </label>
-          <label className="slider-row">
-            <span>Amount</span>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={masterHueAmount}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                setMasterHueAmountLocal(value);
-                setMasterHueAmount(value);
-              }}
-            />
-            <span className="slider-val">{masterHueAmount.toFixed(2)}</span>
-          </label>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={config.render.master_hue_loose}
-              onChange={(event) => client.setMasterHue({ loose: event.target.checked })}
-            />
-            <span>Loose — keep flourishes</span>
-          </label>
-        </>
-      )}
+      <label className="slider-row">
+        <span>Hue amount</span>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={masterHueAmount}
+          {...masterDrag}
+          onChange={(event) => {
+            const value = Number(event.target.value);
+            setMasterHueAmountLocal(value);
+            setMasterHueAmount(value);
+          }}
+        />
+        <span className="slider-val">
+          {masterHueAmount > 0 ? masterHueAmount.toFixed(2) : "off"}
+        </span>
+      </label>
+      <label className="slider-row">
+        <span>Flourishes</span>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={masterHueLoose}
+          {...masterDrag}
+          onChange={(event) => {
+            const value = Number(event.target.value);
+            setMasterHueLooseLocal(value);
+            setMasterHueLoose(value);
+          }}
+        />
+        <span className="slider-val">
+          {masterHueLoose > 0 ? masterHueLoose.toFixed(2) : "strict"}
+        </span>
+      </label>
     </div>
   ) : null;
 
@@ -750,19 +797,24 @@ export default function Live() {
 
   return (
     <div ref={pageRef} className={`live-page ${showMore ? "more-open" : ""}`}>
-      {/* Brush size sits with the brushes, not with the palette — and it evens
-          the two columns out, which is what keeps column B from overflowing on
-          an iPad in landscape. */}
+      {/* Column A is the drawing hand: every cluster that shapes what the next
+          touch on the array does — tool, figure, color, size — plus the effect
+          pads. The palette lives HERE, beside the pens it feeds, not across the
+          window from them. Tempo (the auto/manual beat-sync cluster) is show
+          control and sits in column B with the other show-control clusters.
+          The swap is span-neutral (A: 4+2+2+1+3, B: 2×5 — same totals as
+          before), which is what keeps column B from overflowing on an iPad in
+          landscape. */}
       <div className="live-side a">
         {pens}
         {shapes}
+        {colors}
         {sizeCtl}
         {effects}
-        {tempoCtl}
       </div>
       {canvas}
       <div className="live-side b">
-        {colors}
+        {tempoCtl}
         {/* `display: contents` wherever there is room, so these sit in the column
             grid like any other cluster. Where there isn't — a portrait tablet,
             a squarish window — they collapse into the "All controls" sheet

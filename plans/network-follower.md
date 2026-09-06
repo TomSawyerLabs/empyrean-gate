@@ -183,8 +183,10 @@ is silent, proceed — after a venue-wide power cut, someone must.
       keeps-local-facts contract, wire-shape parse of follower JSON, old-grant
       defaults, should_take_over conditions, hello-safe peer ids; cargo fmt;
       bun typecheck clean
-- [ ] 9. Layout/behavior gates (after the concurrent Live-tab UI session's
-      changes land), README done, commit
+- [x] 9. Layout gate (80 passed) + behavior gates (70 passed, chromium +
+      webkit) on the combined tree; committed as 964bb5d (feature) and
+      5e506ca (Live controls UI, same session's parallel work). Remaining
+      validation is the two-instance shakedown below.
 
 ## Findings / gotchas (exploration 2026-09-06)
 
