@@ -8,7 +8,7 @@ use crate::protocol::{ProDjLinkDebugEntry, ProDjLinkTrackInfo, RuntimeStatus, Se
 use parking_lot::{Mutex, RwLock};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::time::Instant;
 use tokio::sync::broadcast;
 
@@ -480,6 +480,32 @@ pub struct SharedState {
     /// (the engine owns the `SacnSender`). Mirrors `phases_transplanted`.
     pub sacn_resume_pending: AtomicBool,
     pub sacn_resume_sequence: AtomicU8,
+    /// Output suppressed because this instance is FOLLOWING a leader over the
+    /// network (see `peer`). Separate from `sacn_hold` on purpose: the takeover
+    /// machinery clears that one when the control port binds, and a follower
+    /// must stay quiet regardless. Cleared only by a backup takeover.
+    pub peer_hold: AtomicBool,
+    /// One-shot: skip the E1.31 terminate on the next sending→stopped edge.
+    /// Used when the shared-CID stream continues on ANOTHER machine (a backup
+    /// yielding to its returned leader, or a split-brain retreat) — a terminate
+    /// here would end the stream under the instance still driving it.
+    pub sacn_silent_stop: AtomicBool,
+    /// Millis-since-start when sacnwatch last heard OUR OWN CID from a
+    /// non-local IP (0 = never): someone else on the network is transmitting
+    /// our identity. For the leader this means its backup is covering an
+    /// outage; for a backup it means the leader is alive on the wire. The
+    /// split-brain guards on both ends read this.
+    pub own_cid_heard_ms: AtomicU64,
+    /// The IP transmitting our CID, for the split-brain banner.
+    pub own_cid_heard_from: Mutex<String>,
+    /// This instance is currently transmitting AS A BACKUP (its leader is
+    /// lost). Written by the peer task; read by the handover grant so a
+    /// self-update of the backup mid-failover hands the transmission on.
+    pub peer_transmitting: AtomicBool,
+    /// Leader side: connection serial of the granted backup peer (0 = none).
+    /// One backup at a time — a second `PeerFollow{backup:true}` is refused
+    /// while this is claimed.
+    pub peer_backup_conn: AtomicU64,
     /// Total frames rendered; the takeover waits for its adopted config to have
     /// flowed through the render+readback pipeline before committing.
     pub frames_rendered: AtomicU64,
@@ -575,6 +601,12 @@ impl SharedState {
             sacn_sequence: AtomicU8::new(0),
             sacn_resume_pending: AtomicBool::new(false),
             sacn_resume_sequence: AtomicU8::new(0),
+            peer_hold: AtomicBool::new(false),
+            sacn_silent_stop: AtomicBool::new(false),
+            own_cid_heard_ms: AtomicU64::new(0),
+            own_cid_heard_from: Mutex::new(String::new()),
+            peer_transmitting: AtomicBool::new(false),
+            peer_backup_conn: AtomicU64::new(0),
             frames_rendered: AtomicU64::new(0),
             update_check_requested: AtomicBool::new(false),
             update_install_requested: AtomicBool::new(false),
@@ -661,7 +693,9 @@ impl SharedState {
     /// this guard only ever applies to the manual path.) Never touches
     /// `output.enabled`. Stopping is always allowed; the engine crossfades out.
     pub fn set_game_mode(&self, game: Option<crate::game::GameKind>) -> Result<(), String> {
-        if game.is_some() && let Some(playlist) = self.config.read().running_show() {
+        if game.is_some()
+            && let Some(playlist) = self.config.read().running_show()
+        {
             return Err(format!(
                 "\"{}\" is running on the show scheduler. Stop the show before starting a game.",
                 playlist.name
@@ -767,6 +801,27 @@ impl SharedState {
 
     pub fn bump_config(&self) {
         self.config_epoch.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Record that OUR OWN CID was just heard on the wire from `from_ip` — a
+    /// machine that is not us transmitting our sACN identity (see sacnwatch).
+    pub fn note_own_cid_heard(&self, from_ip: &str) {
+        // max(1): 0 is the "never" sentinel and a sighting in the first
+        // millisecond of uptime must not read as one.
+        let now = (self.started.elapsed().as_millis() as u64).max(1);
+        self.own_cid_heard_ms.store(now, Ordering::SeqCst);
+        let mut from = self.own_cid_heard_from.lock();
+        if *from != from_ip {
+            *from = from_ip.to_string();
+        }
+    }
+
+    /// True when our own CID was heard from another machine within the last
+    /// `within_ms` milliseconds — i.e. the shared identity is live on the wire
+    /// right now, and transmitting ourselves would be a split brain.
+    pub fn own_cid_heard_within(&self, within_ms: u64) -> bool {
+        let at = self.own_cid_heard_ms.load(Ordering::SeqCst);
+        at != 0 && (self.started.elapsed().as_millis() as u64).saturating_sub(at) <= within_ms
     }
 
     pub fn request_render_transition(&self) {

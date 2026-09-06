@@ -109,6 +109,17 @@
     "blocked_by_show": null
   },
   "discovery_running": false,
+  "peer": {
+    "role": "",
+    "connected": false,
+    "armed": false,
+    "transmitting": false,
+    "peer_name": "",
+    "peer_version": "",
+    "last_seen_ms": 0.0,
+    "split_brain": false,
+    "detail": ""
+  },
   "diagnostics_path": "",
   "diagnostics_active": false,
   "diagnostics_error": ""

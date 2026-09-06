@@ -177,6 +177,61 @@ impl Default for ServerConfig {
     }
 }
 
+/// Networked redundancy: follow another instance on the LAN and optionally
+/// stand by as its automatic backup sACN transmitter. Both halves are opt-in —
+/// the leader must allow a backup, the follower must ask to be one — and the
+/// failover keeps the leader's persistent CID + sequence numbering so receivers
+/// see one continuous source (see plans/network-follower.md).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PeerConfig {
+    /// Leader to follow, as "host" or "host:port" (default port 9520).
+    /// Empty = standalone (the normal single-instance case).
+    pub follow: String,
+    /// The leader's join token, so this instance passes its hello gate.
+    pub follow_token: String,
+    /// Leader side: accept one backup peer and stream handover-critical state
+    /// (sequence numbers, layer phases) to it.
+    pub allow_backup: bool,
+    /// Follower side: arm as an automatic backup transmitter. Transmission on
+    /// leader loss requires BOTH this and the leader's `allow_backup`.
+    pub act_as_backup: bool,
+    /// How long leader pulses may go missing before the backup concludes the
+    /// leader is dead (control-link watchdog). The wire check — is the shared
+    /// CID still being transmitted? — is consulted independently of this.
+    pub watchdog_ms: u32,
+}
+
+impl Default for PeerConfig {
+    fn default() -> Self {
+        Self {
+            follow: String::new(),
+            follow_token: String::new(),
+            allow_backup: false,
+            act_as_backup: false,
+            watchdog_ms: 2000,
+        }
+    }
+}
+
+impl PeerConfig {
+    /// The leader's host and port ("host[:port]", default 9520).
+    pub fn leader_addr(&self) -> Option<(String, u16)> {
+        let follow = self.follow.trim();
+        if follow.is_empty() {
+            return None;
+        }
+        match follow.rsplit_once(':') {
+            // Only treat the suffix as a port when it parses as one — a bare
+            // IPv6 literal or a hostname with a colon-free tail stays whole.
+            Some((host, port)) if port.parse::<u16>().is_ok() => {
+                Some((host.to_string(), port.parse().unwrap()))
+            }
+            _ => Some((follow.to_string(), 9520)),
+        }
+    }
+}
+
 /// A client device that has connected at least once. Identified by the persistent
 /// id the client keeps in localStorage; named for humans; revocable.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -195,6 +250,38 @@ pub struct ClientRecord {
 /// Random URL-safe token used by join links and authenticated local handover.
 pub fn generate_token() -> String {
     uuid::Uuid::new_v4().simple().to_string()
+}
+
+/// The loose/flourishes mask was a bool through v0.10.15 and is a 0..1 amount
+/// since — the shader always consumed it as a float, so `true` was exactly
+/// 1.0. Configs, recordings, and wire messages written by older versions must
+/// keep parsing, hence bool-or-number here.
+pub fn de_loose_amount<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Loose {
+        Legacy(bool),
+        Amount(f32),
+    }
+    Ok(match Loose::deserialize(d)? {
+        Loose::Legacy(on) => f32::from(u8::from(on)),
+        Loose::Amount(a) => a,
+    })
+}
+
+pub fn de_loose_amount_opt<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<f32>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Loose {
+        Legacy(bool),
+        Amount(f32),
+    }
+    Ok(Option::<Loose>::deserialize(d)?.map(|l| match l {
+        Loose::Legacy(on) => f32::from(u8::from(on)),
+        Loose::Amount(a) => a,
+    }))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -421,9 +508,13 @@ pub struct RenderConfig {
     /// Pull strength 0..1. At 1 every saturated pixel lands on the target hue
     /// (value and saturation still vary, so patterns keep their shape).
     pub master_hue_amount: f32,
-    /// Loose mask: hues near the target snap to it, far-off hues keep most of
-    /// their identity — flourishes survive instead of being crushed.
-    pub master_hue_loose: bool,
+    /// Loose mask amount 0..1: hues near the target always snap to it; the
+    /// further this is turned up, the more far-off hues keep their identity —
+    /// flourishes survive instead of being crushed. 0 = strict pull.
+    /// Was a bool through v0.10.15 (the shader always consumed it as a float);
+    /// old configs and recordings still parse via `de_loose_amount`.
+    #[serde(deserialize_with = "de_loose_amount", default)]
+    pub master_hue_loose: f32,
     /// Duration of an operator-triggered scene, stack, or patch handoff. The
     /// outgoing and incoming renderers remain live for the whole crossfade.
     pub manual_transition_secs: f32,
@@ -489,7 +580,7 @@ impl Default for RenderConfig {
             master_hue_enabled: false,
             master_hue: 0.0,
             master_hue_amount: 1.0,
-            master_hue_loose: false,
+            master_hue_loose: 0.0,
             manual_transition_secs: 3.0,
             manual_bpm: None,
             beat_time: BeatTime::Normal,
@@ -679,14 +770,40 @@ pub struct PerformanceEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum PerformanceAction {
-    SetLook { stack: SavedStack, patch: Option<String> },
-    AddLayer { layer: LayerCfg },
-    UpdateLayer { index: usize, layer: LayerCfg },
-    RemoveLayer { index: usize },
-    MoveLayer { from: usize, to: usize },
-    SetMaster { brightness: Option<f32>, speed: Option<f32> },
-    SetMasterHue { enabled: Option<bool>, hue: Option<f32>, amount: Option<f32>, loose: Option<bool> },
-    TriggerEffect { effect: crate::layers::EffectCfg },
+    SetLook {
+        stack: SavedStack,
+        patch: Option<String>,
+    },
+    AddLayer {
+        layer: LayerCfg,
+    },
+    UpdateLayer {
+        index: usize,
+        layer: LayerCfg,
+    },
+    RemoveLayer {
+        index: usize,
+    },
+    MoveLayer {
+        from: usize,
+        to: usize,
+    },
+    SetMaster {
+        brightness: Option<f32>,
+        speed: Option<f32>,
+    },
+    SetMasterHue {
+        enabled: Option<bool>,
+        hue: Option<f32>,
+        amount: Option<f32>,
+        /// 0..1 since v0.10.16; recordings made when this was a bool replay
+        /// as 0/1 (see `de_loose_amount_opt`).
+        #[serde(deserialize_with = "de_loose_amount_opt", default)]
+        loose: Option<f32>,
+    },
+    TriggerEffect {
+        effect: crate::layers::EffectCfg,
+    },
     Paint {
         pen: crate::layers::PenKind,
         points: Vec<crate::layers::DabPoint>,
@@ -696,8 +813,14 @@ pub enum PerformanceAction {
         size: f32,
         intensity: f32,
     },
-    PatchActivate { id: Option<String> },
-    PatchParam { node: String, param: String, value: f32 },
+    PatchActivate {
+        id: Option<String>,
+    },
+    PatchParam {
+        node: String,
+        param: String,
+        value: f32,
+    },
 }
 
 /// A playlist entry that runs a game world instead of (strictly: on top of) a
@@ -813,6 +936,7 @@ pub struct AppConfig {
     pub geometry: GeometryConfig,
     pub output: OutputConfig,
     pub server: ServerConfig,
+    pub peer: PeerConfig,
     pub audio: AudioConfig,
     pub rhythm: RhythmConfig,
     pub render: RenderConfig,
@@ -864,6 +988,7 @@ impl Default for AppConfig {
             geometry: GeometryConfig::default(),
             output: OutputConfig::default(),
             server: ServerConfig::default(),
+            peer: PeerConfig::default(),
             audio: AudioConfig::default(),
             rhythm: RhythmConfig::default(),
             render: RenderConfig::default(),
@@ -902,8 +1027,7 @@ impl AppConfig {
         if self.output.pixels_per_universe == 0 || self.output.pixels_per_universe > 170 {
             return Err("pixels per universe must be between 1 and 170".into());
         }
-        if self.output.start_universe == 0
-            || self.output.start_universe as u32 > MAX_E131_UNIVERSE
+        if self.output.start_universe == 0 || self.output.start_universe as u32 > MAX_E131_UNIVERSE
         {
             return Err(format!(
                 "start universe must be between 1 and {MAX_E131_UNIVERSE}"
@@ -975,8 +1099,56 @@ impl AppConfig {
                 self.clients.len()
             ));
         }
+        if !self.peer.follow.trim().is_empty() {
+            if self.peer.allow_backup {
+                return Err(
+                    "an instance cannot both follow a leader and allow a backup of its own \
+                     — pick one role per instance"
+                        .into(),
+                );
+            }
+            if self.peer.follow.trim().chars().any(char::is_whitespace) {
+                return Err("the leader address must not contain spaces".into());
+            }
+        }
+        if self.peer.watchdog_ms < 500 {
+            return Err("the backup watchdog must be at least 500 ms".into());
+        }
         Ok(())
     }
+}
+
+/// Merge a peer instance's config into ours, adopting the SHOW — what the array
+/// does — while keeping every machine-local fact. Used in both directions of
+/// the leader/backup relationship: a follower mirroring its leader, and a
+/// returned leader reclaiming state from the backup that covered the outage.
+///
+/// Kept: `server` (own port/tokens — a remote snapshot has the admin token
+/// redacted anyway), `peer` (own role), `output.interface` (a NIC on another
+/// machine), `output.enabled` is adopted (a backup must mirror whether the show
+/// transmits at all), `audio` (device names don't exist on this machine),
+/// `rhythm` inputs ARE adopted (PRO DJ LINK is network-wide; a missing MIDI
+/// port degrades to the audio fallback, which is this app's normal behavior),
+/// `windows`/`autostart`/`update` (local machine policy), `clients` (own
+/// device list).
+pub fn adopt_show_config(local: &mut AppConfig, remote: AppConfig) {
+    let server = local.server.clone();
+    let peer = local.peer.clone();
+    let interface = local.output.interface.clone();
+    let audio = local.audio.clone();
+    let windows = local.windows.clone();
+    let update = local.update.clone();
+    let autostart = local.autostart;
+    let clients = local.clients.clone();
+    *local = remote;
+    local.server = server;
+    local.peer = peer;
+    local.output.interface = interface;
+    local.audio = audio;
+    local.windows = windows;
+    local.update = update;
+    local.autostart = autostart;
+    local.clients = clients;
 }
 
 /// A stack that looks good out of the box: deep noise base, harmonic rings riding
@@ -1068,7 +1240,10 @@ pub fn load() -> AppConfig {
             cfg
         }
         Err(e) if path.exists() => {
-            log::error!("config at {} is invalid ({e}); trying recovery files", path.display());
+            log::error!(
+                "config at {} is invalid ({e}); trying recovery files",
+                path.display()
+            );
             recovered = true;
             load_recovery(&tmp, &bak)
         }
@@ -1301,6 +1476,139 @@ mod tests {
     /// nobody runs, so it is regenerated from here rather than hand-maintained:
     /// `EMPYREAN_UPDATE_FIXTURES=1 cargo test fixture`.
     #[test]
+    fn peer_leader_addr_parses_host_and_port() {
+        let mut peer = PeerConfig::default();
+        assert_eq!(peer.leader_addr(), None, "empty = standalone");
+        peer.follow = "192.168.1.20".into();
+        assert_eq!(peer.leader_addr(), Some(("192.168.1.20".into(), 9520)));
+        peer.follow = "gate-backup:9600".into();
+        assert_eq!(peer.leader_addr(), Some(("gate-backup".into(), 9600)));
+        peer.follow = "  gate.local  ".into();
+        assert_eq!(peer.leader_addr(), Some(("gate.local".into(), 9520)));
+        // A suffix that is not a port stays part of the host.
+        peer.follow = "weird:name".into();
+        assert_eq!(peer.leader_addr(), Some(("weird:name".into(), 9520)));
+    }
+
+    #[test]
+    fn peer_roles_are_validated() {
+        let mut cfg = AppConfig::default();
+        cfg.peer.follow = "leader.local".into();
+        cfg.peer.act_as_backup = true;
+        assert!(cfg.validate().is_ok(), "a plain backup follower is fine");
+
+        cfg.peer.allow_backup = true;
+        let err = cfg.validate().unwrap_err();
+        assert!(
+            err.contains("one role"),
+            "an instance must not be leader and follower at once: {err}"
+        );
+
+        cfg.peer.allow_backup = false;
+        cfg.peer.watchdog_ms = 100;
+        assert!(
+            cfg.validate().unwrap_err().contains("watchdog"),
+            "a hair-trigger watchdog is a split brain waiting to happen"
+        );
+    }
+
+    /// The show crosses machines; machine-local facts must not. This is the
+    /// contract both directions of the leader/backup relationship rely on.
+    #[test]
+    fn adopting_a_show_keeps_machine_local_facts() {
+        let mut local = AppConfig::default();
+        local.server.port = 9600;
+        local.server.join_token = "local-join".into();
+        local.peer.follow = "leader.local".into();
+        local.peer.act_as_backup = true;
+        local.output.interface = "192.168.7.2".into();
+        local.autostart = true;
+        local.clients.push(ClientRecord {
+            id: "ipad".into(),
+            name: "Booth iPad".into(),
+            revoked: false,
+            admin: true,
+        });
+
+        let mut remote = AppConfig::default();
+        remote.server.port = 9520;
+        remote.server.join_token = String::new(); // redacted-ish snapshot
+        remote.output.interface = "10.0.0.5".into(); // the LEADER's NIC
+        remote.output.cid = "8ea9ffbc-32bf-4bfd-9f66-01c1a4a06b6d".into();
+        remote.output.enabled = true;
+        remote.output.priority = 120;
+        remote.render.master_brightness = 0.4;
+        remote.active_patch = Some("patch-7".into());
+        remote.layers.clear();
+
+        adopt_show_config(&mut local, remote);
+
+        // The show came across…
+        assert_eq!(local.output.cid, "8ea9ffbc-32bf-4bfd-9f66-01c1a4a06b6d");
+        assert!(local.output.enabled);
+        assert_eq!(local.output.priority, 120);
+        assert_eq!(local.render.master_brightness, 0.4);
+        assert_eq!(local.active_patch.as_deref(), Some("patch-7"));
+        assert!(local.layers.is_empty());
+
+        // …and the machine stayed itself.
+        assert_eq!(local.server.port, 9600);
+        assert_eq!(local.server.join_token, "local-join");
+        assert_eq!(local.peer.follow, "leader.local");
+        assert!(local.peer.act_as_backup);
+        assert_eq!(local.output.interface, "192.168.7.2");
+        assert!(local.autostart);
+        assert_eq!(local.clients.len(), 1, "own device list is kept");
+    }
+
+    /// The flourishes mask was a bool through v0.10.15; configs, saved
+    /// performances, and stale client bundles still say true/false.
+    #[test]
+    fn legacy_loose_bools_read_as_full_or_zero_amount() {
+        let cfg: AppConfig =
+            serde_json::from_str(r#"{"render":{"master_hue_loose":true}}"#).unwrap();
+        assert_eq!(cfg.render.master_hue_loose, 1.0);
+        let cfg: AppConfig =
+            serde_json::from_str(r#"{"render":{"master_hue_loose":false}}"#).unwrap();
+        assert_eq!(cfg.render.master_hue_loose, 0.0);
+        let cfg: AppConfig =
+            serde_json::from_str(r#"{"render":{"master_hue_loose":0.35}}"#).unwrap();
+        assert_eq!(cfg.render.master_hue_loose, 0.35);
+
+        // A recorded performance event from an old capture replays too.
+        let ev: PerformanceAction = serde_json::from_str(
+            r#"{"action":"set_master_hue","enabled":true,"hue":0.1,"amount":0.5,"loose":true}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            ev,
+            PerformanceAction::SetMasterHue {
+                loose: Some(l),
+                ..
+            } if l == 1.0
+        ));
+    }
+
+    #[test]
+    fn peer_config_round_trips_and_tolerates_old_files() {
+        // An old config.json with no peer section deserializes to defaults.
+        let old: AppConfig = serde_json::from_str("{}").expect("empty config parses");
+        assert_eq!(old.peer.follow, "");
+        assert!(!old.peer.allow_backup && !old.peer.act_as_backup);
+        assert_eq!(old.peer.watchdog_ms, 2000);
+
+        let mut cfg = AppConfig::default();
+        cfg.peer.follow = "leader:9521".into();
+        cfg.peer.follow_token = "tok".into();
+        cfg.peer.act_as_backup = true;
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: AppConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.peer.follow, "leader:9521");
+        assert_eq!(back.peer.follow_token, "tok");
+        assert!(back.peer.act_as_backup);
+    }
+
+    #[test]
     fn default_config_fixture_is_current() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
@@ -1315,7 +1623,8 @@ mod tests {
         let current =
             serde_json::to_string_pretty(&AppConfig::default()).expect("serialize default config");
         if std::env::var("EMPYREAN_UPDATE_FIXTURES").is_ok() {
-            std::fs::create_dir_all(path.parent().expect("fixture dir")).expect("create fixture dir");
+            std::fs::create_dir_all(path.parent().expect("fixture dir"))
+                .expect("create fixture dir");
             std::fs::write(&path, format!("{current}\n")).expect("write fixture");
             return;
         }
@@ -1347,7 +1656,8 @@ mod tests {
         let current = serde_json::to_string_pretty(&crate::protocol::RuntimeStatus::default())
             .expect("serialize default status");
         if std::env::var("EMPYREAN_UPDATE_FIXTURES").is_ok() {
-            std::fs::create_dir_all(path.parent().expect("fixture dir")).expect("create fixture dir");
+            std::fs::create_dir_all(path.parent().expect("fixture dir"))
+                .expect("create fixture dir");
             std::fs::write(&path, format!("{current}\n")).expect("write fixture");
             return;
         }
@@ -1410,7 +1720,10 @@ mod tests {
         let mut custom = AppConfig::default();
         custom.rhythm.pro_dj_link_effects.loop_wrap[0].kind = crate::layers::EffectKind::Moon;
         let value = serde_json::to_value(custom).unwrap();
-        assert_eq!(value["rhythm"]["pro_dj_link_effects"]["loop_wrap"][0]["kind"], "moon");
+        assert_eq!(
+            value["rhythm"]["pro_dj_link_effects"]["loop_wrap"][0]["kind"],
+            "moon"
+        );
     }
 
     #[test]
@@ -1516,7 +1829,10 @@ mod tests {
             .performance
             .as_ref()
             .expect("performance cue");
-        assert_eq!(restored_performance.initial_patch.as_deref(), Some("patch-a"));
+        assert_eq!(
+            restored_performance.initial_patch.as_deref(),
+            Some("patch-a")
+        );
         assert_eq!(restored_performance.events.len(), 1);
         assert!(matches!(
             restored_performance.events[0].action,

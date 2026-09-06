@@ -4,8 +4,8 @@
 
 use crate::config::AppConfig;
 use crate::layers::{DabPoint, EffectCfg, LayerCfg, PenKind};
-use crate::patch::store::PatchSummary;
 use crate::patch::PatchDoc;
+use crate::patch::store::PatchSummary;
 use serde::{Deserialize, Serialize};
 
 /// Binary preview frame layout (little endian):
@@ -70,8 +70,10 @@ pub enum ClientMsg {
         hue: Option<f32>,
         #[serde(default)]
         amount: Option<f32>,
-        #[serde(default)]
-        loose: Option<bool>,
+        /// Flourish keep-amount 0..1 (bool through v0.10.15; stale client
+        /// bundles still send true/false, accepted as 1/0).
+        #[serde(default, deserialize_with = "crate::config::de_loose_amount_opt")]
+        loose: Option<f32>,
     },
     /// Atomically hand rendering back to the classic layer stack and load it.
     /// Unlike a full config write, this cannot be hidden by an active patch.
@@ -317,6 +319,35 @@ pub enum ClientMsg {
     SetLaunchAtStartup {
         enabled: bool,
     },
+    /// A peer backend (a follower/backup instance, not a UI) announcing itself
+    /// right after hello. `backup: true` asks to stand by as the automatic
+    /// backup transmitter, which the leader grants only when its own
+    /// `peer.allow_backup` is on (and at most one at a time). The reply is
+    /// `ServerMsg::PeerWelcome`. A browser can never become a peer by accident:
+    /// this is an explicit upgrade with its own gate.
+    PeerFollow {
+        #[serde(default)]
+        backup: bool,
+        #[serde(default)]
+        version: String,
+    },
+    /// Periodic health report from a connected peer backend. `transmitting`
+    /// after an outage is what triggers the leader's reclaim handshake.
+    PeerStatus {
+        #[serde(default)]
+        armed: bool,
+        #[serde(default)]
+        transmitting: bool,
+    },
+    /// The peer's reply to `ServerMsg::PeerReclaim`: its running state, as a
+    /// handover grant. With `commit: true` the peer has quiesced its sACN
+    /// output (silently — the stream continues on the leader) and the grant's
+    /// sequence number is provably the last it will ever send.
+    PeerGrant {
+        grant: Box<HandoverGrant>,
+        #[serde(default)]
+        commit: bool,
+    },
     /// Phone orientation / motion, mapped onto the global control bus.
     Imu {
         /// Compass-ish heading in radians.
@@ -441,6 +472,29 @@ pub enum ServerMsg {
     Discovery {
         result: Box<crate::discovery::DiscoveryResult>,
     },
+    /// Reply to `ClientMsg::PeerFollow`. `backup` says whether the backup role
+    /// was actually granted (the leader's opt-in, one backup at a time).
+    PeerWelcome {
+        backup: bool,
+        version: String,
+    },
+    /// Leader → peer heartbeat (~4 Hz), sent only on peer connections: liveness
+    /// plus the handover-critical runtime state, so a takeover after leader
+    /// death continues the stream from a baseline at most a beat stale.
+    PeerPulse {
+        seq: u64,
+        sacn_sequence: u8,
+        /// Whether the leader is actually putting frames on the wire.
+        transmitting: bool,
+        layer_phases: Vec<f64>,
+    },
+    /// Leader asking a transmitting backup for the show back — the network
+    /// mirror of the local two-phase takeover. `commit: false` requests a
+    /// side-effect-free state snapshot (the backup keeps transmitting);
+    /// `commit: true` asks it to quiesce and hand over the final sequence.
+    PeerReclaim {
+        commit: bool,
+    },
 }
 
 /// Everything a freshly-started backend needs to take over from this one with
@@ -462,6 +516,13 @@ pub struct HandoverGrant {
     /// fresh rather than continuing from a number it invented.
     #[serde(default)]
     pub sacn_sequence: Option<u8>,
+    /// True when the granting instance was transmitting AS A BACKUP (its leader
+    /// lost). A successor that is itself configured as a follower must resume
+    /// that transmission instead of standing by — otherwise a self-update of
+    /// the backup mid-failover would go dark. Defaults false for grants from
+    /// older binaries.
+    #[serde(default)]
+    pub backup_transmitting: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -756,6 +817,32 @@ pub struct SacnPeer {
     pub ties: bool,
 }
 
+/// Networked redundancy status, mirrored to every client of BOTH instances so
+/// the leader/backup relationship is visible wherever the operator looks.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct PeerStatusInfo {
+    /// "off" (standalone), "leader" (allows a backup), or "follower".
+    pub role: String,
+    /// The control link to the other end is up.
+    pub connected: bool,
+    /// Backup transmission is armed: both ends opted in and state is adopted.
+    pub armed: bool,
+    /// This instance is transmitting as the backup — the leader was lost.
+    pub transmitting: bool,
+    /// The other end: the leader's address (follower role) or the backup's
+    /// device name (leader role).
+    pub peer_name: String,
+    pub peer_version: String,
+    /// Milliseconds since the other end was last heard from; -1 = never.
+    pub last_seen_ms: f32,
+    /// Our shared CID is on the wire from another machine while we also want
+    /// to transmit — the split-brain hazard. Output is suppressed and this is
+    /// bannered until it clears.
+    pub split_brain: bool,
+    /// One-line human summary of the link state, shown in Settings and banners.
+    pub detail: String,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeStatus {
     /// Set when Vulkan init failed — the UI shows this prominently. No fallbacks.
@@ -861,6 +948,8 @@ pub struct RuntimeStatus {
     pub game: GameModeStatus,
     /// True while a controller scan is in flight, so the Scan button can say so.
     pub discovery_running: bool,
+    /// Leader/follower/backup relationship (see `PeerStatusInfo`).
+    pub peer: PeerStatusInfo,
     /// Current bounded persistent log and whether it could be opened.
     pub diagnostics_path: String,
     pub diagnostics_active: bool,
@@ -873,10 +962,8 @@ mod startup_tests {
 
     #[test]
     fn launch_at_startup_message_is_explicitly_typed() {
-        let message: ClientMsg = serde_json::from_str(
-            r#"{"type":"set_launch_at_startup","enabled":true}"#,
-        )
-        .unwrap();
+        let message: ClientMsg =
+            serde_json::from_str(r#"{"type":"set_launch_at_startup","enabled":true}"#).unwrap();
         assert!(matches!(
             message,
             ClientMsg::SetLaunchAtStartup { enabled: true }
@@ -907,6 +994,63 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// The follower hand-builds these frames as JSON (`peer.rs`); this pins
+    /// the leader-side parse against exactly that wire shape.
+    #[test]
+    fn peer_messages_parse_from_the_follower_wire_shape() {
+        let m: ClientMsg =
+            serde_json::from_str(r#"{"type":"peer_follow","backup":true,"version":"0.10.15"}"#)
+                .unwrap();
+        assert!(
+            matches!(m, ClientMsg::PeerFollow { backup: true, ref version } if version == "0.10.15")
+        );
+
+        let m: ClientMsg =
+            serde_json::from_str(r#"{"type":"peer_status","armed":true,"transmitting":false}"#)
+                .unwrap();
+        assert!(matches!(
+            m,
+            ClientMsg::PeerStatus {
+                armed: true,
+                transmitting: false
+            }
+        ));
+
+        // A grant built by serializing HandoverGrant on the follower must
+        // parse on the leader — the two ends share one struct on purpose.
+        let grant = HandoverGrant {
+            config: crate::config::AppConfig::default(),
+            layer_phases: vec![0.25, 1.5],
+            sacn_sequence: Some(200),
+            backup_transmitting: true,
+        };
+        let frame = serde_json::json!({ "type": "peer_grant", "grant": grant, "commit": true });
+        let m: ClientMsg = serde_json::from_value(frame).unwrap();
+        let ClientMsg::PeerGrant {
+            grant,
+            commit: true,
+        } = m
+        else {
+            panic!("expected a committed peer grant");
+        };
+        assert_eq!(grant.layer_phases, vec![0.25, 1.5]);
+        assert_eq!(grant.sacn_sequence, Some(200));
+        assert!(grant.backup_transmitting);
+    }
+
+    /// Grants from binaries that predate the backup field must still parse —
+    /// same rule as `sacn_sequence`, one version further on.
+    #[test]
+    fn old_handover_grants_default_the_backup_field() {
+        let grant: HandoverGrant = serde_json::from_value(serde_json::json!({
+            "config": crate::config::AppConfig::default(),
+            "layer_phases": [],
+        }))
+        .unwrap();
+        assert_eq!(grant.sacn_sequence, None);
+        assert!(!grant.backup_transmitting);
     }
 
     #[test]

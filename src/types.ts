@@ -199,6 +199,21 @@ export interface ServerConfig {
   require_token: boolean;
 }
 
+/** Networked redundancy: follow a leader instance and optionally stand by as
+ *  its automatic backup sACN transmitter (mirrors src-tauri PeerConfig). */
+export interface PeerConfig {
+  /** Leader to follow, "host" or "host:port" (default port 9520). Empty = standalone. */
+  follow: string;
+  /** The leader's join token, so this instance passes its hello gate. */
+  follow_token: string;
+  /** Leader side: accept one backup peer and stream handover state to it. */
+  allow_backup: boolean;
+  /** Follower side: arm as the automatic backup transmitter. */
+  act_as_backup: boolean;
+  /** Control-link watchdog before a takeover (ms). */
+  watchdog_ms: number;
+}
+
 export interface ClientRecord {
   id: string;
   name: string;
@@ -333,6 +348,7 @@ export interface AppConfig {
   geometry: GeometryConfig;
   output: OutputConfig;
   server: ServerConfig;
+  peer: PeerConfig;
   audio: AudioConfig;
   rhythm: RhythmConfig;
   render: RenderConfig;
@@ -579,9 +595,31 @@ export interface RuntimeStatus {
   game: GameModeStatus;
   /** True while a controller scan is in flight. */
   discovery_running: boolean;
+  /** Leader/follower/backup relationship (both roles publish it). */
+  peer: PeerStatusInfo;
   diagnostics_path: string;
   diagnostics_active: boolean;
   diagnostics_error: string;
+}
+
+/** Networked redundancy status (mirrors src-tauri PeerStatusInfo). */
+export interface PeerStatusInfo {
+  /** "off" (standalone) | "leader" | "follower". Empty before first publish. */
+  role: string;
+  connected: boolean;
+  /** Backup transmission armed: both ends opted in. */
+  armed: boolean;
+  /** This instance is transmitting as the backup — the leader was lost. */
+  transmitting: boolean;
+  /** The other end: leader address (follower) or backup device name (leader). */
+  peer_name: string;
+  peer_version: string;
+  /** Milliseconds since the other end was heard from; -1 = never. */
+  last_seen_ms: number;
+  /** Our shared sACN identity is on the wire from another machine. */
+  split_brain: boolean;
+  /** One-line human summary for Settings and banners. */
+  detail: string;
 }
 
 // --- hardware test mode (mirrors src-tauri/src/testmode.rs) ---

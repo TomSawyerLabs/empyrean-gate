@@ -30,8 +30,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use crate::geometry;
@@ -207,6 +207,23 @@ pub fn spawn(state: Arc<SharedState>) {
         .expect("spawn sacn-watch thread");
 }
 
+/// Every IPv4 address this machine answers on (including loopback), so packets
+/// we sent ourselves are recognizable when multicast hands them back.
+fn local_ipv4_addrs() -> BTreeSet<Ipv4Addr> {
+    let mut addrs: BTreeSet<Ipv4Addr> = [Ipv4Addr::LOCALHOST].into();
+    match local_ip_address::list_afinet_netifas() {
+        Ok(ifas) => {
+            for (_, ip) in ifas {
+                if let std::net::IpAddr::V4(v4) = ip {
+                    addrs.insert(v4);
+                }
+            }
+        }
+        Err(e) => log::warn!("sACN watch: cannot enumerate local addresses: {e}"),
+    }
+    addrs
+}
+
 /// Bind the listen socket. Address reuse is mandatory: our own sender, sACNView,
 /// and a second instance mid-takeover all legitimately want this port.
 fn listen_socket(interface: Ipv4Addr) -> std::io::Result<UdpSocket> {
@@ -226,6 +243,7 @@ fn run(state: Arc<SharedState>) {
     let mut key = (Ipv4Addr::UNSPECIFIED, Vec::<u16>::new());
     let mut ours: BTreeSet<u16> = BTreeSet::new();
     let mut our_cid = String::new();
+    let mut local_ips: BTreeSet<Ipv4Addr> = BTreeSet::new();
     let mut our_priority = 100u8;
     let mut watched = 0u16;
     let mut error: Option<String> = None;
@@ -242,7 +260,11 @@ fn run(state: Arc<SharedState>) {
         if current_epoch != epoch {
             epoch = current_epoch;
             let cfg = state.config.read();
-            let interface: Ipv4Addr = cfg.output.interface.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
+            let interface: Ipv4Addr = cfg
+                .output
+                .interface
+                .parse()
+                .unwrap_or(Ipv4Addr::UNSPECIFIED);
             let universes = geometry::universe_list(&cfg.geometry, &cfg.output);
             our_cid = uuid::Uuid::parse_str(&cfg.output.cid)
                 .map(|u| u.to_string())
@@ -250,6 +272,9 @@ fn run(state: Arc<SharedState>) {
             our_priority = cfg.output.priority;
             let next_key = (interface, universes.clone());
             drop(cfg);
+            // Our own addresses, so a multicast loopback of our own packets is
+            // never mistaken for another machine transmitting our CID.
+            local_ips = local_ipv4_addrs();
 
             if next_key != key || socket.is_none() {
                 key = next_key;
@@ -259,10 +284,9 @@ fn run(state: Arc<SharedState>) {
                     Ok(s) => {
                         let mut joined = 0u16;
                         let mut failures = Vec::new();
-                        if let Err(e) = s.join_multicast_v4(
-                            &multicast_group(DISCOVERY_UNIVERSE),
-                            &interface,
-                        ) {
+                        if let Err(e) =
+                            s.join_multicast_v4(&multicast_group(DISCOVERY_UNIVERSE), &interface)
+                        {
                             failures.push(format!("universe discovery: {e}"));
                         }
                         for universe in universes.iter().take(MAX_DATA_GROUPS) {
@@ -278,8 +302,9 @@ fn run(state: Arc<SharedState>) {
                             }
                         }
                         watched = joined;
-                        error = (!failures.is_empty())
-                            .then(|| format!("cannot watch some universes ({})", failures.join("; ")));
+                        error = (!failures.is_empty()).then(|| {
+                            format!("cannot watch some universes ({})", failures.join("; "))
+                        });
                         if let Some(e) = &error {
                             log::warn!("sACN watch: {e}");
                         } else {
@@ -324,7 +349,14 @@ fn run(state: Arc<SharedState>) {
             let data = &buf[..n];
             if let Some(p) = parse_data(data) {
                 if p.cid == our_cid {
-                    continue; // multicast loops back; we are not our own rival
+                    // Multicast loops back; we are not our own rival. But our
+                    // CID arriving from ANOTHER machine is the shared identity
+                    // of the leader/backup pair live on the wire — the
+                    // split-brain guards on both ends read this timestamp.
+                    if !local_ips.contains(from.ip()) {
+                        state.note_own_cid_heard(&from.ip().to_string());
+                    }
+                    continue;
                 }
                 let peer = peers.entry(p.cid).or_default();
                 peer.from_ip = from.ip().to_string();
@@ -348,6 +380,9 @@ fn run(state: Arc<SharedState>) {
                 peer.last_seen = Some(Instant::now());
             } else if let Some((cid, name, universes)) = parse_discovery(data) {
                 if cid == our_cid {
+                    if !local_ips.contains(from.ip()) {
+                        state.note_own_cid_heard(&from.ip().to_string());
+                    }
                     continue;
                 }
                 let peer = peers.entry(cid).or_default();

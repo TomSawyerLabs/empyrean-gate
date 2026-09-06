@@ -33,6 +33,13 @@
     "admin_token": "",
     "require_token": true
   },
+  "peer": {
+    "follow": "",
+    "follow_token": "",
+    "allow_backup": false,
+    "act_as_backup": false,
+    "watchdog_ms": 2000
+  },
   "audio": {
     "sources": [
       {
@@ -63,7 +70,7 @@
     "master_hue_enabled": false,
     "master_hue": 0.0,
     "master_hue_amount": 1.0,
-    "master_hue_loose": false,
+    "master_hue_loose": 0.0,
     "manual_transition_secs": 3.0,
     "manual_bpm": null,
     "beat_time": "normal",

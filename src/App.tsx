@@ -873,6 +873,44 @@ export default function App() {
         </div>
       )}
       <SacnContentionBanner />
+      {/* Redundancy states are shown like test mode: on every tab, every
+          device, because a backup silently carrying the show (or a split
+          brain being averted) is exactly what an operator must not miss. */}
+      {status?.peer?.transmitting && (
+        <div className="banner error">
+          <strong>BACKUP TRANSMITTING</strong> — the leader at{" "}
+          {status.peer.peer_name || "the configured address"} is unreachable; this instance is
+          carrying the show. It hands back automatically when the leader returns.
+        </div>
+      )}
+      {status?.peer?.split_brain && !status?.peer?.transmitting && (
+        <div className="banner error">
+          <strong>Redundancy conflict:</strong> another machine is transmitting this instance's
+          sACN identity, so output here is suppressed. {status.peer.detail}
+        </div>
+      )}
+      {status?.peer?.role === "follower" &&
+        !status?.peer?.transmitting &&
+        !status?.peer?.split_brain && (
+          <div className="banner peer-banner">
+            <span className="peer-dot" />
+            <strong>FOLLOWING</strong>
+            <span className="testmode-summary">
+              {status.peer.peer_name}
+              {status.peer.armed ? " — armed as backup transmitter" : ""}
+              {!status.peer.connected ? " — leader unreachable" : ""}
+            </span>
+          </div>
+        )}
+      {status?.peer?.role === "leader" &&
+        status?.peer?.peer_name !== "" &&
+        !status?.peer?.connected && (
+          <div className="banner warn">
+            <strong>Backup lost:</strong> the standby instance
+            {status.peer.peer_name ? ` (${status.peer.peer_name})` : ""} is no longer connected —
+            the show currently has no automatic failover.
+          </div>
+        )}
       {status?.gpu_error && (
         <div className="banner error">
           <strong>GPU error:</strong> {status.gpu_error}

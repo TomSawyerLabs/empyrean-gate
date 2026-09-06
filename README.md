@@ -218,6 +218,24 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   restarting at zero would land in the window receivers discard as out-of-order and
   freeze the rig on its last look. Deploying a new build mid-show is just "start the
   new binary".
+- **Network follower + automatic backup transmitter (opt-in both ends)**: a second
+  Gate machine can point Settings → Redundancy at the show machine and become a
+  **follower** — it mirrors the leader's show over the same WS protocol every UI
+  speaks (config, layer phases, the active patch document), renders it on its own
+  GPU, and keeps its own sACN silent. Machine-local settings (NIC, audio devices,
+  tokens) stay local. With "act as backup" on the follower AND "allow a backup" on
+  the leader, losing the leader promotes the follower: after the control-link
+  watchdog expires *and* the leader's stream has gone silent on the wire, the
+  backup continues transmission under the same persistent CID with the sequence
+  numbering carried on — to the receivers it is the same source, no source-loss
+  hold, no merge-table churn. A leader that is alive-but-partitioned keeps
+  transmitting and is never preempted (the backup hears its packets; honest limit:
+  on a unicast-only patch the wire check hears nothing, so only the watchdog
+  decides). When the leader returns it **reclaims deliberately** — the two-phase
+  takeover handshake run over the peer link, never a fight: the backup yields
+  without E1.31 termination and goes back to standing by. Both machines banner the
+  whole time (FOLLOWING / BACKUP TRANSMITTING / backup lost), and a backup
+  mid-failover even survives its own self-update via the normal handover.
 - **sACN**: pick the egress interface explicitly (multi-homed machines otherwise send
   multicast out the default route — invisible on the lighting NIC), sync sACN to
   render fps or fix a rate, and optionally enable E1.31 universe synchronization

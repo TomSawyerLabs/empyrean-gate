@@ -6,40 +6,41 @@
 pub mod audio;
 pub mod autostart;
 pub mod config;
-pub mod discovery;
 pub mod diagnostics;
+pub mod discovery;
 pub mod engine;
+pub mod firewall;
 pub mod game;
 pub mod geometry;
 pub mod layers;
 pub mod logging;
 pub mod media;
 pub mod patch;
+pub mod peer;
 pub mod power;
-pub mod protocol;
 pub mod prolink_analysis;
+pub mod protocol;
 pub mod report;
 pub mod rhythm;
 pub mod sacn;
 pub mod sacnwatch;
 pub mod server;
 pub mod session;
+pub mod startup;
 pub mod state;
 pub mod taskbar;
 pub mod testmode;
 /// Windows-only: suppress the OS's touch feedback visuals on our windows.
 #[cfg(target_os = "windows")]
 pub mod touch;
-pub mod startup;
 pub mod updater;
 pub mod videocache;
 pub mod webview2;
 pub mod windowstate;
-pub mod firewall;
 
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use state::SharedState;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 pub struct Backend {
     pub state: Arc<SharedState>,
@@ -77,7 +78,10 @@ fn running_instance_is_newer(port: u16) -> Option<String> {
     let running = running_instance_version(port)?;
     let ours = updater::effective_version();
     let parse = |v: &str| -> Option<(u32, u32, u32)> {
-        let mut it = v.trim_start_matches('v').split('.').map(|p| p.parse::<u32>().ok());
+        let mut it = v
+            .trim_start_matches('v')
+            .split('.')
+            .map(|p| p.parse::<u32>().ok());
         Some((it.next()??, it.next()??, it.next()??))
     };
     match (parse(&running), parse(&ours)) {
@@ -105,9 +109,7 @@ pub fn start_backend() -> Backend {
     // Refuse to take the port from a NEWER instance — that is a downgrade, and
     // if a show is running it happens on the wire. Checked before any subsystem
     // starts, so the loser leaves nothing behind.
-    if takeover
-        && let Some(newer) = running_instance_is_newer(port)
-    {
+    if takeover && let Some(newer) = running_instance_is_newer(port) {
         log::warn!(
             "v{newer} is already running on port {port} and this binary is v{}; \
              refusing to take over — that would downgrade a running show. \
@@ -121,6 +123,19 @@ pub fn start_backend() -> Backend {
     // No instance may transmit until it either owns the control port or has
     // completed an authenticated handover from the process that does.
     state.sacn_hold.store(true, Ordering::SeqCst);
+    // A follower is additionally silent until it either takes over as backup
+    // or stops following. Held from the very first engine frame — the peer
+    // task (spawned below) owns this flag from then on.
+    {
+        let cfg = state.config.read();
+        if cfg.peer.leader_addr().is_some() {
+            state.peer_hold.store(true, Ordering::SeqCst);
+        } else if cfg.peer.allow_backup {
+            let mut st = state.status.lock();
+            st.peer.role = "leader".into();
+            st.peer.detail = "Waiting for a backup to connect.".into();
+        }
+    }
     {
         let mut st = state.status.lock();
         st.interfaces = list_interfaces();
@@ -193,6 +208,15 @@ pub fn start_backend() -> Backend {
                     state.sacn_resume_sequence.store(seq, Ordering::SeqCst);
                     state.sacn_resume_pending.store(true, Ordering::SeqCst);
                 }
+                // The predecessor was covering a lost leader as the BACKUP
+                // transmitter. Continue that too (a self-update mid-failover
+                // must not go dark); the peer task reads this at startup and
+                // keeps `peer_hold` released until the leader reclaims.
+                if grant.backup_transmitting && state.config.read().peer.leader_addr().is_some() {
+                    log::info!("predecessor was transmitting as a backup; continuing that role");
+                    state.peer_transmitting.store(true, Ordering::SeqCst);
+                    state.peer_hold.store(false, Ordering::SeqCst);
+                }
                 log::info!(
                     "takeover committed in {:.0} ms total; resuming sACN",
                     t0.elapsed().as_secs_f32() * 1000.0
@@ -212,19 +236,61 @@ pub fn start_backend() -> Backend {
     }
 
     server::spawn(state.clone(), remote_chains);
+    peer::spawn(state.clone());
     if state.sacn_hold.load(Ordering::SeqCst) {
         let recovery = state.clone();
         std::thread::Builder::new()
             .name("control-port-gate".into())
             .spawn(move || {
-                while !recovery.shutdown.load(Ordering::Relaxed) {
-                    if recovery.server_bound.load(Ordering::SeqCst) {
-                        log::info!("control port acquired; enabling configured sACN output");
-                        recovery.sacn_hold.store(false, Ordering::SeqCst);
-                        return;
+                // Phase 1: owning the control port proves any old local
+                // process has released it.
+                while !recovery.server_bound.load(Ordering::SeqCst) {
+                    if recovery.shutdown.load(Ordering::Relaxed)
+                        || !recovery.sacn_hold.load(Ordering::SeqCst)
+                    {
+                        return; // shutdown, or a handover path cleared the hold
                     }
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }
+                // Phase 2, leaders that allow a backup only: after an outage
+                // the backup may be transmitting our CID right now. Never
+                // fight it — hold until the wire has been silent for a
+                // moment (sacnwatch needs a beat to join and listen), or
+                // until the reclaim over the peer link clears the hold for
+                // us. Unicast-only rigs hear nothing either way; for them
+                // this is a fixed short grace window for the backup to
+                // connect and be reclaimed.
+                if recovery.config.read().peer.allow_backup {
+                    let grace = std::time::Instant::now();
+                    let mut announced = false;
+                    while !recovery.shutdown.load(Ordering::Relaxed) {
+                        if !recovery.sacn_hold.load(Ordering::SeqCst) {
+                            return; // the reclaim handshake finished the job
+                        }
+                        let heard = recovery.own_cid_heard_within(2_000);
+                        if !heard && grace.elapsed() >= std::time::Duration::from_millis(2_500) {
+                            break;
+                        }
+                        if heard && !announced {
+                            announced = true;
+                            let from = recovery.own_cid_heard_from.lock().clone();
+                            log::info!(
+                                "our sACN identity is live on the wire from {from} — \
+                                 holding output until the backup is reclaimed"
+                            );
+                            let mut st = recovery.status.lock();
+                            st.peer.role = "leader".into();
+                            st.peer.detail =
+                                format!("Backup at {from} is transmitting — waiting to reclaim.");
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    if recovery.shutdown.load(Ordering::Relaxed) {
+                        return;
+                    }
+                }
+                log::info!("control port acquired; enabling configured sACN output");
+                recovery.sacn_hold.store(false, Ordering::SeqCst);
             })
             .expect("spawn takeover recovery thread");
     }
@@ -353,7 +419,11 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
     if diagnostics.active {
         log::info!("persistent diagnostics: {}", diagnostics.path);
     } else {
-        log::warn!("persistent diagnostics unavailable at {}: {}", diagnostics.path, diagnostics.error);
+        log::warn!(
+            "persistent diagnostics unavailable at {}: {}",
+            diagnostics.path,
+            diagnostics.error
+        );
     }
     let backend = start_backend();
     let state = backend.state.clone();

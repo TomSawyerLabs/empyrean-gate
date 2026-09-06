@@ -42,6 +42,7 @@ export default function Settings() {
       {config.rhythm.source === "pro_dj_link" && <DjLinkDebugPanel />}
       <OutputPanel config={config} />
       <GeometryPanel config={config} />
+      <RedundancyPanel config={config} />
       <ClientsPanel />
       <BrcEventsPanel />
       <DiagnosticsPanel />
@@ -1635,6 +1636,91 @@ function GeometryPanel({ config }: { config: AppConfig }) {
 }
 
 // ---------------------------------------------------------------------------
+
+/** Networked redundancy: a second Gate instance on the LAN can follow this
+ *  one and — opt-in on both ends — take over sACN transmission if it dies. */
+function RedundancyPanel({ config }: { config: AppConfig }) {
+  const { client, status } = useGate();
+  const p = config.peer;
+  const peer = status?.peer;
+  const commit = (patch: Partial<AppConfig["peer"]>) =>
+    client.setConfig({ ...config, peer: { ...p, ...patch } });
+  const following = p.follow.trim().length > 0;
+
+  return (
+    <section className="panel">
+      <h2>Redundancy</h2>
+      <p className="hint">
+        A second Gate machine can run this app and follow this one — mirroring the show with
+        its own output silent — and, if allowed on both ends, automatically continue
+        transmission if this machine dies. The pair shares one sACN identity, so the rig sees
+        a single uninterrupted source.
+      </p>
+      {peer && peer.role !== "" && (
+        <p className={peer.split_brain || peer.transmitting ? "warn" : "hint"} role="status">
+          {peer.detail}
+          {peer.connected && peer.peer_name ? ` (${peer.peer_name}` : ""}
+          {peer.connected && peer.peer_version ? ` · v${peer.peer_version})` : peer.connected && peer.peer_name ? ")" : ""}
+        </p>
+      )}
+      <h3>On the show machine (leader)</h3>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={p.allow_backup}
+          disabled={following}
+          onChange={(e) => commit({ allow_backup: e.target.checked })}
+        />
+        Allow a backup instance to stand by and take over if this machine dies
+      </label>
+      <h3>On the spare machine (backup)</h3>
+      <label className="field-row">
+        <span>Follow leader at</span>
+        <input
+          defaultValue={p.follow}
+          key={`follow-${p.follow}`}
+          placeholder="host or host:port — empty = standalone"
+          onBlur={(e) => commit({ follow: e.target.value.trim() })}
+        />
+      </label>
+      <label className="field-row">
+        <span>Leader join token</span>
+        <input
+          defaultValue={p.follow_token}
+          key={`token-${p.follow_token}`}
+          placeholder="from the leader's Connect dialog"
+          onBlur={(e) => commit({ follow_token: e.target.value.trim() })}
+        />
+      </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={p.act_as_backup}
+          disabled={!following}
+          onChange={(e) => commit({ act_as_backup: e.target.checked })}
+        />
+        Act as the automatic backup transmitter (the leader must also allow it)
+      </label>
+      <div className="field-grid">
+        <NumberField
+          label="Takeover watchdog (ms)"
+          value={p.watchdog_ms}
+          min={500}
+          max={60000}
+          step={100}
+          onCommit={(v) => commit({ watchdog_ms: v })}
+        />
+      </div>
+      <p className="hint">
+        While following, this instance mirrors the leader's show settings; its own machine-local
+        settings (network interface, audio devices, tokens) stay local. The takeover also checks
+        the wire: a leader that is unreachable but still transmitting is never preempted. On a
+        unicast-only rig that wire check hears nothing, so the watchdog alone decides — give it
+        margin.
+      </p>
+    </section>
+  );
+}
 
 function ThisDevicePanel() {
   const { client } = useGate();

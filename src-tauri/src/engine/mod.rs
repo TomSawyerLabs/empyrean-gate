@@ -73,9 +73,9 @@ pub struct Globals {
     /// continuous as transient button pulses expire.
     pub rotation: f32,
     /// Master hue pull (operator "warm colors now"). Target in turns; amount
-    /// 0 disables. `hue_loose` is a bool as f32: 1 fades the pull out for
-    /// hues far from the target so flourishes survive. These occupy what was
-    /// `_pad_rotation`, so the GPU struct layout is unchanged.
+    /// 0 disables. `hue_loose` 0..1 fades the pull out for hues far from the
+    /// target so flourishes survive — 0 is a strict pull. These occupy what
+    /// was `_pad_rotation`, so the GPU struct layout is unchanged.
     pub hue_target: f32,
     pub hue_amount: f32,
     pub hue_loose: f32,
@@ -761,7 +761,11 @@ fn walked_speed(base: f32, offset: f32, amount: f32) -> f32 {
 
 /// Apply a layer's walk offsets around its configured values. The user's slider
 /// value is the center; `walk_amount` scales the wander radius per parameter.
-fn walked_layer(l: &crate::layers::LayerCfg, w: &mut LayerWalk, dt: f32) -> crate::layers::LayerCfg {
+fn walked_layer(
+    l: &crate::layers::LayerCfg,
+    w: &mut LayerWalk,
+    dt: f32,
+) -> crate::layers::LayerCfg {
     let a = l.walk_amount;
     let mut out = l.clone();
     out.speed = walked_speed(l.speed, w.offsets[0], a);
@@ -1090,7 +1094,11 @@ fn eased_crossfade(outgoing: &[u8], incoming: &[u8], progress: f32, out: &mut Ve
     out.clear();
     out.reserve(incoming.len());
     for (&a, &b) in outgoing.iter().zip(incoming) {
-        out.push((a as f32 + (b as f32 - a as f32) * mix).round().clamp(0.0, 255.0) as u8);
+        out.push(
+            (a as f32 + (b as f32 - a as f32) * mix)
+                .round()
+                .clamp(0.0, 255.0) as u8,
+        );
     }
 }
 
@@ -1150,7 +1158,12 @@ fn replay_performance_action(state: &Arc<SharedState>, action: &crate::config::P
                 }
             });
         }
-        A::SetMasterHue { enabled, hue, amount, loose } => {
+        A::SetMasterHue {
+            enabled,
+            hue,
+            amount,
+            loose,
+        } => {
             let (enabled, hue, amount, loose) = (*enabled, *hue, *amount, *loose);
             state.update_config(move |c| {
                 if let Some(v) = enabled {
@@ -1163,7 +1176,7 @@ fn replay_performance_action(state: &Arc<SharedState>, action: &crate::config::P
                     c.render.master_hue_amount = v.clamp(0.0, 1.0);
                 }
                 if let Some(v) = loose {
-                    c.render.master_hue_loose = v;
+                    c.render.master_hue_loose = v.clamp(0.0, 1.0);
                 }
             });
         }
@@ -1320,11 +1333,19 @@ mod beat_time_tests {
         for _ in 0..180 {
             follower.step(&[0.02], 1.0 / 60.0);
         }
-        assert!(follower.brightness < 0.3, "brightness={}", follower.brightness);
+        assert!(
+            follower.brightness < 0.3,
+            "brightness={}",
+            follower.brightness
+        );
         for _ in 0..60 {
             follower.step(&[0.6], 1.0 / 60.0);
         }
-        assert!(follower.brightness > 0.98, "brightness={}", follower.brightness);
+        assert!(
+            follower.brightness > 0.98,
+            "brightness={}",
+            follower.brightness
+        );
     }
 
     #[test]
@@ -1487,8 +1508,7 @@ fn render_with_urgency<'a>(
 
 impl GameRuntime {
     fn new(kind: crate::game::GameKind, theta: usize, species: u8, seed: u64, time: f32) -> Self {
-        let sim =
-            crate::game::GameSim::new(kind, theta, crate::game::GRID_RINGS, species, seed);
+        let sim = crate::game::GameSim::new(kind, theta, crate::game::GRID_RINGS, species, seed);
         let cells = sim.pack_cells(time);
         Self {
             kind,
@@ -1538,7 +1558,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut outgoing_engine = match Engine::new(engine.npix) {
         Ok(bus) => Some(bus),
         Err(error) => {
-            log::warn!("second render bus unavailable; handoffs use held-frame fallback: {error:#}");
+            log::warn!(
+                "second render bus unavailable; handoffs use held-frame fallback: {error:#}"
+            );
             None
         }
     };
@@ -1739,7 +1761,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 std::mem::swap(&mut layer_env, &mut ready_env);
                 std::mem::swap(&mut walk_rng, &mut ready_walk_rng);
                 std::mem::swap(&mut next_flip, &mut ready_next_flip);
-                ready_key = cfg.ready_stack.as_ref()
+                ready_key = cfg
+                    .ready_stack
+                    .as_ref()
                     .and_then(|stack| serde_json::to_string(stack).ok())
                     .unwrap_or_default();
             }
@@ -1805,7 +1829,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                                     scalar_refs: prog
                                         .preview_scalars
                                         .iter()
-                                        .map(|(n, port)| (doc.nodes[*n].id.clone(), port.to_string()))
+                                        .map(|(n, port)| {
+                                            (doc.nodes[*n].id.clone(), port.to_string())
+                                        })
                                         .collect(),
                                     scalar_nodes: prog.preview_scalars.clone(),
                                 });
@@ -1886,7 +1912,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 config: test.cfg.clone(),
                 blocked_by_show: cfg.running_show().map(|p| p.name.clone()),
             };
-            (test.active, test.cfg.clone(), test.elapsed(), status, expired)
+            (
+                test.active,
+                test.cfg.clone(),
+                test.elapsed(),
+                status,
+                expired,
+            )
         };
         if test_expired {
             state.broadcast_state();
@@ -1983,13 +2015,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 (elapsed / transition_secs).clamp(0.0, 1.0)
             };
             let fade = linear * linear * (3.0 - 2.0 * linear);
-            render_master_brightness = transition_from.as_ref().map_or(
-                target.master_brightness,
-                |previous| {
-                    previous.master_brightness
-                        + (target.master_brightness - previous.master_brightness) * fade
-                },
-            );
+            render_master_brightness =
+                transition_from
+                    .as_ref()
+                    .map_or(target.master_brightness, |previous| {
+                        previous.master_brightness
+                            + (target.master_brightness - previous.master_brightness) * fade
+                    });
 
             if linear >= 1.0 && transition_from.is_some() {
                 let old_len = transition_from
@@ -2187,11 +2219,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             external_clock.usable,
             link_energy,
         );
-        let (master_drop_brightness, master_drop_triggered) = master_drop.step(
-            master_level,
-            pioneer_selected && external_clock.usable,
-            dt,
-        );
+        let (master_drop_brightness, master_drop_triggered) =
+            master_drop.step(master_level, pioneer_selected && external_clock.usable, dt);
         if master_drop_triggered {
             // A short inward edge makes the cut legible before the global envelope
             // reaches near-black. The envelope itself is applied to every output.
@@ -2637,8 +2666,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             // Grid games step on the beat; particle sims (cadence = Some) run
             // a fixed fast step so motion is smooth regardless of the music.
             let fixed = rt.sim.cadence();
-            let bpm_ok =
-                fixed.is_none() && audio[0].bpm_conf > 0.3 && audio[0].bpm > 20.0;
+            let bpm_ok = fixed.is_none() && audio[0].bpm_conf > 0.3 && audio[0].bpm > 20.0;
             rt.interval = match fixed {
                 Some(secs) => secs,
                 None if bpm_ok => (60.0 / audio[0].bpm).clamp(0.12, 0.75),
@@ -2649,8 +2677,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             // On-beat when locked (with a free-run backstop if beats stall);
             // the half-interval guard swallows double-fires around the wrap.
             let tick_now = if bpm_ok {
-                (beat_wrapped && since_tick > rt.interval * 0.5)
-                    || since_tick > rt.interval * 1.75
+                (beat_wrapped && since_tick > rt.interval * 0.5) || since_tick > rt.interval * 1.75
             } else {
                 since_tick >= rt.interval
             };
@@ -2662,8 +2689,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 rt.last_tick = Instant::now();
                 rt.dirty = true;
             }
-            game_alpha = (rt.last_tick.elapsed().as_secs_f32() / rt.interval.max(0.01))
-                .clamp(0.0, 1.0);
+            game_alpha =
+                (rt.last_tick.elapsed().as_secs_f32() / rt.interval.max(0.01)).clamp(0.0, 1.0);
             if std::mem::take(&mut rt.dirty) {
                 let mut cells = rt.prev.clone();
                 cells.extend_from_slice(&rt.next);
@@ -2815,10 +2842,12 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             mix_activity: dj_fade_activity,
             beat_in_bar: f32::from(pioneer_visual.beat_in_bar),
             phrase_active: f32::from(active_phrase.is_some()),
-            phrase_kind: active_phrase
+            phrase_kind: active_phrase.as_ref().map_or(0.0, |(_, phrase)| {
+                crate::prolink_analysis::phrase_kind_code(&phrase.kind)
+            }),
+            phrase_progress: active_phrase
                 .as_ref()
-                .map_or(0.0, |(_, phrase)| crate::prolink_analysis::phrase_kind_code(&phrase.kind)),
-            phrase_progress: active_phrase.as_ref().map_or(0.0, |(_, phrase)| phrase.progress),
+                .map_or(0.0, |(_, phrase)| phrase.progress),
             phrase_fill: active_phrase
                 .as_ref()
                 .map_or(0.0, |(_, phrase)| f32::from(phrase.fill_in_active)),
@@ -2828,19 +2857,21 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             for (node, param, value) in state.patch_params.lock().drain(..) {
                 rt.set_param(&node, &param, value);
             }
-            let params = rt.eval(&crate::patch::eval::EvalInputs {
-                dt,
-                // The scene scheduler's crossfade-effective speed, so patch
-                // phases follow show transitions exactly like layer phases.
-                master_speed: render_master_speed,
-                audio: &audio,
-                yaw: control.yaw,
-                pitch: control.pitch,
-                roll: control.roll,
-                shake: control.shake,
-                effect_seq: state.effect_seq.load(Ordering::Relaxed),
-                dj_link,
-            }).to_vec();
+            let params = rt
+                .eval(&crate::patch::eval::EvalInputs {
+                    dt,
+                    // The scene scheduler's crossfade-effective speed, so patch
+                    // phases follow show transitions exactly like layer phases.
+                    master_speed: render_master_speed,
+                    audio: &audio,
+                    yaw: control.yaw,
+                    pitch: control.pitch,
+                    roll: control.roll,
+                    shake: control.shake,
+                    effect_seq: state.effect_seq.load(Ordering::Relaxed),
+                    dj_link,
+                })
+                .to_vec();
             for effect in rt.take_emitted_effects() {
                 state.trigger_effect_from_patch(effect);
             }
@@ -2900,8 +2931,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // also makes first light after launch a fade-up, not a slam. The
         // drop-detector and audio-follower multipliers keep their own
         // deliberately faster dynamics.
-        master_env += (render_master_brightness - master_env)
-            * (1.0 - (-dt / MASTER_BRIGHTNESS_TAU).exp());
+        master_env +=
+            (render_master_brightness - master_env) * (1.0 - (-dt / MASTER_BRIGHTNESS_TAU).exp());
         if (master_env - render_master_brightness).abs() < 1e-4 {
             master_env = render_master_brightness;
         }
@@ -2953,7 +2984,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 rotation: rotation_angle,
                 hue_target: cfg.render.master_hue.rem_euclid(1.0),
                 hue_amount: hue_env,
-                hue_loose: f32::from(u8::from(cfg.render.master_hue_loose)),
+                hue_loose: cfg.render.master_hue_loose.clamp(0.0, 1.0),
             },
             audio,
             layers,
@@ -2989,13 +3020,25 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             let ready_walk_tau = 45.0 / stack.walk_speed.clamp(0.05, 20.0);
             if stack.walk_enabled && stack.walk_layers && now >= ready_next_flip {
                 ready_next_flip = now + Duration::from_secs_f32(ready_walk_tau);
-                let eligible: Vec<usize> = stack.layers.iter().take(MAX_LAYERS).enumerate()
-                    .filter(|(_, layer)| layer.enabled).map(|(index, _)| index).collect();
+                let eligible: Vec<usize> = stack
+                    .layers
+                    .iter()
+                    .take(MAX_LAYERS)
+                    .enumerate()
+                    .filter(|(_, layer)| layer.enabled)
+                    .map(|(index, _)| index)
+                    .collect();
                 let min_on = (stack.walk_min_layers as usize).min(eligible.len());
-                let on_count = eligible.iter().filter(|index| ready_targets[**index]).count();
+                let on_count = eligible
+                    .iter()
+                    .filter(|index| ready_targets[**index])
+                    .count();
                 for _ in 0..8 {
-                    if eligible.is_empty() { break; }
-                    let pick = eligible[(ready_walk_rng.next_u64() % eligible.len() as u64) as usize];
+                    if eligible.is_empty() {
+                        break;
+                    }
+                    let pick =
+                        eligible[(ready_walk_rng.next_u64() % eligible.len() as u64) as usize];
                     if ready_targets[pick] && on_count > min_on {
                         ready_targets[pick] = false;
                         break;
@@ -3012,7 +3055,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 let target = !stack.walk_enabled || !stack.walk_layers || ready_targets[index];
                 let goal = if target { 1.0 } else { 0.0 };
                 ready_env[index] += (goal - ready_env[index]) * (dt / 4.0).min(1.0);
-                if !layer.enabled { continue; }
+                if !layer.enabled {
+                    continue;
+                }
                 if ready_env[index] < 0.005 {
                     ready_phases[index] +=
                         (layer.phase_rate(level) * layer.speed * stack.master_speed * dt) as f64;
@@ -3022,11 +3067,18 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     continue;
                 }
                 let mut layer = if stack.walk_enabled && layer.walk_amount > 0.0 {
-                    walk_step(&mut ready_walks[index], &mut ready_walk_rng, dt, ready_walk_tau);
+                    walk_step(
+                        &mut ready_walks[index],
+                        &mut ready_walk_rng,
+                        dt,
+                        ready_walk_tau,
+                    );
                     let mut scaled = layer.clone();
                     scaled.walk_amount = (layer.walk_amount * stack.walk_depth).clamp(0.0, 3.0);
                     walked_layer(&scaled, &mut ready_walks[index], dt)
-                } else { layer.clone() };
+                } else {
+                    layer.clone()
+                };
                 layer.opacity *= ready_env[index];
                 ready_phases[index] +=
                     (layer.phase_rate(level) * layer.speed * stack.master_speed * dt) as f64;
@@ -3237,15 +3289,24 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 // no more packets ever leave this instance.
                 state.sacn_quiesced.store(true, Ordering::SeqCst);
             }
-            let sacn_allowed = !state.sacn_hold.load(Ordering::Relaxed) && !leaving;
+            let sacn_allowed = !state.sacn_hold.load(Ordering::Relaxed)
+                && !state.peer_hold.load(Ordering::Relaxed)
+                && !leaving;
             let sending = cfg.output.enabled && sacn_allowed;
             if !sending && was_sending && !leaving {
                 // Output was just switched off: close the stream with E1.31
                 // termination packets so receivers release the universes now,
                 // rather than holding the last frame through their 2.5 s
                 // source-loss timeout. Never on `leaving` — the successor
-                // instance carries the same CID's stream onward.
-                if let Some(s) = sacn.as_mut() {
+                // instance carries the same CID's stream onward — and never on
+                // a silent stop, where the same CID's stream continues on a
+                // PEER machine (a backup yielding to its returned leader) and
+                // a terminate here would end it under them.
+                if state.sacn_silent_stop.swap(false, Ordering::SeqCst) {
+                    if let Some(s) = sacn.as_mut() {
+                        s.mark_stream_yielded();
+                    }
+                } else if let Some(s) = sacn.as_mut() {
                     s.send_terminate();
                 }
             }
@@ -3699,8 +3760,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveTime;
     use crate::layers::{DiscreteParam, LayerCfg, LayerKind};
+    use chrono::NaiveTime;
 
     /// The layer shader has no other automated check — this is what catches a
     /// typo in `gate.wgsl` without a GPU.
@@ -3747,7 +3808,10 @@ mod tests {
     #[test]
     fn discrete_walk_steps_once_the_excursion_is_committed() {
         let mut d = DiscreteWalk::default();
-        assert_eq!(arms_of(walked_discrete(&mut d, 0.51, 0.51, &ARMS, 0.0)), 6.0);
+        assert_eq!(
+            arms_of(walked_discrete(&mut d, 0.51, 0.51, &ARMS, 0.0)),
+            6.0
+        );
 
         // A clear excursion into the 5-arm cell, but not yet held long enough.
         for _ in 0..60 {
@@ -3759,7 +3823,11 @@ mod tests {
             walked_discrete(&mut d, 0.51, 0.44, &ARMS, 1.0 / 60.0);
         }
         let v = walked_discrete(&mut d, 0.51, 0.44, &ARMS, 1.0 / 60.0);
-        assert_eq!(arms_of(v), 5.0, "never stepped despite a sustained excursion");
+        assert_eq!(
+            arms_of(v),
+            5.0,
+            "never stepped despite a sustained excursion"
+        );
     }
 
     #[test]
@@ -3872,7 +3940,9 @@ mod tests {
             (turns - turns.round()).abs() < 1e-9
         };
         let check = |kind: LayerKind, mults: &[f64]| {
-            let p = layer(kind).phase_period().expect("kind should claim a period");
+            let p = layer(kind)
+                .phase_period()
+                .expect("kind should claim a period");
             for m in mults {
                 assert!(whole(p, *m), "{kind:?}: multiplier {m} is not whole at {p}");
             }

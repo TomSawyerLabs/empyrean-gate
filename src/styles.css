@@ -322,6 +322,31 @@ code,
   animation: test-pulse 1.4s ease-in-out infinite;
 }
 
+/* Networked redundancy: a follower quietly mirroring its leader. Calm blue —
+   informational, unlike the red/green mode banners — but still on every tab,
+   because "this machine is the spare, not the show" must never be a surprise. */
+.banner.peer-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #0e2438;
+  color: #cfe6ff;
+  border-bottom: 1px solid #3a7bd5;
+  letter-spacing: 0.04em;
+}
+
+.peer-banner .testmode-summary {
+  letter-spacing: normal;
+}
+
+.peer-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #3a7bd5;
+  flex-shrink: 0;
+}
+
 main {
   flex: 1;
   min-height: 0;

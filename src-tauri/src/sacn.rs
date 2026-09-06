@@ -200,14 +200,15 @@ impl SacnSender {
             } else {
                 HashSet::new() // new identity: the old stream ends entirely
             };
-            let (kept, mut stale): (Vec<UniversePlan>, Vec<UniversePlan>) =
-                self.plan.drain(..).partition(|p| keep.contains(&p.universe));
+            let (kept, mut stale): (Vec<UniversePlan>, Vec<UniversePlan>) = self
+                .plan
+                .drain(..)
+                .partition(|p| keep.contains(&p.universe));
 
             // Carry sequence numbers across the rebuild. Restarting at 0 makes a
             // receiver DROP the next packets whenever the old count was still low —
             // E1.31 discards a sequence delta in [-20, 0] as an out-of-order repeat.
-            let carried: HashMap<u16, u8> =
-                kept.iter().map(|p| (p.universe, p.sequence)).collect();
+            let carried: HashMap<u16, u8> = kept.iter().map(|p| (p.universe, p.sequence)).collect();
             for p in plan.iter_mut() {
                 if let Some(&seq) = carried.get(&p.universe) {
                     p.sequence = seq;
@@ -215,7 +216,10 @@ impl SacnSender {
             }
 
             if !stale.is_empty() {
-                log::info!("sACN: terminating {} universe(s) dropped by reconfigure", stale.len());
+                log::info!(
+                    "sACN: terminating {} universe(s) dropped by reconfigure",
+                    stale.len()
+                );
                 terminate_plans(&self.socket, &mut stale);
             }
         }
@@ -228,7 +232,11 @@ impl SacnSender {
                     self.bind_error = None;
                     log::info!(
                         "sACN socket bound to interface '{}'",
-                        if out.interface.is_empty() { "default" } else { &out.interface }
+                        if out.interface.is_empty() {
+                            "default"
+                        } else {
+                            &out.interface
+                        }
                     );
                 }
                 Err(e) => {
@@ -264,13 +272,13 @@ impl SacnSender {
         self.sync = (out.sync_universe != 0).then(|| {
             let mut dests = Vec::new();
             if out.multicast {
-                dests.push(SocketAddrV4::new(multicast_group(out.sync_universe), SACN_PORT));
+                dests.push(SocketAddrV4::new(
+                    multicast_group(out.sync_universe),
+                    SACN_PORT,
+                ));
             }
-            let mut controller_ips: Vec<SocketAddrV4> = self
-                .plan
-                .iter()
-                .filter_map(|p| p.unicast)
-                .collect();
+            let mut controller_ips: Vec<SocketAddrV4> =
+                self.plan.iter().filter_map(|p| p.unicast).collect();
             controller_ips.sort();
             controller_ips.dedup();
             dests.extend(controller_ips);
@@ -312,7 +320,10 @@ impl SacnSender {
                         frame_error.get_or_insert_with(|| format!("send to {dest} failed: {e}"));
                         self.send_errors += 1;
                         if self.send_errors.is_power_of_two() {
-                            log::warn!("sACN send to {dest} failed ({} total): {e}", self.send_errors);
+                            log::warn!(
+                                "sACN send to {dest} failed ({} total): {e}",
+                                self.send_errors
+                            );
                         }
                     }
                 }
@@ -374,6 +385,18 @@ impl SacnSender {
         terminate_plans(&self.socket, &mut self.plan)
     }
 
+    /// Forget that we are mid-stream WITHOUT sending termination packets: the
+    /// same CID's stream continues on a PEER MACHINE (a backup yielding to its
+    /// returned leader, or retreating from a split brain). After this, a later
+    /// output-off or app exit terminates nothing unless we send again first —
+    /// otherwise our exit would end the stream under the instance driving it.
+    pub fn mark_stream_yielded(&mut self) {
+        if self.streaming {
+            log::info!("sACN: yielding the stream to a peer (no termination sent)");
+        }
+        self.streaming = false;
+    }
+
     pub fn universe_count(&self) -> u16 {
         self.plan.len() as u16
     }
@@ -404,7 +427,10 @@ impl SacnSender {
             p.sequence = base;
         }
         self.sync_sequence = base;
-        log::info!("sACN: resuming handed-over stream at sequence {}", base.wrapping_add(1));
+        log::info!(
+            "sACN: resuming handed-over stream at sequence {}",
+            base.wrapping_add(1)
+        );
     }
 }
 
@@ -595,8 +621,7 @@ fn flags_len(len: usize) -> [u8; 2] {
 pub mod test_support {
     /// One universe-discovery page for `universes` (which must fit a single page).
     pub fn discovery_packet(cid: &[u8; 16], source_name: &str, universes: &[u16]) -> Vec<u8> {
-        super::build_discovery_pages(cid, &super::pad_source_name(source_name), universes)
-            .remove(0)
+        super::build_discovery_pages(cid, &super::pad_source_name(source_name), universes).remove(0)
     }
 }
 
@@ -618,7 +643,10 @@ mod tests {
 
     #[test]
     fn discovery_universe_maps_to_the_reserved_group() {
-        assert_eq!(multicast_group(DISCOVERY_UNIVERSE), Ipv4Addr::new(239, 255, 250, 214));
+        assert_eq!(
+            multicast_group(DISCOVERY_UNIVERSE),
+            Ipv4Addr::new(239, 255, 250, 214)
+        );
         assert_eq!(multicast_group(1), Ipv4Addr::new(239, 255, 0, 1));
     }
 
@@ -730,8 +758,8 @@ mod tests {
             cid: "01234567-89ab-cdef-0123-456789abcdef".into(),
             pixels_per_universe: 4,
             universe_stride: 0, // pack tightly: these tests are about sequencing
-            multicast: false,  // no controllers configured either → no destinations
-            discovery: false,  // keep the test off the wire entirely
+            multicast: false,   // no controllers configured either → no destinations
+            discovery: false,   // keep the test off the wire entirely
             ..Default::default()
         };
         (geo, out)

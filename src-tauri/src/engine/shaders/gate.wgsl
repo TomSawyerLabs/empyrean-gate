@@ -43,7 +43,7 @@ struct Globals {
     _pad_game1: f32,
     rotation: f32,
     // Master hue pull ("warm colors now"): target hue in turns, strength
-    // 0..1 (0 = off), and loose-mask flag as 0/1. See hue_pull().
+    // 0..1 (0 = off), and the loose-mask amount 0..1. See hue_pull().
     hue_target: f32,
     hue_amount: f32,
     hue_loose: f32,
@@ -305,8 +305,9 @@ fn rgb2hsv(c: vec3f) -> vec3f {
 // layers, transitions, touch effects, dabs, DJ overlays, game cells, patches.
 // Strict (hue_loose 0): every saturated pixel's hue lands amount-of-the-way at
 // the target — value and saturation are untouched, so patterns keep shape.
-// Loose (hue_loose 1): the pull fades out for hues far from the target, so
-// complements survive as flourishes. Whites and grays are never tinted.
+// Loose (hue_loose up to 1): the pull fades out for hues far from the target
+// in proportion to the amount, so complements survive as flourishes. Whites
+// and grays are never tinted.
 fn hue_pull(rgb: vec3f) -> vec3f {
     if G.hue_amount <= 0.0 {
         return rgb;

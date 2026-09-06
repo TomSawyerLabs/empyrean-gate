@@ -20,22 +20,22 @@ use crate::config::ClientRecord;
 use crate::media::{MediaResolver, ResolveRequest};
 use crate::patch;
 use crate::protocol::{
-    BrowserAudioStream, ClientMsg, HandoverGrant, MiniScalarRef, ServerMsg, MINI_PREVIEW_MAGIC,
-    PREVIEW_MAGIC, READY_PREVIEW_MAGIC, VIDEO_FRAME_MAGIC,
+    BrowserAudioStream, ClientMsg, HandoverGrant, MINI_PREVIEW_MAGIC, MiniScalarRef, PREVIEW_MAGIC,
+    READY_PREVIEW_MAGIC, ServerMsg, VIDEO_FRAME_MAGIC,
 };
 use crate::state::{MiniBatch, MiniKind, PreviewFrame, SharedState};
+use axum::Router;
+use axum::body::Body;
 use axum::extract::connect_info::ConnectInfo;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, header, StatusCode, Uri};
+use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::Router;
 use futures_util::{SinkExt, StreamExt};
 use std::net::SocketAddr;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
 use tower_http::cors::{Any, CorsLayer};
@@ -77,7 +77,12 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .build()
         .expect("BRC API HTTP client");
     let cache_media = media.clone();
-    let ctx = Ctx { state: state.clone(), remote, media, brc_http };
+    let ctx = Ctx {
+        state: state.clone(),
+        remote,
+        media,
+        brc_http,
+    };
     let app = Router::new()
         .route("/health", get(health))
         .route("/ws", get(ws_upgrade))
@@ -159,18 +164,9 @@ async fn health() -> StatusCode {
 // Browser-decodable media proxy
 // ---------------------------------------------------------------------------
 
-fn client_authorized(
-    state: &SharedState,
-    addr: SocketAddr,
-    client_id: &str,
-    token: &str,
-) -> bool {
+fn client_authorized(state: &SharedState, addr: SocketAddr, client_id: &str, token: &str) -> bool {
     let cfg = state.config.read();
-    if cfg
-        .clients
-        .iter()
-        .any(|c| c.id == client_id && c.revoked)
-    {
+    if cfg.clients.iter().any(|c| c.id == client_id && c.revoked) {
         return false;
     }
     if addr.ip().is_loopback() || !cfg.server.require_token {
@@ -230,7 +226,13 @@ async fn brc_events(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     axum::Json(req): axum::Json<BrcApiRequest>,
 ) -> Response {
-    brc_api(&ctx, addr, req, "https://api.burningman.org/api/event?year=2026").await
+    brc_api(
+        &ctx,
+        addr,
+        req,
+        "https://api.burningman.org/api/event?year=2026",
+    )
+    .await
 }
 
 async fn brc_camps(
@@ -238,7 +240,13 @@ async fn brc_camps(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     axum::Json(req): axum::Json<BrcApiRequest>,
 ) -> Response {
-    brc_api(&ctx, addr, req, "https://api.burningman.org/api/camp?year=2026").await
+    brc_api(
+        &ctx,
+        addr,
+        req,
+        "https://api.burningman.org/api/camp?year=2026",
+    )
+    .await
 }
 
 async fn brc_camp(
@@ -269,7 +277,11 @@ async fn brc_api(ctx: &Ctx, addr: SocketAddr, req: BrcApiRequest, url: &str) -> 
         Some(req.api_key.trim().to_owned())
     };
     let Some(api_key) = api_key.filter(|key| key.len() <= 512) else {
-        return (StatusCode::BAD_REQUEST, "Burning Man API key is not configured").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            "Burning Man API key is not configured",
+        )
+            .into_response();
     };
     let upstream = match ctx
         .brc_http
@@ -287,9 +299,14 @@ async fn brc_api(ctx: &Ctx, addr: SocketAddr, req: BrcApiRequest, url: &str) -> 
                 .into_response();
         }
     };
-    let status = StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let status =
+        StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     if upstream.content_length().unwrap_or(0) > 16 * 1024 * 1024 {
-        return (StatusCode::BAD_GATEWAY, "Burning Man API response was too large").into_response();
+        return (
+            StatusCode::BAD_GATEWAY,
+            "Burning Man API response was too large",
+        )
+            .into_response();
     }
     match upstream.bytes().await {
         Ok(bytes) if bytes.len() <= 16 * 1024 * 1024 => Response::builder()
@@ -298,7 +315,11 @@ async fn brc_api(ctx: &Ctx, addr: SocketAddr, req: BrcApiRequest, url: &str) -> 
             .header(header::CACHE_CONTROL, "no-store")
             .body(Body::from(bytes))
             .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
-        Ok(_) => (StatusCode::BAD_GATEWAY, "Burning Man API response was too large").into_response(),
+        Ok(_) => (
+            StatusCode::BAD_GATEWAY,
+            "Burning Man API response was too large",
+        )
+            .into_response(),
         Err(error) => (
             StatusCode::BAD_GATEWAY,
             format!("Burning Man API response failed: {error}"),
@@ -314,7 +335,11 @@ fn diagnostics_authorized(
     token: &str,
 ) -> bool {
     let cfg = state.config.read();
-    if cfg.clients.iter().any(|client| client.id == client_id && client.revoked) {
+    if cfg
+        .clients
+        .iter()
+        .any(|client| client.id == client_id && client.revoked)
+    {
         return false;
     }
     addr.ip().is_loopback()
@@ -332,7 +357,10 @@ async fn recent_diagnostics(
     }
     let (join_token, admin_token) = {
         let cfg = ctx.state.config.read();
-        (cfg.server.join_token.clone(), cfg.server.admin_token.clone())
+        (
+            cfg.server.join_token.clone(),
+            cfg.server.admin_token.clone(),
+        )
     };
     match crate::diagnostics::recent_text(&[&join_token, &admin_token, &req.token]) {
         Ok(text) => Response::builder()
@@ -379,7 +407,13 @@ async fn stream_media(
     let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
     let upstream = match ctx.media.stream(&id, range).await {
         Ok(response) => response,
-        Err(e) => return (StatusCode::BAD_GATEWAY, format!("media stream error: {e:#}")).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!("media stream error: {e:#}"),
+            )
+                .into_response();
+        }
     };
     let status = upstream.status();
     let mut builder = Response::builder().status(status);
@@ -462,7 +496,7 @@ async fn serve_media_file_ranged(ctx: Ctx, id: String, range: Option<String>) ->
     let (start, end) = match range.as_deref().and_then(|r| parse_range(r, total)) {
         Some(r) => r,
         None if range.is_some() => {
-            return (StatusCode::RANGE_NOT_SATISFIABLE, "bad range").into_response()
+            return (StatusCode::RANGE_NOT_SATISFIABLE, "bad range").into_response();
         }
         None => (0, total.saturating_sub(1)),
     };
@@ -480,9 +514,10 @@ async fn serve_media_file_ranged(ctx: Ctx, id: String, range: Option<String>) ->
         .header(header::ACCEPT_RANGES, "bytes")
         .header(header::CONTENT_LENGTH, len);
     if range.is_some() {
-        builder = builder
-            .status(StatusCode::PARTIAL_CONTENT)
-            .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{total}"));
+        builder = builder.status(StatusCode::PARTIAL_CONTENT).header(
+            header::CONTENT_RANGE,
+            format!("bytes {start}-{end}/{total}"),
+        );
     }
     builder
         .body(Body::from(data))
@@ -517,7 +552,8 @@ fn parse_range(range: &str, total: u64) -> Option<(u64, u64)> {
 /// build. Absent on instances older than v0.5.2, which the caller treats as
 /// "unknown".
 async fn running_version() -> Response {
-    axum::Json(serde_json::json!({ "version": crate::updater::effective_version() })).into_response()
+    axum::Json(serde_json::json!({ "version": crate::updater::effective_version() }))
+        .into_response()
 }
 
 /// Bring the running instance's window forward. Called by a second launch that
@@ -631,6 +667,7 @@ async fn handover_state(
         config: ctx.state.config.read().clone(),
         layer_phases: ctx.state.layer_phases.lock().clone(),
         sacn_sequence: Some(ctx.state.sacn_sequence.load(Ordering::Relaxed)),
+        backup_transmitting: ctx.state.peer_transmitting.load(Ordering::SeqCst),
     };
     axum::Json(grant).into_response()
 }
@@ -664,8 +701,7 @@ async fn handover(
     state.leaving.store(true, Ordering::SeqCst);
     // Wait for the engine's quiesce ack (~1 frame period; cap in case the engine
     // thread is down, e.g. GPU error — then it wasn't sending anyway).
-    while !state.sacn_quiesced.load(Ordering::SeqCst) && t0.elapsed() < Duration::from_millis(150)
-    {
+    while !state.sacn_quiesced.load(Ordering::SeqCst) && t0.elapsed() < Duration::from_millis(150) {
         tokio::time::sleep(Duration::from_millis(2)).await;
     }
     log::info!(
@@ -679,6 +715,7 @@ async fn handover(
         // Read after the quiesce ack above, so this is provably the last sequence
         // number this instance will ever send.
         sacn_sequence: Some(state.sacn_sequence.load(Ordering::Relaxed)),
+        backup_transmitting: state.peer_transmitting.load(Ordering::SeqCst),
     };
 
     // Exit from a plain thread, not the tokio runtime: setting `shutdown` tears the
@@ -753,6 +790,84 @@ struct MiniSub {
     announced: Option<u64>,
 }
 
+/// Leader-side state for a connection that upgraded itself to a peer backend
+/// (a follower/backup instance) via `ClientMsg::PeerFollow`. Lives in the
+/// connection's task — a peer that drops takes its role with it.
+#[derive(Default)]
+struct PeerConn {
+    is_peer: bool,
+    /// The backup role was granted: `peer.allow_backup` is on and this
+    /// connection holds the (single) backup slot.
+    backup: bool,
+    version: String,
+    armed: bool,
+    /// The peer reports it is transmitting our CID (it covered an outage).
+    transmitting: bool,
+    /// Last message from the peer, for the status line.
+    last_heard: Option<Instant>,
+    reclaim: Reclaim,
+}
+
+/// The leader's half of the network reclaim handshake — the two-phase local
+/// takeover, run over the peer's WebSocket, with the roles reversed: the
+/// BACKUP has the live state and the returned leader asks for it back.
+#[derive(Default, Clone, Copy, PartialEq)]
+enum Reclaim {
+    #[default]
+    Idle,
+    /// Sent `PeerReclaim{commit:false}`; the backup keeps transmitting while
+    /// we adopt its state and warm our pipeline.
+    AwaitingState(Instant),
+    /// Sent `PeerReclaim{commit:true}`; awaiting the final, authoritative
+    /// sequence number.
+    AwaitingCommit(Instant),
+}
+
+impl Reclaim {
+    fn started(&self) -> Option<Instant> {
+        match self {
+            Reclaim::Idle => None,
+            Reclaim::AwaitingState(t) | Reclaim::AwaitingCommit(t) => Some(*t),
+        }
+    }
+}
+
+/// How stale a reclaim exchange may go before it is abandoned (the backup will
+/// re-report `transmitting` and the handshake restarts).
+const RECLAIM_TIMEOUT: Duration = Duration::from_secs(5);
+/// Leader → peer heartbeat cadence. At 60 fps output this bounds a takeover's
+/// sequence baseline to ~15 frames stale — well inside the sender's forward
+/// jump margin of 32.
+const PEER_PULSE_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Reflect the leader's side of the peer link into `status.peer` (mirrored to
+/// every client of this instance at the next status tick).
+fn publish_leader_peer(state: &SharedState, peer: &PeerConn, connected: bool, name: &str) {
+    let mut status = state.status.lock();
+    let p = &mut status.peer;
+    p.role = "leader".into();
+    p.connected = connected;
+    p.armed = connected && peer.backup && peer.armed;
+    p.transmitting = false; // leader-side view; the backup's own status says so
+    p.peer_name = name.to_string();
+    p.peer_version = peer.version.clone();
+    p.last_seen_ms = peer
+        .last_heard
+        .map(|t| t.elapsed().as_secs_f32() * 1000.0)
+        .unwrap_or(-1.0);
+    p.detail = if !connected {
+        "Backup disconnected.".into()
+    } else if peer.transmitting {
+        "Backup is transmitting — reclaiming the show.".into()
+    } else if p.armed {
+        "Backup connected and armed.".into()
+    } else if peer.backup {
+        "Backup connected; waiting for it to arm.".into()
+    } else {
+        "Follower connected (not a backup).".into()
+    };
+}
+
 impl PreviewSub {
     /// Whether the flow-control gate allows sending the next frame now.
     /// The wall-clock fps throttle is checked separately by the caller.
@@ -789,12 +904,15 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
     let mut minis: Option<MiniSub> = None;
     let mut announced_meta = (0u32, 0u32, 0u32);
     let mut queued_notified: Option<u32> = None;
+    let mut peer = PeerConn::default();
+    let mut pulse = tokio::time::interval(PEER_PULSE_INTERVAL);
+    pulse.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut pulse_seq: u64 = 0;
     // Loopback clients (the desktop window, aux windows, local browsers) are
     // exempt from preview-slot rationing: their frames never cross the NIC.
     let is_local = addr.ip().is_loopback();
-    let max_preview = |state: &SharedState| {
-        state.config.read().server.max_preview_clients.max(1) as usize
-    };
+    let max_preview =
+        |state: &SharedState| state.config.read().server.max_preview_clients.max(1) as usize;
 
     loop {
         tokio::select! {
@@ -814,7 +932,17 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                                     break;
                                 }
                                 let mut reset_meta = false;
-                                if handle_msg(&ctx, m, &mut client_id, conn_id, addr, &mut preview, &mut minis, &mut reset_meta, &mut tx).await.is_err() {
+                                let is_peer_msg = matches!(
+                                    &m,
+                                    ClientMsg::PeerFollow { .. }
+                                        | ClientMsg::PeerStatus { .. }
+                                        | ClientMsg::PeerGrant { .. }
+                                );
+                                if is_peer_msg {
+                                    if handle_peer_msg(&ctx, m, &mut peer, conn_id, &client_id, &mut tx).await.is_err() {
+                                        break;
+                                    }
+                                } else if handle_msg(&ctx, m, &mut client_id, conn_id, addr, &mut preview, &mut minis, &mut reset_meta, &mut tx).await.is_err() {
                                     break;
                                 }
                                 if is_hello {
@@ -930,6 +1058,30 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                     if tx.send(Message::Binary(bytes.into())).await.is_err() { break; }
                 }
             }
+            _ = pulse.tick(), if peer.is_peer => {
+                // Abandon a reclaim the backup never answered; it will
+                // re-report `transmitting` and the handshake restarts.
+                if peer.reclaim.started().is_some_and(|t| t.elapsed() > RECLAIM_TIMEOUT) {
+                    log::warn!("peer reclaim timed out; will retry on the backup's next report");
+                    peer.reclaim = Reclaim::Idle;
+                }
+                pulse_seq += 1;
+                let transmitting = {
+                    let cfg = state.config.read();
+                    cfg.output.enabled
+                        && !state.sacn_hold.load(Ordering::SeqCst)
+                        && !state.peer_hold.load(Ordering::SeqCst)
+                        && !state.leaving.load(Ordering::SeqCst)
+                };
+                let msg = ServerMsg::PeerPulse {
+                    seq: pulse_seq,
+                    sacn_sequence: state.sacn_sequence.load(Ordering::Relaxed),
+                    transmitting,
+                    layer_phases: state.layer_phases.lock().clone(),
+                };
+                if send_json(&mut tx, &msg).await.is_err() { break; }
+                publish_leader_peer(&state, &peer, true, &client_name(&state, &client_id));
+            }
             batch = minis_rx.recv() => {
                 if !authenticated { continue; }
                 let batch = match batch {
@@ -970,6 +1122,25 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
         state.mini_watchers.fetch_sub(1, Ordering::Relaxed);
     }
 
+    if peer.is_peer {
+        // Free the single backup slot if this connection held it, and surface
+        // the loss — a leader whose backup vanished should say so.
+        let _ =
+            state
+                .peer_backup_conn
+                .compare_exchange(conn_id, 0, Ordering::SeqCst, Ordering::SeqCst);
+        publish_leader_peer(&state, &peer, false, &client_name(&state, &client_id));
+        log::info!(
+            "peer backend disconnected ({}{})",
+            client_name(&state, &client_id),
+            if peer.backup {
+                ", held the backup slot"
+            } else {
+                ""
+            }
+        );
+    }
+
     {
         let max = max_preview(&state);
         state.preview_gate.lock().release(conn_id, max);
@@ -979,6 +1150,166 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
         deactivate_video_audio(&ctx);
     }
     state.status.lock().clients -= 1;
+}
+
+/// Wait until the engine has rendered `n` more frames (the adopted config has
+/// traversed render + readback) or the timeout passes. Async twin of
+/// `lib.rs::wait_frames`, for use on the server runtime during a reclaim.
+async fn wait_frames_async(state: &SharedState, n: u64, timeout: Duration) {
+    let base = state.frames_rendered.load(Ordering::Relaxed);
+    let start = Instant::now();
+    while state.frames_rendered.load(Ordering::Relaxed) < base + n && start.elapsed() < timeout {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+/// Peer-backend messages (`PeerFollow` / `PeerStatus` / `PeerGrant`) — handled
+/// apart from `handle_msg` on purpose: the peer role is an explicit upgrade
+/// with its own gates, never something a UI connection drifts into.
+async fn handle_peer_msg(
+    ctx: &Ctx,
+    msg: ClientMsg,
+    peer: &mut PeerConn,
+    conn_id: u64,
+    client_id: &str,
+    tx: &mut WsSink,
+) -> Result<(), ()> {
+    let state = &ctx.state;
+    peer.last_heard = Some(Instant::now());
+    match msg {
+        ClientMsg::PeerFollow { backup, version } => {
+            let allow = state.config.read().peer.allow_backup;
+            // One backup at a time: the slot is a connection serial, freed on
+            // disconnect. Re-announcing on the same connection is idempotent.
+            let granted = backup
+                && allow
+                && (state
+                    .peer_backup_conn
+                    .compare_exchange(0, conn_id, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                    || state.peer_backup_conn.load(Ordering::SeqCst) == conn_id);
+            peer.is_peer = true;
+            peer.backup = granted;
+            peer.version = version;
+            log::info!(
+                "peer backend connected: {} v{} ({})",
+                client_name(state, client_id),
+                peer.version,
+                match (backup, granted) {
+                    (true, true) => "backup role granted",
+                    (true, false) if !allow => "backup refused — not allowed in Settings",
+                    (true, false) => "backup refused — another backup holds the slot",
+                    (false, _) => "follower only",
+                }
+            );
+            if backup && !granted {
+                let reason = if allow {
+                    "Another backup already holds the slot on this leader."
+                } else {
+                    "This leader does not allow a backup — enable it in Settings → Redundancy."
+                };
+                let _ = send_json(
+                    tx,
+                    &ServerMsg::Error {
+                        message: reason.into(),
+                    },
+                )
+                .await;
+            }
+            let welcome = ServerMsg::PeerWelcome {
+                backup: granted,
+                version: crate::updater::effective_version(),
+            };
+            if send_json(tx, &welcome).await.is_err() {
+                return Err(());
+            }
+            publish_leader_peer(state, peer, true, &client_name(state, client_id));
+        }
+        ClientMsg::PeerStatus {
+            armed,
+            transmitting,
+        } => {
+            if !peer.is_peer {
+                return Ok(()); // status before the upgrade: ignore quietly
+            }
+            peer.armed = armed;
+            peer.transmitting = transmitting;
+            // The reclaim trigger: we are back up but holding sACN (the
+            // startup gate saw our CID on the wire, or is still in its grace
+            // window), and our granted backup says it is the one transmitting.
+            // Ask for the show back — the network mirror of a local takeover.
+            if peer.backup
+                && transmitting
+                && state.sacn_hold.load(Ordering::SeqCst)
+                && !state.leaving.load(Ordering::SeqCst)
+                && peer.reclaim == Reclaim::Idle
+            {
+                log::info!("backup is transmitting; starting the two-phase reclaim");
+                if send_json(tx, &ServerMsg::PeerReclaim { commit: false })
+                    .await
+                    .is_err()
+                {
+                    return Err(());
+                }
+                peer.reclaim = Reclaim::AwaitingState(Instant::now());
+            }
+            publish_leader_peer(state, peer, true, &client_name(state, client_id));
+        }
+        ClientMsg::PeerGrant { grant, commit } => {
+            if !peer.is_peer || !peer.backup {
+                return Ok(()); // a grant we never asked for changes nothing
+            }
+            match (peer.reclaim, commit) {
+                (Reclaim::AwaitingState(t0), false) => {
+                    // Phase 1: adopt the backup's running show (it keeps
+                    // transmitting), warm our pipeline, then ask it to stop.
+                    let HandoverGrant {
+                        config,
+                        layer_phases,
+                        ..
+                    } = *grant;
+                    state.update_config(move |c| {
+                        crate::config::adopt_show_config(c, config);
+                    });
+                    *state.layer_phases.lock() = layer_phases;
+                    state.phases_transplanted.store(true, Ordering::SeqCst);
+                    wait_frames_async(state, 3, Duration::from_secs(2)).await;
+                    if send_json(tx, &ServerMsg::PeerReclaim { commit: true })
+                        .await
+                        .is_err()
+                    {
+                        return Err(());
+                    }
+                    peer.reclaim = Reclaim::AwaitingCommit(t0);
+                }
+                (Reclaim::AwaitingCommit(t0), true) => {
+                    // Phase 2: the backup has quiesced (silently — no stream
+                    // termination; this CID's stream is ours again). Its
+                    // sequence number is authoritative the same way a local
+                    // commit grant's is: read after its final send.
+                    *state.layer_phases.lock() = grant.layer_phases;
+                    state.phases_transplanted.store(true, Ordering::SeqCst);
+                    if let Some(seq) = grant.sacn_sequence {
+                        state.sacn_resume_sequence.store(seq, Ordering::SeqCst);
+                        state.sacn_resume_pending.store(true, Ordering::SeqCst);
+                    }
+                    state.sacn_hold.store(false, Ordering::SeqCst);
+                    peer.transmitting = false;
+                    peer.reclaim = Reclaim::Idle;
+                    log::info!(
+                        "reclaimed the show from the backup in {:.0} ms; resuming sACN",
+                        t0.elapsed().as_secs_f32() * 1000.0
+                    );
+                }
+                _ => {
+                    log::warn!("unexpected peer grant (commit={commit}); ignoring");
+                }
+            }
+            publish_leader_peer(state, peer, true, &client_name(state, client_id));
+        }
+        _ => unreachable!("only peer messages are routed here"),
+    }
+    Ok(())
 }
 
 fn handle_video_frame(state: &SharedState, conn_id: u64, bytes: &[u8]) {
@@ -1100,9 +1431,8 @@ fn encode_preview_rgb(frame: &PreviewFrame, rgb: &[u8], decimate: u32, magic: u3
 /// documented at the magic's definition in `protocol.rs`.
 fn encode_minis(batch: &MiniBatch) -> Vec<u8> {
     let cell_len = (batch.spokes * batch.pixels * 3) as usize;
-    let mut bytes = Vec::with_capacity(
-        20 + batch.cells.len() * (4 + cell_len) + batch.scalars.len() * 8,
-    );
+    let mut bytes =
+        Vec::with_capacity(20 + batch.cells.len() * (4 + cell_len) + batch.scalars.len() * 8);
     bytes.extend_from_slice(&MINI_PREVIEW_MAGIC.to_le_bytes());
     bytes.extend_from_slice(&(batch.batch as u32).to_le_bytes());
     bytes.extend_from_slice(&(batch.spokes as u16).to_le_bytes());
@@ -1241,7 +1571,12 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
             &name(),
             json!({ "brightness": brightness, "speed": speed }),
         ),
-        ClientMsg::SetMasterHue { enabled, hue, amount, loose } => rec.event(
+        ClientMsg::SetMasterHue {
+            enabled,
+            hue,
+            amount,
+            loose,
+        } => rec.event(
             "master_hue",
             &name(),
             json!({ "enabled": enabled, "hue": hue, "amount": amount, "loose": loose }),
@@ -1290,9 +1625,7 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
         // Game mode replaces the whole look of the array, so mode changes and
         // player injections belong on the timeline — a report captured during a
         // game should say plainly that the array was a game world.
-        ClientMsg::SetGameMode { game } => {
-            rec.event("game_mode", &name(), json!({ "game": game }))
-        }
+        ClientMsg::SetGameMode { game } => rec.event("game_mode", &name(), json!({ "game": game })),
         ClientMsg::GameInput { species, points } => rec.event(
             "game_input",
             &name(),
@@ -1363,7 +1696,12 @@ fn record_performance(state: &SharedState, msg: &ClientMsg, is_loopback: bool) {
             brightness: *brightness,
             speed: *speed,
         },
-        ClientMsg::SetMasterHue { enabled, hue, amount, loose } => A::SetMasterHue {
+        ClientMsg::SetMasterHue {
+            enabled,
+            hue,
+            amount,
+            loose,
+        } => A::SetMasterHue {
             enabled: *enabled,
             hue: *hue,
             amount: *amount,
@@ -1377,7 +1715,9 @@ fn record_performance(state: &SharedState, msg: &ClientMsg, is_loopback: bool) {
             stack: stack_snapshot(config, "recorded-look".into(), "Recorded look".into()),
             patch: patch_for_config,
         },
-        ClientMsg::AddLayer { layer } => A::AddLayer { layer: layer.clone() },
+        ClientMsg::AddLayer { layer } => A::AddLayer {
+            layer: layer.clone(),
+        },
         ClientMsg::UpdateLayer { index, layer } => A::UpdateLayer {
             index: *index,
             layer: layer.clone(),
@@ -1680,7 +2020,12 @@ async fn handle_msg(
                 }
             });
         }
-        ClientMsg::SetMasterHue { enabled, hue, amount, loose } => {
+        ClientMsg::SetMasterHue {
+            enabled,
+            hue,
+            amount,
+            loose,
+        } => {
             state.update_config(|c| {
                 if let Some(e) = enabled {
                     c.render.master_hue_enabled = e;
@@ -1692,7 +2037,7 @@ async fn handle_msg(
                     c.render.master_hue_amount = a.clamp(0.0, 1.0);
                 }
                 if let Some(l) = loose {
-                    c.render.master_hue_loose = l;
+                    c.render.master_hue_loose = l.clamp(0.0, 1.0);
                 }
             });
         }
@@ -1716,11 +2061,20 @@ async fn handle_msg(
             state.update_config(|c| c.ready_stack = Some(stack));
         }
         ClientMsg::TakeReady { ready_id } => {
-            let current_ready = state.config.read().ready_stack.as_ref().map(|stack| stack.id.clone());
+            let current_ready = state
+                .config
+                .read()
+                .ready_stack
+                .as_ref()
+                .map(|stack| stack.id.clone());
             if current_ready.as_deref() != Some(ready_id.as_str()) {
-                let _ = send_json(tx, &ServerMsg::Error {
-                    message: "Ready changed before the take. Check Bus B and try again.".into(),
-                }).await;
+                let _ = send_json(
+                    tx,
+                    &ServerMsg::Error {
+                        message: "Ready changed before the take. Check Bus B and try again.".into(),
+                    },
+                )
+                .await;
                 return Ok(());
             }
             state.update_config(|c| {
@@ -1729,7 +2083,9 @@ async fn handle_msg(
                     format!("ready-program-{}", uuid::Uuid::new_v4().simple()),
                     "Previous program".into(),
                 );
-                let Some(next) = c.ready_stack.take() else { return };
+                let Some(next) = c.ready_stack.take() else {
+                    return;
+                };
                 c.active_patch = None;
                 c.show_scheduler.enabled = false;
                 c.layers = next.layers;
@@ -1798,14 +2154,16 @@ async fn handle_msg(
                 }
                 let duration_secs = active.started.elapsed().as_secs_f32().max(0.1);
                 state.update_config(|config| {
-                    config.saved_performances.push(crate::config::SavedPerformance {
-                        id: active.id,
-                        name: active.name,
-                        initial_stack: active.initial_stack,
-                        initial_patch: active.initial_patch,
-                        duration_secs,
-                        events: active.events,
-                    });
+                    config
+                        .saved_performances
+                        .push(crate::config::SavedPerformance {
+                            id: active.id,
+                            name: active.name,
+                            initial_stack: active.initial_stack,
+                            initial_patch: active.initial_patch,
+                            duration_secs,
+                            events: active.events,
+                        });
                 });
             } else {
                 state.broadcast_state();
@@ -1903,7 +2261,9 @@ async fn handle_msg(
         }
         ClientMsg::PatchGet { id } => {
             let msg = match patch::store::load(&patch::store::patches_dir(), &id) {
-                Ok(doc) => ServerMsg::Patch { patch: Box::new(doc) },
+                Ok(doc) => ServerMsg::Patch {
+                    patch: Box::new(doc),
+                },
                 Err(e) => ServerMsg::Error { message: e },
             };
             let _ = send_json(tx, &msg).await;
@@ -1925,7 +2285,13 @@ async fn handle_msg(
                     }
                     // Echo (the editor learns an assigned id), then refresh
                     // everyone's palette.
-                    let _ = send_json(tx, &ServerMsg::Patch { patch: Box::new(doc) }).await;
+                    let _ = send_json(
+                        tx,
+                        &ServerMsg::Patch {
+                            patch: Box::new(doc),
+                        },
+                    )
+                    .await;
                     let _ = state.events.send(ServerMsg::Patches {
                         patches: patch::store::list(&dir),
                     });
@@ -1984,8 +2350,13 @@ async fn handle_msg(
             // params the patch author exposed, on the active patch only.
             let active = state.config.read().active_patch.clone();
             let Some(id) = active else {
-                let _ = send_json(tx, &ServerMsg::Error { message: "no active patch".into() })
-                    .await;
+                let _ = send_json(
+                    tx,
+                    &ServerMsg::Error {
+                        message: "no active patch".into(),
+                    },
+                )
+                .await;
                 return Ok(());
             };
             let dir = patch::store::patches_dir();
@@ -1996,7 +2367,11 @@ async fn handle_msg(
                     return Ok(());
                 }
             };
-            if !doc.exposed.iter().any(|x| x.node == node && x.param == param) {
+            if !doc
+                .exposed
+                .iter()
+                .any(|x| x.node == node && x.param == param)
+            {
                 let _ = send_json(
                     tx,
                     &ServerMsg::Error {
@@ -2085,10 +2460,7 @@ async fn handle_msg(
             // it runs off the async runtime. One scan at a time: a second Scan
             // tap (or a second device) joins the running one rather than putting
             // another round of probes on a show network.
-            if state
-                .discovery_running
-                .swap(true, Ordering::SeqCst)
-            {
+            if state.discovery_running.swap(true, Ordering::SeqCst) {
                 let _ = send_json(
                     tx,
                     &ServerMsg::Error {
@@ -2101,8 +2473,7 @@ async fn handle_msg(
                 state2.broadcast_state(); // light up the "scanning…" state now
                 tokio::task::spawn_blocking(move || {
                     let cfg = state2.config.read().clone();
-                    let result =
-                        crate::discovery::scan(&cfg, std::time::Duration::from_secs(3));
+                    let result = crate::discovery::scan(&cfg, std::time::Duration::from_secs(3));
                     log::info!(
                         "controller scan: {} found, {} missing, {} other sACN source(s)",
                         result.found.len(),
@@ -2199,7 +2570,11 @@ async fn handle_msg(
         } => {
             state.paint(pen, &points, hue, saturation, brightness, size, intensity);
         }
-        ClientMsg::SubscribePreview { fps, decimate, include_ready } => {
+        ClientMsg::SubscribePreview {
+            fps,
+            decimate,
+            include_ready,
+        } => {
             *preview = Some(PreviewSub {
                 min_interval: Duration::from_secs_f32(1.0 / fps.clamp(1.0, 60.0)),
                 decimate: decimate.clamp(1, 64),
@@ -2254,9 +2629,7 @@ async fn handle_msg(
             }
         }
         ClientMsg::StopVideo { force } => {
-            if !client_id.is_empty()
-                && state.stop_video(if force { None } else { Some(conn_id) })
-            {
+            if !client_id.is_empty() && state.stop_video(if force { None } else { Some(conn_id) }) {
                 deactivate_video_audio(ctx);
             }
         }
@@ -2297,6 +2670,11 @@ async fn handle_msg(
             c.roll = roll;
             c.shake = (c.shake + shake).min(3.0);
         }
+        // Routed to `handle_peer_msg` by the connection loop before this
+        // dispatch is ever reached (the peer role has its own gates).
+        ClientMsg::PeerFollow { .. }
+        | ClientMsg::PeerStatus { .. }
+        | ClientMsg::PeerGrant { .. } => {}
     }
     Ok(())
 }
@@ -2324,7 +2702,12 @@ mod diagnostics_tests {
 
         assert!(!diagnostics_authorized(&state, remote(), "unknown", ""));
         assert!(!diagnostics_authorized(&state, remote(), "operator", ""));
-        assert!(diagnostics_authorized(&state, remote(), "unknown", "show-secret"));
+        assert!(diagnostics_authorized(
+            &state,
+            remote(),
+            "unknown",
+            "show-secret"
+        ));
     }
 
     #[test]
@@ -2338,7 +2721,12 @@ mod diagnostics_tests {
             admin: false,
         });
         let state = SharedState::new(config);
-        assert!(!diagnostics_authorized(&state, remote(), "revoked", "show-secret"));
+        assert!(!diagnostics_authorized(
+            &state,
+            remote(),
+            "revoked",
+            "show-secret"
+        ));
     }
 
     #[test]
@@ -2354,14 +2742,29 @@ mod diagnostics_tests {
         config.server.join_token = "show-secret".into();
         config.server.admin_token = "operator-secret".into();
         let state = SharedState::new(config);
-        assert!(diagnostics_authorized(&state, remote(), "unknown", "operator-secret"));
-        assert!(client_authorized(&state, remote(), "unknown", "operator-secret"));
+        assert!(diagnostics_authorized(
+            &state,
+            remote(),
+            "unknown",
+            "operator-secret"
+        ));
+        assert!(client_authorized(
+            &state,
+            remote(),
+            "unknown",
+            "operator-secret"
+        ));
     }
 
     #[test]
     fn show_control_needs_admin_but_play_surfaces_do_not() {
-        assert!(requires_admin(&ClientMsg::SetSacnEnabled { enabled: false }));
-        assert!(requires_admin(&ClientMsg::SetMaster { brightness: Some(0.0), speed: None }));
+        assert!(requires_admin(&ClientMsg::SetSacnEnabled {
+            enabled: false
+        }));
+        assert!(requires_admin(&ClientMsg::SetMaster {
+            brightness: Some(0.0),
+            speed: None
+        }));
         assert!(requires_admin(&ClientMsg::SetTestMode { active: true }));
         assert!(requires_admin(&ClientMsg::StopVideo { force: true }));
         assert!(!requires_admin(&ClientMsg::StopVideo { force: false }));
@@ -2429,9 +2832,19 @@ mod diagnostics_tests {
         let program = encode_preview(&frame, 2);
         let ready = encode_preview_rgb(&frame, &frame.ready_rgb, 2, READY_PREVIEW_MAGIC);
 
-        assert_eq!(u32::from_le_bytes(program[0..4].try_into().unwrap()), PREVIEW_MAGIC);
-        assert_eq!(u32::from_le_bytes(ready[0..4].try_into().unwrap()), READY_PREVIEW_MAGIC);
-        assert_eq!(&program[4..12], &ready[4..12], "bus packets share frame geometry");
+        assert_eq!(
+            u32::from_le_bytes(program[0..4].try_into().unwrap()),
+            PREVIEW_MAGIC
+        );
+        assert_eq!(
+            u32::from_le_bytes(ready[0..4].try_into().unwrap()),
+            READY_PREVIEW_MAGIC
+        );
+        assert_eq!(
+            &program[4..12],
+            &ready[4..12],
+            "bus packets share frame geometry"
+        );
         assert_eq!(u16::from_le_bytes(program[10..12].try_into().unwrap()), 2);
         assert_ne!(&program[12..], &ready[12..]);
     }

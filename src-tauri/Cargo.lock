@@ -1311,6 +1311,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-window-state",
  "tokio",
+ "tokio-tungstenite",
  "tower-http",
  "ureq",
  "url",

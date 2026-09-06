@@ -44,7 +44,7 @@ struct Globals {
     _pad_game1: f32,
     rotation: f32,
     // Master hue pull ("warm colors now"): target hue in turns, strength
-    // 0..1 (0 = off), and loose-mask flag as 0/1. See hue_pull().
+    // 0..1 (0 = off), and the loose-mask amount 0..1. See hue_pull().
     hue_target: f32,
     hue_amount: f32,
     hue_loose: f32,
