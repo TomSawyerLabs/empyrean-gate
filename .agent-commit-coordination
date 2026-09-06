@@ -188,3 +188,11 @@ src/{App.tsx,Settings.tsx,types.ts,styles.css}, tests/show-mode-updates.spec.ts,
 tests/fixtures/default-status.json (regenerated), README.md,
 plans/update-download-progress.md (new), this file. Local: cargo test 237,
 tsc, layout 80, behavior 70 (chromium+webkit). Not touching version files.
+
+## empyrean-gate (Fable session) — v0.10.15 SHIPPED — 2026-09-06
+Release run 34020560721 green on tag v0.10.15 (= a8475df, bump on top of the
+no-hard-cuts ramp feature ea03565 + the update-download-progress work 319ad68).
+All four assets published: windows-x64.exe, linux-x64, linux-x64.AppImage,
+macos-arm64. Version files are free for everyone again. Local suite before the
+tag: tsc, cargo lib 238, engine-smoke 6, layout+behavior 164 passed / 16
+skipped. Follow-ups for the ramp feature live in plans/no-hard-cuts.md.
