@@ -231,16 +231,38 @@ touches. This file is the single place to look for "did we do X yet".
 
 ### Prompt for the USB-C investigation agent
 
-> This is for the USB-C error-detection work on the Empyrean Gate show
-> machine. Earlier you SSH'ed into the live system and gathered direct
-> evidence of a low-quality / flaky USB-C link (display or GPU driver resets,
-> connect/disconnect churn, stutters). Please append to
-> `plans/show-feedback-2026-09.md` under a new heading "USB-C evidence" —
-> the exact commands you ran, the exact log lines / event IDs / counters that
-> proved it (Windows Event Log source and IDs, WMI/PnP queries, `dxdiag` or
-> driver-reset counters, anything else), and which of those an app running on
-> the machine could read without a network. Verbatim output preferred over
-> summaries.
+Handed to Cameron 2026-09-10 to pass to the session that did the SSH work.
+That agent's deliverable is a "## USB-C evidence" section appended below
+this file's "Things not to do"; nothing here is filled in until it lands.
+
+> This is for the USB-C error-detection work on the Empyrean Gate show machine
+> (repo: ~/git/Personal Projects/Empyrean). Earlier you SSH'ed into the live
+> system (`ssh empyreangate`) and gathered direct evidence of a low-quality /
+> flaky USB-C link — display or GPU driver resets, connect/disconnect churn,
+> stutters. That evidence never made it into the repo, and I want to encode
+> the detection in code so it works without the machine online.
+>
+> Please append a new section headed "## USB-C evidence" to
+> `plans/show-feedback-2026-09.md` in that repo, containing:
+>
+> 1. The exact commands you ran (PowerShell / cmd / WMI / anything), verbatim.
+> 2. The exact output that proved it, verbatim — Windows Event Log source names
+>    and event IDs (e.g. Display / nvlddmkm / amdkmdag / igfx / Kernel-PnP / UCM
+>    entries), PnP device instance paths, any driver-reset or TDR counters,
+>    dxdiag or Get-PnpDevice output, timestamps. Do not summarise; paste.
+> 3. For each item, whether a program running on the machine could read the
+>    same signal locally with no network (Event Log query, WMI class, registry
+>    key, perf counter, Win32 API) — name the specific source.
+> 4. Anything you concluded about which cable/port it was and why.
+>
+> Context for you: the repo already has `src-tauri/src/display.rs`, which
+> polls GetSystemMetrics (monitor count, primary size) and flags "flapping"
+> at 3 changes in 10 minutes. Your evidence is meant to sharpen that — a
+> Windows event or counter that says "link lost / driver reset" directly is
+> better than inferring it from topology changes.
+>
+> Don't change any code. Only append to that plan file, then tell me what you
+> added.
 
 ## Things not to do
 
