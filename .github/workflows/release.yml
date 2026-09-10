@@ -51,7 +51,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Restores the release-profile cache warm-cache.yml saves on master.
+      # Restores the release-profile cache warm-cache.yml saves on master. That
+      # workflow is manual-only now (Blacksmith minutes cost money past the free
+      # tier), so the entry may predate several dependency bumps; the restore-key
+      # prefix still hits it and only the changed crates recompile. Restoring
+      # also resets the entry's 7-day expiry, so regular releases keep it alive.
       # `shared-key` because rust-cache otherwise bakes the job id into the key,
       # and this job is `build` while the warm job is `warm` — different keys,
       # permanent miss. `save-if: false` because a cache written here would be

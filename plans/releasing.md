@@ -115,6 +115,13 @@ The fix is `.github/workflows/warm-cache.yml`: build the release profile **on
 master**, save under `shared-key: release-build`, and have release.yml restore
 that same key with `save-if: false`. Read its header before changing any of it.
 
+> **2026-09-09 update:** warm-cache.yml is `workflow_dispatch` only now. The nightly
+> cron and the Cargo.toml/Cargo.lock push trigger were the bulk of the Blacksmith bill
+> (the push one fired on every release's version bump to re-save an identical cache),
+> and post-show the goal is to stay inside the free tier. Releases keep the entry alive
+> by restoring it; see `plans/blacksmith-free-tier.md` for the numbers and the
+> options that were considered.
+
 Two things to know about it:
 
 - What is cached is the dependency tree, not this crate — rust-cache prunes the
