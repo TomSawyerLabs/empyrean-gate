@@ -28,6 +28,10 @@ touches. This file is the single place to look for "did we do X yet".
   separate commits").
 - Finished plan docs are deleted in their own commit with a one-line
   explanation.
+- **F14 (Cameron, 2026-09-10): one global Ready bus stays the design.** It owns
+  a whole GPU render bus, so it is not multiplied per client. Per-client
+  *private* Ready buses only if a show actually needs them, and then with a
+  separate small cap (2–3) for the same reason.
 
 ## The requests
 
@@ -145,8 +149,9 @@ touches. This file is the single place to look for "did we do X yet".
     engine's `ready_inputs.patch_params = None` guard becomes "the Ready
     runtime's params". About a day; wants its own plan doc.
 14. **How many Ready panels? Per-client opt-in? Separate limit?** Today there is
-    exactly one global Ready bus with its own GPU engine. Status: OPEN QUESTION
-    (see below).
+    exactly one global Ready bus with its own GPU engine. Status: DECIDED —
+    stays one global bus; private per-client buses only on demand, capped at
+    2–3 (see Decisions). Nothing to build now.
 
 ### G. Windows and dialogs
 
@@ -221,9 +226,7 @@ touches. This file is the single place to look for "did we do X yet".
 
 ## Open questions for the user
 
-1. **F14 Ready panels.** Recommendation: keep one global Ready bus (it owns a
-   whole GPU engine); add per-client *private* Ready only if the show needs it,
-   with a separate small cap (2–3) because each is a full render bus.
+1. ~~F14 Ready panels~~ — decided 2026-09-10, see Decisions.
 2. **E10 USB-C evidence.** Prompt to hand to the earlier agent is below.
 3. Carried from `plans/rdp-window-state-corruption.md` (fix landed, doc
    deleted): should show mode re-assert itself when the console session
