@@ -112,7 +112,10 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   the order it arrived, what it last did and how long ago, a dashed line where the
   live-view slots run out and the rest are waiting, and a one-tap **Block** per
   device that kicks it and keeps it out until unblocked (any admin, not just the
-  Gate machine).
+  Gate machine). Devices arrive with a name: a phone that never picked one is
+  minted a two-word default ("Dusty Badger", "Sonic Tumbleweed" — playa, festival
+  and nerd flavoured) and its **☺ name chip** in the top bar pulses *pick a name*
+  until it is kept, re-rolled or replaced; the chip stays as the way to rename.
 - **Seven UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Media
   (image/video intake), Patch (node-graph editor), Archive (recorded-show replay),
   Control (touch-sized effect pads + master/layer faders), Games, and Settings.

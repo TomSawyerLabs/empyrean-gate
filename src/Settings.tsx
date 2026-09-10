@@ -1738,6 +1738,7 @@ function ThisDevicePanel() {
       <label className="field-row device-name-row">
         <span>Device name</span>
         <input
+          key={client.deviceName}
           defaultValue={client.deviceName}
           placeholder="e.g. DJ booth iPad"
           onBlur={(e) => client.setDeviceName(e.target.value)}

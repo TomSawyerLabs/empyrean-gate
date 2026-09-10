@@ -12,6 +12,7 @@ import Test from "./Test";
 import { contenders, peerLabel, peerVerdict, severity } from "./sacnPeers";
 import Ready from "./Ready";
 import { useGate } from "./state";
+import { deviceNameUnconfirmed, generateDeviceName } from "./deviceNames";
 
 // The patch editor pulls in React Flow; lazy so phones on the play surfaces
 // never pay for it.
@@ -603,6 +604,7 @@ function TopbarMenu({
             {connected ? "connected" : "reconnecting…"}
           </span>
           <PatchChip onOpen={() => onSelectTab("patch")} />
+          <NameChip />
           {status && <span className="gpu-name">{status.gpu_name}</span>}
           <VersionChip />
         </div>
@@ -651,6 +653,81 @@ function PatchChip({ onOpen }: { onOpen: () => void }) {
     </button>
   ) : (
     <span className={`patch-chip ${broken ? "broken" : ""}`}>{body}</span>
+  );
+}
+
+/** This device's name, as the roster will show it, with a tap-to-rename
+ *  dialog. A freshly minted two-word default pulses until it is confirmed or
+ *  replaced — the nudge to pick a name, for guests who never see Settings. */
+function NameChip() {
+  const { client } = useGate();
+  const [name, setName] = useState(() => client.deviceName);
+  const [unconfirmed, setUnconfirmed] = useState(deviceNameUnconfirmed);
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(name);
+  useEffect(
+    () =>
+      client.onDeviceName((next) => {
+        setName(next);
+        setUnconfirmed(false);
+      }),
+    [client],
+  );
+  const commit = (value: string) => {
+    client.setDeviceName(value);
+    setOpen(false);
+  };
+  return (
+    <>
+      <button
+        className={`name-chip ${unconfirmed ? "unconfirmed" : ""}`}
+        aria-label={`Your device name is ${name}. Change it`}
+        onClick={() => {
+          setDraft(name);
+          setOpen(true);
+        }}
+      >
+        ☺ {name}
+        {unconfirmed && <span className="name-chip-nudge">pick a name</span>}
+      </button>
+      {open && (
+        <div className="modal-backdrop" onClick={() => setOpen(false)}>
+          <div className="modal name-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Your name on the floor</h2>
+            <p>
+              This is how the operator sees your phone in the roster. Keep the one we
+              made up, roll another, or type your own.
+            </p>
+            <form
+              className="name-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                commit(draft);
+              }}
+            >
+              <input
+                autoFocus
+                maxLength={80}
+                value={draft}
+                aria-label="Device name"
+                onChange={(e) => setDraft(e.target.value)}
+              />
+              <button type="button" className="ghost" onClick={() => setDraft(generateDeviceName())}>
+                🎲 Another
+              </button>
+            </form>
+            <div className="name-actions">
+              <button className="primary" onClick={() => commit(draft)} disabled={!draft.trim()}>
+                {draft.trim() === name ? "Keep it" : "Use this name"}
+              </button>
+              <button className="ghost" onClick={() => setOpen(false)}>
+                Not now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -838,6 +915,7 @@ export default function App() {
           </button>
         )}
         <PatchChip onOpen={() => selectTab("patch")} />
+        <NameChip />
         {status && <span className="gpu-name">{status.gpu_name}</span>}
         <span className={connected ? "conn ok" : "conn bad"}>
           {connected ? "connected" : "reconnecting…"}

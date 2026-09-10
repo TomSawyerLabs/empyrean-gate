@@ -4644,8 +4644,15 @@ button:disabled {
   .topbar > .ghost,
   .topbar > .gpu-name,
   .topbar > .conn,
+  .topbar > .patch-chip,
+  .topbar > .name-chip,
   .topbar > .version-chip {
     display: none;
+  }
+  /* Both chips live in the corner menu's foot at this width. */
+  .topbar-menu-foot .name-chip,
+  .topbar-menu-foot .patch-chip {
+    max-width: 100%;
   }
   /* Report survives the cull: a phone or iPad is the most likely thing in the
      hand of whoever just saw something they didn't like, and the capture window
@@ -6548,4 +6555,58 @@ button.hue-swatch-button[aria-expanded="true"] {
   min-height: 0;
   padding: 3px 10px;
   font-size: 11px;
+}
+
+/* --- This device's name (top bar chip + rename dialog) --- */
+
+.name-chip {
+  min-height: 0;
+  padding: 2px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  border-radius: 999px;
+  border: 1px solid #2a2445;
+  background: rgba(20, 16, 36, 0.55);
+  color: var(--text);
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.name-chip.unconfirmed {
+  border-color: var(--accent2);
+  animation: name-nudge 2.4s ease-in-out infinite;
+}
+
+@keyframes name-nudge {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(56, 209, 194, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(56, 209, 194, 0.25); }
+}
+
+.name-chip-nudge {
+  margin-left: 6px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent2);
+}
+
+.name-form {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.name-form input {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+}
+
+.name-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }

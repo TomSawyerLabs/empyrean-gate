@@ -2,6 +2,7 @@
 // LAN browsers, and phones. Text = JSON protocol; binary = preview frames.
 
 import { SHAPE_STYLE_DEFAULTS } from "./shapeStyle";
+import { confirmDeviceName, loadDeviceName } from "./deviceNames";
 import type {
   AppConfig,
   EffectCfg,
@@ -166,13 +167,27 @@ export class GateClient {
     return response.json();
   }
 
+  /** This device's name for the roster. Never empty: a device that has not
+   *  picked one gets a two-word default ("Dusty Badger") minted on first use,
+   *  so the roster reads as people rather than as device-3f9a. */
   get deviceName(): string {
-    return localStorage.getItem("empyrean-client-name") ?? "";
+    return loadDeviceName();
   }
 
   setDeviceName(name: string) {
-    localStorage.setItem("empyrean-client-name", name);
-    this.send({ type: "set_client_name", name });
+    const clean = name.trim().slice(0, 80);
+    if (!clean) return;
+    localStorage.setItem("empyrean-client-name", clean);
+    confirmDeviceName();
+    this.send({ type: "set_client_name", name: clean });
+    this.nameListeners.forEach((l) => l(clean));
+  }
+
+  private nameListeners = new Set<(name: string) => void>();
+  /** Fires whenever this device's name is changed from anywhere in the UI. */
+  onDeviceName(l: (name: string) => void): () => void {
+    this.nameListeners.add(l);
+    return () => this.nameListeners.delete(l);
   }
 
   private newClientId(): string {
