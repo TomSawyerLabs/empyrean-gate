@@ -275,8 +275,8 @@ is silent, proceed — after a venue-wide power cut, someone must.
 - [x] UI (Settings panel + banners)
 - [x] Fixtures + tests (246 Rust tests green, tsc clean)
 - [x] README
-- [ ] Layout/behavior gates + commit (pending the concurrent Live-tab UI work
-      sharing this worktree)
+- [x] Layout/behavior gates + commit — landed as 7731d9b (rebased onto
+      master 2026-09-09).
 
 ## Follow-ups (not in this change)
 

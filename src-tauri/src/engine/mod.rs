@@ -2498,7 +2498,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // Phase hygiene: zero every layer's accumulated phase once a day, at an
         // hour when the array cannot be seen. Kinds that can wrap or split their
         // phase don't need this; the noise-driven ones have no other cure. See
-        // `RenderConfig::phase_reset_at` and `plans/walk-phase-jitter.md`.
+        // `RenderConfig::phase_reset_at` and `plans/walk-phase-jitter.md`
+        // (finished; in git history).
         if now >= next_phase_reset_check {
             next_phase_reset_check = now + Duration::from_secs(1);
             if let Some(at) = cfg.render.phase_reset_at.as_deref().and_then(parse_hhmm) {

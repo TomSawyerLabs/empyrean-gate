@@ -5,8 +5,9 @@ this up in its own worktree. Nothing here is started. Two independent questions
 about how the Gate turns maths into light, both found while making the stamped
 figures (star, heart, …) legible, both larger than figures.
 
-Read `plans/shape-definition.md` for how the figures got where they are; this
-file is self-contained for the two open problems.
+`plans/shape-definition.md` (finished, deleted 2026-09-09 — read it with
+`git log --all -- plans/shape-definition.md`) records how the figures got where
+they are; this file is self-contained for the two open problems.
 
 ---
 
