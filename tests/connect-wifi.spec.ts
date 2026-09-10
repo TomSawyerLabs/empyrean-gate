@@ -10,7 +10,11 @@ test("Wi-Fi credentials add a numbered second code and a poster link", async ({ 
   await page.goto("/#settings");
   await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
 
-  await page.getByRole("checkbox", { name: /join the Wi-Fi/ }).check();
+  // Controlled input: it flips when the backend echoes the config, not on the
+  // click itself, so wait for the state rather than demanding it at once.
+  const enable = page.getByRole("checkbox", { name: /join the Wi-Fi/ });
+  await enable.click();
+  await expect(enable).toBeChecked();
   await page.getByRole("textbox", { name: /Network \(SSID\)/ }).fill("Playa; Guest");
   await page.getByRole("textbox", { name: /^Password/ }).fill("dust:storm");
 
