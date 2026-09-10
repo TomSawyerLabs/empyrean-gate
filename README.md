@@ -87,7 +87,12 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   default outline is ~0.077 of the array radius, just inside the 0.078 gap
   between spokes at the rim: the thinnest continuous line 64 spokes can draw.
   Going thinner is allowed and the readout warns you when the line will start
-  breaking into dashes.
+  breaking into dashes. Everything the floor sends — taps, strokes, pads, from
+  every phone — is scaled by one **Floor input** fader in the master cluster
+  (Live and Control), glided so turning the crowd down never pops; it is also a
+  quick-setting target, so a hold-to-mute button is one tap to make. Switching
+  every layer off does *not* silence the floor by itself, which is why the fader
+  exists.
 - **Seven UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Media
   (image/video intake), Patch (node-graph editor), Archive (recorded-show replay),
   Control (touch-sized effect pads + master/layer faders), Games, and Settings.

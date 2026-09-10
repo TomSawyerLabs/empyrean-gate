@@ -3,6 +3,7 @@ import type { AppConfig } from "./types";
 export type QuickSettingTarget =
   | "master_brightness"
   | "master_speed"
+  | "floor_level"
   | "manual_bpm"
   | "beat_time"
   | "walk_enabled"
@@ -37,6 +38,7 @@ export type QuickSettingTargetDefinition = {
 export const QUICK_SETTING_TARGETS: readonly QuickSettingTargetDefinition[] = [
   { id: "master_brightness", label: "Master brightness", group: "Master", kind: "number", min: 0, max: 1, step: 0.01, defaultValue: 0 },
   { id: "master_speed", label: "Master speed", group: "Master", kind: "number", min: 0, max: 3, step: 0.05, defaultValue: 1 },
+  { id: "floor_level", label: "Floor input (taps, drawing, pads)", group: "Master", kind: "number", min: 0, max: 1, step: 0.01, defaultValue: 0 },
   { id: "manual_bpm", label: "Tempo source / BPM", group: "Tempo", kind: "select", defaultValue: null, options: [
     { value: null, label: "Auto" }, { value: "80", label: "80 BPM" }, { value: "100", label: "100 BPM" },
     { value: "120", label: "120 BPM" }, { value: "128", label: "128 BPM" }, { value: "140", label: "140 BPM" },
@@ -134,6 +136,7 @@ export function readQuickSetting(config: AppConfig, target: QuickSettingTarget):
   switch (target) {
     case "master_brightness": return config.render.master_brightness;
     case "master_speed": return config.render.master_speed;
+    case "floor_level": return config.render.floor_level;
     case "manual_bpm": return config.render.manual_bpm;
     case "beat_time": return config.render.beat_time;
     case "walk_enabled": return config.render.walk_enabled;
@@ -154,6 +157,7 @@ export function patchQuickSetting(
   switch (target) {
     case "master_brightness": next.render.master_brightness = Number(value); break;
     case "master_speed": next.render.master_speed = Number(value); break;
+    case "floor_level": next.render.floor_level = Number(value); break;
     case "manual_bpm": next.render.manual_bpm = value === null ? null : Number(value); break;
     case "beat_time": next.render.beat_time = value as AppConfig["render"]["beat_time"]; break;
     case "walk_enabled": next.render.walk_enabled = Boolean(value); break;

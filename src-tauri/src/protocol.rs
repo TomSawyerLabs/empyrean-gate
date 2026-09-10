@@ -60,6 +60,9 @@ pub enum ClientMsg {
         brightness: Option<f32>,
         #[serde(default)]
         speed: Option<f32>,
+        /// Floor input level 0..1 (taps, drawing, pads from every client).
+        #[serde(default)]
+        floor: Option<f32>,
     },
     /// Patch the master hue pull; every field is optional so the UI can flip
     /// one switch without re-sending the rest.

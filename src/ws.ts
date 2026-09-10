@@ -376,7 +376,7 @@ export class GateClient {
   setConfig(config: AppConfig) {
     this.send({ type: "set_config", config });
   }
-  setMaster(v: { brightness?: number; speed?: number }) {
+  setMaster(v: { brightness?: number; speed?: number; floor?: number }) {
     this.send({ type: "set_master", ...v });
   }
   setMasterHue(v: { enabled?: boolean; hue?: number; amount?: number; loose?: number }) {

@@ -56,6 +56,7 @@ export function QuickSettingsPanel({
     configRef.current = next;
     if (target === "master_brightness") client.setMaster({ brightness: Number(value) });
     else if (target === "master_speed") client.setMaster({ speed: Number(value) });
+    else if (target === "floor_level") client.setMaster({ floor: Number(value) });
     else client.setConfig(next);
   };
 

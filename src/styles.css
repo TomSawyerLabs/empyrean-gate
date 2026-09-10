@@ -3006,6 +3006,24 @@ input[type="range"].hue-slider {
   font-size: 15px;
 }
 
+/* A panel heading with actions on its right (Control → Layers: All off / All on). */
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.panel-head h2 {
+  margin: 0;
+}
+
+.panel-head-actions {
+  display: flex;
+  gap: 6px;
+}
+
 .settings-disclosure {
   padding: 0;
   overflow: hidden;

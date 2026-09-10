@@ -67,6 +67,7 @@
     "fps": 60.0,
     "master_brightness": 1.0,
     "master_speed": 1.0,
+    "floor_level": 1.0,
     "master_hue_enabled": false,
     "master_hue": 0.0,
     "master_hue_amount": 1.0,

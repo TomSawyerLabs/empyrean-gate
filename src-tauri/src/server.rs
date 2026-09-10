@@ -1566,10 +1566,14 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
                 .unwrap_or_default();
             rec.paint_event(&name(), &pen, points.len() as u64, *hue, *size);
         }
-        ClientMsg::SetMaster { brightness, speed } => rec.event(
+        ClientMsg::SetMaster {
+            brightness,
+            speed,
+            floor,
+        } => rec.event(
             "master",
             &name(),
-            json!({ "brightness": brightness, "speed": speed }),
+            json!({ "brightness": brightness, "speed": speed, "floor": floor }),
         ),
         ClientMsg::SetMasterHue {
             enabled,
@@ -1692,9 +1696,14 @@ fn record_performance(state: &SharedState, msg: &ClientMsg, is_loopback: bool) {
         return;
     };
     let action = match msg {
-        ClientMsg::SetMaster { brightness, speed } => A::SetMaster {
+        ClientMsg::SetMaster {
+            brightness,
+            speed,
+            floor,
+        } => A::SetMaster {
             brightness: *brightness,
             speed: *speed,
+            floor: *floor,
         },
         ClientMsg::SetMasterHue {
             enabled,
@@ -2010,13 +2019,20 @@ async fn handle_msg(
                 .await;
             }
         }
-        ClientMsg::SetMaster { brightness, speed } => {
+        ClientMsg::SetMaster {
+            brightness,
+            speed,
+            floor,
+        } => {
             state.update_config(|c| {
                 if let Some(b) = brightness {
                     c.render.master_brightness = b.clamp(0.0, 1.0);
                 }
                 if let Some(s) = speed {
                     c.render.master_speed = s.clamp(0.0, 8.0);
+                }
+                if let Some(f) = floor {
+                    c.render.floor_level = f.clamp(0.0, 1.0);
                 }
             });
         }
@@ -2763,7 +2779,8 @@ mod diagnostics_tests {
         }));
         assert!(requires_admin(&ClientMsg::SetMaster {
             brightness: Some(0.0),
-            speed: None
+            speed: None,
+            floor: None,
         }));
         assert!(requires_admin(&ClientMsg::SetTestMode { active: true }));
         assert!(requires_admin(&ClientMsg::StopVideo { force: true }));

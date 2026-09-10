@@ -271,6 +271,8 @@ export interface RenderConfig {
   fps: number;
   master_brightness: number;
   master_speed: number;
+  /** Floor input level 0..1: scales taps, drawing and pads from every client. */
+  floor_level: number;
   /** Master hue pull ("warm colors now") — live override, not part of stacks. */
   master_hue_enabled: boolean;
   /** Target hue in turns 0..1, same convention as LayerCfg.hue. */

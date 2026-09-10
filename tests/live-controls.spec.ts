@@ -27,13 +27,13 @@ for (const viewport of VIEWPORTS) {
     await page.goto("/#live");
     await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
 
-    // Brightness, Speed, Hue, Hue amount, and Flourishes. Master hue lost its
-    // on/off checkbox (the Amount slider is the switch) and the loose mask is
-    // a 0..1 amount now, so all five are always there.
+    // Brightness, Speed, Floor input, Hue, Hue amount, and Flourishes. Master
+    // hue lost its on/off checkbox (the Amount slider is the switch) and the
+    // loose mask is a 0..1 amount now, so all six are always there.
     const sliders = page.locator('.live-side .master-ctl input[type="range"]');
-    await expect(sliders).toHaveCount(5);
+    await expect(sliders).toHaveCount(6);
 
-    for (const index of [0, 1, 2, 3, 4]) {
+    for (const index of [0, 1, 2, 3, 4, 5]) {
       const box = await sliders.nth(index).boundingBox();
       expect(box, `slider ${index} has no box`).not.toBeNull();
       expect(

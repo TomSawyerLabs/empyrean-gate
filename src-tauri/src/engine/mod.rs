@@ -1149,14 +1149,21 @@ fn replay_performance_action(state: &Arc<SharedState>, action: &crate::config::P
                 }
             });
         }
-        A::SetMaster { brightness, speed } => {
-            let (brightness, speed) = (*brightness, *speed);
+        A::SetMaster {
+            brightness,
+            speed,
+            floor,
+        } => {
+            let (brightness, speed, floor) = (*brightness, *speed, *floor);
             state.update_config(move |c| {
                 if let Some(v) = brightness {
                     c.render.master_brightness = v.clamp(0.0, 1.0);
                 }
                 if let Some(v) = speed {
                     c.render.master_speed = v.clamp(0.0, 8.0);
+                }
+                if let Some(v) = floor {
+                    c.render.floor_level = v.clamp(0.0, 1.0);
                 }
             });
         }
@@ -1467,6 +1474,9 @@ const MASTER_BRIGHTNESS_TAU: f32 = 0.15;
 const OUTPUT_ON_SECS: f32 = 1.0;
 /// Time constant for the master hue enable/amount glide.
 const MASTER_HUE_TAU: f32 = 0.3;
+/// Time constant for the floor-input level (taps/drawing/pads from every
+/// client) — one-pole, so muting the floor is a quick fade, not a cut.
+const FLOOR_LEVEL_TAU: f32 = 0.15;
 /// Seconds for a freshly started Video source to fade into the mix. Stopping
 /// is instant: the frame data is cleared the moment the source goes away.
 const VIDEO_FADE_SECS: f32 = 1.0;
@@ -1659,6 +1669,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut layer_enable_env: Vec<f32> = Vec::new();
     let mut master_env = 0.0f32;
     let mut hue_env = 0.0f32;
+    let mut floor_env = 0.0f32;
     let mut output_env = 0.0f32;
     let mut wire_rgb: Vec<u8> = Vec::new();
 
@@ -2718,8 +2729,17 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // it leaves) — unless the operator's overlay toggle keeps them on top.
         // Once the world is fully on they are dropped outright; state still
         // ages out below so nothing piles up for the moment the game ends.
-        let overlay_gain = if game_overlay { 1.0 } else { 1.0 - game_mix };
-        let game_suppress = overlay_gain <= 0.0;
+        let game_gain = if game_overlay { 1.0 } else { 1.0 - game_mix };
+        let game_suppress = game_gain <= 0.0;
+        // The floor-input level is the operator's volume knob on the play
+        // surface: every tap, stroke and pad from every client is scaled by
+        // it, glided so turning the crowd down never pops.
+        let floor_goal = cfg.render.floor_level.clamp(0.0, 1.0);
+        floor_env += (floor_goal - floor_env) * (1.0 - (-dt / FLOOR_LEVEL_TAU).exp());
+        if (floor_env - floor_goal).abs() < 1e-4 {
+            floor_env = floor_goal;
+        }
+        let overlay_gain = game_gain * floor_env;
 
         // Capture the urgency marker before the effect snapshot. The receiver
         // publishes it only after inserting the effects; this ordering ensures

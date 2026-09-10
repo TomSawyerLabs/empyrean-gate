@@ -166,6 +166,7 @@ export default function Control() {
   const { client, config, status } = useGate();
   const setBrightness = useThrottled((v: number) => client.setMaster({ brightness: v }));
   const setSpeed = useThrottled((v: number) => client.setMaster({ speed: v }));
+  const setFloor = useThrottled((v: number) => client.setMaster({ floor: v }));
   const setRender = useThrottled((patch: Partial<NonNullable<typeof config>["render"]>) => {
     if (config) {
       client.setConfig({ ...config, render: { ...config.render, ...patch } });
@@ -178,6 +179,7 @@ export default function Control() {
     config?.render.master_brightness ?? 1,
   );
   const [speed, setSpeedLocal, speedDrag] = useMirrored(config?.render.master_speed ?? 1);
+  const [floor, setFloorLocal, floorDrag] = useMirrored(config?.render.floor_level ?? 1);
   const [walkSpeed, setWalkSpeedLocal, walkSpeedDrag] = useMirrored(
     config?.render.walk_speed ?? 1,
   );
@@ -271,6 +273,27 @@ export default function Control() {
           />
           <span className="slider-val">{speed.toFixed(2)}</span>
         </label>
+        <label className="slider-row">
+          <span>Floor input</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={floor}
+            {...floorDrag}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setFloorLocal(v);
+              setFloor(v);
+            }}
+          />
+          <span className="slider-val">{floor <= 0 ? "muted" : floor.toFixed(2)}</span>
+        </label>
+        <p className="hint">
+          Floor input is every tap, stroke and pad from every phone. Turn it down to
+          take the crowd out of the picture; the layers are untouched.
+        </p>
         {status?.sacn_enabled && <p className="warn">sACN output is LIVE</p>}
         {status && (
           // Siblings in one stack so the two charts share a column — one of
@@ -380,10 +403,41 @@ export default function Control() {
 
       {!status?.patch_active && (
         <section className="panel">
-          <h2>Layers</h2>
+          <div className="panel-head">
+            <h2>Layers</h2>
+            <div className="panel-head-actions">
+              <button
+                className="ghost"
+                disabled={!config || config.layers.every((l) => !l.enabled)}
+                onClick={() =>
+                  config &&
+                  client.setConfig({
+                    ...config,
+                    layers: config.layers.map((l) => ({ ...l, enabled: false })),
+                  })
+                }
+              >
+                All off
+              </button>
+              <button
+                className="ghost"
+                disabled={!config || config.layers.every((l) => l.enabled)}
+                onClick={() =>
+                  config &&
+                  client.setConfig({
+                    ...config,
+                    layers: config.layers.map((l) => ({ ...l, enabled: true })),
+                  })
+                }
+              >
+                All on
+              </button>
+            </div>
+          </div>
           <p className="hint">
             Hold or right-click a layer for the rest of its parameters, without leaving
-            this tab.
+            this tab. All off leaves the floor's taps showing — the Floor input fader
+            above takes those down too.
           </p>
           {config?.layers.map((l, i) => (
             <LayerFader

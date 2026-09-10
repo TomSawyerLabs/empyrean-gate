@@ -169,6 +169,7 @@ export default function Live() {
   const [queuePos, setQueuePos] = useState(0);
   const [brightness, setBrightnessLocal] = useState(1);
   const [masterSpeed, setMasterSpeedLocal] = useState(1);
+  const [floorLevel, setFloorLevelLocal] = useState(1);
   const [masterHue, setMasterHueLocal] = useState(0);
   const [masterHueAmount, setMasterHueAmountLocal] = useState(1);
   const [masterHueLoose, setMasterHueLooseLocal] = useState(0);
@@ -194,6 +195,9 @@ export default function Live() {
     client.setMaster({ brightness: value }),
   );
   const setMasterSpeed = useThrottled((value: number) => client.setMaster({ speed: value }));
+  // Floor input: the crowd's taps, strokes and pads, as one level. 0 mutes
+  // the play surface (glided, never a cut) without touching the layers.
+  const setFloorLevel = useThrottled((value: number) => client.setMaster({ floor: value }));
   const setMasterHue = useThrottled((value: number) => client.setMasterHue({ hue: value }));
   // The Amount slider IS the on/off switch: 0 disables, anything above enables.
   // The backend keeps its enabled flag (old configs still work); the UI just
@@ -232,6 +236,7 @@ export default function Live() {
     if (!config || masterDragging.current.size > 0) return;
     setBrightnessLocal(config.render.master_brightness);
     setMasterSpeedLocal(config.render.master_speed);
+    setFloorLevelLocal(config.render.floor_level);
     setMasterHueLocal(config.render.master_hue);
     // Amount doubles as the on/off switch, so a disabled master hue reads 0
     // regardless of the amount the backend remembered.
@@ -242,6 +247,7 @@ export default function Live() {
   }, [
     config?.render.master_brightness,
     config?.render.master_speed,
+    config?.render.floor_level,
     config?.render.master_hue,
     config?.render.master_hue_amount,
     config?.render.master_hue_enabled,
@@ -547,6 +553,23 @@ export default function Live() {
           }}
         />
         <span className="slider-val">{masterSpeed.toFixed(2)}×</span>
+      </label>
+      <label className="slider-row">
+        <span>Floor input</span>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={floorLevel}
+          {...masterDrag}
+          onChange={(event) => {
+            const value = Number(event.target.value);
+            setFloorLevelLocal(value);
+            setFloorLevel(value);
+          }}
+        />
+        <span className="slider-val">{floorLevel <= 0 ? "muted" : floorLevel.toFixed(2)}</span>
       </label>
       {/* No on/off toggle for master hue: the Amount slider is the switch.
           Anything above 0 pulls the composite toward the hue; 0 is off. */}

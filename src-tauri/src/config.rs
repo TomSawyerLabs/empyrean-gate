@@ -499,6 +499,11 @@ pub struct RenderConfig {
     pub fps: f32,
     pub master_brightness: f32,
     pub master_speed: f32,
+    /// Floor input level 0..1: scales every tap, pen stroke and effect pad
+    /// from every client (the play surface), so an operator can turn the
+    /// crowd's input all the way down without touching the layers. Live
+    /// override like the master hue — deliberately not part of `SavedStack`.
+    pub floor_level: f32,
     /// Master hue ("warm colors now"): when enabled, the final composite is
     /// pulled toward `master_hue`. Deliberately NOT part of `SavedStack` — it
     /// is a live operator override and must survive scene changes.
@@ -577,6 +582,7 @@ impl Default for RenderConfig {
             fps: 60.0,
             master_brightness: 1.0,
             master_speed: 1.0,
+            floor_level: 1.0,
             master_hue_enabled: false,
             master_hue: 0.0,
             master_hue_amount: 1.0,
@@ -791,6 +797,9 @@ pub enum PerformanceAction {
     SetMaster {
         brightness: Option<f32>,
         speed: Option<f32>,
+        /// Absent in recordings made before v0.11.0.
+        #[serde(default)]
+        floor: Option<f32>,
     },
     SetMasterHue {
         enabled: Option<bool>,
@@ -1803,6 +1812,7 @@ mod tests {
                 action: PerformanceAction::SetMaster {
                     brightness: Some(0.75),
                     speed: Some(1.25),
+                    floor: None,
                 },
             }],
         };
@@ -1838,7 +1848,8 @@ mod tests {
             restored_performance.events[0].action,
             PerformanceAction::SetMaster {
                 brightness: Some(0.75),
-                speed: Some(1.25)
+                speed: Some(1.25),
+                floor: None,
             }
         ));
     }
