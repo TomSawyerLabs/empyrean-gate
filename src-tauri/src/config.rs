@@ -1161,7 +1161,10 @@ pub fn adopt_show_config(local: &mut AppConfig, remote: AppConfig) {
 }
 
 /// A stack that looks good out of the box: deep noise base, harmonic rings riding
-/// the bass, sparkles on the treble, and beat rings.
+/// the bass, sparkles on the treble, and beat rings — followed by a shelf of
+/// ready-tuned layers that ship switched OFF, so an operator can bring a spiral
+/// or a fire in with one tap instead of building it from the kind picker. The
+/// autopilot only walks enabled layers, so the shelf stays dark until asked.
 fn default_layer_stack() -> Vec<LayerCfg> {
     vec![
         LayerCfg {
@@ -1213,6 +1216,153 @@ fn default_layer_stack() -> Vec<LayerCfg> {
             hue: 0.85,
             hue_range: 0.0,
             param_a: 0.08,
+            ..Default::default()
+        },
+        // ---- The shelf: tuned, off by default. Parameters borrowed from the
+        // ---- scene studies in src/scenes.ts so each reads well the moment
+        // ---- it is switched on.
+        LayerCfg {
+            kind: LayerKind::Spiral,
+            name: "Gold spiral".into(),
+            enabled: false,
+            blend: BlendMode::Add,
+            opacity: 0.48,
+            speed: 0.36,
+            scale: 0.62,
+            audio_amount: 0.08,
+            hue: 0.085,
+            hue_range: 0.13,
+            saturation: 0.9,
+            brightness: 0.82,
+            walk_amount: 0.14,
+            param_a: 0.28,
+            param_b: 0.68,
+            param_c: 0.42,
+            ..Default::default()
+        },
+        LayerCfg {
+            kind: LayerKind::Plasma,
+            name: "Purple glowscape".into(),
+            enabled: false,
+            blend: BlendMode::Screen,
+            opacity: 0.54,
+            speed: 0.34,
+            scale: 0.68,
+            audio_amount: 0.08,
+            hue: 0.69,
+            hue_range: 0.14,
+            saturation: 0.86,
+            brightness: 0.68,
+            walk_amount: 0.16,
+            ..Default::default()
+        },
+        LayerCfg {
+            kind: LayerKind::Fire,
+            name: "Banked embers".into(),
+            enabled: false,
+            blend: BlendMode::Screen,
+            opacity: 0.4,
+            speed: 0.4,
+            scale: 0.62,
+            audio_amount: 0.12,
+            hue: 0.015,
+            hue_range: 0.1,
+            saturation: 0.93,
+            brightness: 0.7,
+            walk_amount: 0.16,
+            param_a: 0.42,
+            param_b: 0.34,
+            ..Default::default()
+        },
+        LayerCfg {
+            kind: LayerKind::Meteors,
+            name: "Drifting coals".into(),
+            enabled: false,
+            blend: BlendMode::Add,
+            opacity: 0.32,
+            speed: 0.68,
+            scale: 1.0,
+            audio_amount: 0.16,
+            hue: 0.035,
+            hue_range: 0.12,
+            saturation: 0.86,
+            brightness: 0.94,
+            walk_amount: 0.12,
+            param_a: 0.12,
+            param_b: 0.1,
+            param_c: 0.18,
+            ..Default::default()
+        },
+        LayerCfg {
+            kind: LayerKind::Warp,
+            name: "Star current".into(),
+            enabled: false,
+            blend: BlendMode::Add,
+            opacity: 0.32,
+            speed: 0.42,
+            scale: 0.8,
+            audio_amount: 0.06,
+            hue: 0.57,
+            hue_range: 0.25,
+            saturation: 0.55,
+            brightness: 0.9,
+            walk_amount: 0.1,
+            param_a: 0.1,
+            param_b: 0.16,
+            ..Default::default()
+        },
+        LayerCfg {
+            kind: LayerKind::Interference,
+            name: "Interstellar veil".into(),
+            enabled: false,
+            blend: BlendMode::Screen,
+            opacity: 0.58,
+            speed: 0.32,
+            scale: 0.52,
+            audio_amount: 0.06,
+            hue: 0.63,
+            hue_range: 0.2,
+            saturation: 0.82,
+            brightness: 0.72,
+            walk_amount: 0.16,
+            param_a: 0.2,
+            param_b: 0.62,
+            param_c: 0.3,
+            ..Default::default()
+        },
+        LayerCfg {
+            kind: LayerKind::SpokeChase,
+            name: "Processional light".into(),
+            enabled: false,
+            blend: BlendMode::Add,
+            opacity: 0.16,
+            speed: 0.4,
+            scale: 0.8,
+            audio_amount: 0.12,
+            hue: 0.62,
+            hue_range: 0.32,
+            saturation: 0.58,
+            brightness: 0.84,
+            walk_amount: 0.1,
+            param_a: 0.1,
+            param_b: 0.14,
+            ..Default::default()
+        },
+        LayerCfg {
+            kind: LayerKind::Rainbow,
+            name: "Journey wash".into(),
+            enabled: false,
+            blend: BlendMode::Max,
+            opacity: 0.3,
+            speed: 0.42,
+            scale: 0.72,
+            audio_amount: 0.04,
+            hue: 0.04,
+            hue_range: 0.34,
+            saturation: 0.82,
+            brightness: 0.48,
+            walk_amount: 0.12,
+            param_a: 0.28,
             ..Default::default()
         },
     ]
@@ -1779,7 +1929,10 @@ mod tests {
         let restored: AppConfig =
             serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
         assert!(restored.show_scheduler.enabled);
-        assert_eq!(restored.saved_playlists[0].entries[0].stack.layers.len(), 4);
+        assert_eq!(
+            restored.saved_playlists[0].entries[0].stack.layers.len(),
+            default_layer_stack().len()
+        );
         assert_eq!(
             restored.saved_playlists[0].entries[0].duration_secs,
             2_100.0

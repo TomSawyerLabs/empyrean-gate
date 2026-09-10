@@ -58,7 +58,11 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
 - **Layers**: noise fields (3D simplex / multidimensional color noise), harmonic radial
   waves, spirals, plasma, spoke chases, sparkles, beat rings, breathing envelopes,
   rainbows, wedges, interference, fire, meteors, warp — plus MilkDrop-style raw-audio
-  layers: **Waveform** (the PCM bent into a circular oscilloscope) and **Spectrum**
+  layers. A fresh config ships the four-layer house stack lit, followed by a **shelf
+  of eight more, tuned but switched off** (spiral, plasma, fire, meteors, warp,
+  interference, spoke chase, rainbow), so bringing one in is a single tap on its
+  chip rather than a trip through the kind picker; the autopilot never walks a
+  layer that is off. The raw-audio layers: **Waveform** (the PCM bent into a circular oscilloscope) and **Spectrum**
   (spoke-per-bin circular analyzer), plus **Video** (live browser-decoded texture,
   radial/kaleidoscope mapping and color treatment) —
   stacked with blend modes, each bound to an audio source. **Hold or right-click a

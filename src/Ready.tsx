@@ -23,7 +23,10 @@ function stackFromScene(scene: ScenePreset): SavedStack {
   };
 }
 
-const signature = (layers: SavedStack["layers"]) => JSON.stringify(layers);
+// What is on air is what gets named: layers switched off (the default stack
+// ships a shelf of them) don't stop a stack from being "Original Gate".
+const signature = (layers: SavedStack["layers"]) =>
+  JSON.stringify(layers.filter((layer) => layer.enabled));
 
 export default function Ready() {
   const { client, config, status } = useGate();
