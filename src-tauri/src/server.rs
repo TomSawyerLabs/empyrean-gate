@@ -1389,6 +1389,11 @@ fn requires_admin(msg: &ClientMsg) -> bool {
         M::SetConfig { .. }
         | M::SetMaster { .. }
         | M::SetMasterHue { .. }
+        // Kicking a misbehaving phone (and letting it back) is live show
+        // control, not client administration: any admin may do it from the
+        // roster. Token rotation, admin grants and forgetting stay loopback-only.
+        | M::RevokeClient { .. }
+        | M::UnrevokeClient { .. }
         | M::ActivateStack { .. }
         | M::PrepareStack { .. }
         | M::TakeReady { .. }
@@ -1568,6 +1573,30 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
     use serde_json::json;
     let name = || client_name(state, client_id);
     let rec = &state.recorder;
+    // The roster's "last input" per device — same message set as the timeline.
+    let roster_kind: Option<&'static str> = match msg {
+        ClientMsg::TriggerEffect { .. } => Some("tap"),
+        ClientMsg::Paint { .. } => Some("draw"),
+        ClientMsg::SetMaster { .. } | ClientMsg::SetMasterHue { .. } => Some("master"),
+        ClientMsg::SetSacnEnabled { .. } => Some("output"),
+        ClientMsg::AddLayer { .. }
+        | ClientMsg::UpdateLayer { .. }
+        | ClientMsg::RemoveLayer { .. }
+        | ClientMsg::MoveLayer { .. } => Some("layer"),
+        ClientMsg::SetConfig { .. }
+        | ClientMsg::ActivateStack { .. }
+        | ClientMsg::PrepareStack { .. }
+        | ClientMsg::TakeReady { .. } => Some("scene"),
+        ClientMsg::StartVideo { .. } | ClientMsg::StopVideo { .. } => Some("video"),
+        ClientMsg::SetGameMode { .. } | ClientMsg::GameCommand { .. } => Some("game"),
+        ClientMsg::GameInput { .. } => Some("play"),
+        ClientMsg::SetTestMode { .. } | ClientMsg::SetTestConfig { .. } => Some("test"),
+        ClientMsg::PatchParam { .. } => Some("knob"),
+        _ => None,
+    };
+    if let Some(kind) = roster_kind {
+        state.note_client_input(client_id, kind);
+    }
     match msg {
         ClientMsg::TriggerEffect { effect } => rec.event(
             "effect",
@@ -1874,6 +1903,7 @@ async fn handle_msg(
             }
             if !id.is_empty() {
                 state.connected_clients.lock().insert(conn_id, id.clone());
+                state.note_client_connected(&id);
                 if !known {
                     let display_name = if name.is_empty() {
                         format!("device-{}", &id[id.len().saturating_sub(4)..])
@@ -1924,9 +1954,6 @@ async fn handle_msg(
             });
         }
         ClientMsg::RevokeClient { id } => {
-            if !require_local_operator(tx, addr, "Client administration").await {
-                return Ok(());
-            }
             state.update_config(|c| {
                 if let Some(r) = c.clients.iter_mut().find(|r| r.id == id) {
                     r.revoked = true;
@@ -1934,9 +1961,6 @@ async fn handle_msg(
             });
         }
         ClientMsg::UnrevokeClient { id } => {
-            if !require_local_operator(tx, addr, "Client administration").await {
-                return Ok(());
-            }
             state.update_config(|c| {
                 if let Some(r) = c.clients.iter_mut().find(|r| r.id == id) {
                     r.revoked = false;
@@ -1950,6 +1974,7 @@ async fn handle_msg(
             state.update_config(|c| {
                 c.clients.retain(|r| r.id != id);
             });
+            state.client_activity.lock().remove(&id);
         }
         ClientMsg::RotateJoinToken => {
             if !require_local_operator(tx, addr, "Join-token rotation").await {

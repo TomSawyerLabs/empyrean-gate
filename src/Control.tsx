@@ -13,6 +13,7 @@ import { loadShapeStyle, saveShapeStyle, type ShapeStyle } from "./shapeStyle";
 import { useHoldMenu } from "./longPress";
 import { SCENE_PRESETS, type ScenePreset } from "./scenes";
 import ShapeIcon from "./ShapeIcon";
+import ClientRoster from "./ClientRoster";
 import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
 import {
@@ -317,6 +318,15 @@ export default function Control() {
             />
           </div>
         )}
+      </section>
+
+      <section className="panel">
+        <h2>Clients</h2>
+        <p className="hint">
+          Everyone on the floor, in the order they arrived, with what each phone last
+          did. Block kicks a device at once and keeps it out until you unblock it.
+        </p>
+        <ClientRoster />
       </section>
 
       <BeatTapsPanel />

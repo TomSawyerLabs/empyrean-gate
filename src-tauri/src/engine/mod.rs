@@ -3666,14 +3666,65 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 };
                 st.client_list = {
                     let connected = state.connected_clients.lock();
+                    let activity = state.client_activity.lock();
+                    let gate = state.preview_gate.lock();
+                    let now = Instant::now();
+                    // Connection order among the devices connected right now,
+                    // so the roster reads first-come first-listed.
+                    let mut live: Vec<(u64, &str)> = connected
+                        .values()
+                        .map(|id| {
+                            (
+                                activity.get(id).map_or(0, |a| a.connect_seq),
+                                id.as_str(),
+                            )
+                        })
+                        .collect();
+                    live.sort();
+                    live.dedup_by(|a, b| a.1 == b.1);
                     cfg.clients
                         .iter()
-                        .map(|c| crate::protocol::ClientInfo {
-                            id: c.id.clone(),
-                            name: c.name.clone(),
-                            connected: connected.values().any(|id| *id == c.id),
-                            revoked: c.revoked,
-                            admin: c.admin,
+                        .map(|c| {
+                            let conns: Vec<u64> = connected
+                                .iter()
+                                .filter(|(_, id)| **id == c.id)
+                                .map(|(conn, _)| *conn)
+                                .collect();
+                            let is_connected = !conns.is_empty();
+                            let viewing = conns.iter().any(|conn| gate.active.contains(conn));
+                            let queued = conns
+                                .iter()
+                                .filter_map(|conn| gate.position(*conn))
+                                .min()
+                                .unwrap_or(0);
+                            let act = activity.get(&c.id).copied().unwrap_or_default();
+                            let (last_input, last_input_secs) = act
+                                .last_input
+                                .map(|(at, kind)| {
+                                    (
+                                        Some(kind.to_owned()),
+                                        Some(now.saturating_duration_since(at).as_secs_f32()),
+                                    )
+                                })
+                                .unwrap_or((None, None));
+                            crate::protocol::ClientInfo {
+                                id: c.id.clone(),
+                                name: c.name.clone(),
+                                connected: is_connected,
+                                revoked: c.revoked,
+                                admin: c.admin,
+                                order: if is_connected {
+                                    live.iter()
+                                        .position(|(_, id)| *id == c.id)
+                                        .map_or(0, |p| p as u32 + 1)
+                                } else {
+                                    0
+                                },
+                                viewing,
+                                queued,
+                                last_input,
+                                last_input_secs,
+                            }
                         })
                         .collect()
                 };

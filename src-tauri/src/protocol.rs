@@ -535,6 +535,16 @@ pub struct ClientInfo {
     pub connected: bool,
     pub revoked: bool,
     pub admin: bool,
+    /// Place in connection order this run (1 = first); 0 while disconnected.
+    pub order: u32,
+    /// Holds a live-view slot (or is loopback, which is never rationed).
+    pub viewing: bool,
+    /// 1-based place in the viewer-slot queue; 0 when not waiting.
+    pub queued: u32,
+    /// Kind of the last show-changing input ("tap", "draw", "master", …).
+    pub last_input: Option<String>,
+    /// Seconds since that input.
+    pub last_input_secs: Option<f32>,
 }
 
 /// An audio device as shown in the settings UI.

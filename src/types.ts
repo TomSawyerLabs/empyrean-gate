@@ -227,6 +227,16 @@ export interface ClientInfo {
   connected: boolean;
   revoked: boolean;
   admin: boolean;
+  /** Place in connection order this run (1 = first); 0 while disconnected. */
+  order: number;
+  /** Holds a live-view slot (loopback always does). */
+  viewing: boolean;
+  /** 1-based place in the viewer-slot queue; 0 when not waiting. */
+  queued: number;
+  /** Kind of the last show-changing input ("tap", "draw", "master", …). */
+  last_input: string | null;
+  /** Seconds since that input. */
+  last_input_secs: number | null;
 }
 
 export type AudioSourceConfig = {

@@ -6427,3 +6427,125 @@ button.hue-swatch-button[aria-expanded="true"] {
   gap: 2px;
   padding: 4px 10px 0;
 }
+
+/* --- Client roster (Live: under the "clients" stat; Control: its own panel) --- */
+
+.live-status-clients {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 7px;
+  border-radius: 8px;
+  border: 0;
+  background: rgba(7, 6, 15, 0.54);
+  color: inherit;
+  cursor: pointer;
+}
+
+.live-status-clients.open {
+  background: rgba(56, 209, 194, 0.12);
+}
+
+.live-status-roster {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.client-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.roster-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(7, 6, 15, 0.54);
+  font-size: 13px;
+}
+
+.client-roster.compact .roster-row {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.roster-row.playing {
+  border-color: var(--accent2);
+}
+
+.roster-row.offline {
+  opacity: 0.6;
+}
+
+.roster-row.blocked .roster-name {
+  text-decoration: line-through;
+}
+
+.roster-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roster-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.roster-tag.blocked {
+  color: var(--danger);
+  background: #3a1220;
+}
+
+.roster-input {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.roster-row.playing .roster-input {
+  color: var(--accent2);
+}
+
+.roster-toggle {
+  min-height: 0;
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
+.roster-toggle.danger {
+  color: var(--danger);
+}
+
+.roster-cutoff {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px;
+  border-top: 1px dashed rgba(255, 92, 122, 0.55);
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.roster-offline-toggle {
+  align-self: flex-start;
+  min-height: 0;
+  padding: 3px 10px;
+  font-size: 11px;
+}

@@ -34,6 +34,7 @@ import {
 import { loadQuickSettings, saveQuickSettings } from "./quickSettings";
 import { contenders } from "./sacnPeers";
 import { MiniRing } from "./MiniViz";
+import ClientRoster from "./ClientRoster";
 import ShapeIcon from "./ShapeIcon";
 import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
@@ -177,6 +178,9 @@ export default function Live() {
   const [masterHueAmount, setMasterHueAmountLocal] = useState(1);
   const [masterHueLoose, setMasterHueLooseLocal] = useState(0);
   const [shortcuts, setShortcuts] = useState(loadQuickSettings);
+  // The roster folds under the "clients" stat: who is on the floor, in
+  // arrival order, what they last did, and a Block per device.
+  const [rosterOpen, setRosterOpen] = useState(false);
   const [shortcutEditorId, setShortcutEditorId] = useState<string | null>(null);
   const [editingShortcuts, setEditingShortcuts] = useState(false);
   // Squarish windows have no leftover width for a column, so the controls that
@@ -701,7 +705,19 @@ export default function Live() {
       <div><strong>{bpm > 0 ? bpm.toFixed(0) : "—"}</strong><span>BPM</span></div>
       <div><strong>{status?.engine_fps.toFixed(0) ?? "—"}</strong><span>FPS</span></div>
       <div><strong>{status?.sacn_enabled ? status.sacn_pps : "off"}</strong><span>sACN pkt/s</span></div>
-      <div><strong>{status?.clients ?? "—"}</strong><span>clients</span></div>
+      <button
+        className={`live-status-clients ${rosterOpen ? "open" : ""}`}
+        aria-expanded={rosterOpen}
+        onClick={() => setRosterOpen((v) => !v)}
+      >
+        <strong>{status?.clients ?? "—"}</strong>
+        <span>clients {rosterOpen ? "▴" : "▾"}</span>
+      </button>
+      {rosterOpen && (
+        <div className="live-status-roster">
+          <ClientRoster compact />
+        </div>
+      )}
     </div>
   );
 

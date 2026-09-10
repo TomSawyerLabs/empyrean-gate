@@ -107,7 +107,12 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   (Live and Control), glided so turning the crowd down never pops; it is also a
   quick-setting target, so a hold-to-mute button is one tap to make. Switching
   every layer off does *not* silence the floor by itself, which is why the fader
-  exists.
+  exists. And you can see who the floor *is*: the **clients** stat on Live
+  unfolds into a roster (Control has it as a panel) — every connected device in
+  the order it arrived, what it last did and how long ago, a dashed line where the
+  live-view slots run out and the rest are waiting, and a one-tap **Block** per
+  device that kicks it and keeps it out until unblocked (any admin, not just the
+  Gate machine).
 - **Seven UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Media
   (image/video intake), Patch (node-graph editor), Archive (recorded-show replay),
   Control (touch-sized effect pads + master/layer faders), Games, and Settings.

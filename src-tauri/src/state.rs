@@ -303,6 +303,16 @@ pub struct MiniBatch {
     pub patch_scalars: Arc<Vec<(String, String)>>,
 }
 
+/// What the roster knows about one device beyond its config record.
+#[derive(Default, Clone, Copy)]
+pub struct ClientActivity {
+    /// Position in connection order (1 = first to connect this run); 0 = never
+    /// connected this run.
+    pub connect_seq: u64,
+    /// Last show-changing message: when, and what kind ("tap", "draw", …).
+    pub last_input: Option<(Instant, &'static str)>,
+}
+
 /// Rations concurrent preview streams (the bandwidth-heavy part of a client) to
 /// `max` slots; everyone else waits FIFO. Control traffic is never gated.
 #[derive(Default)]
@@ -548,6 +558,12 @@ pub struct SharedState {
     /// Millis-since-start of the last refused close, for the "ask twice and it
     /// goes through" escape hatch.
     pub last_close_attempt_ms: AtomicU64,
+    /// Per-client liveness for the roster: connection order and the last
+    /// input each device sent (kind + when). Keyed by client id, so it
+    /// survives reconnects; pruned when a device is forgotten.
+    pub client_activity: Mutex<HashMap<String, ClientActivity>>,
+    /// Monotonic connection counter behind `ClientActivity::connect_seq`.
+    pub client_connect_seq: AtomicU64,
     /// The last window closed on a live show. Output is held dark (E1.31
     /// termination went out, as the close dialog promised) while a small
     /// "restart the show?" window stays up for a grace period; the engine keeps
@@ -635,6 +651,8 @@ impl SharedState {
             last_close_attempt_ms: AtomicU64::new(0),
             close_grace: AtomicBool::new(false),
             close_grace_action: AtomicU8::new(0),
+            client_activity: Mutex::new(HashMap::new()),
+            client_connect_seq: AtomicU64::new(0),
             recorder: crate::report::Recorder::new(),
             performance_recording: Mutex::new(None),
             started: Instant::now(),
@@ -797,6 +815,26 @@ impl SharedState {
 
     pub fn close_guard_ready(&self) -> bool {
         self.close_guard_ready.load(Ordering::SeqCst)
+    }
+
+    /// A device just completed its hello: stamp its place in connection order.
+    pub fn note_client_connected(&self, client_id: &str) {
+        let seq = self.client_connect_seq.fetch_add(1, Ordering::SeqCst) + 1;
+        let mut map = self.client_activity.lock();
+        let entry = map.entry(client_id.to_owned()).or_default();
+        entry.connect_seq = seq;
+    }
+
+    /// A device sent something that changes the show (a tap, a stroke, a
+    /// fader move). Continuous streams (IMU, audio features) are deliberately
+    /// not inputs here, same as the report timeline.
+    pub fn note_client_input(&self, client_id: &str, kind: &'static str) {
+        if client_id.is_empty() {
+            return;
+        }
+        let mut map = self.client_activity.lock();
+        let entry = map.entry(client_id.to_owned()).or_default();
+        entry.last_input = Some((Instant::now(), kind));
     }
 
     /// True when a close was already refused moments ago — the operator is

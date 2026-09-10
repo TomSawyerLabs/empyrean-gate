@@ -73,7 +73,12 @@ const status = {
   default_input_channels: 2,
   default_output_channels: 2,
   interfaces: ["Ethernet — 10.255.0.77", "Wi-Fi — 192.168.1.50"],
-  client_list: [{ id: "mock-client", name: "Layout test", connected: true, revoked: false }],
+  client_list: [
+    { id: "mock-client", name: "Layout test", connected: true, revoked: false, admin: true, order: 1, viewing: true, queued: 0, last_input: "tap", last_input_secs: 1.2 },
+    { id: "mock-phone-1", name: "Dusty Playa", connected: true, revoked: false, admin: false, order: 2, viewing: true, queued: 0, last_input: "draw", last_input_secs: 0.4 },
+    { id: "mock-phone-2", name: "Neon Badger", connected: true, revoked: false, admin: false, order: 3, viewing: false, queued: 1, last_input: null, last_input_secs: null },
+    { id: "mock-phone-3", name: "Old tablet", connected: false, revoked: true, admin: false, order: 0, viewing: false, queued: 0, last_input: "tap", last_input_secs: 900 },
+  ],
   master_brightness: 1,
   master_speed: 1,
   version: "0.0.0-mock",
