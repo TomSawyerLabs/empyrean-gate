@@ -166,9 +166,11 @@ Anything under `refs/heads/refs/tags/...` or a deleted branch is dead; delete it
 > **2026-09-01 update:** the repo moved to the TomSawyerLabs org and the heavy
 > workflows (release.yml, build.yml, warm-cache.yml Windows/Linux) now run on
 > Blacksmith 16-vCPU runners — roughly half GitHub's larger-runner rates with
-> 3000 free min/month, so the spending-cap concern below is moot. checks.yml
-> deliberately stays on free GitHub runners: it runs on fork PRs, which
-> third-party runners may not serve.
+> 3000 free min/month. The spending-cap concern below is handled differently
+> there: `cost-gate.yml` (2026-09-10) diverts to GitHub's free runners once the
+> month's free tier is spent instead of failing the release. See
+> `plans/blacksmith-free-tier.md`. checks.yml deliberately stays on free GitHub
+> runners: it runs on fork PRs, which third-party runners may not serve.
 
 - **Larger GitHub runners.** Billed even on public repos: Windows 8-core
   $0.042/min, 16-core $0.082/min. At the observed cadence — 19 releases in 5 days

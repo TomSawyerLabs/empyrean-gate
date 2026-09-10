@@ -1,0 +1,137 @@
+name: Blacksmith cost gate
+
+# Why this exists
+# ---------------
+# Blacksmith has no spending cap, only an email alert. The free tier is 3000
+# "2 vCPU Linux minutes" a month, which at list price is a $12 credit; past it,
+# every 16 vCPU minute is real money. This gate is the cap Blacksmith does not
+# offer: it runs first, on GitHub's free ubuntu runner, reads the org's
+# month-to-date list cost through the Blacksmith CLI, and tells the caller which
+# runners to use.
+#
+#   under the threshold  -> the Blacksmith 16 vCPU labels (fast, ~$0.55/release)
+#   at or over it        -> GitHub's free windows-latest / ubuntu-latest (cold,
+#                           ~20 min, $0), and over_budget=true so jobs that are
+#                           pointless off Blacksmith (the warm cache) can skip
+#
+# The threshold defaults to $12 minus one release, so the release that WOULD
+# cross the line is the one that gets diverted. plans/blacksmith-free-tier.md
+# has the numbers.
+#
+# Inert without a token. If BLACKSMITH_ORG_TOKEN is not set the gate emits the
+# Blacksmith labels and says so, which is exactly the pre-gate behaviour. Mint
+# one with `blacksmith org-token create --label ci-cost-gate` (org admin, browser
+# verification) and store it with
+#   gh secret set BLACKSMITH_ORG_TOKEN --repo TomSawyerLabs/empyrean-gate
+#
+# With a token present, any failure to get a number (CLI download, login, API)
+# diverts to GitHub. That is the fail-closed choice: a slow free build over an
+# unbounded bill. A release is never blocked by this gate, only slowed.
+#
+# Known gap: a job is not in the usage figure until it finishes, so two tags
+# pushed minutes apart both pass. That is one extra release at ~$0.60, not a
+# runaway.
+
+on:
+  workflow_call:
+    inputs:
+      threshold_usd:
+        description: Divert to GitHub runners once month-to-date list cost reaches this
+        type: string
+        default: "11.30"
+      force_fallback:
+        description: Skip the lookup and divert unconditionally (to test the GitHub path for free)
+        type: boolean
+        default: false
+    secrets:
+      BLACKSMITH_ORG_TOKEN:
+        required: false
+    outputs:
+      windows:
+        description: Runner label for the Windows build job
+        value: ${{ jobs.gate.outputs.windows }}
+      linux:
+        description: Runner label for the Linux build job
+        value: ${{ jobs.gate.outputs.linux }}
+      over_budget:
+        description: "true" when the caller should avoid Blacksmith entirely
+        value: ${{ jobs.gate.outputs.over_budget }}
+      reason:
+        description: One line saying what was decided and why
+        value: ${{ jobs.gate.outputs.reason }}
+
+jobs:
+  gate:
+    name: Blacksmith budget check
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      windows: ${{ steps.decide.outputs.windows }}
+      linux: ${{ steps.decide.outputs.linux }}
+      over_budget: ${{ steps.decide.outputs.over_budget }}
+      reason: ${{ steps.decide.outputs.reason }}
+    steps:
+      - name: Decide which runners this run may use
+        id: decide
+        env:
+          BLACKSMITH_ORG_TOKEN: ${{ secrets.BLACKSMITH_ORG_TOKEN }}
+          THRESHOLD_USD: ${{ inputs.threshold_usd }}
+          FORCE_FALLBACK: ${{ inputs.force_fallback }}
+          BLACKSMITH_ORG: TomSawyerLabs
+        shell: bash
+        run: |
+          set -u
+          BS_WINDOWS=blacksmith-16vcpu-windows-2025
+          BS_LINUX=blacksmith-16vcpu-ubuntu-2404
+          GH_WINDOWS=windows-latest
+          GH_LINUX=ubuntu-latest
+
+          emit() {  # emit <windows-label> <linux-label> <over_budget> <reason>
+            {
+              echo "windows=$1"
+              echo "linux=$2"
+              echo "over_budget=$3"
+              echo "reason=$4"
+            } >> "$GITHUB_OUTPUT"
+            {
+              echo "### Blacksmith cost gate"
+              echo
+              echo "- **Decision:** $4"
+              echo "- Windows: \`$1\`, Linux: \`$2\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "$4"
+          }
+          fallback() { emit "$GH_WINDOWS" "$GH_LINUX" true "$1"; exit 0; }
+          proceed()  { emit "$BS_WINDOWS" "$BS_LINUX" false "$1"; exit 0; }
+
+          if [ "$FORCE_FALLBACK" = "true" ]; then
+            fallback "force_fallback set: GitHub runners regardless of spend"
+          fi
+          if [ -z "$BLACKSMITH_ORG_TOKEN" ]; then
+            proceed "no BLACKSMITH_ORG_TOKEN secret: gate inactive, Blacksmith runners"
+          fi
+
+          # From here on, anything that goes wrong diverts to GitHub (fail closed).
+          if ! curl -fsSL https://get.blacksmith.sh | sh >/dev/null 2>&1; then
+            fallback "could not install the Blacksmith CLI; diverting to GitHub runners"
+          fi
+          export PATH="$HOME/.local/bin:$PATH"
+          if ! printf '%s' "$BLACKSMITH_ORG_TOKEN" | blacksmith auth login --api-token - --non-interactive --organization "$BLACKSMITH_ORG" >/dev/null 2>&1; then
+            fallback "Blacksmith CLI login failed; diverting to GitHub runners"
+          fi
+
+          # Blacksmith's billing period is the calendar month (UTC).
+          start=$(date -u +%Y-%m-01T00:00:00Z)
+          end=$(date -u -d "$(date -u +%Y-%m-01) +1 month" +%Y-%m-%dT00:00:00Z)
+          if ! json=$(blacksmith usage --start-time "$start" --end-time "$end" --format json 2>/dev/null); then
+            fallback "Blacksmith usage query failed; diverting to GitHub runners"
+          fi
+          cost=$(printf '%s' "$json" | jq -r '.summary.cost_usd // empty')
+          if [ -z "$cost" ]; then
+            fallback "Blacksmith usage response had no cost figure; diverting to GitHub runners"
+          fi
+
+          if awk -v c="$cost" -v t="$THRESHOLD_USD" 'BEGIN { exit !(c + 0 >= t + 0) }'; then
+            fallback "month-to-date Blacksmith list cost \$$cost is at or over the \$$THRESHOLD_USD threshold; GitHub runners for this run"
+          fi
+          proceed "month-to-date Blacksmith list cost \$$cost is under the \$$THRESHOLD_USD threshold; Blacksmith runners"

@@ -64,8 +64,17 @@ permissions:
   contents: read
 
 jobs:
+  # A warm saved anywhere but Blacksmith is useless to the release jobs, so
+  # when the gate says the month's free tier is spent this workflow skips
+  # rather than diverting. See cost-gate.yml.
+  gate:
+    uses: ./.github/workflows/cost-gate.yml
+    secrets: inherit
+
   warm:
     name: Warm ${{ matrix.os }}
+    needs: gate
+    if: needs.gate.outputs.over_budget != 'true'
     strategy:
       fail-fast: false
       matrix:

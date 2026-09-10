@@ -4,18 +4,32 @@ name: Build (manual)
 # Release tags still run the equivalent checked build through release.yml.
 on:
   workflow_dispatch:
+    inputs:
+      force_fallback:
+        description: Use GitHub's free runners regardless of Blacksmith spend (cold, ~20 min, $0)
+        type: boolean
+        default: false
 
 jobs:
+  # Same budget gate as release.yml; see cost-gate.yml. force_fallback is the
+  # free way to exercise the GitHub-runner path end to end.
+  gate:
+    uses: ./.github/workflows/cost-gate.yml
+    with:
+      force_fallback: ${{ inputs.force_fallback }}
+    secrets: inherit
+
   build:
+    needs: gate
     strategy:
       fail-fast: false
       matrix:
         include:
           # Same runner choice as release.yml — see the note there.
-          - os: blacksmith-16vcpu-windows-2025
+          - os: ${{ needs.gate.outputs.windows }}
             artifact: empyrean-gate-windows
             binary: src-tauri/target/release/empyrean-gate.exe
-          - os: blacksmith-16vcpu-ubuntu-2404
+          - os: ${{ needs.gate.outputs.linux }}
             artifact: empyrean-gate-linux
             binary: src-tauri/target/release/empyrean-gate
           - os: macos-latest

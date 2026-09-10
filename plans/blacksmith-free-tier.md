@@ -86,8 +86,12 @@ bought nothing.
 - [x] Spend alert lowered from $30 to $1/month on the dashboard (2026-09-09,
       Cameron approved; confirmed after reload, toast "Successfully updated email
       alert threshold"). The email now fires the moment paid usage starts.
-- [x] Workflow-enforced cap: decided against. The $1 alert is the tripwire; the
-      gate-job design below stays documented in case the cadence changes.
+- [x] Workflow-enforced cap: built 2026-09-10 as `.github/workflows/cost-gate.yml`
+      after Cameron asked what it would take. Inert until the secret exists.
+- [ ] Cameron mints an org token and stores it (see "Turning the gate on").
+- [ ] Prove the GitHub-runner path once for free: dispatch build.yml with
+      `force_fallback=true` and confirm both jobs land on windows-latest /
+      ubuntu-latest and the gate's step summary explains why.
 
 ## Expected steady state
 
@@ -99,19 +103,55 @@ bought nothing.
   `gh workflow run warm-cache.yml --repo TomSawyerLabs/empyrean-gate`
 - Manual `build.yml` dispatches also cost ~$0.54 each (same runners).
 
-## Open questions for the user
+## The cost gate (built 2026-09-10)
 
-None. Both were settled on 2026-09-09 (alert at $1; no workflow-enforced cap).
+`.github/workflows/cost-gate.yml` is a reusable workflow called first by
+release.yml, build.yml, and warm-cache.yml. On GitHub's free ubuntu runner it
+installs the Blacksmith CLI, logs in with `BLACKSMITH_ORG_TOKEN`, reads the
+calendar month's list cost, and outputs runner labels:
 
-## Considered and not built: a workflow-enforced cap
+- under the threshold (default **$11.30** = $12 minus one release): the
+  Blacksmith 16 vCPU labels, `over_budget=false`.
+- at or over it: `windows-latest` / `ubuntu-latest`, `over_budget=true`. Release
+  and manual builds still ship, cold (~20 min) and free. warm-cache skips
+  entirely, because a cache saved on GitHub's backend is unreadable from
+  Blacksmith runners.
+- **no token**: Blacksmith labels and a "gate inactive" note. That is the
+  pre-gate behaviour, so the workflow landed safely before the secret existed.
+- token present but anything fails (install, login, API): GitHub runners.
+  Fail closed: a slow free build beats an open-ended bill, and a release is never
+  blocked by the gate, only slowed.
 
-Blacksmith cannot cap. The only way to guarantee $0 would be a gate job at the
-top of `release.yml` that queries `blacksmith usage` for the month and, if list
-cost is at or past $12, sets `runs-on` to GitHub's free
-`windows-latest`/`ubuntu-latest` instead (cold, ~20 min, free). Needs a
-Blacksmith org token in repo secrets (`blacksmith org-token create`, admin
-browser verification) and some workflow plumbing. Revisit only if the release
-cadence climbs back toward show-mode levels.
+Its decision is written to the run's step summary. build.yml has a
+`force_fallback` dispatch input that skips the lookup and diverts, which is the
+free way to test the GitHub path.
+
+Verified locally on 2026-09-10 in WSL with the user token: the date window,
+`jq` extraction and `awk` comparison behave, and
+`blacksmith auth login --api-token - --non-interactive --organization TomSawyerLabs`
+accepts a token on stdin.
+
+### Turning the gate on
+
+1. Mint an org token (org admin; opens a browser to verify):
+   `wsl -e bash -lc 'export PATH=$HOME/.local/bin:$PATH; blacksmith org-token create --label ci-cost-gate'`
+   It prints once. Note it is broader than read-only: org tokens can also delete
+   cache entries and manage testboxes. Release/build/warm only run on tag pushes
+   and manual dispatch, never on fork PRs, so only people who can already push
+   tags can reach it.
+2. Store it: `gh secret set BLACKSMITH_ORG_TOKEN --repo TomSawyerLabs/empyrean-gate`
+   (paste when prompted).
+3. The next run of any of the three workflows shows the real decision in its
+   step summary.
+
+### Known gaps
+
+- A running job is not in the usage figure until it finishes, so two tags
+  pushed minutes apart both pass. One extra release, ~$0.60, not a runaway.
+- The usage API lagged a finished run by under two hours when checked; the
+  exact lag is unmeasured.
+- Blacksmith's billing period is assumed to be the calendar month in UTC (the
+  dashboard showed "Sep 1 - 9, 2026").
 
 ## Things not to do
 
