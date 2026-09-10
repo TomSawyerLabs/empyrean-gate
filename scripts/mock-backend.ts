@@ -21,6 +21,11 @@ const fixture = (name: string) =>
   JSON.parse(readFileSync(join(ROOT, `tests/fixtures/${name}.json`), "utf8"));
 
 const initialConfig = fixture("default-config");
+// The fixture is AppConfig::default(), whose tokens are minted on first load;
+// the mock is "the Gate machine", so it holds all three like a real one.
+initialConfig.server.join_token = "mock-join-token";
+initialConfig.server.admin_token = "mock-admin-token";
+initialConfig.server.staff_token = "mock-staff-token";
 let config = structuredClone(initialConfig);
 
 const SPOKES = 64;

@@ -6610,3 +6610,73 @@ button.hue-swatch-button[aria-expanded="true"] {
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* --- Connect modal: Wi-Fi + join codes side by side, poster link --- */
+
+.connect-modal.with-wifi {
+  max-width: min(760px, calc(100vw - 32px));
+}
+
+.connect-codes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 28px;
+  width: 100%;
+}
+
+.connect-code {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(7, 6, 15, 0.4);
+}
+
+.connect-code h3 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 0.02em;
+}
+
+.connect-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #332a55;
+  background: rgba(20, 16, 36, 0.55);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.button-link:hover {
+  border-color: var(--accent);
+}
+
+.wifi-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.wifi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.wifi-fields .hint button {
+  margin-left: 8px;
+}

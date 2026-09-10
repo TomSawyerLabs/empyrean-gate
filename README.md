@@ -116,6 +116,14 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   minted a two-word default ("Dusty Badger", "Sonic Tumbleweed" — playa, festival
   and nerd flavoured) and its **☺ name chip** in the top bar pulses *pick a name*
   until it is kept, re-rolled or replaced; the chip stays as the way to rename.
+  Getting people on in the first place: Settings → Clients can hold the venue's
+  **Wi-Fi credentials** (typed in, never discovered), and then ⊕ Connect shows two
+  codes well apart under big numbered headings — *1 · Join the Wi-Fi*, *2 · Open
+  the show*. On the Gate machine the same dialog offers a **poster for event
+  staff**: a print-ready A4 page (browser print → PDF, or a one-click PNG) with
+  both codes and plain instructions, carrying a separate **long-term staff token**
+  that survives "Rotate token", so the everyday token can be shaken off a crowd
+  without the poster on the wall going dead.
 - **Seven UI tabs**, deep-linkable by hash: Live (stage monitor + drawing), Media
   (image/video intake), Patch (node-graph editor), Archive (recorded-show replay),
   Control (touch-sized effect pads + master/layer faders), Games, and Settings.

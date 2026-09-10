@@ -224,6 +224,8 @@ pub enum ClientMsg {
     /// Operator: replace the admin token. Devices already recorded as admin
     /// keep the role; the old admin QR stops granting it.
     RotateAdminToken,
+    /// Replace the long-term poster token (every printed poster goes stale).
+    RotateStaffToken,
     /// Operator: grant or withdraw show control for a known client.
     SetClientAdmin {
         id: String,

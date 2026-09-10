@@ -784,6 +784,7 @@ function ClientsPanel() {
           Rotate admin token
         </button>
       </label>
+      <WifiAndPosterFields />
       <label className="field-row" style={{ maxWidth: 320 }}>
         <span>Max live viewers (WiFi guard)</span>
         <input
@@ -855,6 +856,69 @@ function ClientsPanel() {
         </div>
       ))}
     </section>
+  );
+}
+
+/** Wi-Fi credentials for the second QR in ⊕ Connect and on the poster, plus
+ *  the poster's own long-term token. Typed in, never discovered: the show
+ *  machine is usually wired, and the guest network is somebody else's. */
+function WifiAndPosterFields() {
+  const { client, config } = useGate();
+  if (!config) return null;
+  const server = config.server;
+  const patch = (next: Partial<typeof server>) =>
+    client.setConfig({ ...config, server: { ...server, ...next } });
+  return (
+    <div className="wifi-fields">
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={server.wifi_qr_enabled}
+          onChange={(e) => patch({ wifi_qr_enabled: e.target.checked })}
+        />
+        Show a "join the Wi-Fi" QR beside the connect QR (and on the poster)
+      </label>
+      {server.wifi_qr_enabled && (
+        <div className="wifi-grid">
+          <label className="field-row">
+            <span>Network (SSID)</span>
+            <input
+              value={server.wifi_ssid}
+              placeholder="e.g. Entheos Guest"
+              onChange={(e) => patch({ wifi_ssid: e.target.value })}
+            />
+          </label>
+          <label className="field-row">
+            <span>Security</span>
+            <select
+              value={server.wifi_security || "WPA"}
+              onChange={(e) => patch({ wifi_security: e.target.value })}
+            >
+              <option value="WPA">WPA / WPA2 / WPA3</option>
+              <option value="WEP">WEP</option>
+              <option value="nopass">Open (no password)</option>
+            </select>
+          </label>
+          {server.wifi_security !== "nopass" && (
+            <label className="field-row">
+              <span>Password</span>
+              <input
+                value={server.wifi_password}
+                onChange={(e) => patch({ wifi_password: e.target.value })}
+              />
+            </label>
+          )}
+        </div>
+      )}
+      <p className="hint">
+        The poster (⊕ Connect → Poster for event staff, Gate machine only) carries a
+        separate long-term token, so rotating the everyday join token never
+        invalidates what is taped to the wall.
+        <button onClick={() => client.send({ type: "rotate_staff_token" })}>
+          Rotate poster token
+        </button>
+      </p>
+    </div>
   );
 }
 

@@ -175,8 +175,16 @@ fn client_authorized(state: &SharedState, addr: SocketAddr, client_id: &str, tok
         return true;
     }
     cfg.clients.iter().any(|c| c.id == client_id)
-        || (!token.is_empty()
-            && (token == cfg.server.join_token || token == cfg.server.admin_token))
+        || (!token.is_empty() && guest_token_ok(&cfg.server, token))
+}
+
+/// Any token that admits a guest: the everyday join token, the long-term
+/// staff (poster) token, or the admin token (which admits and promotes).
+fn guest_token_ok(server: &crate::config::ServerConfig, token: &str) -> bool {
+    !token.is_empty()
+        && (token == server.join_token
+            || (!server.staff_token.is_empty() && token == server.staff_token)
+            || token == server.admin_token)
 }
 
 fn media_authorized(state: &SharedState, addr: SocketAddr, req: &ResolveRequest) -> bool {
@@ -344,9 +352,7 @@ fn diagnostics_authorized(
     {
         return false;
     }
-    addr.ip().is_loopback()
-        || (!token.is_empty()
-            && (token == cfg.server.join_token || token == cfg.server.admin_token))
+    addr.ip().is_loopback() || guest_token_ok(&cfg.server, token)
 }
 
 async fn recent_diagnostics(
@@ -1879,7 +1885,7 @@ async fn handle_msg(
                 (
                     rec.is_some(),
                     rec.is_some_and(|r| r.revoked),
-                    token == cfg.server.join_token || admin_join,
+                    guest_token_ok(&cfg.server, &token) || admin_join,
                     admin_join,
                     cfg.clients.len() >= crate::config::MAX_CLIENT_RECORDS,
                 )
@@ -1990,6 +1996,14 @@ async fn handle_msg(
             }
             state.update_config(|c| {
                 c.server.admin_token = crate::config::generate_token();
+            });
+        }
+        ClientMsg::RotateStaffToken => {
+            if !require_local_operator(tx, addr, "Staff-token rotation").await {
+                return Ok(());
+            }
+            state.update_config(|c| {
+                c.server.staff_token = crate::config::generate_token();
             });
         }
         ClientMsg::SetClientAdmin { id, admin } => {

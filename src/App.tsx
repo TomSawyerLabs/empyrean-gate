@@ -313,6 +313,19 @@ function VersionChip() {
 
 const CONNECT_INTERFACE_KEY = "empyrean-connect-interface";
 
+/** The Wi-Fi QR payload phones understand (`WIFI:T:WPA;S:ssid;P:pass;;`),
+ *  with the characters that would break it escaped. */
+export function wifiQrPayload(server: {
+  wifi_ssid: string;
+  wifi_password: string;
+  wifi_security: string;
+}): string {
+  const esc = (s: string) => s.replace(/([\\;,:"])/g, "\\$1");
+  const security = server.wifi_security === "nopass" ? "nopass" : server.wifi_security || "WPA";
+  const password = security === "nopass" ? "" : `P:${esc(server.wifi_password)};`;
+  return `WIFI:T:${security};S:${esc(server.wifi_ssid)};${password};`;
+}
+
 function ConnectModal({ onClose }: { onClose: () => void }) {
   const { client, config, status } = useGate();
   const interfaces = status?.interfaces ?? [];
@@ -336,11 +349,28 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
   const token = access === "admin" && adminToken ? adminToken : config?.server.join_token ?? "";
   const port = config?.server.port ?? 9520;
   const url = `http://${chosen}:${port}/?join=${token}`;
+  // The Wi-Fi code sits beside the join code, well apart, each under a big
+  // numbered heading — a phone camera must never see both at once.
+  const wifi = config?.server.wifi_qr_enabled && config.server.wifi_ssid ? config.server : null;
+  const wifiPayload = wifi ? wifiQrPayload(wifi) : "";
+  // The poster carries the long-term staff token, which only the Gate machine
+  // holds the right to hand out (same rule as the Admin QR).
+  const staffToken = config?.server.staff_token ?? "";
+  const posterUrl = adminToken && staffToken && chosen
+    ? `${client.httpBase}/poster.html?${new URLSearchParams({
+        url: `http://${chosen}:${port}/?join=${staffToken}`,
+        ...(wifi ? { wifi: wifiPayload, ssid: wifi.wifi_ssid } : {}),
+      }).toString()}`
+    : "";
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className={`modal connect-modal ${wifi ? "with-wifi" : ""}`} onClick={(e) => e.stopPropagation()}>
         <h2>Connect a device</h2>
-        <p className="hint">Scan from a phone/iPad on the same network, then Add to Home Screen.</p>
+        <p className="hint">
+          {wifi
+            ? "Two scans: the Wi-Fi first, then the show. Add it to your home screen."
+            : "Scan from a phone/iPad on the same network, then Add to Home Screen."}
+        </p>
         {interfaces.length > 1 && (
           <select
             value={chosen}
@@ -384,17 +414,40 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
               : "Guest: drawing, effects, and games only. Most people get this one."}
           </p>
         )}
-        {chosen ? (
-          <img
-            className="qr"
-            src={`${client.httpBase}/qr.svg?data=${encodeURIComponent(url)}`}
-            alt={`QR code for ${url}`}
-          />
-        ) : (
-          <p className="warn">No network interface found.</p>
-        )}
-        <code className="join-url">{url}</code>
-        <button onClick={onClose}>Close</button>
+        <div className="connect-codes">
+          {wifi && (
+            <section className="connect-code">
+              <h3>1 · Join the Wi-Fi</h3>
+              <img
+                className="qr"
+                src={`${client.httpBase}/qr.svg?data=${encodeURIComponent(wifiPayload)}`}
+                alt={`Wi-Fi QR code for network ${wifi.wifi_ssid}`}
+              />
+              <code className="join-url">Network: {wifi.wifi_ssid}</code>
+            </section>
+          )}
+          <section className="connect-code">
+            {wifi && <h3>2 · Open the show</h3>}
+            {chosen ? (
+              <img
+                className="qr"
+                src={`${client.httpBase}/qr.svg?data=${encodeURIComponent(url)}`}
+                alt={`QR code for ${url}`}
+              />
+            ) : (
+              <p className="warn">No network interface found.</p>
+            )}
+            <code className="join-url">{url}</code>
+          </section>
+        </div>
+        <div className="connect-actions">
+          {posterUrl && (
+            <a className="button-link" href={posterUrl} target="_blank" rel="noreferrer">
+              🖨 Poster for event staff
+            </a>
+          )}
+          <button onClick={onClose}>Close</button>
+        </div>
       </div>
     </div>
   );

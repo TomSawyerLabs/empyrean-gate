@@ -158,6 +158,18 @@ pub struct ServerConfig {
     /// connect. Loopback clients (the desktop app's own webview) always may.
     /// Off = open LAN access; revocation is then only a client-id blocklist.
     pub require_token: bool,
+    /// Third guest-level token, for the printed poster event staff put up. It
+    /// survives "Rotate token" (which is meant to shake off a crowd's phones,
+    /// not the poster on the wall) and only changes when rotated on its own.
+    pub staff_token: String,
+    /// Show a "join the Wi-Fi" QR beside the connect QR and on the poster.
+    pub wifi_qr_enabled: bool,
+    /// Wi-Fi credentials for that QR (typed in by the operator; never
+    /// discovered). Empty SSID = nothing to show.
+    pub wifi_ssid: String,
+    pub wifi_password: String,
+    /// "WPA" (also covers WPA2/3), "WEP", or "nopass" for an open network.
+    pub wifi_security: String,
 }
 
 impl Default for ServerConfig {
@@ -169,6 +181,11 @@ impl Default for ServerConfig {
             auth_token: None,
             join_token: String::new(),
             admin_token: String::new(),
+            staff_token: String::new(),
+            wifi_qr_enabled: false,
+            wifi_ssid: String::new(),
+            wifi_password: String::new(),
+            wifi_security: "WPA".into(),
             // A fresh show machine should not accept arbitrary control messages
             // from every device on the venue LAN. The desktop remains exempt and
             // its Connect QR carries the generated token.
@@ -1428,6 +1445,10 @@ pub fn load() -> AppConfig {
     }
     if cfg.server.admin_token.is_empty() {
         cfg.server.admin_token = generate_token();
+        dirty = true;
+    }
+    if cfg.server.staff_token.is_empty() {
+        cfg.server.staff_token = generate_token();
         dirty = true;
     }
     if cfg.output.cid.is_empty() {

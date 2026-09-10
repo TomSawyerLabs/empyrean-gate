@@ -31,7 +31,12 @@
     "auth_token": null,
     "join_token": "",
     "admin_token": "",
-    "require_token": true
+    "require_token": true,
+    "staff_token": "",
+    "wifi_qr_enabled": false,
+    "wifi_ssid": "",
+    "wifi_password": "",
+    "wifi_security": "WPA"
   },
   "peer": {
     "follow": "",

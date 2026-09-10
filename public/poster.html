@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Empyrean Gate — join poster</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #e9e6f2; color: #14101f;
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .toolbar { display: flex; gap: 10px; align-items: center; padding: 12px 16px;
+    background: #14101f; color: #f2eefc; }
+  .toolbar button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid #7c5cff;
+    background: #2b2150; color: #fff; cursor: pointer; }
+  .toolbar span { color: #b9b1d1; font-size: 13px; }
+  .page { width: 210mm; min-height: 297mm; margin: 16px auto; padding: 18mm 16mm;
+    background: #fff; display: flex; flex-direction: column; gap: 10mm; }
+  h1 { margin: 0; font-size: 34px; letter-spacing: 0.01em; text-align: center; }
+  .sub { margin: 0; text-align: center; color: #4a4360; font-size: 18px; }
+  .steps { display: grid; grid-template-columns: 1fr 1fr; gap: 12mm; flex: 1; }
+  .steps.one { grid-template-columns: 1fr; }
+  .step { display: flex; flex-direction: column; align-items: center; gap: 6mm;
+    padding: 8mm 6mm; border: 2px solid #14101f; border-radius: 12px; }
+  .step h2 { margin: 0; font-size: 28px; }
+  .step p { margin: 0; text-align: center; font-size: 17px; }
+  .step img { width: 70mm; height: 70mm; background: #fff; }
+  .step code { font-size: 12px; color: #4a4360; word-break: break-all; text-align: center; }
+  .foot { text-align: center; color: #4a4360; font-size: 14px; }
+  @media print {
+    .toolbar { display: none; }
+    body { background: #fff; }
+    .page { margin: 0; width: auto; min-height: auto; }
+    @page { size: A4 portrait; margin: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <button id="print">Print / Save as PDF</button>
+  <button id="png">Download PNG</button>
+  <span>This poster carries the long-term staff token: it keeps working after the everyday join token is rotated.</span>
+</div>
+<div class="page" id="page">
+  <h1 id="title">Play the Empyrean Gate</h1>
+  <p class="sub" id="sub">Two scans and you're drawing on the lights.</p>
+  <div class="steps" id="steps">
+    <section class="step" id="wifi-step">
+      <h2>1 · Join the Wi-Fi</h2>
+      <p>Point your camera at this code and tap the prompt.</p>
+      <img id="wifi-qr" alt="Wi-Fi QR code" />
+      <code id="wifi-text"></code>
+    </section>
+    <section class="step">
+      <h2 id="open-heading">2 · Open the show</h2>
+      <p>Then scan this one. Add it to your home screen for the full-screen version.</p>
+      <img id="join-qr" alt="Join QR code" />
+      <code id="join-url"></code>
+    </section>
+  </div>
+  <p class="foot">No app to install. Tap and drag on the ring; pick a colour; play nice.</p>
+</div>
+<script>
+  const params = new URLSearchParams(location.search);
+  const join = params.get("url") || "";
+  const wifi = params.get("wifi") || "";
+  const ssid = params.get("ssid") || "";
+  const title = params.get("title");
+  if (title) document.getElementById("title").textContent = title;
+  const qr = (data) => `/qr.svg?data=${encodeURIComponent(data)}`;
+  document.getElementById("join-qr").src = qr(join);
+  document.getElementById("join-url").textContent = join;
+  if (wifi) {
+    document.getElementById("wifi-qr").src = qr(wifi);
+    document.getElementById("wifi-text").textContent = ssid ? `Network: ${ssid}` : "";
+  } else {
+    document.getElementById("wifi-step").remove();
+    document.getElementById("steps").classList.add("one");
+    document.getElementById("open-heading").textContent = "Scan to open the show";
+    document.getElementById("sub").textContent = "One scan and you're drawing on the lights.";
+  }
+  document.getElementById("print").addEventListener("click", () => window.print());
+
+  // PNG: the page's SVG QR codes are fetched as text, rasterised onto one
+  // canvas along with the headings, and handed over as a download.
+  document.getElementById("png").addEventListener("click", async () => {
+    const W = 1240, H = 1754; // A4 at 150 dpi
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#14101f"; ctx.textAlign = "center";
+    ctx.font = "bold 64px system-ui, sans-serif";
+    ctx.fillText(document.getElementById("title").textContent, W / 2, 150);
+    ctx.font = "34px system-ui, sans-serif"; ctx.fillStyle = "#4a4360";
+    ctx.fillText(document.getElementById("sub").textContent, W / 2, 215);
+    const steps = [...document.querySelectorAll(".step")];
+    const colW = W / steps.length;
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      const cx = colW * i + colW / 2;
+      ctx.fillStyle = "#14101f"; ctx.font = "bold 44px system-ui, sans-serif";
+      ctx.fillText(step.querySelector("h2").textContent, cx, 380);
+      ctx.font = "26px system-ui, sans-serif"; ctx.fillStyle = "#14101f";
+      const lines = step.querySelector("p").textContent.match(/.{1,34}(\s|$)/g) || [];
+      lines.forEach((line, n) => ctx.fillText(line.trim(), cx, 440 + n * 34));
+      const img = step.querySelector("img");
+      const svg = await (await fetch(img.src)).text();
+      const bitmap = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = reject;
+        image.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+      });
+      const size = Math.min(colW - 120, 520);
+      ctx.drawImage(bitmap, cx - size / 2, 560, size, size);
+      ctx.font = "20px system-ui, sans-serif"; ctx.fillStyle = "#4a4360";
+      const code = step.querySelector("code").textContent;
+      (code.match(/.{1,40}/g) || []).forEach((line, n) => ctx.fillText(line, cx, 560 + size + 50 + n * 26));
+    }
+    ctx.font = "28px system-ui, sans-serif"; ctx.fillStyle = "#4a4360";
+    ctx.fillText(document.querySelector(".foot").textContent, W / 2, H - 120);
+    canvas.toBlob((blob) => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "empyrean-gate-poster.png";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }, "image/png");
+  });
+</script>
+</body>
+</html>

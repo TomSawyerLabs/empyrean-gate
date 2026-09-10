@@ -197,6 +197,13 @@ export interface ServerConfig {
    *  machine can mint admin QR codes. */
   admin_token: string;
   require_token: boolean;
+  /** Long-term guest token for the printed poster; survives "Rotate token". */
+  staff_token: string;
+  wifi_qr_enabled: boolean;
+  wifi_ssid: string;
+  wifi_password: string;
+  /** "WPA" | "WEP" | "nopass" */
+  wifi_security: string;
 }
 
 /** Networked redundancy: follow a leader instance and optionally stand by as
