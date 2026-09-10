@@ -88,7 +88,14 @@ bought nothing.
       alert threshold"). The email now fires the moment paid usage starts.
 - [x] Workflow-enforced cap: built 2026-09-10 as `.github/workflows/cost-gate.yml`
       after Cameron asked what it would take. Inert until the secret exists.
-- [ ] Cameron mints an org token and stores it (see "Turning the gate on").
+- [x] Org token minted (label `ci-cost-gate`, Cameron approved in the browser on
+      2026-09-10) and stored as the `BLACKSMITH_ORG_TOKEN` repo secret; the log
+      that briefly held it was shredded. **The gate is live.**
+- [x] Proved the live path (2026-09-10, build.yml run 34524138107, cancelled
+      seconds after the gate reported): CLI install, org-token login, and usage
+      query all worked; decision "month-to-date Blacksmith list cost $10.944 is
+      under the $11.30 threshold; Blacksmith runners", and the build jobs were
+      created with the Blacksmith labels.
 - [x] Proved the GitHub-runner path for free (2026-09-10, build.yml run
       34439672577 with `force_fallback=true`): gate 0 min on ubuntu-latest, then
       windows-latest 25 min, ubuntu-latest 16 min, macos-latest 13 min, all
@@ -132,7 +139,7 @@ Verified locally on 2026-09-10 in WSL with the user token: the date window,
 `blacksmith auth login --api-token - --non-interactive --organization TomSawyerLabs`
 accepts a token on stdin.
 
-### Turning the gate on
+### Turning the gate on (done 2026-09-10; kept for re-issuing the token)
 
 1. Mint an org token (org admin; opens a browser to verify):
    `wsl -e bash -lc 'export PATH=$HOME/.local/bin:$PATH; blacksmith org-token create --label ci-cost-gate'`
