@@ -32,8 +32,10 @@ quick settings, layers, status) fold behind an **All controls** sheet rather tha
 taking size away from the array. The whole thing is chosen by CSS aspect-ratio media
 queries, so it is correct at first paint with nothing to arrange or maintain.
 
-**Show mode** (⛶ in the top bar, or F11) takes the native window fullscreen and hides
-the app chrome so the array fills the display; Esc or the corner pill brings it back.
+**Show mode** (⛶ in the top bar, or F11) takes the native window fullscreen so the
+array fills the display; Esc or the same top-bar button brings it back. Nothing floats
+over the array — the top bar stays, and it already carries Report, Record and the
+update control, so no pill can land on top of Live's corner clusters.
 The state persists, so the app reopens the way it was closed — including across
 self-updates.
 

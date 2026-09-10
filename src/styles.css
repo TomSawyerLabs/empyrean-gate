@@ -394,27 +394,16 @@ main {
    Native fullscreen keeps the normal top bar: switching Live/Media/Patch/etc.
    is part of operating the show, not window chrome to hide. */
 
-.show-controls {
-  position: fixed;
-  top: 54px;
-  right: 8px;
-  z-index: 60;
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-/* Only rendered when an update exists, so it can afford to be more than a pill. */
+/* Only rendered when an update exists. Lives in the top bar during show mode
+   (nothing floats over the array), so it lays out as a compact row. */
 .show-update {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
   border: 1px solid var(--accent2);
   border-radius: 10px;
-  background: rgba(12, 10, 24, 0.88);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(56, 209, 194, 0.08);
 }
 
 .show-update-install {
@@ -436,6 +425,7 @@ main {
 
 .show-update-bar {
   display: block;
+  flex: 0 0 64px;
   height: 3px;
   border-radius: 2px;
   overflow: hidden;
@@ -473,40 +463,11 @@ main {
   transition: width 0.45s linear;
 }
 
-.show-exit,
-.show-report {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  color: var(--muted);
-  background: rgba(20, 16, 36, 0.55);
-  background-image: var(--surface-grad);
-  border: 1px solid #2a2445;
-  border-radius: 999px;
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  cursor: pointer;
-}
 
-.show-exit:hover,
-.show-report:hover {
-  color: var(--text);
-}
-
-.record-btn.recording,
-.show-report.recording {
+.record-btn.recording {
   color: #fff;
   background: #c9364f;
   border-color: #ec5a70;
-}
-
-/* The Live tab's top-right cluster shares that corner with the fullscreen
-   shortcuts, below the retained top bar. */
-.app.show-mode .corner.tr,
-.app.show-mode .corner-stack.tr {
-  top: 96px;
 }
 
 /* ---- Program / Ready scene switcher ---- */
@@ -1792,10 +1753,6 @@ main {
   .live-side .tempo-time-grid,
   .live-side .tempo-mode-row {
     height: auto;
-  }
-  /* Stacked layout has no free corner for the show-mode exit pill. */
-  .app.show-mode .live-side.a {
-    padding-top: 34px;
   }
   /* The side "columns" are wrap rows here, and a cluster declared `width: 100%`
      claims a whole row — which stretched the Size/Speed sliders the full width

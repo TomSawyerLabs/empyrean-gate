@@ -210,8 +210,9 @@ function downloadPct(
 }
 
 /// The update controls that show mode gets, since it hides the top bar the
-/// version chip lives in. Renders nothing at all until there is an update to
-/// act on — the show surface is deliberately near-empty.
+/// version chip lives in; in show mode it sits in the top bar next to the
+/// show-mode toggle. Renders nothing at all until there is an update to act
+/// on — the show surface is deliberately near-empty.
 ///
 /// Installing mid-show is allowed on purpose: the two-phase handover costs about
 /// a frame, which is the whole reason it exists. What was missing was any way to
@@ -766,30 +767,9 @@ export default function App() {
       // rather than on a visible chip, which the narrow breakpoint hides.
       data-connected={connected ? "yes" : "no"}
     >
-      {showMode && (
-        <div className="show-controls">
-          {/* Keep the performance shortcuts close to the surface even though the
-              normal top bar now remains available in fullscreen. */}
-          <button className="show-report" onClick={() => setShowReport(true)}>
-            ⚑ Report
-          </button>
-          {admin && (
-            <button
-              className={`show-report ${status?.performance_recording ? "recording" : ""}`}
-              onClick={togglePerformanceRecording}
-            >
-              {status?.performance_recording ? "■ Stop recording" : "● Record"}
-            </button>
-          )}
-          <button className="show-exit" onClick={() => setShowMode(false)}>
-            ⤢ Exit show mode <span className="chip-key">Esc</span>
-          </button>
-          {/* Only when there is actually an update. Show mode is meant to be
-              nearly empty, so a control that is always there costs more than it
-              earns — but an update you cannot see or refuse is worse. */}
-          <ShowModeUpdate />
-        </div>
-      )}
+      {/* Nothing floats over the array in show mode any more: the top bar stays,
+          and it already carries Report, Record and the show-mode toggle. The
+          floating duplicates used to sit exactly on Live's top-right cluster. */}
       <header className="topbar">
         {/* Narrow screens only (CSS). The current tab's name rides along, because a
             bare hamburger leaves you with no idea where you already are. */}
@@ -832,13 +812,17 @@ export default function App() {
             <span className="btn-label">{status?.performance_recording ? "Stop" : "Record"}</span>
           </button>
         )}
+        {/* Only when there is actually an update. Show mode is meant to be
+            nearly empty, so a control that is always there costs more than it
+            earns — but an update you cannot see or refuse is worse. */}
+        {showMode && <ShowModeUpdate />}
         <button
-          className="ghost"
+          className={`ghost ${showMode ? "show-exit" : ""}`}
           aria-label={showMode ? "Exit show mode" : "Show mode"}
           onClick={() => setShowMode(!showMode)}
         >
           ⛶ <span className="btn-label">{showMode ? "Exit show mode" : "Show mode"}</span>{" "}
-          <span className="chip-key">F11</span>
+          <span className="chip-key">{showMode ? "Esc" : "F11"}</span>
         </button>
         <button className="ghost" aria-label="Connect a device" onClick={() => setShowConnect(true)}>
           ⊕ <span className="btn-label">Connect</span>
