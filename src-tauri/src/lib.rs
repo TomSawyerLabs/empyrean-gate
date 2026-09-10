@@ -595,9 +595,27 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
                     backend.state.update_config(|c| {
                         c.windows.aux_open.retain(|t| *t != tab);
                     });
+                }
+                if window.label() == CLOSE_GRACE_LABEL {
+                    // The grace prompt's own X means "stop now".
+                    let backend = window.app_handle().state::<Backend>();
+                    backend.state.close_grace_action.store(2, Ordering::SeqCst);
                     return;
                 }
-                // Closing the main window kills the show: the engine stops, the
+                // Only the LAST window can take the show down with it: closing
+                // an extra window — main or aux — while others stay open is
+                // never asked about. The process (and the engine) lives on
+                // until every window is gone.
+                let app_windows = window
+                    .app_handle()
+                    .webview_windows()
+                    .into_keys()
+                    .filter(|label| label != CLOSE_GRACE_LABEL)
+                    .count();
+                if app_windows > 1 {
+                    return;
+                }
+                // Closing the last window kills the show: the engine stops, the
                 // rig goes dark, and on a touch display the X is a few pixels
                 // from the controls. While sACN is actually transmitting, the
                 // close is refused and handed to the UI to confirm.
@@ -632,6 +650,22 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(move |app, event| {
+            // The last window closed on a live show (the user, not app.exit()):
+            // hold the exit for a grace period behind a small "restart the
+            // show?" window. The wire goes dark at once — the dialog promised
+            // that — but the engine keeps rendering, so a resume is a fade-up
+            // and a relaunch is never needed.
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = &event {
+                use tauri::Manager;
+                let state = app.state::<Backend>().state.clone();
+                let show_was_live = state.output_live();
+                let already = state.close_grace.load(Ordering::SeqCst);
+                if show_was_live && !already {
+                    api.prevent_exit();
+                    begin_close_grace(app.clone(), state);
+                    return;
+                }
+            }
             // The window-state plugin has just persisted its cache from its own
             // Exit handler — and tauri runs plugin handlers before this callback
             // — so this is the last word on what lands on disk.
@@ -672,13 +706,89 @@ fn set_close_guard_ready(ready: bool, state: tauri::State<'_, Backend>) {
 /// The operator confirmed closing a live show: let the next close through and
 /// ask for it. Goes through the normal close path so the engine still sends
 /// E1.31 stream termination rather than leaving the rig on its last look.
+/// Closes every window: the guard only ever fires from the last one.
 #[tauri::command]
 fn confirm_close(app: tauri::AppHandle, state: tauri::State<'_, Backend>) {
     use tauri::Manager;
     state.state.confirm_close();
-    if let Some(window) = app.get_webview_window("main") {
+    for (_, window) in app.webview_windows() {
         let _ = window.close();
     }
+}
+
+/// Label of the "restart the show?" window that follows the last close.
+const CLOSE_GRACE_LABEL: &str = "close-grace";
+/// How long that window stays up before the process exits for good.
+const CLOSE_GRACE_SECS: u64 = 30;
+
+/// The last window closed on a live show. Hold the wire dark, put up the grace
+/// window (served by our own HTTP server, so it needs no Tauri API), and wait
+/// for it to decide: resume brings the main window back and lets output fade
+/// up again; exit — or the timer — ends the process the ordinary way.
+fn begin_close_grace(app: tauri::AppHandle, state: Arc<SharedState>) {
+    use tauri::Manager;
+    state.close_grace.store(true, Ordering::SeqCst);
+    state.close_grace_action.store(0, Ordering::SeqCst);
+    let port = state.config.read().server.port;
+    let url = format!("http://127.0.0.1:{port}/restart.html?secs={CLOSE_GRACE_SECS}");
+    let built = tauri::WebviewWindowBuilder::new(
+        &app,
+        CLOSE_GRACE_LABEL,
+        tauri::WebviewUrl::External(url.parse().expect("loopback url")),
+    )
+    .title("Empyrean Gate — show stopped")
+    .inner_size(560.0, 320.0)
+    .resizable(false)
+    .always_on_top(true)
+    .center()
+    .zoom_hotkeys_enabled(false)
+    .background_color(tauri::window::Color(0x0A, 0x08, 0x14, 0xFF))
+    .build();
+    if let Err(error) = built {
+        // No prompt possible: behave exactly as before this existed.
+        log::warn!("could not open the restart prompt ({error}); exiting");
+        app.exit(0);
+        return;
+    }
+    log::info!(
+        "last window closed on a live show: output held dark, restart prompt up for {CLOSE_GRACE_SECS}s"
+    );
+    std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(CLOSE_GRACE_SECS);
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let action = state.close_grace_action.swap(0, Ordering::SeqCst);
+            if action == 1 {
+                log::info!("restart prompt: resuming the show");
+                // Re-arm the guard for the next accidental tap; the wire fades
+                // back up on the engine's usual output-on ramp.
+                state.cancel_close();
+                state.close_grace.store(false, Ordering::SeqCst);
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    let main_cfg = handle.config().app.windows.first().cloned();
+                    match main_cfg.map(|cfg| {
+                        tauri::WebviewWindowBuilder::from_config(&handle, &cfg)
+                            .and_then(|builder| builder.build())
+                    }) {
+                        Some(Ok(_)) => harden_touch_visuals(&handle),
+                        Some(Err(error)) => log::error!("could not reopen the main window: {error}"),
+                        None => log::error!("no main window configured to reopen"),
+                    }
+                    if let Some(prompt) = handle.get_webview_window(CLOSE_GRACE_LABEL) {
+                        let _ = prompt.close();
+                    }
+                });
+                return;
+            }
+            if action == 2 || std::time::Instant::now() >= deadline {
+                log::info!("restart prompt: exiting for good");
+                // Exit with a code so the ExitRequested handler lets it through.
+                app.exit(0);
+                return;
+            }
+        }
+    });
 }
 
 /// They changed their mind — re-arm the guard for the next accidental tap.

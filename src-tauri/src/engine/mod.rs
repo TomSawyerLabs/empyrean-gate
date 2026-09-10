@@ -3360,8 +3360,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 // no more packets ever leave this instance.
                 state.sacn_quiesced.store(true, Ordering::SeqCst);
             }
+            // `close_grace` is the last window having closed on a live show:
+            // dark on the wire (termination goes out below, exactly as the
+            // close dialog promised) but still rendering, so "restart the
+            // show" from the grace prompt is a fade-up, not a relaunch.
             let sacn_allowed = !state.sacn_hold.load(Ordering::Relaxed)
                 && !state.peer_hold.load(Ordering::Relaxed)
+                && !state.close_grace.load(Ordering::Relaxed)
                 && !leaving;
             let sending = cfg.output.enabled && sacn_allowed;
             if !sending && was_sending && !leaving {

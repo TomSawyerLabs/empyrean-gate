@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Empyrean Gate — show stopped</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0; height: 100%;
+    background: #0a0814; color: #f2eefc;
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    user-select: none; -webkit-user-select: none;
+  }
+  main {
+    box-sizing: border-box; height: 100%;
+    display: flex; flex-direction: column; justify-content: center; gap: 14px;
+    padding: 22px 26px;
+  }
+  h1 { margin: 0; font-size: 20px; letter-spacing: 0.01em; }
+  p { margin: 0; color: #b9b1d1; }
+  .restart {
+    display: block; width: 100%;
+    padding: 18px 20px; margin-top: 4px;
+    font: inherit; font-size: 22px; font-weight: 700; letter-spacing: 0.02em;
+    color: #fff; background: #1b8f7f; border: 2px solid #38d1c2; border-radius: 14px;
+    cursor: pointer;
+  }
+  .restart:hover, .restart:focus-visible { background: #20a894; outline: none; }
+  .restart:disabled { opacity: 0.6; cursor: default; }
+  .restart small { display: block; font-size: 13px; font-weight: 400; opacity: 0.85; margin-top: 4px; }
+  .foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    font-size: 13px; color: #8e85aa;
+  }
+  .foot button {
+    font: inherit; font-size: 13px; color: #b9b1d1;
+    background: transparent; border: 1px solid #2a2445; border-radius: 999px;
+    padding: 6px 12px; cursor: pointer;
+  }
+  .foot button:hover { color: #fff; }
+  .bar { height: 4px; border-radius: 2px; background: #1b1730; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 100%; background: #7c5cff; transition: width 0.25s linear; }
+</style>
+</head>
+<body>
+<main>
+  <h1>The show has stopped.</h1>
+  <p>The last Empyrean Gate window was closed, so the lights went dark.</p>
+  <button class="restart" id="restart" autofocus>
+    If that was a mistake… Restart the show ASAP
+    <small>Output resumes at once — the patterns never stopped underneath.</small>
+  </button>
+  <div class="bar"><i id="bar"></i></div>
+  <div class="foot">
+    <span id="countdown">This window closes itself in 30 s.</span>
+    <button id="quit">Stop now</button>
+  </div>
+</main>
+<script>
+  // Served by the app's own HTTP server, so these are same-origin POSTs and no
+  // Tauri API is needed. The backend polls the outcome and either brings the
+  // main window back (output resumes with its usual fade-up) or exits for good.
+  const restart = document.getElementById("restart");
+  const quit = document.getElementById("quit");
+  const countdown = document.getElementById("countdown");
+  const bar = document.getElementById("bar");
+  const TOTAL = Number(new URLSearchParams(location.search).get("secs")) || 30;
+  const started = performance.now();
+  const post = (path) => fetch(path, { method: "POST" }).catch(() => {});
+  restart.addEventListener("click", () => {
+    restart.disabled = true;
+    restart.firstChild.textContent = "Restarting the show… ";
+    void post("/close-grace/resume");
+  });
+  quit.addEventListener("click", () => void post("/close-grace/exit"));
+  const tick = () => {
+    const left = Math.max(0, TOTAL - (performance.now() - started) / 1000);
+    countdown.textContent = `This window closes itself in ${Math.ceil(left)} s.`;
+    bar.style.width = `${(left / TOTAL) * 100}%`;
+    if (left > 0) requestAnimationFrame(tick);
+  };
+  tick();
+</script>
+</body>
+</html>

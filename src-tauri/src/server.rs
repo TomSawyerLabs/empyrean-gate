@@ -99,6 +99,8 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .route("/media/file/{id}", get(serve_media_file))
         .route("/version", get(running_version))
         .route("/focus", post(focus_window))
+        .route("/close-grace/resume", post(close_grace_resume))
+        .route("/close-grace/exit", post(close_grace_exit))
         .route("/reports", get(list_reports))
         .route("/reports/{id}/{file}", get(serve_report_file))
         .route("/diagnostics/recent", post(recent_diagnostics))
@@ -567,6 +569,31 @@ async fn focus_window(
         return (StatusCode::FORBIDDEN, "focus is local-only").into_response();
     }
     ctx.state.focus_requested.store(true, Ordering::SeqCst);
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// The "restart the show?" grace window (restart.html, served from here so it
+/// needs no Tauri API) reporting its decision. Loopback-only, like /focus; the
+/// Tauri layer polls `close_grace_action` and acts on the main thread.
+async fn close_grace_resume(
+    State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> Response {
+    if !addr.ip().is_loopback() {
+        return (StatusCode::FORBIDDEN, "local-only").into_response();
+    }
+    ctx.state.close_grace_action.store(1, Ordering::SeqCst);
+    StatusCode::NO_CONTENT.into_response()
+}
+
+async fn close_grace_exit(
+    State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+) -> Response {
+    if !addr.ip().is_loopback() {
+        return (StatusCode::FORBIDDEN, "local-only").into_response();
+    }
+    ctx.state.close_grace_action.store(2, Ordering::SeqCst);
     StatusCode::NO_CONTENT.into_response()
 }
 

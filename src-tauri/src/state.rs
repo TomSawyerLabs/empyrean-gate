@@ -548,6 +548,14 @@ pub struct SharedState {
     /// Millis-since-start of the last refused close, for the "ask twice and it
     /// goes through" escape hatch.
     pub last_close_attempt_ms: AtomicU64,
+    /// The last window closed on a live show. Output is held dark (E1.31
+    /// termination went out, as the close dialog promised) while a small
+    /// "restart the show?" window stays up for a grace period; the engine keeps
+    /// rendering underneath so a resume is a fade-up, not a relaunch.
+    pub close_grace: AtomicBool,
+    /// What the grace prompt decided: 0 nothing yet, 1 resume, 2 exit now.
+    /// Written by the loopback HTTP routes, polled by the Tauri layer.
+    pub close_grace_action: AtomicU8,
     /// Always-on rolling capture of operator input + engine state, so the Report
     /// button can freeze the last seconds of a visual complaint.
     pub recorder: crate::report::Recorder,
@@ -625,6 +633,8 @@ impl SharedState {
             close_confirmed: AtomicBool::new(false),
             close_guard_ready: AtomicBool::new(false),
             last_close_attempt_ms: AtomicU64::new(0),
+            close_grace: AtomicBool::new(false),
+            close_grace_action: AtomicU8::new(0),
             recorder: crate::report::Recorder::new(),
             performance_recording: Mutex::new(None),
             started: Instant::now(),

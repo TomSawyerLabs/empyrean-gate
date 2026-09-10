@@ -50,7 +50,13 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
 
 - **Backend is the app.** Frame generation runs on a dedicated thread:
   GPU compute → readback (ping-pong staging, no stalls) → sACN + preview fan-out.
-  Kill every UI and the lights keep running.
+  Kill every UI and the lights keep running. In the desktop app, closing an
+  *extra* window (main or popped-out) never asks anything; only the **last**
+  window, while sACN is transmitting, gets the "the show is live" confirmation.
+  And after that last close the wire goes dark as promised, but the engine keeps
+  rendering for 30 s behind a small **"If that was a mistake… Restart the show
+  ASAP"** window — one tap brings the main window back and the output fades up
+  where it left off; "Stop now" or the timer ends the process.
 - **Every UI is a WebSocket client.** The backend serves the web UI (embedded in the
   binary) plus a JSON + binary protocol on port 9520. The Tauri desktop window, LAN
   browsers, and phones all speak the same protocol.

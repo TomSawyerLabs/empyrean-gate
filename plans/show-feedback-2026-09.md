@@ -54,13 +54,15 @@ touches. This file is the single place to look for "did we do X yet".
 3. **Pro controller can turn off all layers, and taps must stop too.** A guest
    VJ turned every layer off in the right panel, but taps (effects/dabs) kept
    rendering. Effects and dabs are composited after the layer stack in
-   `gate.wgsl` and are independent of layer enables. Status: TODO — decide
-   whether "all layers off" should gate effects/dabs, or whether the right panel
-   needs an explicit master/blackout, or both.
+   `gate.wgsl` and are independent of layer enables. Status: DONE (b7bf3ab):
+   `render.floor_level` "Floor input" fader on Live + Control master clusters,
+   glided in the engine, scales every effect/dab; quick-setting target; Control
+   → Layers has All off / All on.
 4. **Enable more layers by default, but toggled off.** Default config seeds a
    small stack; ship more kinds in the default stack with `enabled: false` so
-   an operator can switch them on without building them. Status: TODO
-   (`config.rs` defaults + `tests/fixtures/default-config.json`).
+   an operator can switch them on without building them. Status: DONE
+   (6b8a028): eight tuned shelf layers, `enabled: false`; Ready names the
+   program by enabled layers only.
 
 ### C. Clients
 
@@ -88,7 +90,10 @@ touches. This file is the single place to look for "did we do X yet".
 
 8. **Preview must show on the main page toggle even when "off"**, sacrificing
    frames or resolution if needed, or pre-rendering a short beat-synced clip.
-   Status: TODO — see exploration notes for what "off" currently means.
+   Status: DONE (c220f20), read as: the layer chips on Live had no thumbnail,
+   and off layers had none anywhere. The mini bus now renders off-air layers
+   on alternate sweeps (lit layers keep 2× refresh, still one extra dispatch
+   per frame) and the Live chip shows a dimmed MiniRing.
 
 ### E. Windows / GPU
 
@@ -109,7 +114,7 @@ touches. This file is the single place to look for "did we do X yet".
 
 12. **Global sidebar indicator of the active patch** (a patch replaces the
     layer stack; only the Patch tab and the Control "Layers" heading know about
-    it today). Status: TODO.
+    it today). Status: DONE (a457523): PatchChip in the top bar + phone menu.
 13. **Patches into the Ready panel.** Ready holds exactly one `SavedStack`
     (layers only); a patch cannot be prepared off-air. Status: TODO — design.
 14. **How many Ready panels? Per-client opt-in? Separate limit?** Today there is
@@ -119,16 +124,25 @@ touches. This file is the single place to look for "did we do X yet".
 ### G. Windows and dialogs
 
 15. **Floating fullscreen-exit button and its siblings cover other buttons;
-    move them to the topbar.** Status: TODO.
+    move them to the topbar.** Status: DONE (e00e10f): floating pills removed;
+    the top bar (which stays in show mode) carries Report/Record/toggle, and
+    the update control joins it as a compact row.
 16. **Duplicate background windows** are easy to open by accident; a toast in
     the visible window should offer to close background windows idle/invisible
     for a few minutes. Status: TODO.
 17. **Close warning only on the last window.** Closing an extra window must not
     warn if other windows remain; only the last one shows the close guard.
-    Status: TODO.
+    Status: DONE: `CloseRequested` counts app windows; only the last (main or
+    aux) is guarded, and `confirm_close` closes every window.
 18. **After the last window closes and the show stops outputting**, show a
     temporary window (self-closes in ~30 s) with one button: "If that was a
-    mistake… Restart Show ASAP? Click HERE". Status: TODO.
+    mistake… Restart Show ASAP? Click HERE". Status: DONE: `ExitRequested`
+    with `code: None` on a live show is held; `state.close_grace` darkens the
+    wire (termination packets go out) while the engine keeps rendering;
+    `public/restart.html` (served by our own HTTP server, loopback POSTs to
+    `/close-grace/{resume,exit}`) stays up 30 s; resume recreates the main
+    window from config and output fades back up. Compile-checked + page
+    served; the window flow itself needs a manual desktop run.
 
 ### H. No hard cuts, round two (continuing `plans/no-hard-cuts.md`)
 
@@ -150,8 +164,11 @@ touches. This file is the single place to look for "did we do X yet".
 4. [x] A2 multitouch fix (one commit).
 5. [x] Plans cleanup: delete finished plan docs (own commit), wrap up stale
        progress logs.
-6. [ ] B3, B4, C5, C6, C7, D8, E9–E11, F12–F14, G15–G18 — one commit each,
-       in roughly that order; update status lines here as they land. ← current
+6. [x] B3, B4, D8, F12, G15, G17, G18 — landed, one commit each.
+7. [ ] C5 clients roster ← current
+8. [ ] C6, C7, E9–E11, F13–F14, G16 — one commit each; update status lines
+       here as they land.
+9. [ ] Bump to v0.11.0 and push the tag (per plans/releasing.md).
 
 ## Findings / gotchas
 
