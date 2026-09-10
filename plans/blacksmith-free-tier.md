@@ -32,7 +32,7 @@ bought nothing.
   minutes. Do not use it for free-tier math; use `cost_usd / 0.004`.
 - Blacksmith has **no hard spend cap**. The only control is "Total spend alert"
   under Settings: an email to the primary address when monthly spend (after the
-  discount) reaches a threshold. It was set to **$30/month** when checked.
+  discount) reaches a threshold. Was $30/month; set to **$1/month** on 2026-09-09.
 - Actions cache on Blacksmith: LRU, entries unused for 7 days are evicted (same
   as GitHub). A restore counts as use.
 
@@ -80,10 +80,14 @@ bought nothing.
       file. Once the push lands, `gh workflow enable warm-cache.yml --repo
       TomSawyerLabs/empyrean-gate` makes manual dispatch available again; with no
       schedule in the file, enabling it costs nothing.
-- [ ] Push the "warm cache no longer runs itself" commit to origin/master. Held on 2026-09-09 because local
-      master also carried three unpushed commits from other sessions.
-- [ ] Decide on the spend alert threshold (open question 1).
-- [ ] Decide whether to build a workflow-enforced cap (open question 2).
+- [x] Push to origin/master (2026-09-09, with Cameron's go-ahead; the push also
+      carried other sessions' pending master commits, fast-forward). Workflow
+      re-enabled afterwards so manual dispatch works; no schedule remains.
+- [x] Spend alert lowered from $30 to $1/month on the dashboard (2026-09-09,
+      Cameron approved; confirmed after reload, toast "Successfully updated email
+      alert threshold"). The email now fires the moment paid usage starts.
+- [x] Workflow-enforced cap: decided against. The $1 alert is the tripwire; the
+      gate-job design below stays documented in case the cadence changes.
 
 ## Expected steady state
 
@@ -97,18 +101,17 @@ bought nothing.
 
 ## Open questions for the user
 
-1. **Spend alert threshold.** Currently $30/month. With the nightly gone the
-   expected bill is $0, so a much lower threshold is a better tripwire. My
-   recommendation: **$1**, so the email arrives the moment paid usage starts.
-   This is a change on a third-party dashboard, so it needs your explicit go-ahead
-   (or you set it: Settings -> Total spend alert -> 1 -> Save).
-2. **A real cap.** Blacksmith cannot cap. The only way to guarantee $0 is a gate
-   job at the top of `release.yml` that queries `blacksmith usage` for the month
-   and, if list cost is at or past $12, sets `runs-on` to GitHub's free
-   `windows-latest`/`ubuntu-latest` instead (cold, ~20 min, free). Needs a
-   Blacksmith org token in repo secrets (`blacksmith org-token create`, admin
-   browser verification) and a small amount of workflow plumbing. Worth it only
-   if you want a hard guarantee rather than an email. Not built.
+None. Both were settled on 2026-09-09 (alert at $1; no workflow-enforced cap).
+
+## Considered and not built: a workflow-enforced cap
+
+Blacksmith cannot cap. The only way to guarantee $0 would be a gate job at the
+top of `release.yml` that queries `blacksmith usage` for the month and, if list
+cost is at or past $12, sets `runs-on` to GitHub's free
+`windows-latest`/`ubuntu-latest` instead (cold, ~20 min, free). Needs a
+Blacksmith org token in repo secrets (`blacksmith org-token create`, admin
+browser verification) and some workflow plumbing. Revisit only if the release
+cadence climbs back toward show-mode levels.
 
 ## Things not to do
 
