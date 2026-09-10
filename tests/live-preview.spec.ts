@@ -34,15 +34,18 @@ test("the fps and pkt/s meters line up with each other", async ({ page }) => {
   // "11520 pkt/s", and the two histograms sat visibly offset in the ring.
   await page.goto("/#live");
   await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+  // fps, load, and pkt/s (output is on in the mock status).
   const bars = page.locator(".ring-meters .sparkbars svg");
   const values = page.locator(".ring-meters .spark-value");
-  await expect(bars).toHaveCount(2);
+  await expect(bars).toHaveCount(3);
 
   for (const [what, rows] of [
     ["histograms", bars],
     ["readouts", values],
   ] as const) {
     const lefts = await rows.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().left));
-    expect(Math.abs(lefts[0] - lefts[1]), `the ${what} should share a left edge`).toBeLessThan(0.5);
+    for (const left of lefts.slice(1)) {
+      expect(Math.abs(lefts[0] - left), `the ${what} should share a left edge`).toBeLessThan(0.5);
+    }
   }
 });
