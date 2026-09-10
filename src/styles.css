@@ -164,6 +164,40 @@ code,
   padding: 2px 10px;
   border-radius: 999px;
 }
+
+/* The patch on air, on every tab (see PatchChip in App.tsx). */
+.patch-chip {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(124, 92, 255, 0.55);
+  background: rgba(124, 92, 255, 0.14);
+  color: var(--text);
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+button.patch-chip {
+  cursor: pointer;
+  min-height: 0;
+  line-height: 1.4;
+}
+.patch-chip-mark {
+  color: var(--accent);
+}
+.patch-chip.broken {
+  border-color: rgba(255, 92, 122, 0.6);
+  background: #3a1220;
+  color: var(--danger);
+}
+.patch-chip-state {
+  margin-left: 6px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
 .conn.ok {
   background: #123524;
   color: var(--ok);

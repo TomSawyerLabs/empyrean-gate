@@ -134,6 +134,9 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   to a single WGSL dispatch; knob tweaks and scalar wires never recompile.
   Patches save as JSON files under the config dir and activate live (the layer
   stack renders when no patch is active); six built-in presets seed the palette.
+  While a patch is on air a **◆ chip in the top bar names it on every tab** (red
+  with "fallback" if it failed to build and the stack is covering) — tap it to
+  jump to the editor.
   Editing works on the Gate machine only; remote clients get a read-only view.
   Slated to replace the layer stack once all pattern kinds are ported — see
   `plans/node-graph.md`.

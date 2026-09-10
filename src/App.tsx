@@ -601,11 +601,55 @@ function TopbarMenu({
           <span className={connected ? "conn ok" : "conn bad"}>
             {connected ? "connected" : "reconnecting…"}
           </span>
+          <PatchChip onOpen={() => onSelectTab("patch")} />
           {status && <span className="gpu-name">{status.gpu_name}</span>}
           <VersionChip />
         </div>
       </div>
     </div>
+  );
+}
+
+/** Topbar chip naming the node-graph patch on air, on every tab. A patch
+ *  replaces the layer stack entirely, and until now only the Patch tab (and a
+ *  vanished "Layers" heading on Control) admitted one was rendering. Resolves
+ *  the id to its name from the patch list; admins can tap it to jump to the
+ *  editor. Nothing renders while the layer stack is on air. */
+function PatchChip({ onOpen }: { onOpen: () => void }) {
+  const { client, config, status, connected, admin } = useGate();
+  const [names, setNames] = useState<Map<string, string>>(new Map());
+  const active = config?.active_patch ?? null;
+  useEffect(() => {
+    if (!connected || !active) return;
+    const off = client.onMessage((msg) => {
+      if (msg.type === "patches") {
+        setNames(new Map(msg.patches.map((p) => [p.id, p.name])));
+      }
+    });
+    if (!names.has(active)) client.patchList();
+    return off;
+    // The list is only re-requested when the active id is one we cannot name.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, connected, active]);
+  if (!active) return null;
+  const label = names.get(active) ?? "Patch";
+  const broken = Boolean(status?.patch_error);
+  const body = (
+    <>
+      <span className="patch-chip-mark">◆</span> {label}
+      {broken && <span className="patch-chip-state">fallback</span>}
+    </>
+  );
+  return admin ? (
+    <button
+      className={`patch-chip ${broken ? "broken" : ""}`}
+      aria-label={`Patch on air: ${label}. Open the Patch tab`}
+      onClick={onOpen}
+    >
+      {body}
+    </button>
+  ) : (
+    <span className={`patch-chip ${broken ? "broken" : ""}`}>{body}</span>
   );
 }
 
@@ -809,6 +853,7 @@ export default function App() {
             ⧉ <span className="btn-label">{newWindowBusy ? "Opening…" : "New window"}</span>
           </button>
         )}
+        <PatchChip onOpen={() => selectTab("patch")} />
         {status && <span className="gpu-name">{status.gpu_name}</span>}
         <span className={connected ? "conn ok" : "conn bad"}>
           {connected ? "connected" : "reconnecting…"}
