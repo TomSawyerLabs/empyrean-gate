@@ -163,6 +163,9 @@ const enabledLayers: number[] = state.config.layers
   .map((l: Msg, i: number) => (l.enabled ? i : -1))
   .filter((i: number) => i >= 0);
 if (enabledLayers.length === 0) fail("default config has no enabled layers to preview");
+// Off-air layers get cells too (the chip shows what a tap would add), so the
+// full set is every config layer.
+const allLayers: number[] = state.config.layers.map((_: Msg, i: number) => i);
 
 // --- 1. layer thumbnails ----------------------------------------------------
 
@@ -188,11 +191,11 @@ const layerBatches = batches.filter((b) => b.kind === 0 && b.cells.length > 0);
 if (layerBatches.length < 3) fail(`only ${layerBatches.length} layer batches in 1.5 s`);
 const last = layerBatches[layerBatches.length - 1];
 for (const cell of last.cells) {
-  if (!enabledLayers.includes(cell.id)) fail(`cell for layer ${cell.id}, which is not enabled`);
+  if (!allLayers.includes(cell.id)) fail(`cell for layer ${cell.id}, which does not exist`);
   if (cell.rgb.length !== last.spokes * last.pixels * 3) fail("cell size mismatch");
 }
-if (last.cells.length !== enabledLayers.length) {
-  fail(`${last.cells.length} cells for ${enabledLayers.length} enabled layers`);
+if (last.cells.length !== allLayers.length) {
+  fail(`${last.cells.length} cells for ${allLayers.length} layers (${enabledLayers.length} enabled)`);
 }
 const lit = last.cells.filter((c) => c.rgb.some((v) => v > 8));
 if (lit.length === 0) fail("every layer thumbnail is black — solo renders not happening");

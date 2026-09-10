@@ -74,7 +74,10 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   Settings, one button away. **Every listed layer also carries a mini
   visualizer** — a live thumbnail of that layer's own solo contribution,
   rendered on a dedicated low-res GPU bus and laid out like the real hardware —
-  so it is obvious at a glance what each one adds to the composite. In the
+  so it is obvious at a glance what each one adds to the composite. Layers
+  that are switched *off* get one too (dimmed, refreshed at half the rate of
+  the lit ones so the show never pays for it), so the chip you are about to
+  tap on Live shows what it would add. In the
   Patch editor the same idea follows the wire types: field nodes get the ring
   thumbnail, scalar outputs get small amplitude meters with history.
 - **Effects**: transients that fire over the whole stack. Eight of them *move* —

@@ -6,9 +6,12 @@
 //!
 //! Layer cells cycle one solo dispatch per program frame — a full sweep of an
 //! 8-layer stack refreshes every cell at ~7 Hz for the cost of one extra
-//! 1k-pixel dispatch per frame. Patch cells render in a single dispatch of the
-//! patch's companion preview module (`Program::preview_wgsl`), all nodes at
-//! once, at the publish cadence.
+//! 1k-pixel dispatch per frame. Layers that are switched OFF get a cell too,
+//! so the chip you are about to tap shows what it would add; they join the
+//! sweep on alternate passes only, so the lit layers keep twice the refresh
+//! and the program frame never pays more than that one dispatch. Patch cells
+//! render in a single dispatch of the patch's companion preview module
+//! (`Program::preview_wgsl`), all nodes at once, at the publish cadence.
 
 use super::{Engine, FrameInputs};
 use crate::state::{MiniBatch, MiniKind, SharedState};
@@ -55,6 +58,8 @@ pub struct MiniBus {
     engine: Option<Engine>,
     /// Position in the layer sweep.
     cursor: usize,
+    /// Whether the current sweep pass includes the off-air (disabled) layers.
+    offair_pass: bool,
     pending: Option<Pending>,
     /// Latest completed solo frame per config layer index.
     layer_cells: HashMap<u16, Vec<u8>>,
@@ -84,6 +89,7 @@ impl MiniBus {
         Self {
             engine,
             cursor: 0,
+            offair_pass: false,
             pending: None,
             layer_cells: HashMap::new(),
             batch: 0,
@@ -99,11 +105,14 @@ impl MiniBus {
 
     /// One program-frame tick. `layer_cfg_index[i]` is the config index of
     /// `base.layers[i]` (`None` for a transition's outgoing copies).
+    /// `offair` carries the layers that are switched off — not in `base` at
+    /// all — as (config index, GPU layer) so they still get a thumbnail.
     pub fn tick(
         &mut self,
         state: &Arc<SharedState>,
         base: &FrameInputs,
         layer_cfg_index: &[Option<usize>],
+        offair: &[(usize, super::GpuLayer)],
         patch_preview: Option<&PatchPreviewInfo>,
         patch_rt: Option<&crate::patch::eval::Runtime>,
     ) {
@@ -192,15 +201,23 @@ impl MiniBus {
 
         // ---- Layer stack mode -------------------------------------------------
         self.refresh_layer_meta(spokes, pixels);
-        let sweep: Vec<(usize, u16)> = layer_cfg_index
+        // Every cell that may be published: the packed (on-air) layers first,
+        // then the off-air ones. The off-air tail only joins every other pass.
+        let onair: Vec<(u16, super::GpuLayer)> = layer_cfg_index
             .iter()
             .enumerate()
-            .filter_map(|(slot, cfg)| cfg.map(|c| (slot, c as u16)))
+            .filter_map(|(slot, cfg)| cfg.map(|c| (c as u16, base.layers[slot])))
             .collect();
-        self.layer_cells
-            .retain(|id, _| sweep.iter().any(|(_, c)| c == id));
-        if sweep.is_empty() {
+        let offair: Vec<(u16, super::GpuLayer)> =
+            offair.iter().map(|(c, gpu)| (*c as u16, *gpu)).collect();
+        self.layer_cells.retain(|id, _| {
+            onair.iter().any(|(c, _)| c == id) || offair.iter().any(|(c, _)| c == id)
+        });
+        let sweep_len = onair.len() + if self.offair_pass { offair.len() } else { 0 };
+        if sweep_len == 0 {
             self.pending = None;
+            self.cursor = 0;
+            self.offair_pass = !self.offair_pass;
             if now >= self.next_publish {
                 self.next_publish = now + PUBLISH_INTERVAL;
                 self.publish(state, MiniKind::Layers, spokes, pixels, Vec::new(), Vec::new());
@@ -210,11 +227,20 @@ impl MiniBus {
 
         let engine = self.engine.as_mut().expect("checked above");
         engine.ensure_capacity(total);
-        let (slot, id) = sweep[self.cursor % sweep.len()];
-        self.cursor = (self.cursor + 1) % sweep.len();
+        let pick = self.cursor % sweep_len;
+        let (id, gpu) = if pick < onair.len() {
+            onair[pick]
+        } else {
+            offair[pick - onair.len()]
+        };
+        self.cursor += 1;
+        if self.cursor >= sweep_len {
+            self.cursor = 0;
+            self.offair_pass = !self.offair_pass;
+        }
         let mut inputs = base.clone();
         inputs.globals.pixels = pixels;
-        inputs.layers = vec![base.layers[slot]];
+        inputs.layers = vec![gpu];
         inputs.globals.layer_count = 1;
         // The cell shows the layer's own contribution: pre-master (so a dimmed
         // show still has readable thumbnails), without transitions, overlays,
@@ -235,8 +261,10 @@ impl MiniBus {
         match engine.render(&inputs) {
             Ok(Some(rgb)) => {
                 if let Some(Pending::Layer(prev)) = self.pending.take() {
-                    // Only keep it if that layer is still in the sweep.
-                    if sweep.iter().any(|(_, c)| *c == prev) {
+                    // Only keep it if that layer still exists.
+                    if onair.iter().any(|(c, _)| *c == prev)
+                        || offair.iter().any(|(c, _)| *c == prev)
+                    {
                         self.layer_cells.insert(prev, rgb.to_vec());
                     }
                 }

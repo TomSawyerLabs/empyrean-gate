@@ -53,8 +53,11 @@ function LayerChip({
   onQuickEdit: (x: number, y: number) => void;
 }) {
   const hold = useHoldMenu({ onOpen: onQuickEdit, onClick: onToggle });
+  // The thumbnail renders whether the layer is on or off — off-air layers
+  // get a cell from the mini bus too — so the chip shows what a tap adds.
   return (
     <button className={layer.enabled ? "active" : ""} {...hold}>
+      <MiniRing mini={`layer:${index}`} label={layer.name || `Layer ${index + 1}`} />
       <span className="live-layer-dot" />
       <span>{layer.name || `Layer ${index + 1}`}</span>
     </button>

@@ -4324,6 +4324,12 @@ button:disabled {
   background: rgba(56, 209, 194, 0.1);
 }
 
+/* An off-air chip's thumbnail is a preview, not a contribution: dim it so the
+   lit rows read as the ones actually on the rig. */
+.live-layer-list button:not(.active) .mini-ring {
+  opacity: 0.55;
+}
+
 .live-layer-dot {
   width: 9px;
   height: 9px;

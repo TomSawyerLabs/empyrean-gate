@@ -2551,6 +2551,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // thumbnails with this, since disabled/walked-out layers are skipped
         // here and GPU slot order therefore drifts from config order.
         let mut layer_slot_cfg: Vec<Option<usize>> = Vec::with_capacity(render_layer_limit);
+        // Layers switched off, for the mini bus only: the chip you are about
+        // to tap shows what it would add. Raw sliders, no walk, no fade.
+        let mut offair_layers: Vec<(usize, GpuLayer)> = Vec::new();
         let mut gpu_transition_split = 0u32;
         for (i, l) in render_layers.iter().take(render_layer_limit).enumerate() {
             // Envelope eases layers in/out of the mix over a few seconds.
@@ -2566,13 +2569,29 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             layer_enable_env[i] = (layer_enable_env[i]
                 + if l.enabled { dt } else { -dt } / LAYER_TOGGLE_SECS)
                 .clamp(0.0, 1.0);
+            let level = audio[(l.audio_source as usize).min(MAX_AUDIO_SOURCES - 1)].level;
             if !l.enabled && layer_enable_env[i] <= 0.0 {
-                // Fully faded out and off — same frozen-phase skip as before.
+                // Fully faded out and off: skip the GPU, but keep the phase
+                // moving so its off-air thumbnail animates (and it arrives
+                // mid-motion when switched on, not at a frozen frame).
+                layer_phases[i] +=
+                    (l.phase_rate(level) * l.speed * render_master_speed * dt) as f64;
+                if let Some(p) = l.phase_period() {
+                    layer_phases[i] = layer_phases[i].rem_euclid(p);
+                }
+                let cfg_index = if render_transition_active {
+                    i.checked_sub(render_transition_split)
+                } else {
+                    Some(i)
+                };
+                if let Some(cfg_index) = cfg_index {
+                    let (gpu_phase, gpu_epoch) = l.split_phase(layer_phases[i]);
+                    offair_layers.push((cfg_index, l.to_gpu(gpu_phase, gpu_epoch)));
+                }
                 continue;
             }
             let e = layer_enable_env[i];
             let enable_fade = e * e * (3.0 - 2.0 * e);
-            let level = audio[(l.audio_source as usize).min(MAX_AUDIO_SOURCES - 1)].level;
             if layer_env[i] * enable_fade < 0.005 {
                 // Fully faded out by the walk — keep its phase moving, skip the GPU.
                 layer_phases[i] +=
@@ -3177,6 +3196,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             state,
             &inputs,
             &layer_slot_cfg,
+            &offair_layers,
             patch_preview.as_ref(),
             patch_rt.as_ref(),
         );
