@@ -316,6 +316,13 @@ export default function Control() {
               label="fps"
               value={String(status.fps_history.at(-1) ?? 0)}
             />
+            <Sparkbars
+              data={status.load_history}
+              color="#ffb347"
+              label="load"
+              value={`${status.load_history.at(-1) ?? 0}%`}
+              warn={status.load_warning}
+            />
           </div>
         )}
       </section>

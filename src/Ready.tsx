@@ -112,6 +112,14 @@ export default function Ready() {
           <div className="bus-head"><div><span className="bus-letter">B</span><div><small>READY · OFF AIR</small><strong>{ready?.name ?? "No scene loaded"}</strong></div></div><i className="bus-safe">SAFE</i></div>
           <div className={`bus-preview ${ready ? "" : "empty"}`}>
             {ready ? <GateCanvas previewSource={readySource} /> : <p>Choose a scene below. Nothing here can affect the Gate until Take.</p>}
+            {ready && config.render.ready_bus_paused && (
+              <p className="bus-paused">
+                Ready bus paused to shed load — the scene is kept, not rendered.
+                <button onClick={() => client.setConfig({ ...config, render: { ...config.render, ready_bus_paused: false } })}>
+                  Resume
+                </button>
+              </p>
+            )}
           </div>
         </section>
       </div>

@@ -204,6 +204,8 @@ export interface ServerConfig {
   wifi_password: string;
   /** "WPA" | "WEP" | "nopass" */
   wifi_security: string;
+  /** Ceiling on remote preview fps (load shedding); applied live. */
+  preview_fps_cap: number;
 }
 
 /** Networked redundancy: follow a leader instance and optionally stand by as
@@ -300,6 +302,8 @@ export interface RenderConfig {
   /** Flourish keep-amount 0..1 (0 = strict pull). Bool through v0.10.15. */
   master_hue_loose: number;
   manual_transition_secs: number;
+  /** Load shedding: the off-air Ready bus is not rendered while true. */
+  ready_bus_paused: boolean;
   manual_bpm: number | null;
   beat_time: "half" | "normal" | "double";
   walk_enabled: boolean;
@@ -572,6 +576,10 @@ export interface RuntimeStatus {
   power_error: string | null;
   fps_history: number[];
   pps_history: number[];
+  /** Render load per second bucket, percent of budget (can exceed 100). */
+  load_history: number[];
+  /** Backend-judged sustained underperformance; see LoadBanner. */
+  load_warning: boolean;
   clients: number;
   audio: AudioSourceStatus[];
   rhythm: RhythmStatus;

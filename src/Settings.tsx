@@ -809,6 +809,30 @@ function ClientsPanel() {
         Only this many clients stream the live view at once (a few Mbps per phone);
         extras queue for a slot but keep full control of taps, drawing, and effects.
       </p>
+      <label className="field-row" style={{ maxWidth: 320 }}>
+        <span>Phone preview fps cap (load shedding)</span>
+        <input
+          type="number"
+          min={1}
+          max={60}
+          value={config?.server.preview_fps_cap ?? 60}
+          onChange={(e) => {
+            if (config) {
+              client.setConfig({
+                ...config,
+                server: {
+                  ...config.server,
+                  preview_fps_cap: Math.min(60, Math.max(1, Number(e.target.value) || 1)),
+                },
+              });
+            }
+          }}
+        />
+      </label>
+      <p className="hint">
+        Applies to previews already streaming. The "engine is behind" toast offers 15;
+        60 means no cap.
+      </p>
       {list.length === 0 && <p className="hint">No devices yet — use ⊕ Connect in the top bar.</p>}
       {list.map((c) => (
         <div className="client-row" key={c.id}>

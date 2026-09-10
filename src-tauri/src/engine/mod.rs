@@ -1481,6 +1481,14 @@ const FLOOR_LEVEL_TAU: f32 = 0.15;
 /// is instant: the frame data is cleared the moment the source goes away.
 const VIDEO_FADE_SECS: f32 = 1.0;
 
+// Sustained-underperformance warning (plans/show-feedback-2026-09.md E11).
+/// Render load (share of the second spent rendering) that counts as unhealthy.
+const LOAD_WARN_PCT: u32 = 85;
+/// Frames delivered under this fraction of the target rate count as starved.
+const LOAD_WARN_FPS_RATIO: f32 = 0.85;
+/// Unhealthy seconds in a row before the warning trips.
+const LOAD_WARN_SECS: u32 = 8;
+
 /// Scale a frame of perceptual RGB bytes by an eased 0..1 mix (smoothstep is
 /// applied here so callers track a plain linear envelope). Used to fade the
 /// wire up from black without touching the previewed frame.
@@ -1628,6 +1636,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut sec_start = Instant::now();
     let mut frames_this_sec: u32 = 0;
     let mut pkts_this_sec: u32 = 0;
+    // Render time spent this second, for the load bucket (share of budget).
+    let mut busy_ms_this_sec: f32 = 0.0;
+    let mut load_hist: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
+    // Consecutive unhealthy one-second buckets; the warning trips at
+    // LOAD_WARN_SECS and clears on the first healthy one.
+    let mut unhealthy_secs: u32 = 0;
+    let mut load_warning = false;
     let mut fps_hist: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
     let mut pps_hist: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
     const HIST_LEN: usize = 30;
@@ -3058,7 +3073,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // Render the prepared scene on its own GPU bus. It shares live global
         // inputs (audio, controls, effects and video) but owns its layer phases,
         // so it keeps moving while off air and does not perturb Program.
-        if let (Some(stack), Some(ready)) = (cfg.ready_stack.as_ref(), ready_engine.as_mut()) {
+        if cfg.render.ready_bus_paused {
+            // Load shedding: the prepared scene is not rendered at all; its
+            // preview shows nothing until unpaused. Phases keep their values.
+            ready_rgb.clear();
+        } else if let (Some(stack), Some(ready)) =
+            (cfg.ready_stack.as_ref(), ready_engine.as_mut())
+        {
             let key = serde_json::to_string(stack).unwrap_or_default();
             if key != ready_key {
                 ready_key = key;
@@ -3499,17 +3520,45 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         }
 
         // Close out per-second history buckets.
+        busy_ms_this_sec += frame_ms;
         if sec_start.elapsed() >= Duration::from_secs(1) {
             sec_start += Duration::from_secs(1);
+            // Load = render time as a share of the second (the budget is the
+            // whole second at any target rate). Overruns push it past 100.
+            let load_pct = (busy_ms_this_sec / 10.0).round().clamp(0.0, 999.0) as u32;
+            let target_fps = cfg.render.fps.clamp(1.0, 240.0);
+            let starved = (frames_this_sec as f32) < target_fps * LOAD_WARN_FPS_RATIO;
+            if load_pct >= LOAD_WARN_PCT || starved {
+                unhealthy_secs = unhealthy_secs.saturating_add(1);
+            } else {
+                unhealthy_secs = 0;
+            }
+            let warn_now = unhealthy_secs >= LOAD_WARN_SECS;
+            if warn_now != load_warning {
+                load_warning = warn_now;
+                if warn_now {
+                    log::warn!(
+                        "render load sustained: {load_pct}% of budget, {frames_this_sec} fps \
+                         against a {target_fps:.0} fps target for {unhealthy_secs}s"
+                    );
+                } else {
+                    log::info!("render load back within budget");
+                }
+            }
             fps_hist.push_back(frames_this_sec);
             pps_hist.push_back(pkts_this_sec);
+            load_hist.push_back(load_pct);
             frames_this_sec = 0;
             pkts_this_sec = 0;
+            busy_ms_this_sec = 0.0;
             while fps_hist.len() > HIST_LEN {
                 fps_hist.pop_front();
             }
             while pps_hist.len() > HIST_LEN {
                 pps_hist.pop_front();
+            }
+            while load_hist.len() > HIST_LEN {
+                load_hist.pop_front();
             }
         }
 
@@ -3530,6 +3579,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 }
                 st.fps_history = fps_hist.iter().copied().collect();
                 st.pps_history = pps_hist.iter().copied().collect();
+                st.load_history = load_hist.iter().copied().collect();
+                st.load_warning = load_warning;
                 st.master_brightness = render_master_brightness;
                 st.master_speed = render_master_speed;
                 st.render_transition_active = handoff_active;

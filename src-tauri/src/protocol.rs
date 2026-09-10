@@ -898,6 +898,17 @@ pub struct RuntimeStatus {
     pub fps_history: Vec<u32>,
     /// sACN packets sent in each of the last ~30 one-second buckets (oldest first).
     pub pps_history: Vec<u32>,
+    /// Render load per one-second bucket (oldest first): the share of the frame
+    /// budget the GPU dispatch + readback consumed, in percent (100 = every
+    /// microsecond of 1/fps was spent rendering; can exceed 100 when frames
+    /// overrun). GPU and CPU are one number here because the loop is one
+    /// thread: compute, readback, scatter.
+    pub load_history: Vec<u32>,
+    /// Sustained underperformance: load over LOAD_WARN_PCT, or frames well
+    /// under the target rate, for LOAD_WARN_SECS in a row. Cleared once a bucket
+    /// comes in healthy. The UI turns this into a dismissible toast with the
+    /// load-shedding knobs.
+    pub load_warning: bool,
     pub clients: u32,
     pub audio: Vec<AudioSourceStatus>,
     pub rhythm: RhythmStatus,

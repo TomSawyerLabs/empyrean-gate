@@ -946,6 +946,11 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
     let is_local = addr.ip().is_loopback();
     let max_preview =
         |state: &SharedState| state.config.read().server.max_preview_clients.max(1) as usize;
+    // Load shedding: the operator's ceiling on remote preview rate, read live
+    // so lowering it takes effect on subscriptions already streaming.
+    let preview_floor = |state: &SharedState| {
+        Duration::from_secs_f32(1.0 / state.config.read().server.preview_fps_cap.clamp(1, 60) as f32)
+    };
 
     loop {
         tokio::select! {
@@ -1062,7 +1067,8 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                     let max = max_preview(&state);
                     if !state.preview_gate.lock().is_active(conn_id, max) { continue; }
                 }
-                if sub.last_sent.elapsed() < sub.min_interval { continue; }
+                let interval = if is_local { sub.min_interval } else { sub.min_interval.max(preview_floor(&state)) };
+                if sub.last_sent.elapsed() < interval { continue; }
                 // Latency gate: never let a slow link queue more than a few
                 // frames. Skipping is free — the next broadcast frame is newer.
                 if !sub.ack_gate_open(is_local, Instant::now()) { continue; }

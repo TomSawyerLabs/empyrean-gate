@@ -17,6 +17,8 @@
   "power_error": null,
   "fps_history": [],
   "pps_history": [],
+  "load_history": [],
+  "load_warning": false,
   "clients": 0,
   "audio": [],
   "rhythm": {

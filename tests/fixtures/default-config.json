@@ -36,7 +36,8 @@
     "wifi_qr_enabled": false,
     "wifi_ssid": "",
     "wifi_password": "",
-    "wifi_security": "WPA"
+    "wifi_security": "WPA",
+    "preview_fps_cap": 60
   },
   "peer": {
     "follow": "",
@@ -78,6 +79,7 @@
     "master_hue_amount": 1.0,
     "master_hue_loose": 0.0,
     "manual_transition_secs": 3.0,
+    "ready_bus_paused": false,
     "manual_bpm": null,
     "beat_time": "normal",
     "walk_enabled": true,

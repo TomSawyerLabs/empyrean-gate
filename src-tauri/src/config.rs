@@ -170,6 +170,10 @@ pub struct ServerConfig {
     pub wifi_password: String,
     /// "WPA" (also covers WPA2/3), "WEP", or "nopass" for an open network.
     pub wifi_security: String,
+    /// Ceiling on remote clients' preview frame rate (a load-shedding knob:
+    /// every remote viewer costs an encode + a send per frame). Applied live
+    /// to existing subscriptions, not just new ones.
+    pub preview_fps_cap: u32,
 }
 
 impl Default for ServerConfig {
@@ -186,6 +190,7 @@ impl Default for ServerConfig {
             wifi_ssid: String::new(),
             wifi_password: String::new(),
             wifi_security: "WPA".into(),
+            preview_fps_cap: 60,
             // A fresh show machine should not accept arbitrary control messages
             // from every device on the venue LAN. The desktop remains exempt and
             // its Connect QR carries the generated token.
@@ -540,6 +545,10 @@ pub struct RenderConfig {
     /// Duration of an operator-triggered scene, stack, or patch handoff. The
     /// outgoing and incoming renderers remain live for the whole crossfade.
     pub manual_transition_secs: f32,
+    /// Load shedding: skip rendering the off-air Ready bus (its preview goes
+    /// dark, nothing on the wire changes). The bus is a whole second render
+    /// per frame while a scene is prepared.
+    pub ready_bus_paused: bool,
     /// When set, drive the lighting beat clock at this BPM instead of following
     /// the audio detector. Half/normal/double time is applied afterward.
     pub manual_bpm: Option<f32>,
@@ -600,6 +609,7 @@ impl Default for RenderConfig {
             master_brightness: 1.0,
             master_speed: 1.0,
             floor_level: 1.0,
+            ready_bus_paused: false,
             master_hue_enabled: false,
             master_hue: 0.0,
             master_hue_amount: 1.0,

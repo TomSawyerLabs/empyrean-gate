@@ -784,6 +784,58 @@ function NameChip() {
   );
 }
 
+/** Sustained underperformance, judged by the engine (load over budget or
+ *  frames starved for several seconds in a row). Dismissible — and it stays
+ *  dismissed until the warning has cleared and come back — with the three
+ *  load-shedding moves that cost the show least, in that order. */
+function LoadBanner() {
+  const { client, config, status, admin } = useGate();
+  const [dismissedAt, setDismissedAt] = useState<number | null>(null);
+  const warning = Boolean(status?.load_warning);
+  useEffect(() => {
+    if (!warning) setDismissedAt(null);
+  }, [warning]);
+  if (!warning || dismissedAt !== null || !config) return null;
+  const load = status?.load_history.at(-1) ?? 0;
+  const fps = status?.fps_history.at(-1) ?? 0;
+  const target = Math.round(config.render.fps);
+  const cap = config.server.preview_fps_cap;
+  const ready = config.ready_stack !== null && !config.render.ready_bus_paused;
+  const patchServer = (next: Partial<typeof config.server>) =>
+    client.setConfig({ ...config, server: { ...config.server, ...next } });
+  const patchRender = (next: Partial<typeof config.render>) =>
+    client.setConfig({ ...config, render: { ...config.render, ...next } });
+  return (
+    <div className="banner warn load-banner" role="status">
+      <div className="load-banner-text">
+        <strong>The engine is behind.</strong> Render load {load}% of budget,
+        {" "}{fps} of {target} fps, for several seconds. Stutter on the rig is likely;
+        second monitors, a cable flapping, or another GPU program are the usual causes.
+      </div>
+      {admin && (
+        <div className="load-banner-actions">
+          {cap > 15 && (
+            <button onClick={() => patchServer({ preview_fps_cap: 15 })}>
+              Cap phone previews at 15 fps
+            </button>
+          )}
+          {ready && (
+            <button onClick={() => patchRender({ ready_bus_paused: true })}>
+              Pause the Ready bus
+            </button>
+          )}
+          {target > 45 && (
+            <button onClick={() => patchRender({ fps: 45 })}>Render at 45 fps</button>
+          )}
+        </div>
+      )}
+      <button className="ghost load-banner-dismiss" onClick={() => setDismissedAt(Date.now())}>
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   const { connected, status, errors, dismissError, client, config, denied, savedPulse, admin } = useGate();
   const [tab, setTab] = useState<TabId>(tabFromHash);
@@ -1076,6 +1128,7 @@ export default function App() {
           <strong>GPU error:</strong> {status.gpu_error}
         </div>
       )}
+      <LoadBanner />
       {errors.map((e, i) => (
         <div key={i} className="banner warn" onClick={() => dismissError(i)}>
           {e} <span className="hint">(click to dismiss)</span>

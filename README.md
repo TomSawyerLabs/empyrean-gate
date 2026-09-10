@@ -57,6 +57,16 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   rendering for 30 s behind a small **"If that was a mistake… Restart the show
   ASAP"** window — one tap brings the main window back and the output fades up
   where it left off; "Stop now" or the timer ends the process.
+- **Know when the engine is behind.** Beside fps and packets-per-second, the
+  Live ring and Control meters carry a **load** sparkline: the share of each
+  second the GPU dispatch + readback actually took (one number for GPU and CPU,
+  because the frame loop is one thread; it passes 100 % when frames overrun).
+  When load stays over budget or frames stay starved for several seconds in a
+  row the engine raises a warning and every UI shows a dismissible **"The
+  engine is behind"** toast with the three cheapest load-shedding moves: cap
+  phone previews at 15 fps (applies to streams already running), pause the
+  off-air Ready bus (a whole second render per frame), or render at 45 fps.
+  All three are ordinary settings, so they undo in Settings / on the Ready tab.
 - **Every UI is a WebSocket client.** The backend serves the web UI (embedded in the
   binary) plus a JSON + binary protocol on port 9520. The Tauri desktop window, LAN
   browsers, and phones all speak the same protocol.

@@ -6680,3 +6680,36 @@ button.hue-swatch-button[aria-expanded="true"] {
 .wifi-fields .hint button {
   margin-left: 8px;
 }
+
+/* --- "The engine is behind" toast --- */
+
+.banner.load-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.load-banner-text {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.load-banner-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.load-banner-dismiss {
+  margin-left: auto;
+}
+
+.bus-paused {
+  margin: 8px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
