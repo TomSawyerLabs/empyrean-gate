@@ -89,9 +89,10 @@ bought nothing.
 - [x] Workflow-enforced cap: built 2026-09-10 as `.github/workflows/cost-gate.yml`
       after Cameron asked what it would take. Inert until the secret exists.
 - [ ] Cameron mints an org token and stores it (see "Turning the gate on").
-- [ ] Prove the GitHub-runner path once for free: dispatch build.yml with
-      `force_fallback=true` and confirm both jobs land on windows-latest /
-      ubuntu-latest and the gate's step summary explains why.
+- [x] Proved the GitHub-runner path for free (2026-09-10, build.yml run
+      34439672577 with `force_fallback=true`): gate 0 min on ubuntu-latest, then
+      windows-latest 25 min, ubuntu-latest 16 min, macos-latest 13 min, all
+      green, $0 on Blacksmith. Those are the cold times a diverted release pays.
 
 ## Expected steady state
 
