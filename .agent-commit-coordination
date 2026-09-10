@@ -216,3 +216,13 @@ First: no-hard-cuts round two — src-tauri/src/engine/mod.rs, engine/shaders/
 (deleting ten finished plan docs). Then the Live/clients/windows items.
 NOT mine, leaving unstaged: .github/workflows/release.yml + warm-cache.yml
 (someone's in-flight CI change). Not touching the four version files.
+
+## empyrean-gate (Fable session, show-feedback) — landed + RELEASING v0.11.0
+Fifteen commits from plans/show-feedback-2026-09.md are on local master
+(fades, multitouch, floor input, shelf layers, off-air minis, patch chip,
+show-mode top bar, last-window guard + restart grace, roster, device
+names, Wi-Fi QR + poster, load toast, display watcher, idle-window sentry,
+plans cleanup). Per Cameron: cutting v0.11.0 next — bare bump of the four
+version files + annotated tag, one push. Nobody touch the version files
+until the v0.11.0 tag is on the remote. Not mine, still unstaged if you see
+them: nothing — the CI workflow edits were committed by their owner (d84a1e6).

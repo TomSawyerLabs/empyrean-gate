@@ -72,19 +72,27 @@ touches. This file is the single place to look for "did we do X yet".
    (id/name/connected/revoked/admin), the Live status grid shows a bare count
    (`src/Live.tsx` ~677), revoke lives in Settings → Clients, and the only
    "who sent what" record is the 22 s report timeline (`report.rs`), never
-   pushed to the UI. Status: TODO — needs a small "recent input by client"
-   status field + a Live/Control panel with revoke/restore.
+   pushed to the UI. Status: DONE (ba3f0bf): `ClientRoster` under the Live
+   "clients" stat and as a Control panel — arrival order, last input + age,
+   dashed cutoff at the viewer-slot limit, Block/Unblock (revoke is admin-level
+   now, not loopback-only).
 6. **Ask clients to pick a name, generated two-word default** from a
    festival / Burning Man / nerdy word list. Today: `SetClientName` exists and
    guests may send it, but the only input for it is in Settings (admin-only),
-   so guests never see it; default is `device-<last4>`. Status: TODO.
+   so guests never see it; default is `device-<last4>`. Status: DONE
+   (b710933): `src/deviceNames.ts` mints "Dusty Badger" on first use; ☺ name
+   chip in the top bar / phone menu with a rename dialog; pulses until
+   confirmed.
 7. **Wi-Fi QR next to the connect QR**, credentials entered manually when
    enabled, shown in the full-page connect modal with a big title and simple
    instructions, separated for clean scanning. Plus an admin button that
    produces a PDF/PNG with a longer-term token for event staff to post.
    Today: QR is server-rendered SVG at `/qr.svg` (`qrcode` crate); the join
    token never expires; no Wi-Fi fields in config; no print/PNG export
-   anywhere. Status: TODO.
+   anywhere. Status: DONE (0fbe5be): Settings → Clients holds the Wi-Fi
+   credentials; ⊕ Connect shows "1 · Join the Wi-Fi" / "2 · Open the show"
+   apart; `public/poster.html` (print → PDF, PNG button) carries the new
+   `server.staff_token`, which survives "Rotate token".
 
 ### D. Preview
 
@@ -99,16 +107,26 @@ touches. This file is the single place to look for "did we do X yet".
 
 9. **Disable Windows display reconfiguration?** A second monitor got plugged in
    (extra GPU load for base frames), and a flaky USB-C cable connecting and
-   disconnecting reset the GPU driver, causing ~0.5 s stutters. Status: TODO —
-   investigate what the app can do (device-lost handling, monitor-change
-   events, advice) vs what only the OS can.
+   disconnecting reset the GPU driver, causing ~0.5 s stutters. Status: DONE
+   as far as an app can go (5461cc8): Windows has no supported way to refuse a
+   display hot-plug, so `display.rs` watches the topology, logs every change,
+   counts GPU re-inits, and banners it — red "flapping cable" at 3 changes in
+   10 min — with the fix (pull the extra display). Not done and not possible
+   in-app: stopping the reconfiguration itself.
 10. **Warn when a low-quality USB-C link is detected.** Evidence was gathered
     over SSH on the live system; encode the detection in code so it works
-    without the system online. Status: TODO — needs the evidence from the
-    earlier session (prompt for that agent is in "Open questions").
+    without the system online. Status: PARTLY — the topology watcher above is
+    the in-code proxy (connect/disconnect churn is the observable symptom of a
+    bad link). Sharpening it against the SSH evidence still needs that
+    evidence (prompt in "Open questions").
 11. **GPU/CPU load histogram/sparkline**, a dismissible toast with details on
     sustained underperformance, and quick load-shedding options (reduce client
-    preview frame rate, side render). Status: TODO.
+    preview frame rate, side render). Status: DONE (4b47535): load sparkline
+    (render time as % of the second) on Live + Control; engine-judged
+    `load_warning` (85 % load or <85 % of target fps for 8 s) → dismissible
+    toast with: cap phone previews at 15 fps (`server.preview_fps_cap`,
+    applied live), pause the Ready bus (`render.ready_bus_paused`), render at
+    45 fps.
 
 ### F. Patch and Ready
 
@@ -116,7 +134,16 @@ touches. This file is the single place to look for "did we do X yet".
     layer stack; only the Patch tab and the Control "Layers" heading know about
     it today). Status: DONE (a457523): PatchChip in the top bar + phone menu.
 13. **Patches into the Ready panel.** Ready holds exactly one `SavedStack`
-    (layers only); a patch cannot be prepared off-air. Status: TODO — design.
+    (layers only); a patch cannot be prepared off-air. Status: DEFERRED with a
+    design, not shipped in v0.11.0. Design: `SavedStack` grows
+    `patch: Option<PatchDoc>` (a snapshot, not an id, so Take is atomic and a
+    later edit to the saved patch does not change what is on Bus B); the Ready
+    bus engine compiles it with `set_patch_shader` and runs its own
+    `patch::eval::Runtime` (it already owns phases/walks), the Ready tray gets
+    a "PATCHES" row next to the scenes, and Take sets `active_patch` instead
+    of clearing it. Cost: a second patch runtime + a compile on prepare; the
+    engine's `ready_inputs.patch_params = None` guard becomes "the Ready
+    runtime's params". About a day; wants its own plan doc.
 14. **How many Ready panels? Per-client opt-in? Separate limit?** Today there is
     exactly one global Ready bus with its own GPU engine. Status: OPEN QUESTION
     (see below).
@@ -129,7 +156,10 @@ touches. This file is the single place to look for "did we do X yet".
     the update control joins it as a compact row.
 16. **Duplicate background windows** are easy to open by accident; a toast in
     the visible window should offer to close background windows idle/invisible
-    for a few minutes. Status: TODO.
+    for a few minutes. Status: DONE (bc6af75): `src/windowSentry.ts` —
+    heartbeats in shared localStorage; the focused window offers to close
+    others idle 5+ min that are hidden or duplicate its tab, 60 s countdown,
+    Close now / Keep them (30 min snooze). Unit test via `bun run test:unit`.
 17. **Close warning only on the last window.** Closing an extra window must not
     warn if other windows remain; only the last one shows the close guard.
     Status: DONE: `CloseRequested` counts app windows; only the last (main or
@@ -165,13 +195,21 @@ touches. This file is the single place to look for "did we do X yet".
 5. [x] Plans cleanup: delete finished plan docs (own commit), wrap up stale
        progress logs.
 6. [x] B3, B4, D8, F12, G15, G17, G18 — landed, one commit each.
-7. [ ] C5 clients roster ← current
-8. [ ] C6, C7, E9–E11, F13–F14, G16 — one commit each; update status lines
-       here as they land.
-9. [ ] Bump to v0.11.0 and push the tag (per plans/releasing.md).
+7. [x] C5, C6, C7, E9, E11, G16 — landed, one commit each.
+8. [ ] F13 (deferred, design above), F14 (open question), E10 (needs the
+       SSH evidence).
+9. [ ] Bump to v0.11.0 and push the tag (per plans/releasing.md). ← current
 
 ## Findings / gotchas
 
+- Not exercised on real hardware this session (no Gate machine attached):
+  the close-grace window flow (G18), the idle-window sentry closing a Tauri
+  window (G16), the display watcher seeing an actual hot-plug (E9). All are
+  compile-checked and unit-tested where a pure part exists; first show-machine
+  run should try each once.
+- The `bun run test:unit` (Bun test runner) is not yet in CI's Checks
+  workflow; a peer session had `.github/workflows/*.yml` in flight, so it was
+  left alone. Add `bun run test:unit` after `bun run typecheck` there.
 - Carried over from deleted plans (2026-09-09 cleanup): `show-mode-updates`
   never got a test that drives a real staged-then-install round trip (the mock
   backend has no installer); if update-flow regressions appear, that is the
