@@ -11,7 +11,7 @@
 // (aspect-ratio media queries), so it is right at first paint with no resize
 // observer to get wrong.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { EFFECTS, GROW_MODES, growValue, isShape, SHAPES, type GrowMode } from "./effects";
 import EffectPad from "./EffectPad";
 import GateCanvas from "./GateCanvas";
@@ -225,10 +225,11 @@ export default function Live() {
 
   // Config echoes must not yank a thumb out from under a finger: while a master
   // fader is mid-drag the local mirrors are the truth, and the echo of our own
-  // throttled send re-syncs everything after release.
-  const masterDragging = useRef(false);
+  // throttled send re-syncs everything after release. Tracked per pointer, so
+  // two fingers on two faders don't release each other.
+  const masterDragging = useRef(new Set<number>());
   useEffect(() => {
-    if (!config || masterDragging.current) return;
+    if (!config || masterDragging.current.size > 0) return;
     setBrightnessLocal(config.render.master_brightness);
     setMasterSpeedLocal(config.render.master_speed);
     setMasterHueLocal(config.render.master_hue);
@@ -506,9 +507,9 @@ export default function Live() {
   // masterDragging above). Native range inputs already capture the pointer, so
   // this only has to mark the gesture's start and end.
   const masterDrag = {
-    onPointerDown: () => (masterDragging.current = true),
-    onPointerUp: () => (masterDragging.current = false),
-    onPointerCancel: () => (masterDragging.current = false),
+    onPointerDown: (e: ReactPointerEvent) => masterDragging.current.add(e.pointerId),
+    onPointerUp: (e: ReactPointerEvent) => masterDragging.current.delete(e.pointerId),
+    onPointerCancel: (e: ReactPointerEvent) => masterDragging.current.delete(e.pointerId),
   };
 
   const master = admin && config ? (
