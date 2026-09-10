@@ -549,6 +549,14 @@ pub struct ClientInfo {
     pub last_input_secs: Option<f32>,
 }
 
+/// One display-topology change, for the status blob.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DisplayEventInfo {
+    pub secs_ago: f32,
+    /// e.g. "1 monitor, primary 1920×1080 → 2 monitors, primary 1920×1080"
+    pub detail: String,
+}
+
 /// An audio device as shown in the settings UI.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DeviceInfo {
@@ -894,6 +902,15 @@ pub struct RuntimeStatus {
     pub config_error: Option<String>,
     /// Windows keep-awake failure; the machine may follow its normal sleep policy.
     pub power_error: Option<String>,
+    /// Recent display-topology changes (newest first, last hour) — see
+    /// `display.rs`. Each one usually rides along with a GPU reset and a stall.
+    pub display_events: Vec<DisplayEventInfo>,
+    /// Several topology changes in a few minutes: a flapping cable.
+    pub display_flapping: bool,
+    /// Times the engine had to re-initialise the GPU this run, and how long
+    /// ago the last one was.
+    pub gpu_resets: u32,
+    pub gpu_reset_secs_ago: Option<f32>,
     /// Frames rendered in each of the last ~30 one-second buckets (oldest first).
     pub fps_history: Vec<u32>,
     /// sACN packets sent in each of the last ~30 one-second buckets (oldest first).

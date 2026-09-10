@@ -3306,6 +3306,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 let msg = format!("render failed: {e:#}");
                 log::error!("{msg}");
                 let _ = state.events.send(ServerMsg::Error { message: msg });
+                // Counted for the status blob: a driver reset (a display
+                // hot-plug, a bad cable) is the usual way to land here.
+                state.gpu_resets.fetch_add(1, Ordering::Relaxed);
+                *state.gpu_reset_at.lock() = Some(Instant::now());
                 return; // drop back to engine_thread for re-init
             }
         };
@@ -3581,6 +3585,17 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 st.pps_history = pps_hist.iter().copied().collect();
                 st.load_history = load_hist.iter().copied().collect();
                 st.load_warning = load_warning;
+                {
+                    let (events, flapping) =
+                        crate::display::summarize(&state.display_events.lock(), Instant::now());
+                    st.display_events = events;
+                    st.display_flapping = flapping;
+                    st.gpu_resets = state.gpu_resets.load(Ordering::Relaxed);
+                    st.gpu_reset_secs_ago = state
+                        .gpu_reset_at
+                        .lock()
+                        .map(|at| at.elapsed().as_secs_f32());
+                }
                 st.master_brightness = render_master_brightness;
                 st.master_speed = render_master_speed;
                 st.render_transition_active = handoff_active;

@@ -26,6 +26,32 @@ test("a load warning becomes a dismissible toast with shedding actions", async (
   await expect(banner).toHaveCount(0);
 });
 
+test("a flapping display becomes a red banner naming the cable", async ({ page, request }) => {
+  const id = "display-flap-test";
+  await page.addInitScript((c) => localStorage.setItem("empyrean-client-id", c), id);
+  await request.post(`/mock/status?client=${id}`, {
+    data: {
+      display_flapping: true,
+      gpu_resets: 3,
+      display_events: [
+        { secs_ago: 12, detail: "2 monitors, primary 1920×1080 → 1 monitor, primary 1920×1080" },
+        { secs_ago: 90, detail: "1 monitor, primary 1920×1080 → 2 monitors, primary 1920×1080" },
+        { secs_ago: 300, detail: "2 monitors, primary 1920×1080 → 1 monitor, primary 1920×1080" },
+      ],
+    },
+  });
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto("/#live");
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+  const banner = page.locator(".display-banner");
+  await expect(banner).toHaveClass(/error/);
+  await expect(banner).toContainText("A display is flapping");
+  await expect(banner).toContainText("3 changes in 10 min");
+  await expect(banner).toContainText("3 GPU resets");
+  await banner.getByRole("button", { name: "Dismiss" }).click();
+  await expect(banner).toHaveCount(0);
+});
+
 test("no warning, no toast — and the load meter is still there", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.goto("/#control");

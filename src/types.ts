@@ -576,6 +576,12 @@ export interface RuntimeStatus {
   power_error: string | null;
   fps_history: number[];
   pps_history: number[];
+  /** Recent display-topology changes, newest first (last hour). */
+  display_events: { secs_ago: number; detail: string }[];
+  /** Several changes in a few minutes: a flapping cable. */
+  display_flapping: boolean;
+  gpu_resets: number;
+  gpu_reset_secs_ago: number | null;
   /** Render load per second bucket, percent of budget (can exceed 100). */
   load_history: number[];
   /** Backend-judged sustained underperformance; see LoadBanner. */

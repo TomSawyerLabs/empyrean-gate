@@ -17,6 +17,7 @@ pub mod logging;
 pub mod media;
 pub mod patch;
 pub mod peer;
+pub mod display;
 pub mod power;
 pub mod prolink_analysis;
 pub mod protocol;
@@ -159,6 +160,7 @@ pub fn start_backend() -> Backend {
     rhythm::spawn(state.clone());
     engine::spawn(state.clone());
     power::spawn(state.clone());
+    display::spawn(state.clone());
     // Read-only listener; safe to start before the takeover dance, and useful
     // during it — the instance we are displacing is a peer on our own universes
     // and gets filtered out by CID like any other copy of us.

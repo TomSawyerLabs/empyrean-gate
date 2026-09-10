@@ -67,6 +67,13 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   phone previews at 15 fps (applies to streams already running), pause the
   off-air Ready bus (a whole second render per frame), or render at 45 fps.
   All three are ordinary settings, so they undo in Settings / on the Ready tab.
+  On Windows the backend also watches the **display topology** (monitor count,
+  primary size): every change is logged, counted, and shown as a banner naming
+  it — and several changes in a few minutes turns the banner red as a **flapping
+  cable**, because a USB-C/HDMI link going in and out resets the GPU driver and
+  stalls the show ~0.5 s each time (seen live). The app cannot refuse a
+  hot-plug; it can say what is happening and that pulling the extra display is
+  the fix. GPU re-inits are counted alongside.
 - **Every UI is a WebSocket client.** The backend serves the web UI (embedded in the
   binary) plus a JSON + binary protocol on port 9520. The Tauri desktop window, LAN
   browsers, and phones all speak the same protocol.

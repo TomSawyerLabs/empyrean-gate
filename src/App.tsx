@@ -836,6 +836,38 @@ function LoadBanner() {
   );
 }
 
+/** Windows re-enumerating the displays under a running show. The app cannot
+ *  stop a hot-plug (there is no supported way), but it can name the cause
+ *  while it is happening: several changes in a few minutes is the signature
+ *  of a bad USB-C/HDMI cable, each one a GPU reset and a stall. Dismissible
+ *  until the next change. */
+function DisplayBanner() {
+  const { status } = useGate();
+  const [dismissedCount, setDismissedCount] = useState(-1);
+  const events = status?.display_events ?? [];
+  const latest = events[0];
+  const recent = latest !== undefined && latest.secs_ago < 15 * 60;
+  const flapping = Boolean(status?.display_flapping);
+  if (!latest || !(recent || flapping) || dismissedCount === events.length) return null;
+  const ago = latest.secs_ago < 90 ? `${Math.round(latest.secs_ago)} s ago` : `${Math.round(latest.secs_ago / 60)} min ago`;
+  const resets = status?.gpu_resets ?? 0;
+  return (
+    <div className={`banner ${flapping ? "error" : "warn"} display-banner`} role="status">
+      <div className="load-banner-text">
+        <strong>{flapping ? "A display is flapping." : "The display setup changed."}</strong>{" "}
+        {latest.detail} ({ago}
+        {flapping ? `, ${events.filter((e) => e.secs_ago < 600).length} changes in 10 min` : ""}
+        {resets > 0 ? `; ${resets} GPU reset${resets === 1 ? "" : "s"} this run` : ""}).
+        {" "}Every change resets the GPU driver and stalls the show for about half a second
+        {flapping ? " — a bad USB-C or HDMI cable does exactly this. Pull the extra display for the show." : "; a second display also costs base frames all night."}
+      </div>
+      <button className="ghost load-banner-dismiss" onClick={() => setDismissedCount(events.length)}>
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   const { connected, status, errors, dismissError, client, config, denied, savedPulse, admin } = useGate();
   const [tab, setTab] = useState<TabId>(tabFromHash);
@@ -1129,6 +1161,7 @@ export default function App() {
         </div>
       )}
       <LoadBanner />
+      <DisplayBanner />
       {errors.map((e, i) => (
         <div key={i} className="banner warn" onClick={() => dismissError(i)}>
           {e} <span className="hint">(click to dismiss)</span>

@@ -88,6 +88,10 @@ const status = {
   master_speed: 1,
   load_history: [42, 45, 44, 48, 51, 47, 46, 49, 52, 50],
   load_warning: false,
+  display_events: [],
+  display_flapping: false,
+  gpu_resets: 0,
+  gpu_reset_secs_ago: null,
   version: "0.0.0-mock",
   update_state: "up to date",
 };

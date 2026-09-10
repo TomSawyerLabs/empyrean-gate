@@ -548,6 +548,13 @@ pub struct SharedState {
     /// update put us here. Licenses promoting over a launcher we were not told
     /// about, for updates started by binaries older than v0.5.2.
     pub took_over_older: AtomicBool,
+    /// Display-topology changes seen this run (see `display.rs`); the status
+    /// blob carries the recent ones and a flapping verdict.
+    pub display_events: Mutex<Vec<crate::display::DisplayEvent>>,
+    /// Times the frame loop bailed out for a GPU re-init (a render error —
+    /// a driver reset is the usual cause), and when the last one was.
+    pub gpu_resets: AtomicU32,
+    pub gpu_reset_at: Mutex<Option<Instant>>,
     /// Set once the operator has confirmed closing a live show; the next window
     /// close request is then allowed through instead of being refused again.
     pub close_confirmed: AtomicBool,
@@ -646,6 +653,9 @@ impl SharedState {
             video: Mutex::new(VideoInput::default()),
             focus_requested: AtomicBool::new(false),
             took_over_older: AtomicBool::new(false),
+            display_events: Mutex::new(Vec::new()),
+            gpu_resets: AtomicU32::new(0),
+            gpu_reset_at: Mutex::new(None),
             close_confirmed: AtomicBool::new(false),
             close_guard_ready: AtomicBool::new(false),
             last_close_attempt_ms: AtomicU64::new(0),
