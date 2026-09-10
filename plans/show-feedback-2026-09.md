@@ -198,7 +198,9 @@ touches. This file is the single place to look for "did we do X yet".
 7. [x] C5, C6, C7, E9, E11, G16 — landed, one commit each.
 8. [ ] F13 (deferred, design above), F14 (open question), E10 (needs the
        SSH evidence).
-9. [ ] Bump to v0.11.0 and push the tag (per plans/releasing.md). ← current
+9. [x] v0.11.0 shipped: release run 34432222155 green on tag v0.11.0
+       (= 3478dab), all four assets published (windows-x64.exe, linux-x64,
+       linux-x64.AppImage, macos-arm64). The show machine can self-update.
 
 ## Findings / gotchas
 

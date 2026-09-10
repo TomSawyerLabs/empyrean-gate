@@ -226,3 +226,10 @@ plans cleanup). Per Cameron: cutting v0.11.0 next — bare bump of the four
 version files + annotated tag, one push. Nobody touch the version files
 until the v0.11.0 tag is on the remote. Not mine, still unstaged if you see
 them: nothing — the CI workflow edits were committed by their owner (d84a1e6).
+
+## empyrean-gate (Fable session) — v0.11.0 SHIPPED, freeze lifted — 2026-09-10
+Release run 34432222155 green on tag v0.11.0 (= 3478dab). All four assets
+published. Version files are free for everyone again. Open from this pass:
+F13 (patch on the Ready bus — design in plans/show-feedback-2026-09.md),
+F14 (open question), E10 (needs the SSH USB-C evidence), and adding
+`bun run test:unit` to the Checks workflow.
