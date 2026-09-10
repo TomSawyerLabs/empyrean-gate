@@ -54,7 +54,7 @@ on:
         description: Runner label for the Linux build job
         value: ${{ jobs.gate.outputs.linux }}
       over_budget:
-        description: "true" when the caller should avoid Blacksmith entirely
+        description: Set to true when the caller should avoid Blacksmith entirely
         value: ${{ jobs.gate.outputs.over_budget }}
       reason:
         description: One line saying what was decided and why
