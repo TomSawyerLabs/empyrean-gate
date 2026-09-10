@@ -74,6 +74,14 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   stalls the show ~0.5 s each time (seen live). The app cannot refuse a
   hot-plug; it can say what is happening and that pulling the extra display is
   the fix. GPU re-inits are counted alongside.
+- **Idle-window sentry** (desktop app). An accidental second window of the same
+  tab, or a popped-out window minimised and forgotten, is a webview burning a
+  preview stream behind the show. Every window heartbeats into shared storage;
+  the focused window offers to close any other that has had no input for five
+  minutes and is either hidden or showing its own tab — a banner with a 60 s
+  countdown, **Close now**, or **Keep them** (snoozes them half an hour). A
+  window doing its job on a second display — visible, its own tab — is never
+  offered.
 - **Every UI is a WebSocket client.** The backend serves the web UI (embedded in the
   binary) plus a JSON + binary protocol on port 9520. The Tauri desktop window, LAN
   browsers, and phones all speak the same protocol.

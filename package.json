@@ -11,6 +11,7 @@
     "demo:uprising": "bash scripts/fetch-uprising-demo.sh",
     "tauri": "tauri",
     "typecheck": "tsc -b",
+    "test:unit": "bun test src",
     "mock-backend": "bun scripts/mock-backend.ts",
     "test:layout": "bun run build && playwright test layout",
     "test:behavior": "playwright test quick-settings live-controls color-wheel mobile-nav layer-quick-edit show-mode-updates patch-zoom dj-scenes video-playback ready-switcher ambient-media-scenes connect-interface multitouch client-roster device-name connect-wifi load-banner",

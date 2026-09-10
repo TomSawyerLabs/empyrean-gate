@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Control from "./Control";
 import Games from "./Games";
 import { EFFECTS } from "./effects";
@@ -13,6 +13,7 @@ import { contenders, peerLabel, peerVerdict, severity } from "./sacnPeers";
 import Ready from "./Ready";
 import { useGate } from "./state";
 import { deviceNameUnconfirmed, generateDeviceName } from "./deviceNames";
+import { IDLE_MS, scan, snooze, startSentry, type IdleWindow } from "./windowSentry";
 
 // The patch editor pulls in React Flow; lazy so phones on the play surfaces
 // never pay for it.
@@ -868,6 +869,100 @@ function DisplayBanner() {
   );
 }
 
+/** Desktop app only: this window heartbeats for the idle-window sentry and,
+ *  while it has focus, offers to close other windows of the app that have
+ *  sat idle for a while either hidden (minimised) or showing the same tab as
+ *  this one — the two shapes an accidental extra window takes. The offer
+ *  counts down and closes them by itself unless "Keep them" is pressed,
+ *  which snoozes those windows for half an hour. */
+function IdleWindowsBanner({ tab }: { tab: TabId }) {
+  const [label, setLabel] = useState<string | null>(null);
+  const [idle, setIdle] = useState<IdleWindow[]>([]);
+  const [deadline, setDeadline] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+
+  useEffect(() => {
+    if (!IN_TAURI) return;
+    let stop: (() => void) | undefined;
+    let cancelled = false;
+    void import("@tauri-apps/api/webviewWindow").then(({ getCurrentWebviewWindow }) => {
+      if (cancelled) return;
+      const me = getCurrentWebviewWindow().label;
+      setLabel(me);
+      stop = startSentry(me, () => tabRef.current);
+    });
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!label) return;
+    const tick = () => {
+      setNow(Date.now());
+      if (!document.hasFocus()) return;
+      const found = scan(label, tabRef.current);
+      setIdle((current) => {
+        const same =
+          current.length === found.length && current.every((c, i) => c.label === found[i].label);
+        return same ? current : found;
+      });
+    };
+    tick();
+    const timer = window.setInterval(tick, 5_000);
+    return () => window.clearInterval(timer);
+  }, [label]);
+
+  // Arm the countdown when an offer first appears; drop it when it clears.
+  useEffect(() => {
+    if (idle.length === 0) setDeadline(null);
+    else setDeadline((d) => d ?? Date.now() + 60_000);
+  }, [idle]);
+
+  const closeAll = async (targets: IdleWindow[]) => {
+    const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    for (const t of targets) {
+      const w = await WebviewWindow.getByLabel(t.label);
+      await w?.close().catch(() => {});
+    }
+    setIdle([]);
+  };
+
+  useEffect(() => {
+    if (deadline !== null && now >= deadline && idle.length > 0) void closeAll(idle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [now, deadline]);
+
+  if (!label || idle.length === 0 || deadline === null) return null;
+  const secs = Math.max(0, Math.ceil((deadline - now) / 1000));
+  const names = idle
+    .map((w) => `${TABS.find((t) => t.id === w.tab)?.label ?? w.tab}${w.reason === "hidden" ? " (hidden)" : " (same tab)"}`)
+    .join(", ");
+  return (
+    <div className="banner warn idle-windows-banner" role="status">
+      <div className="load-banner-text">
+        <strong>{idle.length === 1 ? "An extra window is" : `${idle.length} extra windows are`} sitting idle</strong>{" "}
+        — {names}; no input for {Math.round(IDLE_MS / 60_000)}+ min. Closing {idle.length === 1 ? "it" : "them"} in {secs} s.
+      </div>
+      <div className="load-banner-actions">
+        <button onClick={() => void closeAll(idle)}>Close now</button>
+        <button
+          className="ghost"
+          onClick={() => {
+            snooze(idle.map((w) => w.label));
+            setIdle([]);
+          }}
+        >
+          Keep them
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { connected, status, errors, dismissError, client, config, denied, savedPulse, admin } = useGate();
   const [tab, setTab] = useState<TabId>(tabFromHash);
@@ -1162,6 +1257,7 @@ export default function App() {
       )}
       <LoadBanner />
       <DisplayBanner />
+      <IdleWindowsBanner tab={visibleTab} />
       {errors.map((e, i) => (
         <div key={i} className="banner warn" onClick={() => dismissError(i)}>
           {e} <span className="hint">(click to dismiss)</span>
