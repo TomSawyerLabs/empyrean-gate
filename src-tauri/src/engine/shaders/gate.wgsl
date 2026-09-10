@@ -27,7 +27,9 @@ struct Globals {
     transition_split: u32,
     transition_active: u32,
     transition_progress: f32,
-    _pad_transition: f32,
+    // 0..1 fade-in of the Video layer's contribution (engine-side ramp,
+    // already smoothstepped). Video never pops on: see layer_opacity().
+    video_mix: f32,
     dj_link_visual_active: u32,
     dj_fade_position: f32,
     dj_fade_activity: f32,
@@ -984,6 +986,14 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
     }
 }
 
+/// Effective opacity of a layer. The Video layer (kind 19) is scaled by the
+/// engine's start-up ramp so a freshly started source fades in instead of
+/// popping; opacity 0 is the identity for every blend mode, which is why the
+/// fade rides opacity rather than the sampled colour.
+fn layer_opacity(L: Layer) -> f32 {
+    return select(L.opacity, L.opacity * clamp(G.video_mix, 0.0, 1.0), L.kind == 19u);
+}
+
 fn apply_blend(acc: vec3f, c: vec4f, opacity: f32, mode: u32) -> vec3f {
     let a = clamp(c.a * opacity, 0.0, 1.0);
     let rgb = c.rgb * opacity;
@@ -1469,9 +1479,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
             let L = LAYERS[l];
             let c = layer_color(L, ctx);
             if l < G.transition_split {
-                outgoing = apply_blend(outgoing, c, L.opacity, L.blend);
+                outgoing = apply_blend(outgoing, c, layer_opacity(L), L.blend);
             } else {
-                incoming = apply_blend(incoming, c, L.opacity, L.blend);
+                incoming = apply_blend(incoming, c, layer_opacity(L), L.blend);
             }
         }
         acc = mix(outgoing, incoming, clamp(G.transition_progress, 0.0, 1.0));
@@ -1479,7 +1489,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         for (var l = 0u; l < G.layer_count; l++) {
             let L = LAYERS[l];
             let c = layer_color(L, ctx);
-            acc = apply_blend(acc, c, L.opacity, L.blend);
+            acc = apply_blend(acc, c, layer_opacity(L), L.blend);
         }
     }
 
@@ -1514,8 +1524,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     }
 
     // Game mode: the world crossfades over the scene (layers + DJ overlays).
-    // Effects and dabs stay on top when the operator's overlay toggle is on —
-    // the engine zeroes their counts when it isn't.
+    // Effects and dabs stay on top when the operator's overlay toggle is on;
+    // when it isn't, the engine fades their intensity out with the same
+    // crossfade and drops them once the world is fully on.
     if G.game_active != 0u {
         acc = mix(acc, game_color(ctx), clamp(G.game_mix, 0.0, 1.0));
     }

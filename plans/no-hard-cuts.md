@@ -96,12 +96,25 @@ a short envelope; the rig never pops.
 - Don't add a per-frame allocation on the sACN path — scratch buffers only.
 - Don't touch `MasterDropDetector`/`AudioBrightnessFollower` taus.
 
-## Follow-ups (not in this pass)
+## Follow-ups
 
-- Video layer start still pops on (`video_active` u32 gate in `gate.wgsl`); fading
-  it needs a shader-side mix or an engine-side video-layer opacity env.
-- Game start instantly zeroes effects/dabs (`game_suppress`) even though the world
-  crossfades; could scale by `1 - game_mix` instead.
-- Ready bus (off-air) layer toggles still pop in its preview — cosmetic only.
+Closed 2026-09-09 (second pass, see `plans/show-feedback-2026-09.md` H19–H21):
+
+- [x] Video layer start fades in: `video_env` linear ramp (`VIDEO_FADE_SECS`,
+      1 s) → `Globals.video_mix` (smoothstepped, took the old `_pad_transition`
+      slot so the GPU layout is unchanged) → `layer_opacity()` in `gate.wgsl`
+      scales the Video layer's opacity. Opacity 0 is the identity for every
+      blend mode, which is why the fade rides opacity rather than the sampled
+      colour. Stop stays instant — the texture is cleared the same moment.
+- [x] Game start no longer hard-cuts effects/dabs: their intensity is scaled
+      by `overlay_gain = 1 − game_mix` (unless the operator overlay is on) and
+      they are only dropped once the world is fully on. Reverse on game stop.
+- [x] Ready bus layer toggles ride `ready_enable_env`, the same
+      `LAYER_TOGGLE_SECS` envelope as Program; swapped along with the other
+      per-layer state at Take, and deliberately *not* reset on the ready-stack
+      key change (a toggle changes the key, and the toggle is what it smooths).
+
+Still open (not started; only worth doing if someone is already in there):
+
 - Beat-taps enable, `SetConfig` full-replace paths (could call
   `request_render_transition()`), per-cue `transition_secs: 0`.

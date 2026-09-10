@@ -50,7 +50,9 @@ pub struct Globals {
     pub transition_active: u32,
     /// Smoothed 0..1 mix from the outgoing scene to the incoming scene.
     pub transition_progress: f32,
-    pub _pad_transition: f32,
+    /// 0..1 fade-in of the Video layer's contribution, smoothstepped here so
+    /// the shader's opacity scale stays a plain multiply.
+    pub video_mix: f32,
     /// PRO DJ LINK transport visuals. These only add overlays to the base scene.
     pub dj_link_visual_active: u32,
     pub dj_fade_position: f32,
@@ -1465,6 +1467,9 @@ const MASTER_BRIGHTNESS_TAU: f32 = 0.15;
 const OUTPUT_ON_SECS: f32 = 1.0;
 /// Time constant for the master hue enable/amount glide.
 const MASTER_HUE_TAU: f32 = 0.3;
+/// Seconds for a freshly started Video source to fade into the mix. Stopping
+/// is instant: the frame data is cleared the moment the source goes away.
+const VIDEO_FADE_SECS: f32 = 1.0;
 
 /// Scale a frame of perceptual RGB bytes by an eased 0..1 mix (smoothstep is
 /// applied here so callers track a plain linear envelope). Used to fade the
@@ -1552,6 +1557,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut frame_number: u64 = 0;
     let mut low_latency_render_seq = state.low_latency_render_seq.load(Ordering::Acquire);
     let mut video_revision: u64 = u64::MAX;
+    // Linear 0..1 ramp for the Video layer's fade-in (VIDEO_FADE_SECS).
+    let mut video_env = 0.0f32;
     // A second independent render bus keeps the outgoing renderer alive during
     // arbitrary layer/patch handoffs. It owns its own GPU buffers/pipeline and
     // patch evaluator; the CPU only mixes the two completed RGB frames.
@@ -1582,6 +1589,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut ready_walks = Vec::<LayerWalk>::new();
     let mut ready_targets = Vec::<bool>::new();
     let mut ready_env = Vec::<f32>::new();
+    let mut ready_enable_env = Vec::<f32>::new();
     let mut ready_walk_rng = WalkRng::new();
     let mut ready_next_flip = Instant::now();
     let mut ready_rgb = Vec::<u8>::new();
@@ -1759,6 +1767,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 std::mem::swap(&mut layer_walks, &mut ready_walks);
                 std::mem::swap(&mut layer_target, &mut ready_targets);
                 std::mem::swap(&mut layer_env, &mut ready_env);
+                std::mem::swap(&mut layer_enable_env, &mut ready_enable_env);
                 std::mem::swap(&mut walk_rng, &mut ready_walk_rng);
                 std::mem::swap(&mut next_flip, &mut ready_next_flip);
                 ready_key = cfg
@@ -2701,11 +2710,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             (0, 0)
         };
         game_prev_beat = audio[0].beat_phase;
-        // The game replaces the scene, so triggered effects and drawing are
-        // suppressed while it is (even partially) on screen — unless the
-        // operator's overlay toggle says otherwise. State still ages out
-        // below so nothing piles up for the moment the game ends.
-        let game_suppress = game_fade > 0.0 && !game_overlay;
+        // Smoothstepped here so the shader mix stays a plain lerp.
+        let game_mix = game_fade * game_fade * (3.0 - 2.0 * game_fade);
+        // The game replaces the scene, so triggered effects and drawing fade
+        // out with the same crossfade the world fades in on (and back in as
+        // it leaves) — unless the operator's overlay toggle keeps them on top.
+        // Once the world is fully on they are dropped outright; state still
+        // ages out below so nothing piles up for the moment the game ends.
+        let overlay_gain = if game_overlay { 1.0 } else { 1.0 - game_mix };
+        let game_suppress = overlay_gain <= 0.0;
 
         // Capture the urgency marker before the effect snapshot. The receiver
         // publishes it only after inserting the effects; this ordering ensures
@@ -2724,7 +2737,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     radius: d.radius,
                     hue: d.hue,
                     size: d.size,
-                    intensity: d.intensity,
+                    intensity: d.intensity * overlay_gain,
                     dir: d.dir,
                     saturation: d.saturation,
                     brightness: d.brightness,
@@ -2748,6 +2761,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 v.active && v.width > 0 && v.height > 0,
                 upload,
             )
+        };
+        // A new source fades in over VIDEO_FADE_SECS. Stop resets the ramp
+        // immediately: the texture is gone, so there is nothing to fade out.
+        video_env = if video_active {
+            (video_env + dt / VIDEO_FADE_SECS).min(1.0)
+        } else {
+            0.0
         };
 
         // Control-rate evaluation of the active patch: scalar/event nodes run on
@@ -2902,7 +2922,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     },
                     angle: e.cfg.angle,
                     radius: e.cfg.radius,
-                    intensity: e.cfg.intensity,
+                    intensity: e.cfg.intensity * overlay_gain,
                     hue: e.cfg.hue,
                     saturation: e.cfg.saturation.clamp(0.0, 1.0),
                     brightness: e.cfg.brightness.clamp(0.0, 1.0),
@@ -2968,14 +2988,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 transition_split: gpu_transition_split,
                 transition_active: u32::from(render_transition_active),
                 transition_progress: render_transition_progress,
-                _pad_transition: 0.0,
+                video_mix: video_env * video_env * (3.0 - 2.0 * video_env),
                 dj_link_visual_active: u32::from(dj_visual_active),
                 dj_fade_position,
                 dj_fade_activity,
                 dj_looping: if pioneer_visual.looping { 1.0 } else { 0.0 },
                 game_active: u32::from(game_fade > 0.0 && game_theta > 0),
-                // Smoothstepped here so the shader mix stays a plain lerp.
-                game_mix: game_fade * game_fade * (3.0 - 2.0 * game_fade),
+                game_mix,
                 game_theta,
                 game_rings,
                 game_alpha,
@@ -3017,6 +3036,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             ready_walks.resize(ready_phases.len(), LayerWalk::default());
             ready_targets.resize(ready_phases.len(), true);
             ready_env.resize(ready_phases.len(), 1.0);
+            // Not reset with the key: an enable toggle changes the key, and
+            // the toggle is exactly what this envelope smooths. New slots
+            // start dark and fade in, as on Program.
+            ready_enable_env.resize(ready_phases.len(), 0.0);
             let ready_walk_tau = 45.0 / stack.walk_speed.clamp(0.05, 20.0);
             if stack.walk_enabled && stack.walk_layers && now >= ready_next_flip {
                 ready_next_flip = now + Duration::from_secs_f32(ready_walk_tau);
@@ -3055,10 +3078,17 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 let target = !stack.walk_enabled || !stack.walk_layers || ready_targets[index];
                 let goal = if target { 1.0 } else { 0.0 };
                 ready_env[index] += (goal - ready_env[index]) * (dt / 4.0).min(1.0);
-                if !layer.enabled {
+                // Same enable envelope as Program, so the off-air preview
+                // never pops a layer in either (plans/no-hard-cuts.md).
+                ready_enable_env[index] = (ready_enable_env[index]
+                    + if layer.enabled { dt } else { -dt } / LAYER_TOGGLE_SECS)
+                    .clamp(0.0, 1.0);
+                if !layer.enabled && ready_enable_env[index] <= 0.0 {
                     continue;
                 }
-                if ready_env[index] < 0.005 {
+                let e = ready_enable_env[index];
+                let enable_fade = e * e * (3.0 - 2.0 * e);
+                if ready_env[index] * enable_fade < 0.005 {
                     ready_phases[index] +=
                         (layer.phase_rate(level) * layer.speed * stack.master_speed * dt) as f64;
                     if let Some(period) = layer.phase_period() {
@@ -3079,7 +3109,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 } else {
                     layer.clone()
                 };
-                layer.opacity *= ready_env[index];
+                layer.opacity *= ready_env[index] * enable_fade;
                 ready_phases[index] +=
                     (layer.phase_rate(level) * layer.speed * stack.master_speed * dt) as f64;
                 if let Some(period) = layer.phase_period() {

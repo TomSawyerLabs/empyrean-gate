@@ -206,3 +206,13 @@ All four assets published: windows-x64.exe, linux-x64, linux-x64.AppImage,
 macos-arm64. Version files are free for everyone again. Local suite before the
 tag: tsc, cargo lib 238, engine-smoke 6, layout+behavior 164 passed / 16
 skipped. Follow-ups for the ramp feature live in plans/no-hard-cuts.md.
+
+## empyrean-gate (Fable session, show-feedback) — 2026-09-09
+Rebased the two unpushed local commits (network follower 7731d9b, live
+controls e6f1e96) onto origin's firewall fix 2e2c9ce; tree was clean. Working
+through plans/show-feedback-2026-09.md, ONE COMMIT PER ITEM, staging explicitly.
+First: no-hard-cuts round two — src-tauri/src/engine/mod.rs, engine/shaders/
+{gate,patch_lib}.wgsl, plans/no-hard-cuts.md. Then a plans cleanup commit
+(deleting ten finished plan docs). Then the Live/clients/windows items.
+NOT mine, leaving unstaged: .github/workflows/release.yml + warm-cache.yml
+(someone's in-flight CI change). Not touching the four version files.

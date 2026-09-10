@@ -29,7 +29,7 @@ struct Globals {
     transition_split: u32,
     transition_active: u32,
     transition_progress: f32,
-    _pad_transition: f32,
+    video_mix: f32,
     dj_link_visual_active: u32,
     dj_fade_position: f32,
     dj_fade_activity: f32,
