@@ -90,6 +90,10 @@ webview2-com = "0.38.2"
 windows = { version = "0.61.3", features = [
   "Win32_System_Com",
   "Win32_UI_WindowsAndMessaging",
+  # display.rs: EDID vs offered modes (degraded USB-C link), TDR event count.
+  "Win32_Graphics_Gdi",
+  "Win32_System_Registry",
+  "Win32_System_EventLog",
 ] }
 
 [dev-dependencies]

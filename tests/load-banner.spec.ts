@@ -52,6 +52,31 @@ test("a flapping display becomes a red banner naming the cable", async ({ page, 
   await expect(banner).toHaveCount(0);
 });
 
+test("a monitor negotiated below its native mode gets a banner naming the USB-C link", async ({ page, request }) => {
+  const id = "display-link-test";
+  await page.addInitScript((c) => localStorage.setItem("empyrean-client-id", c), id);
+  await request.post(`/mock/status?client=${id}`, {
+    data: {
+      display_links: [
+        { name: "TYPEC", native_w: 2560, native_h: 1080, offered_w: 1920, offered_h: 1080, degraded: true },
+        { name: "Show display", native_w: 1920, native_h: 1080, offered_w: 1920, offered_h: 1080, degraded: false },
+      ],
+      tdr_last_hour: 2,
+      tdr_last_day: 2,
+    },
+  });
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto("/#live");
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+  const banner = page.locator(".link-banner");
+  await expect(banner).toContainText("TYPEC is running below its native 2560×1080");
+  await expect(banner).toContainText("at most 1920×1080");
+  await expect(banner).not.toContainText("Show display");
+  await expect(banner).toContainText("2 display-driver resets in the last hour");
+  await banner.getByRole("button", { name: "Dismiss" }).click();
+  await expect(banner).toHaveCount(0);
+});
+
 test("no warning, no toast — and the load meter is still there", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.goto("/#control");

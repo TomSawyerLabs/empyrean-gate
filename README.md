@@ -73,7 +73,14 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   cable**, because a USB-C/HDMI link going in and out resets the GPU driver and
   stalls the show ~0.5 s each time (seen live). The app cannot refuse a
   hot-plug; it can say what is happening and that pulling the extra display is
-  the fix. GPU re-inits are counted alongside.
+  the fix. GPU re-inits are counted alongside. It also reads each monitor's
+  **link health** offline — the mode the panel asks for (its EDID, from the
+  registry) against the largest mode Windows will offer — and banners a monitor
+  negotiated below native, which is what a USB-C DisplayPort cable running on
+  two lanes looks like: steady, nothing flapping, just 1920×1080 offered to a
+  2560×1080 panel (seen on the show machine). Display-driver resets (TDR,
+  System log event 4101) are counted for the last hour and day and reported
+  with either banner.
 - **Idle-window sentry** (desktop app). An accidental second window of the same
   tab, or a popped-out window minimised and forgotten, is a webview burning a
   preview stream behind the show. Every window heartbeats into shared storage;

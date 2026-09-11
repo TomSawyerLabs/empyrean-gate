@@ -582,6 +582,18 @@ export interface RuntimeStatus {
   display_flapping: boolean;
   gpu_resets: number;
   gpu_reset_secs_ago: number | null;
+  /** Each active monitor: what it asks for (EDID) vs the largest mode offered. */
+  display_links: {
+    name: string;
+    native_w: number;
+    native_h: number;
+    offered_w: number;
+    offered_h: number;
+    degraded: boolean;
+  }[];
+  /** Display-driver resets (TDR) in the last hour / day, from the event log. */
+  tdr_last_hour: number;
+  tdr_last_day: number;
   /** Render load per second bucket, percent of budget (can exceed 100). */
   load_history: number[];
   /** Backend-judged sustained underperformance; see LoadBanner. */

@@ -3595,6 +3595,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         .gpu_reset_at
                         .lock()
                         .map(|at| at.elapsed().as_secs_f32());
+                    st.display_links =
+                        state.display_links.lock().iter().map(|l| l.to_info()).collect();
+                    let tdr = state.tdr_counts.load(Ordering::Relaxed);
+                    st.tdr_last_hour = (tdr >> 32) as u32;
+                    st.tdr_last_day = tdr as u32;
                 }
                 st.master_brightness = render_master_brightness;
                 st.master_speed = render_master_speed;

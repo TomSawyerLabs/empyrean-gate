@@ -92,6 +92,9 @@ const status = {
   display_flapping: false,
   gpu_resets: 0,
   gpu_reset_secs_ago: null,
+  display_links: [],
+  tdr_last_hour: 0,
+  tdr_last_day: 0,
   version: "0.0.0-mock",
   update_state: "up to date",
 };

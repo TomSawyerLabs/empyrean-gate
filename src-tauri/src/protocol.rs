@@ -557,6 +557,17 @@ pub struct DisplayEventInfo {
     pub detail: String,
 }
 
+/// One monitor's link health, for the status blob (see `display.rs`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DisplayLinkInfo {
+    pub name: String,
+    pub native_w: u32,
+    pub native_h: u32,
+    pub offered_w: u32,
+    pub offered_h: u32,
+    pub degraded: bool,
+}
+
 /// An audio device as shown in the settings UI.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DeviceInfo {
@@ -911,6 +922,12 @@ pub struct RuntimeStatus {
     /// ago the last one was.
     pub gpu_resets: u32,
     pub gpu_reset_secs_ago: Option<f32>,
+    /// Every active monitor's link: the mode it asks for (EDID) vs the
+    /// largest Windows offers. `degraded` = a USB-C/DP link negotiated down.
+    pub display_links: Vec<DisplayLinkInfo>,
+    /// Display-driver resets (System/Display event 4101) in the last hour / day.
+    pub tdr_last_hour: u32,
+    pub tdr_last_day: u32,
     /// Frames rendered in each of the last ~30 one-second buckets (oldest first).
     pub fps_history: Vec<u32>,
     /// sACN packets sent in each of the last ~30 one-second buckets (oldest first).

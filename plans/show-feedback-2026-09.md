@@ -126,8 +126,15 @@ touches. This file is the single place to look for "did we do X yet".
     native mode is 2560×1080 — not flapping. That is readable offline: EDID
     detailed timing #1 (registry) vs the largest mode Windows offers
     (EnumDisplaySettingsEx). TDR = System log, provider Display, ID 4101;
-    churn = Kernel-PnP 400/410/420/430. Next: implement the degraded-link
-    check + TDR counter in `display.rs`; run script §5 on the show machine.
+    churn = Kernel-PnP 400/410/420/430. Status now: DONE in code —
+    `display.rs` reads every active monitor's EDID (registry, by PnP device
+    id) vs the largest `EnumDisplaySettingsEx` mode, orientation-agnostic,
+    on start, on each hot-plug and once a minute; counts TDRs via an XPath
+    `timediff()` query on System/Display 4101; both land in status and a
+    LinkBanner. Verified on the dev laptop against three real monitors
+    (found a portrait-rotated one and fixed the false positive). Still to
+    do: run script §5 on the show machine when it is online (offline, last
+    seen 2026-09-06).
 11. **GPU/CPU load histogram/sparkline**, a dismissible toast with details on
     sustained underperformance, and quick load-shedding options (reduce client
     preview frame rate, side render). Status: DONE (4b47535): load sparkline

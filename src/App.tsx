@@ -849,6 +849,7 @@ function DisplayBanner() {
   const latest = events[0];
   const recent = latest !== undefined && latest.secs_ago < 15 * 60;
   const flapping = Boolean(status?.display_flapping);
+  const tdrHour = status?.tdr_last_hour ?? 0;
   if (!latest || !(recent || flapping) || dismissedCount === events.length) return null;
   const ago = latest.secs_ago < 90 ? `${Math.round(latest.secs_ago)} s ago` : `${Math.round(latest.secs_ago / 60)} min ago`;
   const resets = status?.gpu_resets ?? 0;
@@ -861,6 +862,7 @@ function DisplayBanner() {
         {resets > 0 ? `; ${resets} GPU reset${resets === 1 ? "" : "s"} this run` : ""}).
         {" "}Every change resets the GPU driver and stalls the show for about half a second
         {flapping ? " — a bad USB-C or HDMI cable does exactly this. Pull the extra display for the show." : "; a second display also costs base frames all night."}
+        {tdrHour > 0 && ` Windows logged ${tdrHour} display-driver reset${tdrHour === 1 ? "" : "s"} in the last hour.`}
       </div>
       <button className="ghost load-banner-dismiss" onClick={() => setDismissedCount(events.length)}>
         Dismiss
@@ -959,6 +961,44 @@ function IdleWindowsBanner({ tab }: { tab: TabId }) {
           Keep them
         </button>
       </div>
+    </div>
+  );
+}
+
+/** A monitor whose link is negotiated below what the panel asks for — what
+ *  was actually found on the show machine (plans/show-feedback-2026-09.md,
+ *  "USB-C evidence"): a USB-C DisplayPort link on two lanes offers ≤1920×1080
+ *  to a 2560×1080 panel, steadily, with nothing flapping. Also the place the
+ *  TDR count lands when the topology is quiet. Dismissible per link set. */
+function LinkBanner() {
+  const { status } = useGate();
+  const [dismissedKey, setDismissedKey] = useState("");
+  const degraded = (status?.display_links ?? []).filter((l) => l.degraded);
+  const tdrHour = status?.tdr_last_hour ?? 0;
+  const quietTopology = (status?.display_events ?? []).length === 0;
+  const key = degraded.map((l) => `${l.name}:${l.offered_w}x${l.offered_h}`).join("|") + (tdrHour > 0 && quietTopology ? "|tdr" : "");
+  if (!key || dismissedKey === key) return null;
+  return (
+    <div className="banner warn link-banner" role="status">
+      <div className="load-banner-text">
+        {degraded.map((l) => (
+          <span key={l.name}>
+            <strong>{l.name} is running below its native {l.native_w}×{l.native_h}</strong> — Windows offers at
+            most {l.offered_w}×{l.offered_h}. That is a USB-C DisplayPort link on too few lanes: reseat and
+            flip the plug, use a full-featured cable with no hub, check the monitor's USB data-priority
+            setting, then power-cycle the monitor.{" "}
+          </span>
+        ))}
+        {tdrHour > 0 && quietTopology && (
+          <span>
+            <strong>Windows logged {tdrHour} display-driver reset{tdrHour === 1 ? "" : "s"} in the last hour</strong>
+            {" "}(System log, Display 4101) — each one stalls the show.
+          </span>
+        )}
+      </div>
+      <button className="ghost load-banner-dismiss" onClick={() => setDismissedKey(key)}>
+        Dismiss
+      </button>
     </div>
   );
 }
@@ -1257,6 +1297,7 @@ export default function App() {
       )}
       <LoadBanner />
       <DisplayBanner />
+      <LinkBanner />
       <IdleWindowsBanner tab={visibleTab} />
       {errors.map((e, i) => (
         <div key={i} className="banner warn" onClick={() => dismissError(i)}>

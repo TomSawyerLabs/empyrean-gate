@@ -555,6 +555,11 @@ pub struct SharedState {
     /// a driver reset is the usual cause), and when the last one was.
     pub gpu_resets: AtomicU32,
     pub gpu_reset_at: Mutex<Option<Instant>>,
+    /// Per-monitor link health (native vs offered mode), refreshed by the
+    /// display watcher on start, on every hot-plug, and once a minute.
+    pub display_links: Mutex<Vec<crate::display::LinkInfo>>,
+    /// Display-driver resets: (last hour << 32) | last day, from the event log.
+    pub tdr_counts: AtomicU64,
     /// Set once the operator has confirmed closing a live show; the next window
     /// close request is then allowed through instead of being refused again.
     pub close_confirmed: AtomicBool,
@@ -656,6 +661,8 @@ impl SharedState {
             display_events: Mutex::new(Vec::new()),
             gpu_resets: AtomicU32::new(0),
             gpu_reset_at: Mutex::new(None),
+            display_links: Mutex::new(Vec::new()),
+            tdr_counts: AtomicU64::new(0),
             close_confirmed: AtomicBool::new(false),
             close_guard_ready: AtomicBool::new(false),
             last_close_attempt_ms: AtomicU64::new(0),
