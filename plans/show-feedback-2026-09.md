@@ -507,3 +507,207 @@ confirmed present on this machine yet**):
   `WM_DISPLAYCHANGE`, plus `RegisterDeviceNotificationW` with
   `GUID_DEVINTERFACE_MONITOR` for `WM_DEVICECHANGE` arrive/remove — gives the
   same topology events `display.rs` polls for, at the instant they happen.
+
+### 5. Results — run on camtop, 2026-09-11 (read-only, three passes)
+
+Cameron's correction: the machine to read is **camtop** (Surface, Intel Iris
+Plus, user `camer`) — not the Empyrean Gate show PC, and not the
+`entheos@192.168.1.95` box the 2026-09-06 notes above came from (an Iris Xe
+with a 2560×1080 "TYPEC" monitor; camtop has never seen such a monitor — see
+the all-time list under L). Output is verbatim.
+
+**Verdict for camtop.** In the last 14 days: no display-driver resets (no
+`Display` 4101; the DxgKrnl channels are enabled and empty), no display
+hot-plug in the System log, and in the Kernel-PnP operational channels
+(retained back to 2025) the only external display ever recorded on this
+machine is an **Optoma UHD projector** (`OTM0035`, native 3840×2160),
+configured 2026-08-31 22:16 and surprise-removed 22:22 the same evening —
+nothing display-related in the show window 2026-09-05..08 at all. What the
+show window does show is **two unclean reboots** (Kernel-Power 41 at
+16:11:23 and again at 16:12:33 on 2026-09-05: "rebooted without cleanly
+shutting down") and Modern Standby cycling through the night. The USB hub
+churn on 2026-08-29 is VID 1A86 PID 7523 — a CH340 USB-serial adapter, not a
+display. The UCSI failure is a one-off from 2025-11. Conclusion: camtop's
+Event Log holds no cable evidence; on it, the offline EDID-vs-offered check
+shipped in dd24625 is the only display signal available, and the machine
+whose link was actually degraded on 2026-09-06 is the Iris Xe box.
+
+Pass 1 — the §5 script above (with a null-guard on the internal panel's name):
+
+```
+=== A. Display / DxgKrnl / igfx events (System log, last 14 days) ===
+=== B. Kernel-PnP events mentioning DISPLAY/MONITOR/USB4/UCM/TypeC (last 14 days) ===
+2026-09-11 00:14:14 | id 219 | The driver \Driver\WudfRd failed to load. Device: DISPLAY\LGD0555\4&bb010ab&1&UID8388688 Status: 0xC0000365
+2026-09-11 00:16:31 | id 219 | The driver \Driver\WudfRd failed to load. Device: DISPLAY\LGD0555\4&bb010ab&1&UID8388688 Status: 0xC0000365
+2026-09-11 00:17:33 | id 219 | The driver \Driver\WudfRd failed to load. Device: DISPLAY\LGD0555\4&bb010ab&1&UID8388688 Status: 0xC0000365
+=== C. UCM / USB4 / xHCI / Thunderbolt provider events (last 14 days) ===
+2026-08-29 22:08:42 | Microsoft-Windows-USB-USBHUB3 | id 196 | USB device draining system power when system is idle.                            USB Device: VID: 0x1A86 PID: 0x7523 REV: 0x264              Removal action failed: QueryRemovalInitiated
+2026-08-29 22:08:42 | Microsoft-Windows-USB-USBHUB3 | id 205 | Re-enumerating a DRIPS blocking device that was previously removed when exiting low power epoch.                            USB Device: VID: 0x1A86 PID: 0x7523 REV: 0x264              IsPortCycle: false
+2026-08-29 22:14:54 | Microsoft-Windows-USB-USBHUB3 | id 205 | Re-enumerating a DRIPS blocking device that was previously removed when exiting low power epoch.                            USB Device: VID: 0x1A86 PID: 0x7523 REV: 0x264              IsPortCycle: true
+2026-08-29 22:19:11 | Microsoft-Windows-USB-USBHUB3 | id 205 | Re-enumerating a DRIPS blocking device that was previously removed when exiting low power epoch.                            USB Device: VID: 0x1A86 PID: 0x7523 REV: 0x264              IsPortCycle: false
+2026-08-29 22:19:11 | Microsoft-Windows-USB-USBHUB3 | id 196 | USB device draining system power when system is idle.                            USB Device: VID: 0x1A86 PID: 0x7523 REV: 0x264              Removal action failed: QueryRemovalInitiated
+2026-08-29 22:45:03 | Microsoft-Windows-USB-USBHUB3 | id 205 | Re-enumerating a DRIPS blocking device that was previously removed when exiting low power epoch.                            USB Device: VID: 0x1A86 PID: 0x7523 REV: 0x264              IsPortCycle: true
+=== D. Operational logs present for Type-C / DisplayPort / DxgKrnl ===
+Microsoft-Windows-USB-UCMUCSICX/Operational | enabled=True | records=1
+Microsoft-Windows-DxgKrnl-Operational | enabled=True | records=0
+Microsoft-Windows-DxgKrnl-Admin | enabled=True | records=0
+Microsoft-Windows-DisplayColorCalibration/Operational | enabled=False | records=
+Microsoft-Windows-Kernel-PnP/Driver Watchdog | enabled=True | records=149
+Microsoft-Windows-Kernel-PnP/Device Management | enabled=True | records=4835
+Microsoft-Windows-Kernel-PnP/Configuration | enabled=True | records=1386
+=== E. PnP devices: Monitor / Display / USB-C / USB4 ===
+Display | OK | Intel(R) Iris(R) Plus Graphics | PCI\VEN_8086&DEV_8A52&SUBSYS_00371414&REV_07\3&11583659&0&10
+Monitor | OK | Surface Calibrated Panel | DISPLAY\LGD0555\4&BB010AB&1&UID8388688
+UCM | OK | SurfaceUcmUcsiHidClient Device | HID\TARGET_SAM&CATEGORY_HID\4&D79852&0&0000
+=== F. Current monitor/EDID state (re-run of the 2026-09-06 queries) ===
+Intel(R) Iris(R) Plus Graphics | 2736x1824 | driver 31.0.101.2130 | status OK
+Monitor: (no name) (active=True) InstanceName=DISPLAY\LGD0555\4&bb010ab&1&UID8388688_0
+Connection tech: 2147483648
+Preferred mode index: 0
+2736x1824 @ 60Hz
+MaxH: 26cm MaxV: 17cm
+=== G. TDR policy values (HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers) ===
+
+
+Tdr* : 
+
+
+
+
+=== H. Uptime ===
+Last boot: 2026-09-11 00:17:15  Now: 2026-09-11 12:59:43
+```
+
+Pass 2 — Kernel-PnP operational channels, all-time monitor list, boots:
+
+```
+=== N. Oldest record per PnP/DxgKrnl channel (retention) ===
+System | oldest=2026-03-29 19:32:19
+Microsoft-Windows-Kernel-PnP/Configuration | oldest=2025-09-25 18:25:23
+Microsoft-Windows-Kernel-PnP/Device Management | oldest=2025-02-25 06:06:27
+Microsoft-Windows-Kernel-PnP/Driver Watchdog | oldest=2025-02-25 06:05:37
+Microsoft-Windows-DxgKrnl-Operational | oldest=
+Microsoft-Windows-DxgKrnl-Admin | oldest=
+=== O. Any event in the PnP channels mentioning a monitor or display, all time ===
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-09-25 18:25:31 | id 400 | Device DISPLAY\Default_Monitor\1&c528b8a&6&UID256 was configured. Driver Name: monitor.inf Driver Package ID: monitor.inf_amd64_0db4b706fdd7346d Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Driver Date: 06/21/2006 Driver Version: 10.0.26100.4768 Driver Provider: Microsoft Driver Section: PnPMonitor.Install Driver Rank: 0xFF2000 Matching Device ID: *PNP09FF Outranked Drivers: Device Updated: false Parent Device: SWD\RemoteDisplayEnum\RdpIdd_IndirectDisplay&SessionId_0001
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-09-25 18:25:31 | id 410 | Device DISPLAY\Default_Monitor\1&c528b8a&6&UID256 was started. Driver Name: monitor.inf Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Service: monitor Lower Filters: Upper Filters: 
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-11-09 22:23:08 | id 400 | Device DISPLAY\GSM5B99\4&bb010ab&1&UID4162 was configured. Driver Name: monitor.inf Driver Package ID: monitor.inf_amd64_7e38082eefc282c3 Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Driver Date: 06/21/2006 Driver Version: 10.0.26100.5074 Driver Provider: Microsoft Driver Section: PnPMonitor.Install Driver Rank: 0xFF2000 Matching Device ID: *PNP09FF Outranked Drivers: Device Updated: false Parent Device: PCI\VEN_8086&DEV_8A52&SUBSYS_00371414&REV_07\3&11583659&0&10
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-11-09 22:23:09 | id 410 | Device DISPLAY\GSM5B99\4&bb010ab&1&UID4162 was started. Driver Name: monitor.inf Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Service: monitor Lower Filters: Upper Filters: 
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-11-15 10:12:13 | id 430 | Device DISPLAY\MS_0001\4&bb010ab&1&UID4162 requires further installation.
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-11-15 10:12:15 | id 400 | Device DISPLAY\MS_0001\4&bb010ab&1&UID4162 was configured. Driver Name: monitor.inf Driver Package ID: monitor.inf_amd64_b5ae5b6b913bc182 Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Driver Date: 06/21/2006 Driver Version: 10.0.26100.7019 Driver Provider: Microsoft Driver Section: Laptop640x480x60.Install Driver Rank: 0xFF0000 Matching Device ID: MONITOR\MS_0001 Outranked Drivers: monitor.inf:*PNP09FF:00FF2000 Device Updated: false Parent Device: PCI\VEN_8086&DEV_8A52&SUBSYS_00371414&REV_07\3&11583659&0&10
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-11-15 10:12:15 | id 410 | Device DISPLAY\MS_0001\4&bb010ab&1&UID4162 was started. Driver Name: monitor.inf Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Service: monitor Lower Filters: Upper Filters: 
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-11-16 17:59:51 | id 430 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 requires further installation.
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-11-16 17:59:52 | id 400 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 was configured. Driver Name: monitor.inf Driver Package ID: monitor.inf_amd64_b5ae5b6b913bc182 Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Driver Date: 06/21/2006 Driver Version: 10.0.26100.7019 Driver Provider: Microsoft Driver Section: PnPMonitor.Install Driver Rank: 0xFF2000 Matching Device ID: *PNP09FF Outranked Drivers: Device Updated: false Parent Device: PCI\VEN_8086&DEV_8A52&SUBSYS_00371414&REV_07\3&11583659&0&10
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-11-16 17:59:52 | id 400 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 was configured. Driver Name: oem168.inf Driver Package ID: lgmonitorappextension.inf_amd64_9259cecb4d841b63 Class GUID: {e2f84ce7-8efa-411c-aa69-97454ca4cb57} Driver Date: 09/26/2024 Driver Version: 1.1.2024.926 Driver Provider: LG Electronics Inc. Driver Section: LG MONITOR_DP.Install Driver Rank: 0xFF0000 Matching Device ID: MONITOR\GSM5B9A Outranked Drivers: Device Updated: false Parent Device: PCI\VEN_8086&DEV_8A52&SUBSYS_00371414&REV_07\3&11583659&0&10
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-11-16 17:59:52 | id 410 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 was started. Driver Name: monitor.inf Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Service: monitor Lower Filters: Upper Filters: 
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-11-16 17:59:52 | id 400 | Device SWD\DRIVERENUM\{3846ad8c-dd27-433d-ab89-453654cd542a}#LGMonitorApp&5&79bb045&0 was configured. Driver Name: c_swcomponent.inf Driver Package ID: c_swcomponent.inf_amd64_1536c854ab7bdc83 Class GUID: {5c4c3332-344d-483c-8739-259e934c9cc8} Driver Date: 06/21/2006 Driver Version: 10.0.26100.1 Driver Provider: Microsoft Driver Section: SoftwareComponent Driver Rank: 0xFF3000 Matching Device ID: SWC\Generic Outranked Drivers: c_swdevice.inf:SWD\GenericRaw:00FF3001 Device Updated: false Parent Device: DISPLAY\GSM5B9A\4&bb010ab&1&UID20549
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-11-16 18:01:19 | id 400 | Device SWD\DRIVERENUM\{3846ad8c-dd27-433d-ab89-453654cd542a}#LGMonitorApp&5&79bb045&0 was configured. Driver Name: oem178.inf Driver Package ID: lgmonitorappsoftwarecomponent.inf_amd64_dbb847f4512c75b1 Class GUID: {5c4c3332-344d-483c-8739-259e934c9cc8} Driver Date: 11/02/2023 Driver Version: 1.1.2023.1102 Driver Provider: LG Electronics Inc. Driver Section: LGMonitor_Install Driver Rank: 0xFF0000 Matching Device ID: SWC\GSM9E8C Outranked Drivers: c_swcomponent.inf:SWC\Generic:00FF3000 c_swdevice.inf:SWD\GenericRaw:00FF3001 Device Updated: true Parent Device: DISPLAY\GSM5B9A\4&bb010ab&1&UID20549
+Microsoft-Windows-Kernel-PnP/Configuration | 2025-11-21 00:18:44 | id 420 | Device DISPLAY\DEFAULT_MONITOR\1&C528B8A&6&UID256 was deleted. Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318}
+Microsoft-Windows-Kernel-PnP/Configuration | 2026-03-29 08:12:27 | id 420 | Device DISPLAY\GSM5B99\4&BB010AB&1&UID4162 was deleted. Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318}
+Microsoft-Windows-Kernel-PnP/Configuration | 2026-03-29 08:12:28 | id 420 | Device DISPLAY\GSM5B9A\4&BB010AB&1&UID20549 was deleted. Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318}
+Microsoft-Windows-Kernel-PnP/Configuration | 2026-03-29 08:12:31 | id 420 | Device DISPLAY\MS_0001\4&BB010AB&1&UID4162 was deleted. Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318}
+Microsoft-Windows-Kernel-PnP/Configuration | 2026-05-20 14:23:38 | id 400 | Device DISPLAY\Default_Monitor\1&c528b8a&7&UID256 was configured. Driver Name: monitor.inf Driver Package ID: monitor.inf_amd64_f34c845bb3958726 Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Driver Date: 06/21/2006 Driver Version: 10.0.26100.7309 Driver Provider: Microsoft Driver Section: PnPMonitor.Install Driver Rank: 0xFF2000 Matching Device ID: *PNP09FF Outranked Drivers: Device Updated: false Parent Device: SWD\RemoteDisplayEnum\RdpIdd_IndirectDisplay&SessionId_0001
+Microsoft-Windows-Kernel-PnP/Configuration | 2026-05-20 14:23:38 | id 410 | Device DISPLAY\Default_Monitor\1&c528b8a&7&UID256 was started. Driver Name: monitor.inf Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Service: monitor Lower Filters: Upper Filters: 
+Microsoft-Windows-Kernel-PnP/Configuration | 2026-07-04 08:59:26 | id 420 | Device DISPLAY\DEFAULT_MONITOR\1&1F0C3C2F&0&UID256 was deleted. Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318}
+Microsoft-Windows-Kernel-PnP/Configuration | 2026-07-04 16:37:42 | id 420 | Device DISPLAY\DEFAULT_MONITOR\1&C528B8A&7&UID256 was deleted. Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318}
+Microsoft-Windows-Kernel-PnP/Configuration | 2026-08-25 19:56:55 | id 400 | Device DISPLAY\Default_Monitor\1&1f0c3c2f&1&UID256 was configured. Driver Name: monitor.inf Driver Package ID: monitor.inf_amd64_d4f1c0693437b11f Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Driver Date: 06/21/2006 Driver Version: 10.0.26100.8972 Driver Provider: Microsoft Driver Section: PnPMonitor.Install Driver Rank: 0xFF2000 Matching Device ID: *PNP09FF Outranked Drivers: Device Updated: false Parent Device: SWD\RemoteDisplayEnum\RdpIdd_IndirectDisplay&SessionId_0002
+Microsoft-Windows-Kernel-PnP/Configuration | 2026-08-25 19:56:55 | id 410 | Device DISPLAY\Default_Monitor\1&1f0c3c2f&1&UID256 was started. Driver Name: monitor.inf Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Service: monitor Lower Filters: Upper Filters: 
+Microsoft-Windows-Kernel-PnP/Configuration | 2026-08-31 22:16:05 | id 400 | Device DISPLAY\OTM0035\4&bb010ab&1&UID4162 was configured. Driver Name: monitor.inf Driver Package ID: monitor.inf_amd64_d4f1c0693437b11f Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Driver Date: 06/21/2006 Driver Version: 10.0.26100.8972 Driver Provider: Microsoft Driver Section: PnPMonitor.Install Driver Rank: 0xFF2000 Matching Device ID: *PNP09FF Outranked Drivers: Device Updated: false Parent Device: PCI\VEN_8086&DEV_8A52&SUBSYS_00371414&REV_07\3&11583659&0&10
+Microsoft-Windows-Kernel-PnP/Configuration | 2026-08-31 22:16:06 | id 410 | Device DISPLAY\OTM0035\4&bb010ab&1&UID4162 was started. Driver Name: monitor.inf Class GUID: {4d36e96e-e325-11ce-bfc1-08002be10318} Service: monitor Lower Filters: Upper Filters: 
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-04-16 14:12:39 | id 1010 | Device DISPLAY\Default_Monitor\1&8713bca&0&UID0 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 1
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-04-28 16:43:32 | id 1010 | Device DISPLAY\Default_Monitor\1&8713bca&0&UID0 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 1
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-09 22:25:51 | id 1010 | Device DISPLAY\GSM5B99\4&bb010ab&1&UID4162 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 1
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-09 22:26:54 | id 1010 | Device DISPLAY\GSM5B99\4&bb010ab&1&UID4162 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 1
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-09 22:28:02 | id 1010 | Device DISPLAY\GSM5B99\4&bb010ab&1&UID4162 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 1
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-15 10:12:43 | id 1010 | Device DISPLAY\MS_0001\4&bb010ab&1&UID4162 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 1
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-16 18:00:12 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-17 03:00:25 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-17 15:04:17 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-17 19:12:22 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-18 03:02:11 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-18 08:41:30 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-18 10:11:05 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-18 14:06:30 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-19 03:05:21 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-19 08:39:05 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-19 16:27:34 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-19 21:40:10 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-20 03:06:13 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-20 22:02:53 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-20 22:13:48 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-21 03:32:09 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-21 11:47:12 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-21 21:07:56 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-22 08:48:37 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-22 21:04:09 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-23 07:58:05 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-23 09:54:28 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-23 20:10:06 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-24 13:28:41 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-24 20:00:12 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-24 20:10:17 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-25 06:13:06 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-25 09:35:48 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-25 09:49:56 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-25 09:51:03 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-26 02:24:56 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-26 09:51:59 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-26 22:49:12 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-27 09:55:15 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2025-11-27 15:53:05 | id 1010 | Device DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 2
+Microsoft-Windows-Kernel-PnP/Device Management | 2026-08-25 23:47:52 | id 1010 | Device DISPLAY\Default_Monitor\1&1f0c3c2f&1&UID256 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 1
+Microsoft-Windows-Kernel-PnP/Device Management | 2026-08-27 01:49:54 | id 1010 | Device DISPLAY\Default_Monitor\1&1f0c3c2f&1&UID256 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 1
+Microsoft-Windows-Kernel-PnP/Device Management | 2026-08-31 22:22:41 | id 1010 | Device DISPLAY\OTM0035\4&bb010ab&1&UID4162 has been surprise removed as it is reported as missing on the bus. Count of devices removed: 1
+Microsoft-Windows-Kernel-PnP/Driver Watchdog | 2025-11-25 09:50:58 | id 900 | A long running thread for the device event queue was detected. The thread has been running for 3015 milliseconds. Thread ID: 0x92E4 Device: DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 Service: monitor Event Category: 1 Event GUID: {cb3a400e-46f0-11d0-b08f-00609713053f} Event Argument: 0x18 Argument Status: 0x0 Category Specific Data: {00000000-0000-0000-0000-000000000000} DISPLAY\GSM5B9A\4&bb010ab&1&UID20549
+Microsoft-Windows-Kernel-PnP/Driver Watchdog | 2025-11-25 09:51:03 | id 901 | A long running thread for the device event queue has been completed. Thread ID: 0x92E4 Device: DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 Service: monitor Event Category: 1 Event GUID: {cb3a400e-46f0-11d0-b08f-00609713053f} Event Argument: 0x18 Argument Status: 0x0 Category Specific Data: {00000000-0000-0000-0000-000000000000} DISPLAY\GSM5B9A\4&bb010ab&1&UID20549 Total run time in milliseconds: 7460
+=== P. Kernel-PnP/Configuration events 2026-09-05..08, every device ===
+2026-09-05 16:12:56 | id 420 | Device ROOT\WIREGUARD\0000 was deleted. Class GUID: {4d36e972-e325-11ce-bfc1-08002be10318}
+=== Q. System log 2026-09-05..08: USB / PnP / Display / DxgKrnl / power-loss (Modern Standby churn excluded) ===
+2026-09-05 13:57:42 | BTHUSB | id 18 | Windows cannot store Bluetooth authentication codes (link keys) on the local adapter. Bluetooth keyboards might not work in the system BIOS during startup.
+2026-09-05 14:00:44 | Microsoft-Windows-Kernel-Power | id 187 | User-mode process attempted to change the system state by calling SetSuspendState or SetSystemPowerState APIs.
+2026-09-05 14:00:48 | Microsoft-Windows-Kernel-Power | id 42 | The system is entering sleep. Sleep Reason: Application API
+2026-09-05 14:01:05 | Microsoft-Windows-Kernel-Power | id 107 | The system has resumed from sleep.
+2026-09-05 14:04:47 | BTHUSB | id 18 | Windows cannot store Bluetooth authentication codes (link keys) on the local adapter. Bluetooth keyboards might not work in the system BIOS during startup.
+2026-09-05 16:11:23 | Microsoft-Windows-Kernel-Power | id 41 | The system has rebooted without cleanly shutting down first. This error could be caused if the system stopped responding, crashed, or lost power unexpectedly.
+2026-09-05 16:11:23 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: ROOT\WindowsHelloFaceSoftwareDriver\0000 Status: 0xC0000365
+2026-09-05 16:11:26 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: PCI\VEN_8086&DEV_8A03&SUBSYS_72708086&REV_03\3&11583659&0&20 Status: 0xC0000365
+2026-09-05 16:11:33 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: HID\VEN_8086&DEV_34E4&SUBSYS_00391414&REV_30&Col09\4&1f1b4878&0&0008 Status: 0xC0000365
+2026-09-05 16:11:35 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: {DD8E82AE-334B-49A2-AEAE-AEB0FD5C40DD}\DetectionVerification\5&23cc679b&0&0 Status: 0xC0000365
+2026-09-05 16:11:36 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: HID\HID_DEVICE_SYSTEM_VHF\6&20972bab&0&0000 Status: 0xC0000365
+2026-09-05 16:11:36 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: {98DE32A9-5D44-419E-B67D-66072BCEF58B}\SurfaceSarManager\3&c7da34a&0&SID_DEVICE_05 Status: 0xC0000365
+2026-09-05 16:11:39 | BTHUSB | id 18 | Windows cannot store Bluetooth authentication codes (link keys) on the local adapter. Bluetooth keyboards might not work in the system BIOS during startup.
+2026-09-05 16:11:40 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: HID\Vid_8087&Pid_0AC2\6&2d0ab97b&0&0000 Status: 0xC0000365
+2026-09-05 16:12:33 | Microsoft-Windows-Kernel-Power | id 41 | The system has rebooted without cleanly shutting down first. This error could be caused if the system stopped responding, crashed, or lost power unexpectedly.
+2026-09-05 16:12:33 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: ROOT\WindowsHelloFaceSoftwareDriver\0000 Status: 0xC0000365
+2026-09-05 16:12:37 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: PCI\VEN_8086&DEV_8A03&SUBSYS_72708086&REV_03\3&11583659&0&20 Status: 0xC0000365
+2026-09-05 16:12:39 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: HID\VEN_8086&DEV_34E4&SUBSYS_00391414&REV_30&Col09\4&1f1b4878&0&0008 Status: 0xC0000365
+2026-09-05 16:12:41 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: {DD8E82AE-334B-49A2-AEAE-AEB0FD5C40DD}\DetectionVerification\5&23cc679b&0&0 Status: 0xC0000365
+2026-09-05 16:12:42 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: HID\HID_DEVICE_SYSTEM_VHF\6&20972bab&0&0000 Status: 0xC0000365
+2026-09-05 16:12:42 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: {98DE32A9-5D44-419E-B67D-66072BCEF58B}\SurfaceSarManager\3&c7da34a&0&SID_DEVICE_05 Status: 0xC0000365
+2026-09-05 16:12:46 | BTHUSB | id 18 | Windows cannot store Bluetooth authentication codes (link keys) on the local adapter. Bluetooth keyboards might not work in the system BIOS during startup.
+2026-09-05 16:12:46 | Microsoft-Windows-Kernel-PnP | id 219 | The driver \Driver\WudfRd failed to load. Device: HID\Vid_8087&Pid_0AC2\6&2d0ab97b&0&0000 Status: 0xC0000365
+2026-09-06 00:16:39 | BTHUSB | id 18 | Windows cannot store Bluetooth authentication codes (link keys) on the local adapter. Bluetooth keyboards might not work in the system BIOS during startup.
+2026-09-06 00:43:51 | BTHUSB | id 18 | Windows cannot store Bluetooth authentication codes (link keys) on the local adapter. Bluetooth keyboards might not work in the system BIOS during startup.
+2026-09-06 19:32:57 | Microsoft-Windows-Kernel-Power | id 42 | The system is entering sleep. Sleep Reason: Battery
+2026-09-06 19:33:01 | Microsoft-Windows-Kernel-Power | id 107 | The system has resumed from sleep.
+=== R. Surface USB-C port / PD hardware present ===
+Firmware | OK | Surface PD Controller | UEFI\RES_{3E650D19-9511-438F-87C7-F18F0BA1A655}\0
+HIDClass | OK | Surface Dock Integration | HID\VID_045E&PID_0904&COL05\7&58DD278&0&0004
+HIDClass | OK | Surface Dock Component Firmware Update | HID\VID_045E&PID_0904&COL04\7&58DD278&0&0003
+=== K. UCM UCSI operational (all) ===
+2025-11-18 10:52:41 | id 1 | UcmUcsiCx device has encountered a failure. Please contact the manufacturer of your computer or device to investigate. Device Instance ID: HID\Target_SAM&Category_HID\4&d79852&0&0000 Service: SurfaceUcmUcsiHidClient Failure Type: Command Timeout UCSI Command: GetPdos
+=== L. Every monitor the machine has ever seen (registry Enum\DISPLAY), with EDID native mode ===
+Default_Monitor\1&1f0c3c2f&1&UID256 | driver={4d36e96e-e325-11ce-bfc1-08002be10318}\0001 | @System32\drivers\dxgkrnl.sys,#300;Generic Monitor | native=
+INT3480\4&bb010ab&1&UID144512 | driver={ca3e7ab9-b4c3-4ae6-8251-579ef933890f}\0000 |  | native=
+LGD0555\4&bb010ab&1&UID8388688 | driver={4d36e96e-e325-11ce-bfc1-08002be10318}\0000 | Surface Calibrated Panel | native=2736x1824 26x17cm
+OTM0035\4&bb010ab&1&UID4162 | driver={4d36e96e-e325-11ce-bfc1-08002be10318}\0002 | @System32\drivers\dxgkrnl.sys,#303;Generic Monitor (%1);(Optoma UHD) | native=3840x2160 0x0cm
+=== M. Boot history (last 21 days) ===
+2026-09-11 00:17:34 | boot
+2026-09-11 00:16:32 | boot
+2026-09-11 00:14:31 | boot
+2026-09-05 16:12:50 | boot
+2026-09-05 16:11:43 | boot
+2026-08-25 19:55:35 | boot
+2026-08-25 19:54:31 | boot
+2026-08-25 19:51:01 | boot
+```
