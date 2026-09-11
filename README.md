@@ -429,6 +429,19 @@ git tag v0.2.0 && git push origin v0.2.0
 
 Grab binaries from https://github.com/TomSawyerLabs/empyrean-gate/releases.
 
+Windows and Linux release builds run on paid 16-vCPU Blacksmith runners while the
+month is inside Blacksmith's free tier, and fall back to GitHub's free (slower) runners
+once it is spent. For a show, where a fast release is worth paying for, lift the cap
+with one repository variable and put it back afterwards:
+
+```sh
+gh variable set SHOW_MODE --body true --repo TomSawyerLabs/empyrean-gate   # pay for speed
+gh variable set SHOW_MODE --body false --repo TomSawyerLabs/empyrean-gate  # free tier only
+```
+
+Show mode also turns the nightly cache warm back on. `plans/blacksmith-free-tier.md`
+has the numbers.
+
 ### The WebView2 runtime (Windows)
 
 The desktop window is drawn by Microsoft's Evergreen WebView2 runtime. Windows 11 ships

@@ -168,7 +168,8 @@ Anything under `refs/heads/refs/tags/...` or a deleted branch is dead; delete it
 > Blacksmith 16-vCPU runners — roughly half GitHub's larger-runner rates with
 > 3000 free min/month. The spending-cap concern below is handled differently
 > there: `cost-gate.yml` (2026-09-10) diverts to GitHub's free runners once the
-> month's free tier is spent instead of failing the release. See
+> month's free tier is spent instead of failing the release, and the `SHOW_MODE`
+> repository variable lifts that cap for a show (2026-09-11). See
 > `plans/blacksmith-free-tier.md`. checks.yml deliberately stays on free GitHub
 > runners: it runs on fork PRs, which third-party runners may not serve.
 

@@ -18,6 +18,17 @@ name: Blacksmith cost gate
 # cross the line is the one that gets diverted. plans/blacksmith-free-tier.md
 # has the numbers.
 #
+# Show mode: the toggle
+# ---------------------
+# During a show the premium is worth paying. The SHOW_MODE repository variable
+# lifts the cap without a commit: when it is "true" the gate hands out the
+# Blacksmith labels regardless of spend and the nightly warm cache runs again.
+#   on:   gh variable set SHOW_MODE --body true  --repo TomSawyerLabs/empyrean-gate
+#   off:  gh variable set SHOW_MODE --body false --repo TomSawyerLabs/empyrean-gate
+#   ask:  gh variable get SHOW_MODE --repo TomSawyerLabs/empyrean-gate
+# The $1 spend alert on the Blacksmith dashboard still emails on the first paid
+# dollar; raise it there for the duration if the mail is unwelcome.
+#
 # Inert without a token. If BLACKSMITH_ORG_TOKEN is not set the gate emits the
 # Blacksmith labels and says so, which is exactly the pre-gate behaviour. Mint
 # one with `blacksmith org-token create --label ci-cost-gate` (org admin, browser
@@ -77,6 +88,7 @@ jobs:
           BLACKSMITH_ORG_TOKEN: ${{ secrets.BLACKSMITH_ORG_TOKEN }}
           THRESHOLD_USD: ${{ inputs.threshold_usd }}
           FORCE_FALLBACK: ${{ inputs.force_fallback }}
+          SHOW_MODE: ${{ vars.SHOW_MODE }}
           BLACKSMITH_ORG: TomSawyerLabs
         shell: bash
         run: |
@@ -106,6 +118,9 @@ jobs:
 
           if [ "$FORCE_FALLBACK" = "true" ]; then
             fallback "force_fallback set: GitHub runners regardless of spend"
+          fi
+          if [ "$SHOW_MODE" = "true" ]; then
+            proceed "SHOW_MODE=true: Blacksmith runners regardless of spend (gh variable set SHOW_MODE --body false to cap again)"
           fi
           if [ -z "$BLACKSMITH_ORG_TOKEN" ]; then
             proceed "no BLACKSMITH_ORG_TOKEN secret: gate inactive, Blacksmith runners"

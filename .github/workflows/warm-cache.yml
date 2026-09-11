@@ -32,15 +32,18 @@ name: Warm the release build cache
 # provider's backend is not readable from the other's runners). macOS stays on
 # GitHub's free standard runners.
 #
-# Manual only, as of 2026-09-09
-# -----------------------------
+# Nightly only in show mode, as of 2026-09-11
+# -------------------------------------------
 # Blacksmith bills per minute past a free tier worth about $12/month (3000
 # "2 vCPU Linux minutes"; a 16 vCPU Windows minute burns 16 of them). This
 # workflow was the bulk of the bill: the nightly cron cost ~$0.42/day on its
 # own, and the push trigger on Cargo.toml/Cargo.lock fired on every release's
 # version bump to re-save a byte-identical cache (version bumps do not move the
-# dependency hash; see plans/releasing.md). Both triggers are gone; releases
-# are what refresh the cache's 7-day expiry now, by restoring it.
+# dependency hash; see plans/releasing.md). The push trigger is gone for good.
+# The nightly cron stays in the file but its jobs only run while the SHOW_MODE
+# repository variable is "true" (see cost-gate.yml for the toggle); a skipped
+# scheduled run allocates no runner and costs nothing. Outside show mode,
+# releases are what refresh the cache's 7-day expiry, by restoring it.
 #
 # What that costs a release:
 #   - Nothing, normally. rust-cache's restore-key is a prefix without the
@@ -52,10 +55,15 @@ name: Warm the release build cache
 #       gh workflow run warm-cache.yml --repo TomSawyerLabs/empyrean-gate
 
 on:
+  schedule:
+    # 09:00 UTC, after the small hours in US/Pacific, so a release cut during
+    # the day gets a cache warmed from that morning's master. Skipped unless
+    # SHOW_MODE is "true"; see the gate job.
+    - cron: "0 9 * * *"
   workflow_dispatch:
 
-# Two manual warms started back to back would race to save the same key; the
-# later one wins and the earlier is wasted work.
+# A warm started by the nightly cron and a manual one would race to save the
+# same key; the later one wins and the earlier is wasted work.
 concurrency:
   group: warm-cache-${{ github.workflow }}
   cancel-in-progress: true
@@ -68,6 +76,9 @@ jobs:
   # when the gate says the month's free tier is spent this workflow skips
   # rather than diverting. See cost-gate.yml.
   gate:
+    # The cron fires every night; only show mode lets it do anything. Manual
+    # dispatch always goes through to the gate.
+    if: github.event_name != 'schedule' || vars.SHOW_MODE == 'true'
     uses: ./.github/workflows/cost-gate.yml
     secrets: inherit
 

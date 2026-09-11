@@ -2,11 +2,12 @@
 
 ## Goal
 
-Keep the Blacksmith CI bill for `TomSawyerLabs/empyrean-gate` at $0/month now
-that the show is over. The 16-vCPU runners were worth paying for when releases
-were cut many times a day; they are not worth a standing bill for a project that
-releases occasionally. Keep the speed where it is free, drop the spend that
-bought nothing.
+Keep the Blacksmith CI bill for `TomSawyerLabs/empyrean-gate` at $0/month
+between shows, and make paying for speed a one-command toggle for the weeks a
+show is on. The 16-vCPU runners are worth paying for when releases are cut many
+times a day; they are not worth a standing bill for a project that releases
+occasionally. Keep the speed where it is free, drop the spend that bought
+nothing, and flip to "spend freely" only on purpose.
 
 ## Environment / context
 
@@ -100,6 +101,35 @@ bought nothing.
       34439672577 with `force_fallback=true`): gate 0 min on ubuntu-latest, then
       windows-latest 25 min, ubuntu-latest 16 min, macos-latest 13 min, all
       green, $0 on Blacksmith. Those are the cold times a diverted release pays.
+- [x] Show-mode toggle (2026-09-11, Cameron asked): `SHOW_MODE` repository
+      variable, read by the gate and by warm-cache's nightly cron. Created set to
+      `false`.
+- [ ] Prove the toggle live: set `SHOW_MODE=true`, dispatch build.yml, confirm
+      the gate's reason names show mode, cancel, set it back to `false`.
+
+## Show mode: the toggle
+
+One repository variable, no commit, takes effect on the next run:
+
+```
+gh variable set SHOW_MODE --body true  --repo TomSawyerLabs/empyrean-gate   # on
+gh variable set SHOW_MODE --body false --repo TomSawyerLabs/empyrean-gate   # off
+gh variable get SHOW_MODE --repo TomSawyerLabs/empyrean-gate                # ask
+```
+
+While it is `true`:
+- cost-gate.yml hands out the Blacksmith labels regardless of month-to-date
+  spend (reason line says so), for release.yml, build.yml and warm-cache.yml.
+- warm-cache.yml's nightly 09:00 UTC cron actually runs (~$0.42/night). Outside
+  show mode the cron still fires but its gate job is skipped, which allocates no
+  runner and costs nothing. The Cargo.lock push trigger is gone for good.
+- The $1 spend alert on the Blacksmith dashboard still emails on the first paid
+  dollar. Raise it on the dashboard for the show if that is unwelcome; that is a
+  per-change authorization from Cameron, not something to do automatically.
+
+Show-mode cost, from August's cadence (19 releases in 5 days): ~$0.55/release
+plus $0.42/night, so a two-week show with ~40 releases is roughly $28 list, $16
+after the free tier.
 
 ## Expected steady state
 
