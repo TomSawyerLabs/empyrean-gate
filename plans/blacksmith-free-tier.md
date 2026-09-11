@@ -104,8 +104,14 @@ nothing, and flip to "spend freely" only on purpose.
 - [x] Show-mode toggle (2026-09-11, Cameron asked): `SHOW_MODE` repository
       variable, read by the gate and by warm-cache's nightly cron. Created set to
       `false`.
-- [ ] Prove the toggle live: set `SHOW_MODE=true`, dispatch build.yml, confirm
-      the gate's reason names show mode, cancel, set it back to `false`.
+- [x] Proved the toggle live (2026-09-11, build.yml run 34638776414, cancelled
+      seconds after the gate): with `SHOW_MODE=true` the gate said "SHOW_MODE=true:
+      Blacksmith runners regardless of spend" and the build jobs got the
+      Blacksmith labels; `vars.SHOW_MODE` resolves inside the reusable workflow.
+      Variable set back to `false` afterwards.
+- [ ] Check the morning after: the 09:00 UTC warm-cache cron should show a run
+      whose gate job is *skipped* while SHOW_MODE is false (`gh run list
+      --workflow warm-cache.yml --limit 1`, then `gh run view <id>`).
 
 ## Show mode: the toggle
 
