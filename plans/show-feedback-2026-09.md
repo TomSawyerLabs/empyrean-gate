@@ -132,9 +132,13 @@ touches. This file is the single place to look for "did we do X yet".
     on start, on each hot-plug and once a minute; counts TDRs via an XPath
     `timediff()` query on System/Display 4101; both land in status and a
     LinkBanner. Verified on the dev laptop against three real monitors
-    (found a portrait-rotated one and fixed the false positive). Still to
-    do: run script §5 on the show machine when it is online (offline, last
-    seen 2026-09-06).
+    (found a portrait-rotated one and fixed the false positive). Cameron
+    2026-09-12: the show machine IS the Iris Xe box at 192.168.1.95 (user
+    entheos = `ssh empyreangate` over the tailnet), not camtop — so the
+    2026-09-06 degraded-link evidence is from the show machine itself. Still
+    to do there when it is online: run script §5 and paste under "§5
+    Results — empyreangate"; and the first v0.11.0+ launch on it will
+    surface the degraded link in the LinkBanner if the cable is still bad.
 11. **GPU/CPU load histogram/sparkline**, a dismissible toast with details on
     sustained underperformance, and quick load-shedding options (reduce client
     preview frame rate, side render). Status: DONE (4b47535): load sparkline
