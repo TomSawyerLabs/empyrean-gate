@@ -154,16 +154,12 @@ touches. This file is the single place to look for "did we do X yet".
     layer stack; only the Patch tab and the Control "Layers" heading know about
     it today). Status: DONE (a457523): PatchChip in the top bar + phone menu.
 13. **Patches into the Ready panel.** Ready holds exactly one `SavedStack`
-    (layers only); a patch cannot be prepared off-air. Status: DEFERRED with a
-    design, not shipped in v0.11.0. Design: `SavedStack` grows
-    `patch: Option<PatchDoc>` (a snapshot, not an id, so Take is atomic and a
-    later edit to the saved patch does not change what is on Bus B); the Ready
-    bus engine compiles it with `set_patch_shader` and runs its own
-    `patch::eval::Runtime` (it already owns phases/walks), the Ready tray gets
-    a "PATCHES" row next to the scenes, and Take sets `active_patch` instead
-    of clearing it. Cost: a second patch runtime + a compile on prepare; the
-    engine's `ready_inputs.patch_params = None` guard becomes "the Ready
-    runtime's params". About a day; wants its own plan doc.
+    (layers only); a patch cannot be prepared off-air. Status: SUPERSEDED
+    (2026-09-12) by `plans/one-look-model.md` — Cameron asked for the larger
+    redesign instead ("force everything through the patch system"). Bus B
+    holding a patch falls out of that plan's step 4 (buses hold looks); the
+    standalone F13 design is kept there as the pull-forward option if a show
+    needs it first.
 14. **How many Ready panels? Per-client opt-in? Separate limit?** Today there is
     exactly one global Ready bus with its own GPU engine. Status: DECIDED —
     stays one global bus; private per-client buses only on demand, capped at

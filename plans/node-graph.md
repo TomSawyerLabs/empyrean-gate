@@ -125,6 +125,11 @@ CPU→uniform→GPU. We're generalizing "hardcoded uniforms + switch on kind" in
 
 ## Migration / coexistence
 
+> **Superseded 2026-09-12 by `plans/one-look-model.md`**, which turns the
+> paragraph below into a six-step staircase (operator parity → generator
+> parity → converter → buses hold looks → game node → flag day after a show).
+> The end state is unchanged; kept here for the record.
+
 - **End state (user decision 2026-08-21): the Layers tab is retired and
   removed** once patches reach generator parity. Dev-time bridge:
   `active_patch` set → the patch renders (stack ignored); unset → the stack
