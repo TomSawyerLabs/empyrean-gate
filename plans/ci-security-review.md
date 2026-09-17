@@ -1,6 +1,25 @@
 # CI / release-channel security review
 
-**Status:** review complete (2026-09-17). No changes made — findings only.
+**Status:** review complete; remediation in progress (2026-09-17).
+
+## Decisions already made (do not re-ask)
+
+Approved by the user on 2026-09-17, in response to the four recommendations
+below:
+
+1. **Tag-protection ruleset on `v*`, creation restricted to `cinderblock`** —
+   approved. Staged as `plans/ci-tag-ruleset.json`, **not yet applied**: it is a
+   GitHub org change and needs explicit per-change authorization.
+2. **Sign releases in CI** — approved, with "sign in CI" called out explicitly.
+   Provenance attestation chosen over an embedded minisign key. *Partially
+   done*; see "The signing gap" below — the CI half is committed, the
+   install-time enforcement half needs one more decision.
+3. **Updater rejects releases not authored by `github-actions[bot]`** —
+   approved and **done** (`3ba6a1c`).
+4. Environment reviewers / SHA-pinning / branch protection — user asked for
+   elaboration; written up under "Item 4, elaborated".
+5. **`waterbury`, `ericvicenti`, `allibell` keep `write`.** Settled — the answer
+   to finding 1 is tag protection, not reducing headcount.
 
 ## Goal
 
@@ -143,6 +162,126 @@ not argv (`cost-gate.yml:134`) — it will not appear in a process list.
 7. **Revisit whether `waterbury`, `ericvicenti`, `allibell` need `write`** — each
    is currently a full path to the rig.
 
+## The signing gap (item 2, and why it is not finished)
+
+The CI half is committed (`3ba6a1c`): `actions/attest-build-provenance@v3` now
+signs a provenance statement per release asset, binding its SHA-256 to the
+workflow, commit and tag. Any asset can be checked after the fact with:
+
+```
+gh attestation verify empyrean-gate-windows-x64.exe --repo TomSawyerLabs/empyrean-gate
+```
+
+**What that does not do is gate the install.** Verifying a Sigstore bundle
+offline requires the Sigstore TUF trust root plus a Rekor inclusion proof — the
+Fulcio certificate is valid for ~10 minutes, so without a trusted timestamp from
+the transparency log there is no way to know the signature was made while the
+cert was live. Reimplementing that in `updater.rs` (currently a blocking `ureq`
+client and ~25 lines of `sha2`) means either pulling in `sigstore-rs` and its
+async stack, or hand-rolling certificate-chain and log-proof verification. Both
+are a large amount of security-critical code whose failure mode is a rig that
+either refuses good updates mid-show or accepts bad ones.
+
+This was not clear when attestation was recommended, and it is the one place the
+earlier recommendation was too optimistic.
+
+**Recommended resolution: do both, because they cost different things.**
+
+- Keep attestation as the auditable, key-less provenance record (done).
+- Add an **ed25519 detached signature** over each asset in the same release job,
+  with the public key embedded in the binary. In-app verification is
+  `ed25519-dalek` and about 25 lines, offline, no trust root to keep fresh.
+  This becomes what the updater actually enforces.
+
+The objection to a long-lived signing key is that anyone able to run a workflow
+could sign arbitrary bytes with it. That is answerable with GitHub's own
+controls, and it is why this pairs with item 1 and item 4:
+
+- Put `RELEASE_SIGNING_KEY` in a **GitHub Environment** (`release`) rather than
+  as a plain repo secret.
+- Give that environment a **deployment tag rule of `v*`**, so no workflow run
+  from a branch can reach the key.
+- With `v*` tag creation restricted to `cinderblock` (item 1), the only way to
+  produce a signature is a tag only they can push.
+
+Net effect: the signature is cryptographic proof the asset came from a release
+the repo owner initiated, checkable on the show machine with no network and no
+Sigstore machinery.
+
+## Item 4, elaborated
+
+Three separate things were bundled together; they differ a lot in value and cost.
+
+### 4a. A GitHub Environment with required reviewers — recommended
+
+An Environment is a named gate a job can be attached to (`environment: release`),
+with two properties worth having:
+
+- **Required reviewers**: the `release` job pauses and will not run until a named
+  person clicks approve, in the Actions UI. The build still runs; only publishing
+  waits. So a pushed tag no longer silently becomes a live release.
+- **Deployment branch/tag rules**: restricts which refs may use the environment
+  *and its secrets*. This is the piece that makes a CI signing key safe (above).
+
+Cost: a couple of lines in `release.yml` plus one settings page. The reviewer
+click is a real cost on every release, but this repo cuts releases in bursts
+(six in the last two weeks of August), so consider whether the approval fatigue
+is worth it **once signing exists** — at that point the signature already proves
+provenance, and the reviewer gate is mostly protection against a compromised
+`cinderblock` account. My read: **adopt the environment for the deployment tag
+rule** (needed for signing regardless), and treat required reviewers as
+optional, probably off, given a one-person release process.
+
+### 4b. Pinning actions to full SHAs — recommended, low urgency
+
+Today every third-party action floats on a mutable reference:
+`actions/checkout@v5`, `oven-sh/setup-bun@v2`, `Swatinem/rust-cache@v2`,
+`actions/cache@v4`, `actions/upload-artifact@v6`, `actions/download-artifact@v7`,
+`actions/attest-build-provenance@v3`, and `dtolnay/rust-toolchain@stable` — the
+last being a mutable *branch*, the loosest of the set. If any of those
+repositories were compromised, the malicious code runs inside the job that
+builds the binary the rig installs, with the release token in scope.
+
+The fix is `uses: actions/checkout@<40-char-sha>  # v5.0.1` and turning on
+`sha_pinning_required`. The real cost is maintenance: pinned actions stop
+receiving fixes silently, so this wants Dependabot (`package-ecosystem:
+"github-actions"`) configured at the same time, or the pins rot and you end up
+worse off. Recommend doing both together, as one change, not urgently.
+
+Worth noting the asymmetry: `actions/*` are first-party and a compromise there is
+an industry-wide event. `dtolnay/rust-toolchain` and `Swatinem/rust-cache` are
+single-maintainer repos, and `@stable` is a branch. If only part of this gets
+done, pin those two.
+
+### 4c. Branch protection on `master` — optional, mostly orthogonal
+
+This was on the list because `master` has no protection at all, so the three
+write collaborators can push unreviewed commits. With tag protection in place
+this is **no longer a release-channel risk** — unreviewed code on `master` does
+not reach the rig unless `cinderblock` tags it.
+
+So it is now a code-quality question rather than a security one, and it has a
+genuine downside: a required-PR rule applies to the owner too, and would get in
+the way of how this repo is actually worked (direct pushes to `master`, multiple
+concurrent agent threads). Recommendation: **skip it**, or at most require the
+`Checks` workflow to pass, without requiring review.
+
+## Progress log
+
+- [x] Review access, rulesets, workflows, updater trust chain (2026-09-17).
+- [x] Item 3 — updater refuses non-`github-actions[bot]` releases (`3ba6a1c`).
+      `cargo check` clean, 250 lib tests pass.
+- [x] Item 2, CI half — `attest-build-provenance` on every release asset
+      (`3ba6a1c`), with per-job `id-token`/`attestations` permissions.
+- [ ] Item 1 — tag ruleset staged in `plans/ci-tag-ruleset.json`, **awaiting
+      authorization to apply**.
+- [ ] Item 2, enforcement half — ed25519 signature + embedded public key,
+      pending the decision in "The signing gap".
+- [ ] Item 4a — `release` environment with a `v*` deployment tag rule (needed by
+      the signing work).
+- [ ] Item 4b — SHA-pin actions + Dependabot for `github-actions`.
+- [ ] Item 4c — decided against for now (see above).
+
 ## Things not to do
 
 - Do not flip `auto_install` to `true` as a convenience before item 2 exists — it
@@ -157,10 +296,41 @@ not argv (`cost-gate.yml:134`) — it will not appear in a process list.
 
 ## Open questions for the user
 
-1. Do you want item 1 (tag protection) staged as an ops change now? It needs
-   per-change authorization on the GitHub org, so I have not touched it.
-2. Preference for item 2: GitHub build provenance attestation, or an embedded
-   minisign public key? Recommendation: **attestation** — no key material for
-   you to hold or rotate, and it binds the artifact to the workflow and commit
-   that produced it.
-3. Should the three `write` collaborators keep that level?
+1. **Authorization to apply the tag ruleset** in `plans/ci-tag-ruleset.json`?
+   The exact command is in that file's companion note below. Nothing has been
+   applied.
+2. **Add the ed25519 signature the updater actually enforces?** See "The signing
+   gap". Recommendation: yes — attestation alone does not gate the install, and
+   this is the difference between an audit trail and a control. Needs a
+   `release` Environment plus a generated keypair, so it needs authorization
+   too.
+3. Required reviewers on releases: my read is **no** once signing exists (see
+   4a), but it is a judgement call about how much you trust the single admin
+   account.
+
+### The exact command for item 1 (not run)
+
+```
+gh api -X POST repos/TomSawyerLabs/empyrean-gate/rulesets \
+  --input plans/ci-tag-ruleset.json
+```
+
+Blocks creation, update and deletion of `refs/tags/v*` for everyone except
+`cinderblock` (user id `419955`). Verified beforehand that the repo currently has
+zero rulesets, so this adds rather than replaces. It does not affect
+`release.yml`: the workflow publishes a *release* against an already-pushed tag
+(`gh release create --verify-tag`) and never creates tags, so it needs no bypass
+entry.
+
+Two variants, if the `User` actor type is rejected by the API — swap the
+`bypass_actors` entry for:
+
+```
+{ "actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always" }
+```
+
+(`actor_id` is ignored for that type). That grants bypass to org owners as a
+class rather than to one account, which is equivalent today — `cinderblock` is
+the sole owner — but would widen automatically if an owner were ever added.
+
+To undo: `gh api -X DELETE repos/TomSawyerLabs/empyrean-gate/rulesets/<id>`.
