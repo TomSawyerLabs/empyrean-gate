@@ -552,26 +552,42 @@ about what is actually checked — and what is not.
 - **Creating a `v*` tag is what authorizes a release**, so that is restricted to
   the repo owner. Tests run before a release is cut, but tests catch breakage,
   not malice — the tag is the real authorization step.
+- **Every release asset is signed, and the signature is checked before the
+  binary is ever run.** The release job makes an ed25519 detached signature
+  (`<asset>.sig`) over `empyrean-gate-release-v1\n<version>\n<asset>\n<sha256>`;
+  the updater verifies it against a public key compiled into the binary. The
+  version and asset name are inside the signed message, so a signature cannot
+  be lifted onto another platform's asset or replayed under a different version
+  number. A release with no signature is refused at check time, before the
+  operator is offered it, and an already-staged binary is re-verified rather
+  than trusted because it is already on disk.
 - **The SHA-256 check is an integrity check, not a signature.** The expected
   digest comes from the same GitHub API response as the download URL, so it
   proves the bytes arrived intact — which is what matters for a resumed download
-  over venue wifi — and proves nothing about who built them.
-- **Release assets carry build provenance attestation**, binding each binary's
-  digest to the workflow, commit and tag that produced it. Check any download
-  with:
+  over venue wifi — and proves nothing about who built them. The signature is
+  made over the digest this machine computes from the file, never the one the
+  API reported.
+- **Release assets also carry build provenance attestation**, binding each
+  binary's digest to the workflow, commit and tag that produced it:
 
   ```
   gh attestation verify empyrean-gate-windows-x64.exe --repo TomSawyerLabs/empyrean-gate
   ```
 
-  This is an audit trail rather than an install-time gate: verifying it offline
-  needs the Sigstore trust root and a transparency-log proof, which is not
-  something the updater reimplements.
+  That is the audit trail rather than the install-time gate — verifying it
+  offline needs the Sigstore trust root and a transparency-log proof, which the
+  updater does not reimplement. The ed25519 signature above is the gate.
 
-Auto-install being **off by default** is part of this picture, not just a
-show-safety choice: with it off, an operator action stands between any published
-release and the rig. `plans/ci-security-review.md` tracks the remaining gap —
-a signature the updater can verify offline.
+The signing key lives in a `release` GitHub Environment whose deployment tag
+rule is `v*`, so no workflow run from a branch can reach it; combined with `v*`
+tag creation being owner-only, the only way to produce a valid signature is a
+tag the owner pushed. If the key in CI and the key compiled into the binary ever
+stop being a pair, the release **fails** instead of shipping — the workflow
+verifies its own signature against the committed public key, and `cargo test`
+asserts the same pairing.
+
+Auto-install being **off by default** remains part of the picture: with it off,
+an operator action stands between any published release and the rig.
 
 ### When an update misbehaves
 

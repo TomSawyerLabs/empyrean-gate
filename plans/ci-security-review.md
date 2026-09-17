@@ -266,6 +266,59 @@ the way of how this repo is actually worked (direct pushes to `master`, multiple
 concurrent agent threads). Recommendation: **skip it**, or at most require the
 `Checks` workflow to pass, without requiring review.
 
+## Signing, as built (2026-09-17)
+
+Resolved in favour of the "do both" option above. `673e064`.
+
+- **CI** (`release.yml`, `release` job, `environment: release`): openssl makes an
+  ed25519 detached signature per asset, published as `<asset>.sig` (128 hex
+  chars). Message, no trailing newline:
+  `empyrean-gate-release-v1\n<version>\n<asset>\n<sha256>`.
+- **App** (`updater.rs`): public key committed at `src-tauri/release-signing.pub`
+  and embedded with `include_str!`; `verify_staged_file` computes the digest
+  locally, compares it to the API's, then verifies the signature over the
+  *locally computed* digest. A release with no `.sig` asset is refused in
+  `check_latest`, so it is never offered.
+- **Already-staged siblings are re-verified.** They previously passed on a digest
+  comparison alone, which would have let a binary staged before enforcement — or
+  altered while it sat there overnight — launch unchecked.
+
+### Guards against the failure that would strand the fleet
+
+The dangerous mistake is the CI key and the embedded key not being a pair: every
+fielded copy would reject every future update, discoverable only after release.
+Two independent checks:
+
+1. `release.yml` rebuilds the public key from the committed
+   `release-signing.pub` and verifies its own freshly made signature against it.
+   Fails the release if it does not match.
+2. `updater::tests::the_shipped_public_key_matches_the_signing_key_used_in_ci`
+   asserts the same pairing on every `cargo test`, via a signature over a fixed
+   synthetic triple (`0.0.0-keycheck`, all-zero digest).
+
+**Both must be regenerated if the key is rotated** — see the doc comment on that
+test for the exact commands.
+
+### Gotchas found while building it (do not rediscover)
+
+- **`openssl pkey -pubin -inform DER` does not honour `-pubin` on stdin** — it
+  reports `Could not find private key of Public Key` and exits nonzero. The
+  working route is assembling the PEM armor by hand:
+  `-----BEGIN PUBLIC KEY-----` + base64 of
+  `302a300506032b6570032100` ++ the 32 raw key bytes.
+- **`set -euo pipefail` did not abort the loop** when `openssl pkeyutl -verify`
+  failed in a local dry run of the step. The self-check that exists specifically
+  to fail the release is therefore written as an explicit
+  `if ! openssl …; then exit 1; fi`, not left to shell error handling. Worth
+  remembering for any future guard in these workflows.
+- Dry-running the step is worth it: extract it with
+  `yaml.safe_load` → `jobs.release.steps[name="Sign release assets"].run`, run it
+  against a fake `assets/` tree, and check the three failure modes (missing
+  secret, garbage secret, mismatched public key) all exit nonzero and publish no
+  `.sig`. All three were verified before commit.
+- `head -c 1500000 /dev/urandom` is pathologically slow under Git Bash on this
+  machine — it blew a 120 s tool timeout. Use `yes … | head -N` for fixtures.
+
 ## Progress log
 
 - [x] Review access, rulesets, workflows, updater trust chain (2026-09-17).
@@ -273,22 +326,118 @@ concurrent agent threads). Recommendation: **skip it**, or at most require the
       `cargo check` clean, 250 lib tests pass.
 - [x] Item 2, CI half — `attest-build-provenance` on every release asset
       (`3ba6a1c`), with per-job `id-token`/`attestations` permissions.
-- [ ] Item 1 — tag ruleset staged in `plans/ci-tag-ruleset.json`, **awaiting
-      authorization to apply**.
-- [ ] Item 2, enforcement half — ed25519 signature + embedded public key,
-      pending the decision in "The signing gap".
-- [ ] Item 4a — `release` environment with a `v*` deployment tag rule (needed by
-      the signing work).
+- [x] Item 1 — tag ruleset **applied by the user** 2026-09-17. Verified live:
+      ruleset id `23616688`, target `tag`, active, rules
+      `creation`/`update`/`deletion` on `refs/tags/v*`, sole bypass actor
+      `User:419955` (`cinderblock`).
+- [x] Item 2, enforcement half — ed25519 signature + embedded public key
+      (`673e064`). 257 lib tests pass.
+- [ ] **Blocking the next release:** create the `release` environment with a
+      `v*` deployment tag rule and load `RELEASE_SIGNING_KEY` into it. Until
+      that exists the Release workflow fails by design, loudly, rather than
+      publishing something the fleet would reject. Commands in "Handover".
+- [ ] Delete `~/empyrean-release-signing-key.pem` once the secret is loaded.
 - [ ] Item 4b — SHA-pin actions + Dependabot for `github-actions`.
 - [ ] Item 4c — decided against for now (see above).
 
+## Handover — the three commands that arm signing
+
+Not run by me: these create a GitHub environment and load a credential, which
+needs its own authorization. **The next `v*` tag will fail the Release workflow
+until all three are done** — by design, since publishing an unsigned release
+would be rejected by every copy in the field.
+
+The private key is at `C:\Users\camer\empyrean-release-signing-key.pem`
+(ACL restricted to `camer`). Its public half is already committed at
+`src-tauri/release-signing.pub`.
+
+**1. Create the `release` environment and allow only `v*` tags to use it.**
+
+```
+gh api -X PUT repos/TomSawyerLabs/empyrean-gate/environments/release \
+  -F 'deployment_branch_policy[protected_branches]=false' \
+  -F 'deployment_branch_policy[custom_branch_policies]=true'
+
+gh api -X POST repos/TomSawyerLabs/empyrean-gate/environments/release/deployment-branch-policies \
+  -f name='v*' -f type=tag
+```
+
+**2. Load the signing key into that environment** (Git Bash):
+
+```
+gh secret set RELEASE_SIGNING_KEY \
+  --env release \
+  --repo TomSawyerLabs/empyrean-gate \
+  < ~/empyrean-release-signing-key.pem
+```
+
+Or PowerShell:
+
+```
+Get-Content "$env:USERPROFILE\empyrean-release-signing-key.pem" -Raw |
+  gh secret set RELEASE_SIGNING_KEY --env release --repo TomSawyerLabs/empyrean-gate
+```
+
+**3. Delete the local private key** — CI is the only place it should exist:
+
+```
+Remove-Item "$env:USERPROFILE\empyrean-release-signing-key.pem"
+```
+
+Keep a copy in a password manager first **only if** you want to be able to
+re-point the same key later; losing it is recoverable anyway (generate a new
+pair, update `src-tauri/release-signing.pub`, regenerate the probe signature in
+`updater.rs`, ship a release — fielded copies verify against the key *they*
+shipped with, so a rotation needs one release signed by the OLD key to carry the
+new public key out, then the next release can use the new one).
+
+**Verify afterwards:**
+
+```
+gh api repos/TomSawyerLabs/empyrean-gate/environments/release/deployment-branch-policies
+gh secret list --env release --repo TomSawyerLabs/empyrean-gate
+```
+
+### The initial rollout is safe (checked)
+
+Enforcement does not strand anything already in the field, because the copy doing
+the installing is the one that decides:
+
+- v0.11.0 and older have no signature code, so they install the next release on
+  the digest check alone — as they always did. They are not broken by `.sig`
+  assets appearing.
+- The first release built from `673e064` onward both ships the enforcing updater
+  and is itself signed, so from that point every copy verifies every subsequent
+  release against the key it shipped with.
+
+So there is no chicken-and-egg step and no flag day. The only ordering
+requirement is the one below, for rotation.
+
+### Key rotation is a two-release operation — do not do it in one
+
+Fielded binaries verify against the key compiled into them. Shipping a release
+signed by a NEW key that fielded copies have never seen means they reject it and
+stop updating — permanently, without a manual reinstall. To rotate: release N
+carries the new `release-signing.pub` but is still **signed by the old key**;
+release N+1 is signed by the new one. Anything older than N needs a manual
+download.
+
 ## Things not to do
 
-- Do not flip `auto_install` to `true` as a convenience before item 2 exists — it
-  removes the only human check between a compromised account and the show machine.
-- Do not read the existing SHA-256 verification as a security control. It is a
-  corruption check. Saying "we verify the hash" out loud invites exactly the
-  wrong conclusion.
+- Do not read the SHA-256 verification as a security control. It is a corruption
+  check — the digest and the download URL come from the same API response.
+  Saying "we verify the hash" out loud invites exactly the wrong conclusion. The
+  ed25519 signature is the control; the hash is what makes a resumed download
+  safe.
+- Do not rotate the signing key in a single release (see above), and do not
+  change `signing_message`'s format without regenerating the test vector — the
+  two implementations must agree byte for byte.
+- Do not add `|| true` or drop the explicit `if !` around the signature
+  self-check in `release.yml`. A dry run showed `set -e` does not reliably abort
+  there, and a guard that cannot fail the release is decoration.
+- `auto_install` is now defensible to turn on if wanted — a published release
+  has to carry a valid signature from an owner-pushed tag. Still a show-safety
+  decision rather than a security one now, so leave it to the operator.
 - Never create a repo named `empyrean-gate` under the `cinderblock` account —
   binaries at/below v0.10.9 still poll that path via GitHub's transfer redirect
   and would start reading someone else's releases (already noted in
@@ -296,41 +445,14 @@ concurrent agent threads). Recommendation: **skip it**, or at most require the
 
 ## Open questions for the user
 
-1. **Authorization to apply the tag ruleset** in `plans/ci-tag-ruleset.json`?
-   The exact command is in that file's companion note below. Nothing has been
-   applied.
-2. **Add the ed25519 signature the updater actually enforces?** See "The signing
-   gap". Recommendation: yes — attestation alone does not gate the install, and
-   this is the difference between an audit trail and a control. Needs a
-   `release` Environment plus a generated keypair, so it needs authorization
-   too.
-3. Required reviewers on releases: my read is **no** once signing exists (see
-   4a), but it is a judgement call about how much you trust the single admin
-   account.
+1. **Run the three "Handover" commands** to arm signing. Nothing else blocks a
+   release.
+2. Item 4b — SHA-pin the actions and add Dependabot for `github-actions`? Worth
+   doing, not urgent, and best as one change so the pins do not rot.
+3. Required reviewers on releases: my read is still **no** now that signing
+   exists — the signature already proves provenance, and the reviewer gate would
+   mostly guard against a compromised owner account.
 
-### The exact command for item 1 (not run)
-
-```
-gh api -X POST repos/TomSawyerLabs/empyrean-gate/rulesets \
-  --input plans/ci-tag-ruleset.json
-```
-
-Blocks creation, update and deletion of `refs/tags/v*` for everyone except
-`cinderblock` (user id `419955`). Verified beforehand that the repo currently has
-zero rulesets, so this adds rather than replaces. It does not affect
-`release.yml`: the workflow publishes a *release* against an already-pushed tag
-(`gh release create --verify-tag`) and never creates tags, so it needs no bypass
-entry.
-
-Two variants, if the `User` actor type is rejected by the API — swap the
-`bypass_actors` entry for:
-
-```
-{ "actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always" }
-```
-
-(`actor_id` is ignored for that type). That grants bypass to org owners as a
-class rather than to one account, which is equivalent today — `cinderblock` is
-the sole owner — but would widen automatically if an owner were ever added.
-
-To undo: `gh api -X DELETE repos/TomSawyerLabs/empyrean-gate/rulesets/<id>`.
+`plans/ci-tag-ruleset.json` is kept as the record of what was applied; the
+ruleset is live as id `23616688`. To undo it:
+`gh api -X DELETE repos/TomSawyerLabs/empyrean-gate/rulesets/23616688`.
