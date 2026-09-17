@@ -2,3 +2,8 @@
 # the checked-out file. Without this, a Windows checkout converts them to CRLF
 # and the drift guards fail on line endings alone.
 tests/fixtures/*.json eol=lf
+
+# The release signing public key is read two ways that must agree: include_str!
+# into the binary, and `tr -d '[:space:]'` in release.yml. Both tolerate CRLF,
+# but a key this load-bearing does not need a line-ending variable in it.
+src-tauri/release-signing.pub eol=lf
