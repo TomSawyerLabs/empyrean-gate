@@ -191,6 +191,14 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    # The signing key lives in this environment, not in plain repo secrets, so
+    # that a deployment TAG RULE of `v*` can decide which refs may reach it. A
+    # workflow run from a branch — including one added by a push to master —
+    # cannot read it. Combined with the ruleset that restricts who may create a
+    # `v*` tag, the only way to produce a release signature is a tag the repo
+    # owner pushed. That is the whole security argument for a long-lived key
+    # being acceptable here; see plans/ci-security-review.md.
+    environment: release
     steps:
       - uses: actions/checkout@v5
 
@@ -198,6 +206,103 @@ jobs:
         with:
           path: assets
           merge-multiple: true
+
+      # What the in-app updater actually enforces before it will run a
+      # downloaded binary. The attestation added in the build job is an audit
+      # trail; this is the gate, because it is verifiable offline on the rig
+      # with nothing but the public key compiled into the binary.
+      #
+      # The message signed is, with no trailing newline:
+      #
+      #   empyrean-gate-release-v1\n<version>\n<asset name>\n<sha256 hex>
+      #
+      # Version and asset name are in there so a signature cannot be lifted onto
+      # another platform's asset or replayed under a different version.
+      # `updater::signing_message` builds the identical string and
+      # `updater::tests::signature_vector_from_openssl` pins the format against a
+      # signature made by this exact openssl invocation.
+      - name: Sign release assets
+        env:
+          SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SIGNING_KEY:-}" ]; then
+            echo "::error::RELEASE_SIGNING_KEY is not available. Releases must be" \
+                 "signed — the updater refuses unsigned releases, so publishing one" \
+                 "would strand every fielded copy. Check the secret exists in the" \
+                 "'release' environment and that this ref matches its tag rule."
+            exit 1
+          fi
+
+          version="${GITHUB_REF_NAME#v}"
+
+          key=$(mktemp)
+          printf '%s\n' "$SIGNING_KEY" > "$key"
+
+          # Rebuild a public-key PEM from the raw 32 bytes committed at
+          # src-tauri/release-signing.pub — the same file the binary embeds via
+          # include_str!. Signing and then verifying against THAT, rather than
+          # against the private key's own public half, is the point: it proves the
+          # key in CI and the key in the shipped binary are a pair. Get this wrong
+          # and the failure would otherwise surface as a fleet that rejects every
+          # update, discoverable only after the release is out.
+          #
+          # Assembled as PEM armor directly rather than via `openssl pkey -pubin
+          # -inform DER`: that route silently declines to honor -pubin and reports
+          # "Could not find private key of Public Key", which cost a debugging
+          # round the first time. 302a300506032b6570032100 is the fixed Ed25519
+          # SubjectPublicKeyInfo prefix; the remaining 32 bytes are the key.
+          pub=$(mktemp)
+          {
+            echo "-----BEGIN PUBLIC KEY-----"
+            printf '302a300506032b6570032100%s' \
+              "$(tr -d '[:space:]' < src-tauri/release-signing.pub)" | xxd -r -p | base64
+            echo "-----END PUBLIC KEY-----"
+          } > "$pub"
+
+          shopt -s nullglob
+          signed=0
+          for f in assets/*; do
+            case "$f" in *.sig) continue ;; esac
+            name=$(basename "$f")
+            digest=$(sha256sum "$f" | cut -d' ' -f1)
+
+            msg=$(mktemp)
+            printf 'empyrean-gate-release-v1\n%s\n%s\n%s' "$version" "$name" "$digest" > "$msg"
+
+            if ! openssl pkeyutl -sign -rawin -inkey "$key" -in "$msg" -out "$f.sigbin"; then
+              echo "::error::could not sign $name — is RELEASE_SIGNING_KEY a valid ed25519 PEM?"
+              exit 1
+            fi
+
+            # Checked explicitly rather than leaning on `set -e`: this is the step
+            # whose whole purpose is to fail the release, so it does not get to
+            # depend on shell error handling being configured right.
+            if ! openssl pkeyutl -verify -rawin -pubin -inkey "$pub" \
+                 -in "$msg" -sigfile "$f.sigbin"; then
+              echo "::error::signature for $name does not verify against" \
+                   "src-tauri/release-signing.pub. The CI signing key and the key" \
+                   "compiled into the binary are not a pair — publishing this would" \
+                   "strand every fielded copy. Refusing to release."
+              exit 1
+            fi
+
+            xxd -p -c 256 "$f.sigbin" | tr -d '\n' > "$f.sig"
+            printf '\n' >> "$f.sig"
+            rm -f "$f.sigbin" "$msg"
+
+            echo "signed $name ($digest)"
+            signed=$((signed + 1))
+          done
+
+          rm -f "$key" "$pub"
+
+          if [ "$signed" -eq 0 ]; then
+            echo "::error::no assets were signed — nothing to release"
+            exit 1
+          fi
+          echo "signed $signed asset(s)"
 
       - name: Create GitHub release
         env:

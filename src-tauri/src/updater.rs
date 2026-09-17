@@ -116,6 +116,83 @@ struct Release {
     /// Asset size from the release metadata; drives the progress bar and the
     /// resume guard. 0 when the API didn't say (then there is no resume).
     size: u64,
+    /// Download URL of the detached `.sig` beside the asset. Its presence is
+    /// checked at check time — an unsigned release is refused before the
+    /// operator is ever offered it — but the 128 bytes are not fetched until
+    /// verification, so a 6-hourly check that finds nothing new costs one
+    /// request as before.
+    signature_url: String,
+}
+
+/// Ed25519 public key the Release workflow's signatures must verify against,
+/// as 64 hex characters.
+///
+/// Committed in its own file rather than inlined so that `release.yml` can read
+/// the same bytes: the workflow re-verifies its own signature against this file
+/// before publishing, which turns "the CI secret and the shipped key disagree"
+/// into a failed release instead of a fleet that refuses every future update.
+const RELEASE_PUBLIC_KEY_HEX: &str = include_str!("../release-signing.pub");
+
+/// The exact bytes a release signature is made over.
+///
+/// Binding the version and asset name alongside the digest — rather than signing
+/// the digest alone — is what stops a valid signature being moved somewhere it
+/// was not meant to go: an asset swapped between platforms (the Linux bare
+/// binary's signature presented for the AppImage), or an old release's signed
+/// pair replayed under a newer version number. The `v1` prefix is domain
+/// separation, so these signatures can never be confused with a signature this
+/// project might make over something else later.
+///
+/// `release.yml` builds this string with `printf` and no trailing newline. The
+/// two must agree byte for byte, which is what `signature_vector_from_openssl`
+/// pins down.
+fn signing_message(version: &str, asset: &str, sha256: &str) -> String {
+    format!("empyrean-gate-release-v1\n{version}\n{asset}\n{sha256}")
+}
+
+fn decode_hex(input: &str) -> Option<Vec<u8>> {
+    let s = input.trim();
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
+}
+
+/// Verify `signature_hex` over `(version, asset, sha256)` against the embedded key.
+///
+/// The digest passed in must be one this machine computed from the file on disk,
+/// never the one the API reported — otherwise the whole check reduces to asking
+/// the server to confirm its own claim.
+fn verify_release_signature(
+    version: &str,
+    asset: &str,
+    sha256: &str,
+    signature_hex: &str,
+) -> anyhow::Result<()> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    let key_bytes: [u8; 32] = decode_hex(RELEASE_PUBLIC_KEY_HEX)
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| {
+            anyhow::anyhow!("embedded release public key is not 32 bytes of hex — build is broken")
+        })?;
+    let key = VerifyingKey::from_bytes(&key_bytes)
+        .map_err(|e| anyhow::anyhow!("embedded release public key is not a valid ed25519 key: {e}"))?;
+
+    let sig_bytes: [u8; 64] = decode_hex(signature_hex)
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| anyhow::anyhow!("release signature is not 64 bytes of hex"))?;
+    let signature = Signature::from_bytes(&sig_bytes);
+
+    key.verify(signing_message(version, asset, sha256).as_bytes(), &signature)
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "release signature does not verify for {asset} v{version} — refusing to install it"
+            )
+        })
 }
 
 /// True when `target` already holds a plausible copy of the release.
@@ -304,7 +381,57 @@ fn check_latest() -> anyhow::Result<Option<Release>> {
         .ok_or_else(|| anyhow::anyhow!("release asset '{asset}' has no valid SHA-256 digest"))?
         .to_ascii_lowercase();
     let size = release_asset["size"].as_u64().unwrap_or(0);
-    Ok(Some(Release { version, url, sha256: digest, size }))
+    // Refuse an unsigned release here rather than at install time: the operator
+    // should never be shown an update that cannot pass verification, least of all
+    // as a button they can press between sets.
+    let signature_asset = format!("{asset}.sig");
+    let signature_url = body["assets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|a| a["name"].as_str() == Some(signature_asset.as_str()))
+        .and_then(|a| a["browser_download_url"].as_str())
+        .ok_or_else(|| {
+            anyhow::anyhow!("release v{version} has no signature '{signature_asset}' — refusing it")
+        })?
+        .to_string();
+    Ok(Some(Release { version, url, sha256: digest, size, signature_url }))
+}
+
+/// Fetch the detached signature for a release asset. 128 bytes of hex.
+fn fetch_signature(release: &Release) -> anyhow::Result<String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(20)))
+        .build()
+        .into();
+    let body = agent
+        .get(&release.signature_url)
+        .header("User-Agent", "empyrean-gate-updater")
+        .call()?
+        .body_mut()
+        .read_to_string()?;
+    Ok(body.trim().to_string())
+}
+
+/// Confirm a file on disk is the release it claims to be, then that the release
+/// was signed by the key this binary ships with.
+///
+/// Both halves matter and they are not the same check. The digest comparison
+/// catches a truncated or corrupted transfer and says so usefully; the signature
+/// is the only part that says anything about *who produced the bytes*, because
+/// the expected digest and the download URL come from the same API response and
+/// an attacker who controls one controls the other.
+fn verify_staged_file(path: &std::path::Path, release: &Release) -> anyhow::Result<()> {
+    let asset = asset_name().ok_or_else(|| anyhow::anyhow!("no release asset for this platform"))?;
+    let actual = sha256_file(path)?;
+    if actual != release.sha256 {
+        anyhow::bail!(
+            "binary failed SHA-256 verification (expected {}, got {actual})",
+            release.sha256
+        );
+    }
+    let signature = fetch_signature(release)?;
+    verify_release_signature(&release.version, asset, &actual, &signature)
 }
 
 fn versioned_path(version: &str) -> anyhow::Result<PathBuf> {
@@ -335,9 +462,11 @@ fn download_and_launch(release: &Release, state: &SharedState) -> anyhow::Result
 /// whole download over.
 fn stage(release: &Release, state: &SharedState) -> anyhow::Result<PathBuf> {
     let target = versioned_path(&release.version)?;
-    if already_staged(&target)
-        && matches!(sha256_file(&target), Ok(digest) if digest == release.sha256)
-    {
+    // A sibling left by a previous session takes the same verification as a fresh
+    // download — signature included. Skipping it here would mean a binary that
+    // landed on disk before signatures were enforced, or was tampered with while
+    // it sat there overnight, could be launched without ever being checked.
+    if already_staged(&target) && verify_staged_file(&target, release).is_ok() {
         log::info!("v{} is already staged at {}", release.version, target.display());
         return Ok(target);
     }
@@ -365,14 +494,12 @@ fn stage(release: &Release, state: &SharedState) -> anyhow::Result<PathBuf> {
     );
     // Hash the finished file from disk rather than the stream — a resumed
     // transfer only ever saw the tail, so the stream hash would be meaningless.
-    let actual_sha256 = sha256_file(&tmp)?;
-    if actual_sha256 != release.sha256 {
-        // A corrupt partial would fail every future resume the same way.
+    // Then check the signature over that locally computed digest.
+    if let Err(e) = verify_staged_file(&tmp, release) {
+        // A corrupt partial would fail every future resume the same way, and a
+        // file that fails the signature has no business staying on the rig.
         let _ = std::fs::remove_file(&tmp);
-        anyhow::bail!(
-            "downloaded binary failed SHA-256 verification (expected {}, got {actual_sha256})",
-            release.sha256
-        );
+        return Err(e.context("downloaded binary failed verification"));
     }
 
     #[cfg(unix)]
@@ -636,5 +763,178 @@ pub(crate) fn cleanup_old_binaries() {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A real signature produced by the same `openssl pkeyutl -sign -rawin`
+    /// invocation `release.yml` uses, over the canonical message for a made-up
+    /// release. Its job is to pin the wire format down across two
+    /// implementations: if `signing_message` ever changes shape, or the hex
+    /// decoding is wrong, or the signature scheme drifts, this fails.
+    ///
+    /// Regenerating (only ever needed if the message format changes on purpose):
+    ///   openssl genpkey -algorithm ed25519 -out k.pem
+    ///   printf 'empyrean-gate-release-v1\n0.12.0\n<asset>\n<sha256>' > msg
+    ///   openssl pkeyutl -sign -rawin -inkey k.pem -in msg | xxd -p -c 256
+    ///   openssl pkey -in k.pem -pubout -outform DER | tail -c 32 | xxd -p -c 32
+    const VECTOR_PUBKEY: &str =
+        "83b9ef1ab72aaac997434bacf04199b95624aacddd1c5a65142da9d7e115b6a0";
+    const VECTOR_SIG: &str = "54183ab4ab32b3fa52e3f19971b6f4e25f70595519df7c874fccfb7fa3ba6407\
+                              200c26148daefac837981fcaf32c63e74aec875822002c57708893a119d25d0d";
+    const VECTOR_VERSION: &str = "0.12.0";
+    const VECTOR_ASSET: &str = "empyrean-gate-windows-x64.exe";
+    const VECTOR_SHA: &str =
+        "3b1f8e9c0a7d6542e1b0c9d8a7f6e5d4c3b2a1908f7e6d5c4b3a29180f7e6d5c";
+
+    /// Verify with an explicitly supplied key, mirroring `verify_release_signature`
+    /// but without the embedded one, so the vector does not depend on which key the
+    /// repo currently ships.
+    fn verify_with(
+        pubkey_hex: &str,
+        version: &str,
+        asset: &str,
+        sha256: &str,
+        sig_hex: &str,
+    ) -> bool {
+        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        let Some(kb) = decode_hex(pubkey_hex).and_then(|b| <[u8; 32]>::try_from(b).ok()) else {
+            return false;
+        };
+        let Ok(key) = VerifyingKey::from_bytes(&kb) else {
+            return false;
+        };
+        let Some(sb) = decode_hex(sig_hex).and_then(|b| <[u8; 64]>::try_from(b).ok()) else {
+            return false;
+        };
+        key.verify(
+            signing_message(version, asset, sha256).as_bytes(),
+            &Signature::from_bytes(&sb),
+        )
+        .is_ok()
+    }
+
+    #[test]
+    fn signature_vector_from_openssl() {
+        assert!(
+            verify_with(
+                VECTOR_PUBKEY,
+                VECTOR_VERSION,
+                VECTOR_ASSET,
+                VECTOR_SHA,
+                VECTOR_SIG
+            ),
+            "the canonical signing message no longer matches what release.yml signs"
+        );
+    }
+
+    /// Each field is bound, so a signature cannot be moved to another version,
+    /// another platform's asset, or another binary.
+    #[test]
+    fn a_signature_does_not_transfer_to_anything_else() {
+        assert!(
+            !verify_with(VECTOR_PUBKEY, "0.12.1", VECTOR_ASSET, VECTOR_SHA, VECTOR_SIG),
+            "signature accepted under a different version"
+        );
+        assert!(
+            !verify_with(
+                VECTOR_PUBKEY,
+                VECTOR_VERSION,
+                "empyrean-gate-linux-x64",
+                VECTOR_SHA,
+                VECTOR_SIG
+            ),
+            "signature accepted for a different platform asset"
+        );
+        let other_sha = VECTOR_SHA.replace("3b1f", "4c20");
+        assert!(
+            !verify_with(
+                VECTOR_PUBKEY,
+                VECTOR_VERSION,
+                VECTOR_ASSET,
+                &other_sha,
+                VECTOR_SIG
+            ),
+            "signature accepted for different content"
+        );
+    }
+
+    #[test]
+    fn a_wrong_key_rejects_a_good_signature() {
+        let other = "5d1636371b31f07bb9e7c5153a8c97649b5cfa746536f9551f0bdf3447641dd4";
+        assert_ne!(other, VECTOR_PUBKEY);
+        assert!(!verify_with(
+            other,
+            VECTOR_VERSION,
+            VECTOR_ASSET,
+            VECTOR_SHA,
+            VECTOR_SIG
+        ));
+    }
+
+    /// The key that ships in this build has to be usable, or every update fails
+    /// on the rig rather than here. Guards a truncated or mangled
+    /// `release-signing.pub`.
+    #[test]
+    fn the_embedded_public_key_is_a_usable_ed25519_key() {
+        let bytes = decode_hex(RELEASE_PUBLIC_KEY_HEX)
+            .expect("release-signing.pub is not valid hex");
+        let bytes: [u8; 32] = bytes
+            .try_into()
+            .expect("release-signing.pub is not 32 bytes");
+        ed25519_dalek::VerifyingKey::from_bytes(&bytes)
+            .expect("release-signing.pub is not a valid ed25519 public key");
+    }
+
+    /// The committed public key and the private key held in CI are a pair.
+    ///
+    /// `release.yml` asserts the same thing before publishing, but it can only do
+    /// so once a release is already being cut — and the consequence of getting it
+    /// wrong is a fleet that refuses every future update. This catches it on any
+    /// `cargo test`, through the same `verify_release_signature` the rig uses.
+    ///
+    /// The signature is over a fixed synthetic triple (version `0.0.0-keycheck`,
+    /// an all-zero digest) that can never name a real release, so it is useless
+    /// as anything but this check. **Regenerate it whenever the signing key is
+    /// rotated**, alongside `release-signing.pub`:
+    ///
+    ///   printf 'empyrean-gate-release-v1\n0.0.0-keycheck\nempyrean-gate-windows-x64.exe\n%s' \
+    ///     0000000000000000000000000000000000000000000000000000000000000000 > msg
+    ///   openssl pkeyutl -sign -rawin -inkey <key>.pem -in msg | xxd -p -c 256
+    #[test]
+    fn the_shipped_public_key_matches_the_signing_key_used_in_ci() {
+        const PROBE_SIG: &str = "9e7392d42bd35f7ac1bcaa35275d5e5557e226d2e974b7616a39833d709fec36\
+                                 cab47b1154388bdb1f5c57303da40919eb12c68dc938556a0554cc9abda4d506";
+        verify_release_signature(
+            "0.0.0-keycheck",
+            "empyrean-gate-windows-x64.exe",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            PROBE_SIG,
+        )
+        .expect(
+            "release-signing.pub is not the public half of the CI signing key — \
+             releases signed in CI would be rejected by this build",
+        );
+    }
+
+    #[test]
+    fn garbage_signatures_are_rejected_without_panicking() {
+        for bad in ["", "zz", "not hex at all", &"ab".repeat(63), &"ab".repeat(65)] {
+            assert!(
+                verify_release_signature(VECTOR_VERSION, VECTOR_ASSET, VECTOR_SHA, bad).is_err(),
+                "accepted malformed signature {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn decode_hex_rejects_odd_and_non_hex_input() {
+        assert_eq!(decode_hex("00ff").unwrap(), vec![0x00, 0xff]);
+        assert_eq!(decode_hex("  00ff\n").unwrap(), vec![0x00, 0xff]);
+        assert!(decode_hex("abc").is_none());
+        assert!(decode_hex("gg").is_none());
     }
 }

@@ -34,6 +34,11 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 cpal = "0.18.2"
 crossbeam-channel = "0.5.16"
 dirs = "6.0.0"
+# Verifies the release signature the Release workflow produces, so a binary the
+# updater is about to run is provably from a release the repo owner tagged. See
+# `updater::verify_release_signature`. Verify-only: no `rand_core`, since nothing
+# here ever generates a key — signing happens in CI with openssl.
+ed25519-dalek = { version = "2.2.0", default-features = false, features = ["std", "fast"] }
 env_logger = "0.11.11"
 futures-util = { version = "0.3.34", features = ["sink"] }
 fs2 = "0.4.3"
