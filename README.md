@@ -538,6 +538,41 @@ AppUserModelID, without which Windows would give each new binary its own button
 and break a pinned shortcut. A versioned binary sits beside the launcher between
 an update and the next restart, then is cleaned up.
 
+### What an update is trusted on
+
+An update is code that installs itself on the rig, so it is worth being precise
+about what is actually checked — and what is not.
+
+- **The release must come from the release workflow.** `release.yml` publishes
+  with `gh release create` under the workflow token, which GitHub records as
+  `github-actions[bot]`; the updater refuses any release published by anyone
+  else. Repo write access otherwise allows publishing a release *by hand* with
+  arbitrary binaries attached, bypassing the checked build. This is an account
+  name in an API response rather than a signature, so it is a gate, not proof.
+- **Creating a `v*` tag is what authorizes a release**, so that is restricted to
+  the repo owner. Tests run before a release is cut, but tests catch breakage,
+  not malice — the tag is the real authorization step.
+- **The SHA-256 check is an integrity check, not a signature.** The expected
+  digest comes from the same GitHub API response as the download URL, so it
+  proves the bytes arrived intact — which is what matters for a resumed download
+  over venue wifi — and proves nothing about who built them.
+- **Release assets carry build provenance attestation**, binding each binary's
+  digest to the workflow, commit and tag that produced it. Check any download
+  with:
+
+  ```
+  gh attestation verify empyrean-gate-windows-x64.exe --repo TomSawyerLabs/empyrean-gate
+  ```
+
+  This is an audit trail rather than an install-time gate: verifying it offline
+  needs the Sigstore trust root and a transparency-log proof, which is not
+  something the updater reimplements.
+
+Auto-install being **off by default** is part of this picture, not just a
+show-safety choice: with it off, an operator action stands between any published
+release and the rig. `plans/ci-security-review.md` tracks the remaining gap —
+a signature the updater can verify offline.
+
 ### When an update misbehaves
 
 Release builds on Windows have no console, so logs go to a file next to the config:
