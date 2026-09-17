@@ -304,12 +304,76 @@ jobs:
           fi
           echo "signed $signed asset(s)"
 
+      # Created as a DRAFT, filled, checked, and only then published.
+      #
+      # Two problems with the obvious `gh release create <tag> assets/*`, both hit
+      # for real on v0.12.0:
+      #
+      # 1. It uploads assets in parallel, and GitHub's upload endpoint returns
+      #    sporadic 500s ("Error saving asset", "Error creating asset temp dir") on
+      #    concurrent multi-hundred-MB uploads. Three consecutive attempts failed
+      #    on a different large asset each time. Serial uploads with retries are
+      #    slower and actually finish.
+      # 2. It publishes the release BEFORE the assets are attached. The updater
+      #    polls releases/latest every 6 h, so a partially uploaded release is a
+      #    release the fleet can see and try to install. A draft is invisible to
+      #    that endpoint, so the window does not exist.
+      #
+      # `gh` does delete the release when its own upload fails, which is why the
+      # three failures left nothing behind — but that is cleanup after the fact,
+      # not the same as never being visible.
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           ls -l assets
-          gh release create "$GITHUB_REF_NAME" assets/* \
+
+          gh release create "$GITHUB_REF_NAME" \
             --title "Empyrean Gate $GITHUB_REF_NAME" \
             --generate-notes \
-            --verify-tag
+            --verify-tag \
+            --draft
+
+          for f in assets/*; do
+            name=$(basename "$f")
+            uploaded=false
+            for attempt in 1 2 3 4 5; do
+              if gh release upload "$GITHUB_REF_NAME" "$f" --clobber; then
+                echo "uploaded $name"
+                uploaded=true
+                break
+              fi
+              delay=$((attempt * 10))
+              echo "::warning::upload of $name failed (attempt $attempt/5); retrying in ${delay}s"
+              sleep "$delay"
+            done
+            if [ "$uploaded" != true ]; then
+              echo "::error::gave up uploading $name after 5 attempts. The release is" \
+                   "left as a DRAFT with whatever uploaded, so nothing is served to the" \
+                   "fleet; finish or delete it by hand."
+              exit 1
+            fi
+          done
+
+          # Every binary must have landed with its signature beside it. Publishing a
+          # release whose .sig is missing would be refused by every fielded copy,
+          # which looks like "updates are broken" rather than "one upload failed".
+          present=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
+          missing=0
+          while read -r name; do
+            [ -n "$name" ] || continue
+            case "$name" in *.sig) continue ;; esac
+            if ! printf '%s\n' "$present" | grep -qx -- "$name.sig"; then
+              echo "::error::$name has no $name.sig in the release"
+              missing=1
+            fi
+          done <<< "$present"
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::refusing to publish an incompletely signed release (left as draft)"
+            exit 1
+          fi
+
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+          echo "published $GITHUB_REF_NAME with:"
+          printf '%s\n' "$present" | sed 's/^/  /'
