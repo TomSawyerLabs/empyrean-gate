@@ -240,6 +240,22 @@ fn is_newer(candidate: &str) -> bool {
     }
 }
 
+/// The account the Release workflow publishes as. `gh release create` running
+/// under the workflow's `GITHUB_TOKEN` is recorded by GitHub as this bot, and
+/// every release this repo has ever cut carries it.
+///
+/// Write access to the repo also permits publishing a release BY HAND — UI or
+/// API, with arbitrary binaries attached — which skips the checked build in
+/// `release.yml` entirely. Refusing any other author closes that path.
+///
+/// Be clear about what this is NOT: it trusts an account name in a JSON body,
+/// not a signature, and anyone who can make the Release workflow run can still
+/// get the bot to publish for them. It raises the bar from "has write access"
+/// to "can push a v* tag", which is why it is paired with the tag-protection
+/// ruleset rather than standing on its own. Real authenticity needs a signature
+/// over the asset — see `plans/ci-security-review.md`.
+const RELEASE_AUTHOR: &str = "github-actions[bot]";
+
 /// Latest release for this platform, as far as the GitHub API knows.
 fn check_latest() -> anyhow::Result<Option<Release>> {
     let Some(asset) = asset_name() else {
@@ -260,6 +276,16 @@ fn check_latest() -> anyhow::Result<Option<Release>> {
     let version = tag.trim_start_matches('v').to_string();
     if version.is_empty() {
         return Ok(None);
+    }
+    // Hard refusal rather than a warning: an unexpected author means the release
+    // did not come from the checked build, and there is no version of that worth
+    // installing on a rig. The error reaches the operator as the update status.
+    let author = body["author"]["login"].as_str().unwrap_or("<none>");
+    if author != RELEASE_AUTHOR {
+        anyhow::bail!(
+            "refusing release v{version}: published by '{author}', not {RELEASE_AUTHOR} \
+             — it did not come from the release workflow"
+        );
     }
     let release_asset = body["assets"]
         .as_array()

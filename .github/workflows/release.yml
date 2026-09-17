@@ -21,6 +21,14 @@ jobs:
 
   build:
     needs: gate
+    # Scoped per-job rather than inheriting the top-level `contents: write` the
+    # release job needs: this job only reads the repo. `id-token` mints the OIDC
+    # token the attestation is signed against, and `attestations` writes the
+    # resulting provenance record. See the attest step below.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -148,6 +156,30 @@ jobs:
           fi
           cp "$src" "release-assets/${{ matrix.asset }}.AppImage"
           ls -lh release-assets/
+
+      # Signs a provenance statement binding each asset's SHA-256 to THIS
+      # workflow, commit and tag, via Sigstore and GitHub's OIDC token. No key
+      # material to hold or rotate — the signing identity is the workflow run
+      # itself, and the record is public and auditable after the fact:
+      #
+      #   gh attestation verify empyrean-gate-windows-x64.exe \
+      #     --repo TomSawyerLabs/empyrean-gate
+      #
+      # That command is the supported way to check a downloaded binary really
+      # came from this pipeline. Note it is NOT what the in-app updater enforces
+      # at install time: verifying a Sigstore bundle offline needs the Sigstore
+      # trust root and a Rekor inclusion proof, which is not something to
+      # reimplement inside updater.rs. The updater's own gate is the release
+      # author check (`RELEASE_AUTHOR`); this attestation is the audit trail.
+      # See plans/ci-security-review.md for where the gap stands.
+      #
+      # Attesting here rather than in the release job is deliberate: this is
+      # where the bytes are produced, and the release job only re-uploads them,
+      # so the digests are the same either way.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: release-assets/*
 
       - uses: actions/upload-artifact@v6
         with:
