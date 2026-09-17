@@ -332,23 +332,31 @@ test for the exact commands.
       `User:419955` (`cinderblock`).
 - [x] Item 2, enforcement half — ed25519 signature + embedded public key
       (`673e064`). 257 lib tests pass.
-- [ ] **Blocking the next release:** create the `release` environment with a
-      `v*` deployment tag rule and load `RELEASE_SIGNING_KEY` into it. Until
-      that exists the Release workflow fails by design, loudly, rather than
-      publishing something the fleet would reject. Commands in "Handover".
-- [ ] Delete `~/empyrean-release-signing-key.pem` once the secret is loaded.
+- [x] Item 4a — `release` environment created and armed, 2026-09-17. Verified:
+      one protection rule, type `branch_policy` (no required reviewers, no wait
+      timer); deployment policy `name=v*  type=tag` (id `60274225`);
+      `RELEASE_SIGNING_KEY` present **in the environment**, and repo-level
+      secrets still hold only `BLACKSMITH_ORG_TOKEN`.
+- [ ] **Delete `~/empyrean-release-signing-key.pem`** — deliberately still
+      present. `gh secret list` proves the secret exists but not that its
+      contents are intact, and it is write-only afterwards. If the upload were
+      subtly wrong the fix is to re-upload; with the local copy gone the only
+      fix is a key rotation, which is a two-release operation. Delete it after
+      the first release that signs successfully.
+- [ ] First signed release — the one untested link is whether a tag-triggered
+      run can read the environment secret. Failure is safe by construction: the
+      guard aborts the job before publishing, so the worst case is a failed
+      release, never an unsigned one.
 - [ ] Item 4b — SHA-pin actions + Dependabot for `github-actions`.
 - [ ] Item 4c — decided against for now (see above).
 
 ## Handover — the three commands that arm signing
 
-Not run by me: these create a GitHub environment and load a credential, which
-needs its own authorization. **The next `v*` tag will fail the Release workflow
-until all three are done** — by design, since publishing an unsigned release
-would be rejected by every copy in the field.
+**DONE 2026-09-17**, authorized by the user. Recorded here as the record of what
+was applied and how to reproduce or undo it.
 
 The private key is at `C:\Users\camer\empyrean-release-signing-key.pem`
-(ACL restricted to `camer`). Its public half is already committed at
+(ACL restricted to `camer`). Its public half is committed at
 `src-tauri/release-signing.pub`.
 
 **1. Create the `release` environment and allow only `v*` tags to use it.**
@@ -445,8 +453,8 @@ download.
 
 ## Open questions for the user
 
-1. **Run the three "Handover" commands** to arm signing. Nothing else blocks a
-   release.
+1. **Cut a release when ready** — nothing blocks one now. Delete the local
+   private key once it succeeds (see progress log for why it is still there).
 2. Item 4b — SHA-pin the actions and add Dependabot for `github-actions`? Worth
    doing, not urgent, and best as one change so the pins do not rot.
 3. Required reviewers on releases: my read is still **no** now that signing
