@@ -299,6 +299,37 @@ Two independent checks:
 **Both must be regenerated if the key is rotated** — see the doc comment on that
 test for the exact commands.
 
+### The release upload path, and why v0.12.0 does not exist
+
+`v0.12.0` is a tag with no release attached. Three consecutive attempts to
+publish it failed with HTTP 500 from GitHub's upload endpoint — `Error creating
+asset temp dir`, then `Error saving asset` twice — on a different large asset
+each time (65 MB binary, 117 MB AppImage, a `.sig`). No GitHub incident was
+declared. Signing succeeded on every attempt, so the fault was never ours.
+
+Two defects in the release step that this exposed, both fixed in `b77443d`:
+
+1. `gh release create <tag> assets/*` uploads **in parallel**, and ~300 MB of
+   concurrent uploads is what the endpoint rejects. Now serial, one asset at a
+   time, five attempts each with linear backoff.
+2. It **published the release before attaching the assets**. The updater polls
+   `releases/latest`, so a partially uploaded release is one the fleet can see
+   and try to install. Now created `--draft`, filled, checked, then flipped with
+   `gh release edit --draft=false --latest`. `gh` does delete the release when
+   its own upload fails — which is why the three failures left nothing behind —
+   but that is cleanup after the fact, not never being visible.
+
+Before publishing, the step now asserts every non-`.sig` asset has a matching
+`<name>.sig` in the release. A release missing a signature is refused by every
+fielded copy, which presents as "updates are broken" rather than "one upload
+failed".
+
+**Why v0.12.1 rather than retagging v0.12.0:** the workflow fix only takes effect
+if it is in the tagged commit, and moving `v0.12.0` means deleting a remote ref —
+which the tag ruleset blocks by design, and which is not worth a bypass. Tagging
+forward is additive. The burned tag is harmless: `releases/latest` ignores tags
+with no release.
+
 ### Gotchas found while building it (do not rediscover)
 
 - **`openssl pkey -pubin -inform DER` does not honour `-pubin` on stdin** — it
@@ -337,16 +368,19 @@ test for the exact commands.
       timer); deployment policy `name=v*  type=tag` (id `60274225`);
       `RELEASE_SIGNING_KEY` present **in the environment**, and repo-level
       secrets still hold only `BLACKSMITH_ORG_TOKEN`.
-- [ ] **Delete `~/empyrean-release-signing-key.pem`** — deliberately still
-      present. `gh secret list` proves the secret exists but not that its
-      contents are intact, and it is write-only afterwards. If the upload were
-      subtly wrong the fix is to re-upload; with the local copy gone the only
-      fix is a key rotation, which is a two-release operation. Delete it after
-      the first release that signs successfully.
-- [ ] First signed release — the one untested link is whether a tag-triggered
-      run can read the environment secret. Failure is safe by construction: the
-      guard aborts the job before publishing, so the worst case is a failed
-      release, never an unsigned one.
+- [x] **First signed release: v0.12.1**, 2026-09-17, run `35270664545`. The
+      environment secret was reachable from a tag-triggered run and the pairing
+      self-check passed. Verified independently afterwards by downloading the
+      Windows asset, computing its digest locally and checking the signature
+      against the committed public key (`Signature Verified Successfully`), plus
+      a negative control with the version changed to `0.12.0` (fails, as the
+      binding intends). `gh attestation verify` also passes and binds the digest
+      to `release.yml@refs/tags/v0.12.1`, commit `62f2433`.
+- [ ] **Delete `~/empyrean-release-signing-key.pem`** — now safe (a real release
+      proved the secret's contents are good), left to the user because the
+      remaining decision is whether to keep a copy in a password manager first.
+      Without the local copy, re-adding the secret is impossible and the only
+      recovery is a key rotation, which is a two-release operation.
 - [ ] Item 4b — SHA-pin actions + Dependabot for `github-actions`.
 - [ ] Item 4c — decided against for now (see above).
 
