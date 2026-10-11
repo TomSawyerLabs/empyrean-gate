@@ -48,3 +48,45 @@ test("a pick that no longer exists falls back to the first interface", async ({ 
   await expect(page.locator(".modal select")).toHaveValue("10.255.0.77");
   await expect(page.locator(".join-url")).toContainText("10.255.0.77");
 });
+
+// Once a public URL exists it is the venue QR: the dialog opens on it, the
+// LAN join link stays a tap away for crew, and the poster carries the public
+// address instead of a token that could go stale.
+test("a public URL becomes the default QR and the poster's address", async ({ page }) => {
+  const clientId = `connect-public-${Date.now()}`;
+  await page.addInitScript((id) => localStorage.setItem("empyrean-client-id", id), clientId);
+  await page.request.post(`/mock/config?client=${clientId}`, {
+    data: {
+      public: {
+        enabled: true,
+        bind: "127.0.0.1",
+        port: 9521,
+        url: "https://play.example.com",
+        trust_forwarded_headers: true,
+        open: true,
+        allow_draw: true,
+        allow_effects: true,
+        allow_games: true,
+        allow_knobs: false,
+        input_level: 1,
+        preview_fps: 0,
+        preview_decimate: 12,
+        max_connections: 300,
+        max_per_ip: 6,
+        messages_per_second: 40,
+        keys: [],
+      },
+    },
+  });
+  await openConnect(page);
+  const access = page.getByRole("group", { name: "Access level" });
+  await expect(access.getByRole("button", { name: "Public" })).toHaveClass(/active/);
+  await expect(page.locator(".join-url")).toHaveText("https://play.example.com");
+  await expect(page.getByRole("link", { name: /Poster for event staff/ })).toHaveAttribute(
+    "href",
+    /url=https%3A%2F%2Fplay\.example\.com/,
+  );
+  // Crew still get the LAN link with its token.
+  await access.getByRole("button", { name: "Guest" }).click();
+  await expect(page.locator(".join-url")).toContainText("/?join=mock-join-token");
+});

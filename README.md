@@ -291,7 +291,9 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   run. **Secret keys** (`Settings → Public floor → Secret keys`) unlock
   **perks** for a group: a link (`/k/<secret>`), a QR, or a code word read out
   over the mic; five perks override the floor's toggles for the holder, the
-  rest (`big_brush`, `strobe`) are read by the page. TLS is deliberately the
+  rest (`big_brush`, `strobe`) are read by the page. Once a public URL is set
+  it is the venue QR too: ⊕ Connect opens on it and the poster carries it
+  (Guest and Admin stay a tap away for crew). TLS is deliberately the
   proxy's job. The operator port, meanwhile, **refuses proxied requests** —
   a proxy on the show machine connects from loopback, and loopback is the
   operator — and guests no longer receive other devices' ids, the join/staff

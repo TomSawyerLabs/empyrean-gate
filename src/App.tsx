@@ -349,7 +349,10 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
   // The public floor's URL, once a domain exists: the same QR dialog hands it
   // out, so the venue poster and the internet can share one address.
   const publicUrl = config?.public.enabled && config.public.url ? config.public.url : "";
-  const [access, setAccess] = useState<"guest" | "admin" | "public">("guest");
+  // Once the public URL exists it IS the venue QR (Cameron, 2026-10-11): one
+  // address to explain, reachable from the dance floor through the LAN DNS
+  // override and from home through the tunnel. Guest stays a tap away for crew.
+  const [access, setAccess] = useState<"guest" | "admin" | "public">(publicUrl ? "public" : "guest");
   const token = access === "admin" && adminToken ? adminToken : config?.server.join_token ?? "";
   const port = config?.server.port ?? 9520;
   const url = access === "public" && publicUrl ? publicUrl : `http://${chosen}:${port}/?join=${token}`;
@@ -360,9 +363,10 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
   // The poster carries the long-term staff token, which only the Gate machine
   // holds the right to hand out (same rule as the Admin QR).
   const staffToken = config?.server.staff_token ?? "";
-  const posterUrl = adminToken && staffToken && chosen
+  // With a public URL the poster carries that instead — no token to go stale.
+  const posterUrl = adminToken && (publicUrl || (staffToken && chosen))
     ? `${client.httpBase}/poster.html?${new URLSearchParams({
-        url: `http://${chosen}:${port}/?join=${staffToken}`,
+        url: publicUrl || `http://${chosen}:${port}/?join=${staffToken}`,
         ...(wifi ? { wifi: wifiPayload, ssid: wifi.wifi_ssid } : {}),
       }).toString()}`
     : "";

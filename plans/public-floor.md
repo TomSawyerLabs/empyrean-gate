@@ -240,6 +240,8 @@ a bloom at the array's centre so the group sees it land.
 - [x] Status/roster/admin messages.
 - [x] Public UI (`public.html`, `src/public/`).
 - [x] Settings panel + Connect QR.
+- [x] 2026-10-11 Connect defaults to the Public QR and the poster carries the
+      public URL once one is set (Cameron's answer to the venue-QR question).
 - [x] Tests (unit, Playwright, e2e script): 281 Rust, public-floor spec on
       Chromium + WebKit, two public-page layout cases per viewport, headless
       e2e script green.
@@ -248,14 +250,15 @@ a bloom at the array's centre so the group sees it land.
 
 ## Open questions for the user
 
-1. Public preview default is **off** (phones look up at the array). Fine, or
-   do you want the 5 fps thumbnail on by default? Recommendation: off; turn it
-   on from Settings for a show where people play from outside the venue.
-2. Should LAN phones (venue Wi-Fi) be sent to the public UI too, or keep the
-   full guest UI? Recommendation: point the venue QR at the public URL once it
-   exists — one UI to explain — and keep the LAN guest UI for crew.
-3. Easter-egg content: which perks matter first? The mechanism is generic;
-   `big_brush` and `strobe` are the planned examples.
+None. Answered 2026-10-11:
+
+1. Public preview stays **off by default** and is **sticky**: `public.preview_fps`
+   is ordinary persisted config, so turning it on survives restarts.
+2. **The venue QR is the public URL once it exists.** ⊕ Connect opens on the
+   Public QR when `public.url` is set and the poster carries that address
+   (no token to go stale); Guest and Admin stay a tap away for crew.
+3. **Perks are another thread's.** The mechanism (`big_brush`, `strobe` as
+   examples) stays as built.
 
 ## Things not to do
 

@@ -155,6 +155,10 @@ const MIME: Record<string, string> = {
 const timers = new WeakMap<object, ReturnType<typeof setInterval>>();
 /// Per-client status patches from `POST /mock/status` (see the route below).
 const overrides = new Map<string, Record<string, unknown>>();
+/// Per-client CONFIG patches from `POST /mock/config` — shallow-merged over
+/// the fixture, one top-level section at a time (`{ public: {...} }` replaces
+/// `config.public` wholesale, so send the whole section).
+const configOverrides = new Map<string, Record<string, unknown>>();
 /// Which client id each open socket said hello as.
 const clients = new WeakMap<object, string>();
 
@@ -228,6 +232,13 @@ const server = Bun.serve({
       const client = url.searchParams.get("client") ?? "";
       return req.json().then((patch) => {
         overrides.set(client, { ...(overrides.get(client) ?? {}), ...(patch as object) });
+        return Response.json({ ok: true });
+      });
+    }
+    if (url.pathname === "/mock/config" && req.method === "POST") {
+      const client = url.searchParams.get("client") ?? "";
+      return req.json().then((patch) => {
+        configOverrides.set(client, { ...(configOverrides.get(client) ?? {}), ...(patch as object) });
         return Response.json({ ok: true });
       });
     }
@@ -309,7 +320,8 @@ const server = Bun.serve({
           // test can address, so this is where an override lands.
           if (msg.client_id) clients.set(ws, msg.client_id);
           const patch = overrides.get(clients.get(ws) ?? "") ?? {};
-          ws.send(JSON.stringify({ type: "state", config, status: { ...status, ...patch } }));
+          const configPatch = configOverrides.get(clients.get(ws) ?? "") ?? {};
+          ws.send(JSON.stringify({ type: "state", config: { ...config, ...configPatch }, status: { ...status, ...patch } }));
           break;
         }
         case "subscribe_preview": {
