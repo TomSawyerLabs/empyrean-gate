@@ -119,36 +119,36 @@ Read 2026-10-11 from `server.rs`, `protocol.rs`, `state.rs`, `config.rs`:
 ## Plan / steps
 
 1. [x] Threat model + design; this plan.
-2. [ ] **Backend hardening of the main listener** *(current step)* (own commit): refuse proxied
+2. [x] **Backend hardening of the main listener** (own commit): refuse proxied
    requests; redact client ids / staff token / Wi-Fi password / client_list
    for non-admin remotes. Unit tests.
-3. [ ] **Config**: `PublicConfig` + `UnlockKey` in `AppConfig.public`;
+3. [x] **Config**: `PublicConfig` + `UnlockKey` in `AppConfig.public`;
    migrate defaults; regenerate fixtures; `server.refuse_proxied`.
-4. [ ] **Public registry + limiter** (`public.rs`): sessions, per-IP counts,
+4. [x] **Public registry + limiter** (`public.rs`): sessions, per-IP counts,
    blocklist, token-bucket limiter, forwarded-IP parsing, key redemption,
    effective capabilities. Unit tests.
-5. [ ] **Public listener** (`public_server.rs`): supervisor task (start/stop/
+5. [x] **Public listener** (`public_server.rs`): supervisor task (start/stop/
    rebind live from config), router (public.html, assets allowlist, `/ws`,
    `/health`), connection caps at upgrade (503 + Retry-After), Origin check,
    hello within 5 s, message allowlist, clamps + input_level scaling, preview
    clamps, 1 Hz `public_state`, strike counter, idle timeout.
-6. [ ] **Status + admin surface**: `RuntimeStatus.public` (listening, counts,
+6. [x] **Status + admin surface**: `RuntimeStatus.public` (listening, counts,
    player list capped), `BlockPublic`/`UnblockPublic` admin messages, roster
    shows public players.
-7. [ ] **Public UI** (`src/public/`): slim client with jittered backoff,
+7. [x] **Public UI** (`src/public/`): slim client with jittered backoff,
    touch surface (GateCanvas via `previewSource`, schematic ring when the
    stream is off), game chips/commands, pens + colours + effect pads, name
    chip, unlock toasts, "floor closed" / "full" states, code entry.
    `play.webmanifest`. Phone-first; layout gate cases.
-8. [ ] **Settings → Public floor panel**: enable/bind/port/URL, live toggles,
+8. [x] **Settings → Public floor panel**: enable/bind/port/URL, live toggles,
    input level, preview, caps, keys editor with copyable URL + QR, public
    roster + Block. ⊕ Connect gets a "Public" QR when a URL is set.
-9. [ ] **Tests**: Rust unit; mock-backend public protocol; Playwright
+9. [x] **Tests**: Rust unit; mock-backend public protocol; Playwright
    `public-floor.spec.ts`; `scripts/public-floor-test.ts` against a headless
    backend (allowlist refusals, limiter, unlock, 404 on `/handover`).
-10. [ ] **Docs**: README section; `docs/public-deploy.md` with cloudflared and
+10. [x] **Docs**: README section; `docs/public-deploy.md` with cloudflared and
     Caddy (DNS-01) recipes and the "never proxy 9520" warning.
-11. [ ] Final sweep: all checks green, plan closed.
+11. [x] Final sweep: all checks green (2026-10-11: cargo 281, unit 1, layout 96, behaviour 94, headless e2e), landed as `c0c078f` + `41d0065`.
 
 ## Secret-URL brainstorm (for Cameron)
 
@@ -204,6 +204,24 @@ a bloom at the array's centre so the group sees it land.
   listener maps `/` to `public.html` and 404s `index.html` on purpose.
 - Playwright behaviour specs run on both Chromium and WebKit; the public page
   is phone-first so it goes in the WebKit list too.
+- WebKit opens the WebSocket before React's first effect runs on a cold load
+  of the public page, so a status listener registered in that effect misses
+  the `open` event. The page now reads the client's current state right after
+  subscribing. Chromium never showed it.
+- The operator UI's `.name-chip-nudge` ("pick a name") is inline inside a
+  nowrap chip; at the public header's right edge its clipped box pokes past
+  the viewport and the layout gate flags it. On the public page the nudge
+  wraps under the name.
+- `GateCanvas` with a `previewSource` whose `subscribe` never emits is the
+  trick for pointer handling without a stream (the WebGL ring stays
+  transparent over the 2D schematic).
+- Playwright's strict mode: reusing `.roster-cutoff` for the public section
+  header broke the existing roster spec; it is `.roster-section` now.
+- The local e2e run: `EMPYREAN_CONFIG=<tmp>/config.json
+  target/debug/empyrean-gate.exe --headless` with `server.port` 9540,
+  `public.port` 9541, `output.enabled` false, `update.auto_check` false, one
+  key; then `PUBLIC_BASE=http://127.0.0.1:9541 OPERATOR_BASE=http://127.0.0.1:9540
+  KEY=<secret> bun scripts/public-floor-test.ts`. Passed 2026-10-11.
 - The forwarded-IP logic is only trusted when
   `public.trust_forwarded_headers` is on **and** the TCP peer is loopback or
   a private address — a direct internet connection to a `0.0.0.0` bind can
@@ -213,17 +231,20 @@ a bloom at the array's centre so the group sees it land.
 
 - [x] 2026-10-11 Pulled latest (`0b90d40`, a hardware-model commit; no code).
 - [x] 2026-10-11 Read the access model end to end; threat model above.
-- [x] Plan committed.
-- [ ] Main-listener hardening (`is_proxied`, redaction by role).
-- [ ] `PublicConfig` + fixtures.
-- [ ] `public.rs` registry/limiter/keys + tests.
-- [ ] `public_server.rs` listener + supervisor.
-- [ ] Status/roster/admin messages.
-- [ ] Public UI (`public.html`, `src/public/`).
-- [ ] Settings panel + Connect QR.
-- [ ] Tests (unit, Playwright, e2e script).
-- [ ] Docs (README + `docs/public-deploy.md`).
-- [ ] All checks green on the final tree; plan closed.
+- [x] Plan committed (`215fa54`).
+- [x] Backend landed as `c0c078f` (281 Rust tests green).
+- [x] Main-listener hardening (`is_proxied`, redaction by role).
+- [x] `PublicConfig` + fixtures.
+- [x] `public.rs` registry/limiter/keys + tests.
+- [x] `public_server.rs` listener + supervisor.
+- [x] Status/roster/admin messages.
+- [x] Public UI (`public.html`, `src/public/`).
+- [x] Settings panel + Connect QR.
+- [x] Tests (unit, Playwright, e2e script): 281 Rust, public-floor spec on
+      Chromium + WebKit, two public-page layout cases per viewport, headless
+      e2e script green.
+- [x] Docs (README + `docs/public-deploy.md`).
+- [x] All checks green on the final tree. Open questions below are follow-ups, not blockers.
 
 ## Open questions for the user
 
