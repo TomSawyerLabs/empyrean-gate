@@ -124,8 +124,16 @@ Perks are strings. Five override the floor's toggles for the holder — `draw`,
 `effects`, `games`, `knobs`, `preview` — so a group can keep drawing while
 the floor is closed to everyone else. The public page reads the rest:
 `big_brush` (strokes up to half the array), `strobe` (the strobe pad
-appears). Adding an easter egg is adding a string and the code that honours
-it.
+appears), `cone` (an orange traffic-cone shape pad appears), and
+`game:<kind>` for a **hidden game** — `game:perimeter` today — which gives
+the holder a Start pad for that game while nothing else is running, a Stop
+while the floor's own game runs, and the games capability whatever the
+floor's toggle says. A floor-started game stops by itself after three
+minutes without any game input, so a group that wanders off cannot leave
+its world over the show; the operator can stop it any time from the Games
+tab, and a game the operator started is never the floor's to stop. Adding an
+easter egg is adding a string and the code that honours it
+(`plans/hidden-modes.md`).
 
 Keys are bearer secrets: a photo of a card spreads one. **Max uses**,
 switching a key off, and rolling a new code (🎲) are the controls. Codes are

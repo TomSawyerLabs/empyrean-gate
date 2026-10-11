@@ -122,12 +122,15 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   thumbnail, scalar outputs get small amplitude meters with history.
 - **Effects**: transients that fire over the whole stack. Eight of them *move* —
   burst / strobe / swoosh / collapse / bloom / pinwheel / twinkle / wipe — from the
-  keyboard (1–8), a pad, or a remote client. Six are **shapes** — star / heart /
-  flower / diamond / triangle / moon — figures drawn from exact signed-distance
-  fields and *stamped where you tap*: pick one (pad, or `s h f d t m`), then every
-  press on the array plants that figure there, at the Size slider's size, holding
-  its size or growing or shrinking away over its life. On Control, which has no
-  array to aim at, a shape pad plants one centre-array instead. A tap with no shape
+  keyboard (1–8), a pad, or a remote client. Seven are **shapes** — star / heart /
+  flower / diamond / triangle / moon, and a traffic **cone** — figures drawn from
+  exact signed-distance fields and *stamped where you tap*: pick one (pad, or
+  `s h f d t m c`), then every press on the array plants that figure there, at the
+  Size slider's size, holding its size or growing or shrinking away over its life.
+  The cone is always orange with white bands whatever colour is picked, tip toward
+  the rim; on the public floor it is a perk (`cone`), not a default pad. On
+  Control, which has no array to aim at, a shape pad plants one centre-array
+  instead. A tap with no shape
   selected is still a burst, and a drag still draws with the current pen.
   **Hold or right-click a shape pad** for the two controls that decide whether a
   figure reads as a figure — outline thickness and interior brightness. The
@@ -173,8 +176,17 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   how hard the crowd is firing), plus **Ringfall** (pieces fall inward from the
   rim; complete rings collapse, and a deliberately small-piece-heavy bag of
   dots, dominoes, triominoes, and tetrominoes keeps awkward gaps playable).
-  Starting/stopping a
-  game is Gate-machine-only (and refused while a playlist runs, though a
+  A sixth, **Perimeter**, is *hidden*: Gate, Perimeter & Exodus's own — the
+  city is a rainbow party inside the orange trash fence (a pentagon around
+  the middle of the array), headlamps dash in from the dark to hop it, each
+  player drives a perimeter truck in their colour to run them down, Gate Road
+  carries ticketed traffic in through one corner and a plane lands at the
+  airport now and then; more drivers means more sneakers, and the rate backs
+  off a little for every one that gets in. The Games tab lists it under
+  Hidden; the public floor offers it only to a key carrying `game:perimeter`,
+  whose holders may start and stop it from their phones (it also stops itself
+  after three quiet minutes). Starting/stopping the other
+  games is Gate-machine-only (and refused while a playlist runs, though a
   playlist cue can itself *schedule* a game); playing is open to every
   connected phone, and every world runs fine with zero players, so there is
   nothing to wait for and nothing to ruin by leaving. Effects and drawing are
@@ -291,7 +303,9 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   run. **Secret keys** (`Settings → Public floor → Secret keys`) unlock
   **perks** for a group: a link (`/k/<secret>`), a QR, or a code word read out
   over the mic; five perks override the floor's toggles for the holder, the
-  rest (`big_brush`, `strobe`) are read by the page. Once a public URL is set
+  rest (`big_brush`, `strobe`, `cone`, `game:perimeter`) are read by the page —
+  the last two are the **hidden modes** (`plans/hidden-modes.md`): a shape pad
+  and a whole game that exist only for the group holding the key. Once a public URL is set
   it is the venue QR too: ⊕ Connect opens on it and the poster carries it
   (Guest and Admin stay a tap away for crew). TLS is deliberately the
   proxy's job. The operator port, meanwhile, **refuses proxied requests** —

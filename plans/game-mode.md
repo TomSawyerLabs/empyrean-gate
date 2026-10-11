@@ -81,6 +81,14 @@ GAME MODE banner. Commits `c7f3bb6`, `608a85d`, `f0b7a6b`.
       cue defaults) instead of the backend's conservative 3. Layout gate
       grew 16 cases: live + games tabs with a running game (banner + active
       play surface) at all 8 viewports, via the mock status patch.
+- [x] **Perimeter** (`game/perimeter.rs`, 2026-10-11): the first *hidden*
+      game — listed under Hidden on the Games tab, offered on the public
+      floor only to a key with `game:perimeter`, which may start and stop it
+      (plans/hidden-modes.md). World coordinates with cell rasterization at
+      pack time, trucks that route around the fence, Spokewar's drop-in rule
+      (AI drives until a human aims, takes back after ~15 s), Flak's pressure
+      window turned around (spawn rate rises per human driver, backs off per
+      recent crossing).
 - [ ] Next games: Comets (wants IMU steering — sensors.ts already streams
       orientation) or Pulse (wants a beat-grid claim mechanic).
 
@@ -131,6 +139,13 @@ GAME MODE banner. Commits `c7f3bb6`, `608a85d`, `f0b7a6b`.
    boss arena), not a defect.
 
 ## Game roster
+
+### Hidden (key holders only on the public floor)
+
+- **Perimeter** — built 2026-10-11. GPE's game: the trash-fence pentagon
+  around the middle, a rainbow city inside, trucks (one per color slot)
+  catching headlamps that dash in from the rim, Gate Road traffic through
+  one corner, an airport on the next edge. See plans/hidden-modes.md.
 
 ### Tier 1 — build first
 
