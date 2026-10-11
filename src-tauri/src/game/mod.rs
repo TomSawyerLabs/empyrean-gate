@@ -271,6 +271,14 @@ pub struct GameControl {
     pub commands: Vec<GameCommand>,
     /// When the current game was started (None while inactive).
     pub started: Option<Instant>,
+    /// Started from the public floor by a key holder (plans/hidden-modes.md).
+    /// The floor may stop such a game, and it stops itself after
+    /// `public::FLOOR_GAME_IDLE` without input. Never set by the operator's
+    /// own start, which also clears it.
+    pub from_floor: bool,
+    /// The most recent player input of any kind, for the floor game's idle
+    /// stop. Set on start too, so a fresh game has its full idle allowance.
+    pub last_input: Option<Instant>,
 }
 
 pub const MAX_QUEUED_INPUTS: usize = 256;
@@ -284,6 +292,8 @@ impl Default for GameControl {
             inputs: Vec::new(),
             commands: Vec::new(),
             started: None,
+            from_floor: false,
+            last_input: None,
         }
     }
 }

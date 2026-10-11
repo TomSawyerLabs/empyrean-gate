@@ -906,6 +906,9 @@ pub struct GameModeStatus {
     pub species: u8,
     /// Whether effects/drawing are overlaid on the game world.
     pub effects_overlay: bool,
+    /// Started from the public floor by a key holder; the floor may stop it
+    /// and it idles out by itself (plans/hidden-modes.md).
+    pub from_floor: bool,
     /// Name of the playlist blocking a manual start, when one is running.
     pub blocked_by_show: Option<String>,
 }
@@ -920,6 +923,7 @@ impl Default for GameModeStatus {
             // first status write.
             species: 3,
             effects_overlay: false,
+            from_floor: false,
             blocked_by_show: None,
         }
     }

@@ -10,6 +10,7 @@ import { SHAPE_STYLE_DEFAULTS } from "../shapeStyle";
 import type {
   EffectCfg,
   GameCommand,
+  GameKind,
   PenKind,
   PreviewFrame,
   PublicSnapshot,
@@ -252,5 +253,11 @@ export class PublicClient implements CanvasTransport {
 
   gameCommand(command: GameCommand) {
     this.send({ type: "game_command", command });
+  }
+
+  /** Start (kind) or stop (null) a hidden game this session's key unlocks
+   *  (plans/hidden-modes.md). The server refuses anything else. */
+  setGameMode(game: GameKind | null) {
+    this.send({ type: "set_game_mode", game });
   }
 }

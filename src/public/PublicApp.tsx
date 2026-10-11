@@ -12,7 +12,7 @@ import GateCanvas, { type DrawPen, type GatePreviewSource } from "../GateCanvas"
 import ShapeIcon from "../ShapeIcon";
 import ToolIcon from "../ToolIcon";
 import { EFFECTS, isShape, publicShapes } from "../effects";
-import { ERASE_SPECIES, GAMES, RINGFALL_COMMANDS, speciesColor } from "../gameCatalog";
+import { ERASE_SPECIES, GAMES, HIDDEN_GAMES, RINGFALL_COMMANDS, speciesColor } from "../gameCatalog";
 import { BUILTIN_LIVE_COLORS, type LiveColor } from "../liveColors";
 import { deviceNameUnconfirmed, generateDeviceName } from "../deviceNames";
 import type { EffectKind, PenKind, PublicSnapshot, ServerMsg } from "../types";
@@ -346,6 +346,12 @@ export default function PublicApp() {
     if (size > maxSize) setSize(maxSize);
   }, [maxSize, size]);
 
+  // Hidden games this session's keys unlock (plans/hidden-modes.md): a
+  // Start pad while nothing runs, a Stop while the floor's own game does.
+  const myHidden = HIDDEN_GAMES.filter((g) => g.perk && perks.has(g.perk));
+  const canStart = !!snap && !game && myHidden.length > 0 && !snap.game.blocked_by_show;
+  const canStop = !!snap && !!game && snap.game.from_floor && myHidden.some((g) => g.kind === game);
+
   // Playing a game takes the whole surface; otherwise the chosen tool does.
   const playing = !!game && caps.games;
   const drawing = !playing && tool.kind === "pen" && caps.draw;
@@ -406,7 +412,7 @@ export default function PublicApp() {
   const title = snap?.title || "Empyrean Gate";
 
   return (
-    <div className={`public-app ${anything ? "" : "closed"}`} data-connected={connected && snap ? "yes" : "no"}>
+    <div className={`public-app ${anything || canStart ? "" : "closed"}`} data-connected={connected && snap ? "yes" : "no"}>
       <header className="public-top">
         <span className={connected ? "conn-dot on" : "conn-dot"} aria-label={connected ? "connected" : "connecting"} />
         <h1>{title}</h1>
@@ -463,6 +469,23 @@ export default function PublicApp() {
         </div>
 
         <section className="public-tools" aria-label="What a touch does">
+          {canStart && (
+            <>
+              <div className="public-row-label">✦ Your key unlocks</div>
+              <div className="public-pads">
+                {myHidden.map((g) => (
+                  <button
+                    key={g.kind}
+                    className="public-pad perk public-start-game"
+                    onClick={() => client.setGameMode(g.kind)}
+                    title={g.blurb}
+                  >
+                    ▶ Start {g.name}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           {playing && gameInfo && (
             <>
               <div className="public-row-label">Your color</div>
@@ -506,6 +529,14 @@ export default function PublicApp() {
                 </div>
               )}
               {snap?.game.summary && <p className="hint public-summary">{snap.game.summary}</p>}
+              {canStop && (
+                <div className="public-stop-row">
+                  <button className="ghost public-stop-game" onClick={() => client.setGameMode(null)}>
+                    ■ Stop {gameInfo.name}
+                  </button>
+                  <span className="hint">Started from the floor · stops by itself after 3 quiet minutes</span>
+                </div>
+              )}
             </>
           )}
 

@@ -39,6 +39,7 @@ test("says hello as the public surface and offers only play tools", async ({ pag
   await expect(page.getByRole("button", { name: "Heart" })).toBeVisible();
   await expect(page.locator(".public-pad.shape")).toHaveCount(6);
   await expect(page.getByRole("button", { name: "Cone" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Start / })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Glow pen" })).toBeVisible();
   await expect(page.locator(".public-swatches .swatch")).toHaveCount(9);
   // The page itself never scrolls.
@@ -77,7 +78,7 @@ test("a running game takes the surface: colour chips, commands, game input", asy
   await page.addInitScript((id) => localStorage.setItem("empyrean-public-id", id), clientId);
   await page.request.post(`/mock/public?client=${clientId}`, {
     data: {
-      game: { active: "radial_tetris", summary: "Ringfall · Dot falling", species: 5, effects_overlay: false, blocked_by_show: null },
+      game: { active: "radial_tetris", summary: "Ringfall · Dot falling", species: 5, effects_overlay: false, from_floor: false, blocked_by_show: null },
     },
   });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -94,6 +95,61 @@ test("a running game takes the surface: colour chips, commands, game input", asy
   await expect.poll(() => sent.some((m) => m.includes('"game_input"') && m.includes('"species":2'))).toBe(true);
   await page.getByRole("button", { name: /Hard drop/ }).click();
   await expect.poll(() => sent.some((m) => m.includes('"hard_drop"'))).toBe(true);
+});
+
+test("a key that unlocks a hidden game offers Start, then Stop once the floor's game runs", async ({ page }) => {
+  const sent = collectSent(page);
+  const clientId = `public-hidden-${Date.now()}`;
+  await page.addInitScript((id) => localStorage.setItem("empyrean-public-id", id), clientId);
+  await page.request.post(`/mock/public?client=${clientId}`, {
+    data: { perks: ["game:perimeter"], unlocked: ["GPE"] },
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/public.html");
+  await page.locator('.public-app[data-connected="yes"]').waitFor({ state: "attached" });
+
+  // The Start pad sits above the ordinary tools, which stay available.
+  const start = page.getByRole("button", { name: /Start Perimeter/ });
+  await expect(start).toBeVisible();
+  await expect(page.getByRole("button", { name: "Burst" })).toBeVisible();
+  await start.click();
+  await expect.poll(() => sent.some((m) => m.includes('"set_game_mode"') && m.includes('"perimeter"'))).toBe(true);
+  // The mock answers with the floor's own game running: chips, the
+  // how-to banner, and a Stop that only the floor's game gets.
+  await expect(page.locator(".public-banner")).toContainText("Perimeter");
+  await expect(page.locator(".games-chip")).toHaveCount(5);
+  await expect(start).toHaveCount(0);
+  const stop = page.getByRole("button", { name: /Stop Perimeter/ });
+  await expect(stop).toBeVisible();
+  await stop.click();
+  await expect.poll(() => sent.some((m) => m.includes('"set_game_mode"') && m.includes('"game":null'))).toBe(true);
+  await expect(page.getByRole("button", { name: /Start Perimeter/ })).toBeVisible();
+});
+
+test("the operator's game shows no Stop to a key holder; a show blocks Start", async ({ page }) => {
+  const clientId = `public-hidden-op-${Date.now()}`;
+  await page.addInitScript((id) => localStorage.setItem("empyrean-public-id", id), clientId);
+  await page.request.post(`/mock/public?client=${clientId}`, {
+    data: {
+      perks: ["game:perimeter"],
+      game: { active: "perimeter", summary: "Perimeter · 3 caught", species: 5, effects_overlay: false, from_floor: false, blocked_by_show: null },
+    },
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/public.html");
+  await page.locator('.public-app[data-connected="yes"]').waitFor({ state: "attached" });
+  await expect(page.locator(".games-chip")).toHaveCount(5);
+  await expect(page.getByRole("button", { name: /Stop Perimeter/ })).toHaveCount(0);
+
+  await page.request.post(`/mock/public?client=${clientId}`, {
+    data: {
+      game: { active: null, summary: "", species: 3, effects_overlay: false, from_floor: false, blocked_by_show: "Saturday night" },
+    },
+  });
+  await page.reload();
+  await page.locator('.public-app[data-connected="yes"]').waitFor({ state: "attached" });
+  await expect(page.getByRole("button", { name: "Burst" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Start Perimeter/ })).toHaveCount(0);
 });
 
 test("a closed floor folds the tools away and says so", async ({ page }) => {

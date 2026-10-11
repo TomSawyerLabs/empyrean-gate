@@ -30,6 +30,7 @@ import {
 } from "./types";
 import { hsvToHex, liveColor } from "./liveColors";
 import { generateCodeWord } from "./deviceNames";
+import { HIDDEN_GAMES } from "./gameCatalog";
 import { BRC_EVENT_CATEGORIES } from "./ambientScenes";
 import LayerColorControls from "./LayerColor";
 
@@ -898,6 +899,13 @@ const KNOWN_PERKS: { id: string; label: string; hint: string }[] = [
   { id: "big_brush", label: "Big brush", hint: "stroke size up to half the array" },
   { id: "strobe", label: "Strobe", hint: "the strobe pad appears" },
   { id: "cone", label: "Traffic cone", hint: "the orange cone shape pad appears" },
+  // Hidden games (plans/hidden-modes.md): the holder may start and stop
+  // them from the floor, and play them whatever the games toggle says.
+  ...HIDDEN_GAMES.map((g) => ({
+    id: g.perk!,
+    label: `${g.name} game`,
+    hint: `may start the hidden ${g.name} game from the floor`,
+  })),
 ];
 
 /** The internet-facing floor: its listener, what it may do, who is on it, and

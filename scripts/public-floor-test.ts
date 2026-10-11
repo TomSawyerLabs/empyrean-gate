@@ -136,21 +136,61 @@ console.log("rate limiter OK");
 console.log("strike limit OK");
 
 // 7. A key (when the operator configured one and told us) unlocks perks.
+//    With a `game:<kind>` perk it may also start that hidden game from the
+//    floor, and stop it again; without one, a start is refused (an error,
+//    not a kick).
 if (KEY) {
-  const { got } = await session({}, (ws) => {
+  const { got } = await session({}, async (ws) => {
     ws.send(JSON.stringify({ type: "unlock", key: KEY }));
     ws.send(JSON.stringify({ type: "get_state" }));
+    await new Promise((r) => setTimeout(r, 300));
+    ws.send(JSON.stringify({ type: "set_game_mode", game: "perimeter" }));
+    await new Promise((r) => setTimeout(r, 1500));
+    ws.send(JSON.stringify({ type: "get_state" }));
+    await new Promise((r) => setTimeout(r, 300));
+    ws.send(JSON.stringify({ type: "set_game_mode", game: null }));
+    await new Promise((r) => setTimeout(r, 1500));
+    ws.send(JSON.stringify({ type: "get_state" }));
   });
-  const unlocked = got.find((m) => m.type === "unlocked");
+  const unlocked = got.find((m) => m.type === "unlocked") as { name: string; perks: string[] } | undefined;
   if (!unlocked) fail(`unlock with KEY=${KEY} produced no 'unlocked' reply: ${JSON.stringify(got.filter((m) => m.type === "error"))}`);
-  const last = got.filter((m) => m.type === "public_state").pop()!.state as { unlocked: string[] };
-  if (!last.unlocked.length) fail("snapshot after unlock lists no key");
-  console.log(`key OK (${unlocked.name})`);
+  const snaps = got.filter((m) => m.type === "public_state").map((m) => m.state as { unlocked: string[]; caps: { games: boolean }; game: { active: string | null; from_floor: boolean } });
+  if (!snaps[snaps.length - 1].unlocked.length) fail("snapshot after unlock lists no key");
+  if (unlocked.perks.includes("game:perimeter")) {
+    // The 1 Hz tick also pushes a snapshot whenever the world changes, so
+    // look for the running game rather than counting replies.
+    const during = snaps.find((s) => s.game.active === "perimeter");
+    if (!during || !during.game.from_floor) fail(`the key's hidden game did not start from the floor: ${JSON.stringify(snaps.map((s) => s.game))}`);
+    if (!during.caps.games) fail("a hidden-game key did not grant the games capability");
+    const after = snaps[snaps.length - 1];
+    if (after.game.active !== null) fail(`the floor could not stop its own game: ${JSON.stringify(after.game)}`);
+    console.log(`key OK (${unlocked.name}) — hidden game started and stopped from the floor`);
+  } else {
+    if (!got.some((m) => m.type === "error" && /key/i.test(String(m.message)))) fail("a start without the game perk was not refused");
+    console.log(`key OK (${unlocked.name}) — no game perk, start refused`);
+  }
 } else {
   const { got } = await session({}, (ws) => ws.send(JSON.stringify({ type: "unlock", key: "definitely-not-a-key" })));
   if (!got.some((m) => m.type === "error")) fail("an unknown code did not produce an error");
   console.log("unknown key OK (set KEY=<secret> to test a real one)");
 }
+
+// 8. Without a key, a hidden game cannot be started, and the operator's own
+//    games are not even part of the protocol.
+{
+  const { got, closed } = await session({}, (ws) => {
+    ws.send(JSON.stringify({ type: "set_game_mode", game: "perimeter" }));
+    ws.send(JSON.stringify({ type: "set_game_mode", game: "flak" }));
+    ws.send(JSON.stringify({ type: "set_game_config", species: 8 }));
+    ws.send(JSON.stringify({ type: "get_state" }));
+  });
+  if (closed) fail("asking for a hidden game without a key closed the connection");
+  const errors = got.filter((m) => m.type === "error");
+  if (errors.length < 3) fail(`expected three refusals for game control without a key, got ${errors.length}`);
+  const last = got.filter((m) => m.type === "public_state").pop()!.state as { game: { active: string | null } };
+  if (last.game.active !== null) fail("a game started without a key");
+}
+console.log("hidden games need a key OK");
 
 console.log("PUBLIC FLOOR PASS");
 process.exit(0);

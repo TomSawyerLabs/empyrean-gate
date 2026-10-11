@@ -847,6 +847,9 @@ export interface GameModeStatus {
   summary: string;
   species: number;
   effects_overlay: boolean;
+  /** Started from the public floor by a key holder: the floor may stop it,
+   *  and it stops itself after a few quiet minutes (plans/hidden-modes.md). */
+  from_floor: boolean;
   /** Name of the playlist blocking a manual start, when a show is running. */
   blocked_by_show: string | null;
 }

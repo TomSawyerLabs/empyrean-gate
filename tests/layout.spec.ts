@@ -236,7 +236,7 @@ for (const viewport of VIEWPORTS) {
       await page.addInitScript((id) => localStorage.setItem("empyrean-public-id", id), clientId);
       await page.request.post(`/mock/public?client=${clientId}`, {
         data: {
-          game: { active: "radial_tetris", summary: "Ringfall · Dot falling · 3 rings", species: 6, effects_overlay: false, blocked_by_show: null },
+          game: { active: "radial_tetris", summary: "Ringfall · Dot falling · 3 rings", species: 6, effects_overlay: false, from_floor: false, blocked_by_show: null },
         },
       });
       await page.goto("/public.html");

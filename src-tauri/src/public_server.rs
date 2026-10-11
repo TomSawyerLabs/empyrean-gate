@@ -118,6 +118,10 @@ pub async fn supervise(state: Arc<SharedState>) {
             running = None;
             state.public_listening.store(false, Ordering::SeqCst);
         }
+        // A game the floor started and then abandoned stops itself here —
+        // whether or not the listener is up, so disabling the floor does not
+        // strand its game either.
+        state.expire_floor_game(public::FLOOR_GAME_IDLE);
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
@@ -631,6 +635,20 @@ async fn handle(ctx: &Ctx, msg: ClientMsg, conn_id: u64, flow: &mut Flow<'_>, tx
                 return Ok(());
             }
         }
+        Gate::HiddenGame(game) => {
+            let perks = perks_of(state, conn_id);
+            let holds = |kind: crate::game::GameKind| kind.floor_perk().is_some_and(|p| perks.contains(p));
+            let allowed = match game {
+                Some(kind) => holds(kind),
+                None => state.floor_game().is_some_and(holds),
+            };
+            if !allowed {
+                // Not a strike: a stale page may offer a Start its key no
+                // longer carries; the next snapshot corrects it.
+                error(tx, "That game needs a key.").await;
+                return Ok(());
+            }
+        }
         Gate::Refuse => {
             *flow.strikes += 1;
             if *flow.strikes > public::STRIKE_LIMIT {
@@ -788,6 +806,34 @@ async fn handle(ctx: &Ctx, msg: ClientMsg, conn_id: u64, flow: &mut Flow<'_>, tx
             state.public.lock().note_input(conn_id, "game", now);
             state.game_command(command);
         }
+        ClientMsg::SetGameMode { game } => {
+            // A hidden game, by a key holder (the gate above checked the
+            // perk). Starting opens with the game's own color count;
+            // stopping is only for a game the floor started.
+            let who = name_of(state, conn_id);
+            let result = match game {
+                Some(kind) => state.start_floor_game(kind),
+                None => state.stop_floor_game(),
+            };
+            match result {
+                Ok(()) => {
+                    state.recorder.event(
+                        "game_mode",
+                        &who,
+                        serde_json::json!({ "game": game, "public": true }),
+                    );
+                    log::info!(
+                        "public floor: {who} {}",
+                        match game {
+                            Some(kind) => format!("started {}", kind.label()),
+                            None => "stopped the game".to_owned(),
+                        }
+                    );
+                    state.public.lock().note_input(conn_id, "game", now);
+                }
+                Err(message) => error(tx, message).await,
+            }
+        }
         ClientMsg::PatchParam { node, param, value } => {
             if node.len() > 64 || param.len() > 64 {
                 error(tx, "bad param").await;
@@ -862,6 +908,45 @@ mod tests {
         assert_eq!(clean_name(""), "Someone");
         assert_eq!(clean_name("\u{7}\n"), "Someone");
         assert_eq!(clean_name(&"x".repeat(100)).len(), 40);
+    }
+
+    #[test]
+    fn floor_games_start_with_their_defaults_and_idle_out() {
+        use crate::game::{GameCommand, GameKind};
+        let state = SharedState::new(crate::config::AppConfig::default());
+        // Only hidden games are the floor's to start.
+        assert!(state.start_floor_game(GameKind::Flak).is_err());
+        assert_eq!(state.floor_game(), None);
+        state.start_floor_game(GameKind::Perimeter).unwrap();
+        {
+            let g = state.game.lock();
+            assert_eq!(g.active, Some(GameKind::Perimeter));
+            assert!(g.from_floor);
+            assert_eq!(g.species, GameKind::Perimeter.floor_species());
+            assert!(g.last_input.is_some());
+        }
+        assert_eq!(state.floor_game(), Some(GameKind::Perimeter));
+        // A long idle allowance keeps it; input refreshes it; zero ends it.
+        assert_eq!(state.expire_floor_game(Duration::from_secs(3600)), None);
+        state.game_command(GameCommand::HardDrop);
+        assert_eq!(state.expire_floor_game(Duration::from_secs(3600)), None);
+        assert_eq!(state.expire_floor_game(Duration::ZERO), Some(GameKind::Perimeter));
+        assert_eq!(state.game.lock().active, None);
+        assert!(!state.game.lock().from_floor);
+        // The floor may stop what it started…
+        state.start_floor_game(GameKind::Perimeter).unwrap();
+        state.stop_floor_game().unwrap();
+        assert_eq!(state.game.lock().active, None);
+        // …but not what the operator started, which never expires either,
+        // and the operator's start of the same game is still the operator's.
+        state.set_game_mode(Some(GameKind::Perimeter)).unwrap();
+        assert_eq!(state.floor_game(), None);
+        assert!(state.stop_floor_game().is_err());
+        assert_eq!(state.expire_floor_game(Duration::ZERO), None);
+        state.start_floor_game(GameKind::Perimeter).unwrap();
+        assert_eq!(state.floor_game(), None, "a floor start must not take over the operator's game");
+        state.set_game_mode(None).unwrap();
+        assert!(state.stop_floor_game().is_ok(), "stopping nothing is fine");
     }
 
     #[test]

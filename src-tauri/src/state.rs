@@ -748,6 +748,70 @@ impl SharedState {
     /// this guard only ever applies to the manual path.) Never touches
     /// `output.enabled`. Stopping is always allowed; the engine crossfades out.
     pub fn set_game_mode(&self, game: Option<crate::game::GameKind>) -> Result<(), String> {
+        self.apply_game_mode(game, false, None)
+    }
+
+    /// A key holder on the public floor starting their hidden game
+    /// (plans/hidden-modes.md). Only games with a floor perk; the listener
+    /// has checked the session holds it. Opens with the game's own color
+    /// count, since the floor cannot send `set_game_config`. A game the
+    /// operator already started is left as the operator's.
+    pub fn start_floor_game(&self, kind: crate::game::GameKind) -> Result<(), String> {
+        if kind.floor_perk().is_none() {
+            return Err(format!("{} is started from the Gate machine.", kind.label()));
+        }
+        self.apply_game_mode(Some(kind), true, Some(kind.floor_species()))
+    }
+
+    /// The running game, if it was started from the public floor.
+    pub fn floor_game(&self) -> Option<crate::game::GameKind> {
+        let g = self.game.lock();
+        g.active.filter(|_| g.from_floor)
+    }
+
+    /// The floor ending the game it started. An operator-started game is not
+    /// the floor's to stop.
+    pub fn stop_floor_game(&self) -> Result<(), String> {
+        {
+            let g = self.game.lock();
+            if g.active.is_none() {
+                return Ok(());
+            }
+            if !g.from_floor {
+                return Err("This game was started from the Gate machine; only the operator can stop it.".into());
+            }
+        }
+        self.apply_game_mode(None, false, None)
+    }
+
+    /// Stop a floor-started game that has had no input for `idle`. Called
+    /// from the public listener's supervisor tick; returns what was stopped.
+    /// Operator-started games never expire.
+    pub fn expire_floor_game(&self, idle: std::time::Duration) -> Option<crate::game::GameKind> {
+        let expired = {
+            let g = self.game.lock();
+            match (g.active, g.from_floor, g.last_input) {
+                (Some(kind), true, Some(last)) if last.elapsed() >= idle => Some(kind),
+                _ => None,
+            }
+        };
+        if let Some(kind) = expired {
+            log::info!(
+                "game mode: {} (started from the public floor) stopped after {} s without input",
+                kind.label(),
+                idle.as_secs()
+            );
+            let _ = self.apply_game_mode(None, false, None);
+        }
+        expired
+    }
+
+    fn apply_game_mode(
+        &self,
+        game: Option<crate::game::GameKind>,
+        from_floor: bool,
+        species: Option<u8>,
+    ) -> Result<(), String> {
         if game.is_some()
             && let Some(playlist) = self.config.read().running_show()
         {
@@ -761,12 +825,19 @@ impl SharedState {
             if g.active == game {
                 return Ok(());
             }
+            let now = Instant::now();
             g.active = game;
-            g.started = game.map(|_| Instant::now());
+            g.started = game.map(|_| now);
+            g.from_floor = from_floor && game.is_some();
+            g.last_input = game.map(|_| now);
+            if let Some(s) = species {
+                g.species = s.clamp(2, 8);
+            }
             g.inputs.clear();
             g.commands.clear();
         }
         match game {
+            Some(kind) if from_floor => log::info!("game mode: {} started from the public floor", kind.label()),
             Some(kind) => log::info!("game mode: {} started", kind.label()),
             None => log::info!("game mode: stopped"),
         }
@@ -799,6 +870,7 @@ impl SharedState {
     /// input with no game to land in simply evaporates.
     pub fn game_input(&self, species: u8, points: &[crate::layers::DabPoint]) {
         let mut g = self.game.lock();
+        g.last_input = Some(Instant::now());
         for p in points {
             if g.inputs.len() >= crate::game::MAX_QUEUED_INPUTS {
                 g.inputs.remove(0);
@@ -816,6 +888,7 @@ impl SharedState {
     /// the same flood limit as point inputs.
     pub fn game_command(&self, command: crate::game::GameCommand) {
         let mut game = self.game.lock();
+        game.last_input = Some(Instant::now());
         if game.commands.len() >= crate::game::MAX_QUEUED_INPUTS {
             game.commands.remove(0);
         }

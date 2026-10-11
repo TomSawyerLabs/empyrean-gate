@@ -162,6 +162,21 @@
   width: 26px;
   height: 26px;
 }
+.public-start-game {
+  grid-column: span 2;
+  font-weight: 600;
+}
+.public-stop-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 4px;
+}
+.public-stop-row .hint {
+  margin: 0;
+  font-size: 12px;
+}
 .public-pens {
   display: flex;
   flex-wrap: wrap;

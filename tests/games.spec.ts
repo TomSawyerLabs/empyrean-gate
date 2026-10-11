@@ -14,6 +14,7 @@ test("Ringfall exposes complete touch controls and sends immediate commands", as
         summary: "Ringfall · Dot falling · Domino next · 3 rings",
         species: 6,
         effects_overlay: false,
+        from_floor: false,
         blocked_by_show: null,
       },
     },
@@ -81,7 +82,7 @@ test("Ringfall keyboard controls map to move, rotate, and drop commands", async 
     if (typeof frame.payload === "string") sent.push(frame.payload);
   }));
   await page.request.post(`/mock/status?client=${clientId}`, {
-    data: { game: { active: "radial_tetris", summary: "Ringfall", species: 4, effects_overlay: false, blocked_by_show: null } },
+    data: { game: { active: "radial_tetris", summary: "Ringfall", species: 4, effects_overlay: false, from_floor: false, blocked_by_show: null } },
   });
   await page.goto("/#games");
   await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });

@@ -174,7 +174,7 @@ const publicState = {
   unlocked: [] as string[],
   players: 7,
   you: "Dusty Badger",
-  game: { active: null as string | null, summary: "", species: 3, effects_overlay: false, blocked_by_show: null },
+  game: { active: null as string | null, summary: "", species: 3, effects_overlay: false, from_floor: false, blocked_by_show: null },
   spokes: SPOKES,
   pixels: 378,
   inner_radius_ft: initialConfig.geometry.inner_radius_ft,
@@ -278,7 +278,7 @@ const server = Bun.serve({
       ws.send(JSON.stringify({ type: "state", config, status }));
     },
     message(ws, raw) {
-      let msg: { type?: string; client_id?: string; include_ready?: boolean; ready_id?: string; stack?: unknown; config?: unknown; surface?: string; key?: string; keys?: string[] };
+      let msg: { type?: string; client_id?: string; include_ready?: boolean; ready_id?: string; stack?: unknown; config?: unknown; surface?: string; key?: string; keys?: string[]; game?: string | null };
       try {
         msg = JSON.parse(String(raw));
       } catch {
@@ -310,6 +310,18 @@ const server = Bun.serve({
           }
         } else if (msg.type === "subscribe_preview") {
           ws.send(JSON.stringify({ type: "error", message: "No preview on the public floor right now." }));
+        } else if (msg.type === "set_game_mode") {
+          // A hidden game started or stopped from the floor: the snapshot
+          // follows, marked as the floor's own.
+          const id = clients.get(ws) ?? "";
+          const game = msg.game ?? null;
+          publicOverrides.set(id, {
+            ...(publicOverrides.get(id) ?? {}),
+            game: game
+              ? { active: game, summary: `${game} · 0 caught · 0 got in`, species: 5, effects_overlay: false, from_floor: true, blocked_by_show: null }
+              : { ...publicState.game },
+          });
+          ws.send(JSON.stringify({ type: "public_state", state: snap() }));
         }
         return;
       }

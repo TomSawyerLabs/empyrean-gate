@@ -176,6 +176,12 @@ export default function Games() {
             before starting a game.
           </p>
         )}
+        {active && game?.from_floor && (
+          <p className="hint games-from-floor">
+            Started from the public floor by a key holder. It stops by itself
+            after 3 minutes without input; Stop ends it now.
+          </p>
+        )}
         {isAdmin && active && (
           <label className="row">
             <span>{knob.label}</span>

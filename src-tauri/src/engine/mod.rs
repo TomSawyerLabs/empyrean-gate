@@ -2651,12 +2651,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // step with it, and drive the crossfade. Ticks follow the beat when
         // the tracker is confident, else a fixed cadence; the shader
         // interpolates between generations so nothing strobes.
-        let (manual_game, manual_species, game_overlay, game_inputs, game_commands) = {
+        let (manual_game, manual_species, game_overlay, game_from_floor, game_inputs, game_commands) = {
             let mut g = state.game.lock();
             (
                 g.active,
                 g.species,
                 g.effects_overlay,
+                g.from_floor,
                 std::mem::take(&mut g.inputs),
                 std::mem::take(&mut g.commands),
             )
@@ -3645,6 +3646,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     },
                     species: game_species,
                     effects_overlay: game_overlay,
+                    from_floor: game_from_floor,
                     blocked_by_show: cfg.running_show().map(|p| p.name.clone()),
                 };
                 st.discovery_running = state

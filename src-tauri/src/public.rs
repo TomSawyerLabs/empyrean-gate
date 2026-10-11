@@ -58,6 +58,13 @@ pub const MIN_PREVIEW_DECIMATE: u32 = 6;
 pub const ID_PREFIX: &str = "pub-";
 
 pub const CAPABILITY_PERKS: [&str; 5] = ["draw", "effects", "games", "knobs", "preview"];
+/// A game started from the floor stops itself after this long without any
+/// game input, so a group that wandered off does not leave its world over
+/// the show (plans/hidden-modes.md). Operator-started games never expire.
+pub const FLOOR_GAME_IDLE: Duration = Duration::from_secs(180);
+/// Perks of the form `game:<kind>` let a key holder start that hidden game
+/// from the floor (and stop it, if the floor started it).
+pub const GAME_PERK_PREFIX: &str = "game:";
 
 // ---------------------------------------------------------------------------
 // Rate limiting
@@ -223,6 +230,11 @@ pub enum Gate {
     Allow,
     /// Allowed when the session holds the named capability.
     Needs(&'static str),
+    /// Start (`Some`) or stop (`None`) a hidden game: allowed when the
+    /// session holds the game's `game:<kind>` perk — for a stop, the
+    /// running game's, and only if the floor started it. The listener
+    /// resolves both.
+    HiddenGame(Option<crate::game::GameKind>),
     /// Not part of the public protocol at all.
     Refuse,
 }
@@ -241,6 +253,10 @@ pub fn gate(msg: &ClientMsg) -> Gate {
         M::Paint { .. } => Gate::Needs("draw"),
         M::TriggerEffect { .. } => Gate::Needs("effects"),
         M::GameInput { .. } | M::GameCommand { .. } => Gate::Needs("games"),
+        // Only games with a floor perk can be asked for; the operator's own
+        // games are not part of the public protocol.
+        M::SetGameMode { game: Some(kind) } if kind.floor_perk().is_some() => Gate::HiddenGame(Some(*kind)),
+        M::SetGameMode { game: None } => Gate::HiddenGame(None),
         M::PatchParam { .. } => Gate::Needs("knobs"),
         M::SubscribePreview { .. } => Gate::Needs("preview"),
         _ => Gate::Refuse,
@@ -279,10 +295,13 @@ impl Capabilities {
 /// keep drawing while the floor is closed to everyone else.
 pub fn capabilities(cfg: &PublicConfig, perks: &BTreeSet<String>) -> Capabilities {
     let floor = |allowed: bool, perk: &str| (cfg.open && allowed) || perks.contains(perk);
+    // A key that unlocks a hidden game must let its holder play it, whatever
+    // the floor's games toggle says.
+    let hidden_game = perks.iter().any(|p| p.starts_with(GAME_PERK_PREFIX));
     Capabilities {
         draw: floor(cfg.allow_draw, "draw"),
         effects: floor(cfg.allow_effects, "effects"),
-        games: floor(cfg.allow_games, "games"),
+        games: floor(cfg.allow_games, "games") || hidden_game,
         knobs: floor(cfg.allow_knobs, "knobs"),
         preview: floor(cfg.preview_fps > 0, "preview"),
     }
@@ -857,8 +876,17 @@ mod tests {
         assert_eq!(gate(&ClientMsg::Report { description: String::new(), seconds: 1.0 }), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::CheckUpdate), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::InstallUpdate), Gate::Refuse);
-        assert_eq!(gate(&ClientMsg::SetGameMode { game: None }), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::SetTestMode { active: true }), Gate::Refuse);
+        assert_eq!(gate(&ClientMsg::SetGameConfig { species: Some(3), effects_overlay: None }), Gate::Refuse);
+        // Hidden games go through their own gate; the operator's games are
+        // not part of the protocol at all.
+        use crate::game::GameKind;
+        assert_eq!(gate(&ClientMsg::SetGameMode { game: Some(GameKind::Flak) }), Gate::Refuse);
+        assert_eq!(
+            gate(&ClientMsg::SetGameMode { game: Some(GameKind::Perimeter) }),
+            Gate::HiddenGame(Some(GameKind::Perimeter))
+        );
+        assert_eq!(gate(&ClientMsg::SetGameMode { game: None }), Gate::HiddenGame(None));
         assert_eq!(gate(&ClientMsg::SubscribeMiniPreviews { fps: 1.0 }), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::PatchList), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::RotateJoinToken), Gate::Refuse);
@@ -878,6 +906,10 @@ mod tests {
         let perks: BTreeSet<String> = ["draw".to_string()].into_iter().collect();
         let caps = capabilities(&c, &perks);
         assert!(caps.draw && !caps.effects && !caps.games);
+        // A hidden game's key lets its holder play on a closed floor.
+        let perks: BTreeSet<String> = ["game:perimeter".to_string()].into_iter().collect();
+        let caps = capabilities(&c, &perks);
+        assert!(caps.games && !caps.draw && !caps.effects);
         // Preview: the perk on a 0 fps floor gets the smallest stream.
         let perks: BTreeSet<String> = ["preview".to_string()].into_iter().collect();
         let caps = capabilities(&c, &perks);
