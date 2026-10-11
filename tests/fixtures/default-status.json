@@ -117,6 +117,23 @@
     "effects_overlay": false,
     "blocked_by_show": null
   },
+  "public": {
+    "enabled": false,
+    "listening": false,
+    "error": "",
+    "address": "",
+    "url": "",
+    "open": false,
+    "connections": 0,
+    "players": 0,
+    "peak": 0,
+    "total_joined": 0,
+    "refused_full": 0,
+    "kicked": 0,
+    "blocked": 0,
+    "roster": [],
+    "roster_truncated": 0
+  },
   "discovery_running": false,
   "peer": {
     "role": "",

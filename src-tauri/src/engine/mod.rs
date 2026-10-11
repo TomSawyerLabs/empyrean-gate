@@ -3735,6 +3735,12 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     list.sort_by(|a, b| a.id.cmp(&b.id));
                     list
                 };
+                st.public = state.public.lock().status(
+                    &cfg.public,
+                    state.public_listening.load(std::sync::atomic::Ordering::Relaxed),
+                    &state.public_error.lock(),
+                    Instant::now(),
+                );
                 st.client_list = {
                     let connected = state.connected_clients.lock();
                     let activity = state.client_activity.lock();

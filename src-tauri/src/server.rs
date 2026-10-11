@@ -42,7 +42,7 @@ use tower_http::cors::{Any, CorsLayer};
 
 #[derive(rust_embed::Embed)]
 #[folder = "../dist"]
-struct Assets;
+pub(crate) struct Assets;
 
 #[derive(Clone)]
 struct Ctx {
@@ -111,6 +111,10 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
                 .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
                 .allow_headers([header::CONTENT_TYPE, header::RANGE]),
         )
+        .layer(axum::middleware::from_fn_with_state(
+            ctx.clone(),
+            refuse_proxied_requests,
+        ))
         .with_state(ctx);
 
     let addr = format!("{bind}:{port}");
@@ -142,6 +146,9 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
     // Only the process that owns the control port may mutate the shared media
     // cache/config. During hot takeover the old and new binaries overlap briefly.
     tokio::spawn(crate::videocache::run(state.clone(), cache_media));
+    // The public floor: a second listener, started and stopped by its config
+    // (Settings → Public floor) without a restart.
+    tokio::spawn(crate::public_server::supervise(state.clone()));
     log::info!("web UI + control server on http://{addr}");
     let shutdown_state = state.clone();
     let server = axum::serve(
@@ -160,6 +167,39 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
 
 async fn health() -> StatusCode {
     StatusCode::NO_CONTENT
+}
+
+/// Headers a reverse proxy adds when it forwards a request. Their presence
+/// means the TCP peer is the proxy, not the client — and on this listener the
+/// TCP peer being loopback is what makes a connection the operator.
+const PROXY_HEADERS: [&str; 4] = ["x-forwarded-for", "cf-connecting-ip", "x-real-ip", "forwarded"];
+
+/// True when the request came through a reverse proxy. Checked by name only:
+/// a proxy that strips these would also be one that hides the client from the
+/// per-IP caps, and that is a deployment to fix, not to tolerate.
+pub(crate) fn is_proxied(headers: &HeaderMap) -> bool {
+    PROXY_HEADERS.iter().any(|h| headers.contains_key(*h))
+}
+
+/// The operator listener must never sit behind a proxy (see
+/// `ServerConfig::refuse_proxied`). A proxied request is answered with the
+/// fix instead of being served as the operator.
+async fn refuse_proxied_requests(
+    State(ctx): State<Ctx>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if is_proxied(req.headers()) && ctx.state.config.read().server.refuse_proxied {
+        let public_port = ctx.state.config.read().public.port;
+        return (
+            StatusCode::FORBIDDEN,
+            format!(
+                "This port is the operator console and treats proxied connections as untrusted.                  Point the reverse proxy at the public listener (port {public_port},                  Settings → Public floor) instead."
+            ),
+        )
+            .into_response();
+    }
+    next.run(req).await
 }
 
 // ---------------------------------------------------------------------------
@@ -649,7 +689,7 @@ async fn serve_asset(uri: Uri) -> Response {
     }
 }
 
-fn mime_for(path: &str) -> &'static str {
+pub(crate) fn mime_for(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or("") {
         "html" => "text/html; charset=utf-8",
         "js" => "text/javascript",
@@ -790,28 +830,28 @@ async fn ws_upgrade(
         .on_upgrade(move |socket| client_task(ctx, socket, addr))
 }
 
-struct PreviewSub {
-    min_interval: Duration,
-    decimate: u32,
-    include_ready: bool,
-    last_sent: Instant,
+pub(crate) struct PreviewSub {
+    pub(crate) min_interval: Duration,
+    pub(crate) decimate: u32,
+    pub(crate) include_ready: bool,
+    pub(crate) last_sent: Instant,
     /// Program frames sent but not yet acked by the client. A ready-bus frame
     /// rides along with its program frame and is not counted separately.
-    in_flight: u32,
+    pub(crate) in_flight: u32,
     /// True once this connection has acked at least one frame. Clients running
     /// a bundle that predates PreviewAck never set it and stream exactly as
     /// before (wall-clock throttle only).
-    acking: bool,
-    last_ack: Instant,
+    pub(crate) acking: bool,
+    pub(crate) last_ack: Instant,
 }
 
 /// Unacked program frames a remote client may have in flight. Small enough to
 /// bound buffered latency to a few frame intervals even when venue WiFi is
 /// queueing heavily; large enough that a healthy RTT never limits frame rate.
-const PREVIEW_MAX_IN_FLIGHT: u32 = 3;
+pub(crate) const PREVIEW_MAX_IN_FLIGHT: u32 = 3;
 /// If acks stop this long (mid-reload, wedged tab), fall back to unthrottled
 /// streaming rather than freezing the preview forever.
-const PREVIEW_ACK_STALL: Duration = Duration::from_secs(3);
+pub(crate) const PREVIEW_ACK_STALL: Duration = Duration::from_secs(3);
 
 /// Per-connection mini-preview subscription. No slot rationing and no ack
 /// flow: batches are small (a few KB at ≤10 Hz), throttled by `min_interval`,
@@ -904,14 +944,14 @@ fn publish_leader_peer(state: &SharedState, peer: &PeerConn, connected: bool, na
 impl PreviewSub {
     /// Whether the flow-control gate allows sending the next frame now.
     /// The wall-clock fps throttle is checked separately by the caller.
-    fn ack_gate_open(&self, is_local: bool, now: Instant) -> bool {
+    pub(crate) fn ack_gate_open(&self, is_local: bool, now: Instant) -> bool {
         if is_local || !self.acking || self.in_flight < PREVIEW_MAX_IN_FLIGHT {
             return true;
         }
         now.duration_since(self.last_ack) >= PREVIEW_ACK_STALL
     }
 
-    fn note_ack(&mut self, now: Instant) {
+    pub(crate) fn note_ack(&mut self, now: Instant) {
         // Cap before decrementing so a client that resumes acking after a stall
         // (during which in_flight kept growing) recovers immediately.
         self.in_flight = self.in_flight.min(PREVIEW_MAX_IN_FLIGHT).saturating_sub(1);
@@ -985,14 +1025,14 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                                 }
                                 if is_hello {
                                     authenticated = true;
+                                    let admin = client_is_admin(&state, addr, &client_id);
                                     let hello = redact_for_remote(ServerMsg::State {
                                         config: Box::new(state.config.read().clone()),
                                         status: state.status.lock().clone(),
-                                    }, is_local);
+                                    }, is_local, admin, &client_id);
                                     if send_json(&mut tx, &hello).await.is_err() {
                                         break;
                                     }
-                                    let admin = client_is_admin(&state, addr, &client_id);
                                     last_admin = Some(admin);
                                     if send_json(&mut tx, &ServerMsg::Role { admin }).await.is_err() {
                                         break;
@@ -1046,7 +1086,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                 }
                 match ev {
                     Ok(ev) => {
-                        let ev = redact_for_remote(ev, is_local);
+                        let ev = redact_for_remote(ev, is_local, admin, &client_id);
                         if send_json(&mut tx, &ev).await.is_err() { break; }
                     }
                     Err(RecvError::Lagged(_)) => continue,
@@ -1406,6 +1446,8 @@ fn requires_admin(msg: &ClientMsg) -> bool {
         // roster. Token rotation, admin grants and forgetting stay loopback-only.
         | M::RevokeClient { .. }
         | M::UnrevokeClient { .. }
+        | M::BlockPublic { .. }
+        | M::UnblockPublic { .. }
         | M::ActivateStack { .. }
         | M::PrepareStack { .. }
         | M::TakeReady { .. }
@@ -1440,12 +1482,12 @@ fn is_revoked(state: &SharedState, client_id: &str) -> bool {
         .any(|c| c.id == client_id && c.revoked)
 }
 
-fn decimated_count(pixels: u32, decimate: u32) -> u32 {
+pub(crate) fn decimated_count(pixels: u32, decimate: u32) -> u32 {
     let d = decimate.max(1);
     pixels.div_ceil(d)
 }
 
-fn encode_preview(frame: &PreviewFrame, decimate: u32) -> Vec<u8> {
+pub(crate) fn encode_preview(frame: &PreviewFrame, decimate: u32) -> Vec<u8> {
     encode_preview_rgb(frame, &frame.rgb, decimate, PREVIEW_MAGIC)
 }
 
@@ -1506,21 +1548,57 @@ fn encode_minis(batch: &MiniBatch) -> Vec<u8> {
     bytes
 }
 
-/// The admin token travels only to loopback clients. Every state snapshot a
-/// remote connection receives — the hello greeting and each broadcast — passes
-/// through here, so a guest can never lift the admin QR out of its own config.
-fn redact_for_remote(mut ev: ServerMsg, is_local: bool) -> ServerMsg {
-    if !is_local {
-        if let ServerMsg::State { config, .. } = &mut ev {
+/// What a connection's state snapshots may carry. Every `State`/`Status` a
+/// remote connection receives — the hello greeting and each broadcast —
+/// passes through here.
+///
+/// - The admin token travels only to loopback clients, so a guest can never
+///   lift the admin QR out of its own config.
+/// - Guests (remote, not admin) additionally lose the join/staff tokens, the
+///   Wi-Fi password, and every *other* device's record and id. Client ids are
+///   the bearer credential a device joins with: handing a guest the roster's
+///   ids would let it hello as an admin's id and become one. Admins keep the
+///   ids because Block/Unblock from the roster needs them.
+fn redact_for_remote(mut ev: ServerMsg, is_local: bool, admin: bool, own_id: &str) -> ServerMsg {
+    if is_local {
+        return ev;
+    }
+    match &mut ev {
+        ServerMsg::State { config, status } => {
             config.server.admin_token.clear();
+            if !admin {
+                config.server.join_token.clear();
+                config.server.staff_token.clear();
+                config.server.wifi_password.clear();
+                config.peer.follow_token.clear();
+                for key in &mut config.public.keys {
+                    key.secret.clear();
+                }
+                config.clients.retain(|c| c.id == own_id);
+                redact_client_list(&mut status.client_list, own_id);
+            }
         }
+        ServerMsg::Status { status } if !admin => {
+            redact_client_list(&mut status.client_list, own_id);
+        }
+        _ => {}
     }
     ev
 }
 
-type WsSink = futures_util::stream::SplitSink<WebSocket, Message>;
+/// Keep the roster readable (names, activity) but strip every id that is not
+/// the recipient's own.
+fn redact_client_list(list: &mut [crate::protocol::ClientInfo], own_id: &str) {
+    for c in list.iter_mut() {
+        if c.id != own_id {
+            c.id.clear();
+        }
+    }
+}
 
-async fn send_json(tx: &mut WsSink, msg: &ServerMsg) -> Result<(), axum::Error> {
+pub(crate) type WsSink = futures_util::stream::SplitSink<WebSocket, Message>;
+
+pub(crate) async fn send_json(tx: &mut WsSink, msg: &ServerMsg) -> Result<(), axum::Error> {
     let text = serde_json::to_string(msg).expect("serialize ServerMsg");
     tx.send(Message::Text(text.into())).await
 }
@@ -1754,7 +1832,60 @@ fn stack_snapshot(
 
 /// Record replayable control metadata while an explicit performance capture is armed.
 /// Continuous audio/video pixels are intentionally absent.
-fn record_performance(state: &SharedState, msg: &ClientMsg, is_loopback: bool) {
+/// Play an EXPOSED param of the ACTIVE patch — the phone-facing play surface,
+/// shared by the operator listener and the public floor. Strictly limited to
+/// params the patch author exposed; clamps to the registry's range; persists
+/// without a patch-epoch bump (the live value goes through the runtime queue,
+/// no pipeline rebuild).
+pub(crate) fn apply_patch_param(
+    state: &SharedState,
+    node: String,
+    param: String,
+    value: f32,
+) -> Result<(), String> {
+    let active = state.config.read().active_patch.clone();
+    let Some(id) = active else {
+        return Err("no active patch".into());
+    };
+    let dir = patch::store::patches_dir();
+    let mut doc = patch::store::load(&dir, &id)?;
+    if !doc
+        .exposed
+        .iter()
+        .any(|x| x.node == node && x.param == param)
+    {
+        return Err(format!("param {node}.{param} is not exposed"));
+    }
+    let clamped = doc
+        .nodes
+        .iter()
+        .find(|n| n.id == node)
+        .and_then(|n| patch::registry::lookup(&n.kind))
+        .and_then(|t| t.param(&param))
+        .map(|p| {
+            let finite = if value.is_finite() { value } else { p.default };
+            finite.clamp(p.min, p.max)
+        })
+        .unwrap_or(value);
+    if let Some(n) = doc.nodes.iter_mut().find(|n| n.id == node) {
+        n.params.insert(param.clone(), clamped);
+    }
+    if let Err(e) = patch::store::save(&dir, &mut doc) {
+        log::warn!("persisting patch param: {e}");
+    }
+    state
+        .patch_params
+        .lock()
+        .push((node.clone(), param.clone(), clamped));
+    let _ = state.events.send(ServerMsg::PatchParamChanged {
+        node,
+        param,
+        value: clamped,
+    });
+    Ok(())
+}
+
+pub(crate) fn record_performance(state: &SharedState, msg: &ClientMsg, is_loopback: bool) {
     use crate::config::{PerformanceAction as A, PerformanceEvent};
     let patch_for_config = matches!(msg, ClientMsg::SetConfig { .. })
         .then(|| state.config.read().active_patch.clone())
@@ -1873,6 +2004,7 @@ async fn handle_msg(
             name,
             client_id: id,
             token,
+            ..
         } => {
             if id.is_empty()
                 || id.len() > 128
@@ -1942,6 +2074,25 @@ async fn handle_msg(
                 }
             }
             *client_id = id;
+        }
+        ClientMsg::Unlock { .. } => {
+            let _ = send_json(
+                tx,
+                &ServerMsg::Error {
+                    message: "Keys unlock perks on the public floor; this connection already has the full surface.".into(),
+                },
+            )
+            .await;
+        }
+        ClientMsg::BlockPublic { id } => {
+            let kicked = state.public.lock().block(&id);
+            log::info!(
+                "public player {id} blocked by {} ({kicked} connection(s) kicked)",
+                client_name(state, client_id)
+            );
+        }
+        ClientMsg::UnblockPublic { id } => {
+            state.public.lock().unblock(&id);
         }
         ClientMsg::SetClientName { name } => {
             let id = client_id.clone();
@@ -2073,7 +2224,11 @@ async fn handle_msg(
                 let require_token = c.server.require_token;
                 let active_patch = c.active_patch.clone();
                 let launch_at_startup = c.windows.launch_at_startup;
-                *c = *config;
+                let mut incoming = *config;
+                // Key redemption counters are the server's; a Settings page
+                // holding a stale copy must not reset them.
+                crate::public::preserve_key_uses(&c.public, &mut incoming.public);
+                *c = incoming;
                 c.clients = clients;
                 c.server.join_token = join_token;
                 c.server.admin_token = admin_token;
@@ -2434,69 +2589,9 @@ async fn handle_msg(
             }
         }
         ClientMsg::PatchParam { node, param, value } => {
-            // The play surface: open to every client, but strictly limited to
-            // params the patch author exposed, on the active patch only.
-            let active = state.config.read().active_patch.clone();
-            let Some(id) = active else {
-                let _ = send_json(
-                    tx,
-                    &ServerMsg::Error {
-                        message: "no active patch".into(),
-                    },
-                )
-                .await;
-                return Ok(());
-            };
-            let dir = patch::store::patches_dir();
-            let mut doc = match patch::store::load(&dir, &id) {
-                Ok(d) => d,
-                Err(e) => {
-                    let _ = send_json(tx, &ServerMsg::Error { message: e }).await;
-                    return Ok(());
-                }
-            };
-            if !doc
-                .exposed
-                .iter()
-                .any(|x| x.node == node && x.param == param)
-            {
-                let _ = send_json(
-                    tx,
-                    &ServerMsg::Error {
-                        message: format!("param {node}.{param} is not exposed"),
-                    },
-                )
-                .await;
-                return Ok(());
+            if let Err(message) = apply_patch_param(state, node, param, value) {
+                let _ = send_json(tx, &ServerMsg::Error { message }).await;
             }
-            let clamped = doc
-                .nodes
-                .iter()
-                .find(|n| n.id == node)
-                .and_then(|n| patch::registry::lookup(&n.kind))
-                .and_then(|t| t.param(&param))
-                .map(|p| {
-                    let finite = if value.is_finite() { value } else { p.default };
-                    finite.clamp(p.min, p.max)
-                })
-                .unwrap_or(value);
-            if let Some(n) = doc.nodes.iter_mut().find(|n| n.id == node) {
-                n.params.insert(param.clone(), clamped);
-            }
-            // Persist, but WITHOUT a patch-epoch bump: the live value goes
-            // through the runtime queue, no pipeline rebuild.
-            if let Err(e) = patch::store::save(&dir, &mut doc) {
-                log::warn!("persisting patch param: {e}");
-            }
-            state
-                .patch_params
-                .lock()
-                .push((node.clone(), param.clone(), clamped));
-            let _ = state.events.send(ServerMsg::PatchParamChanged {
-                node,
-                param,
-                value: clamped,
-            });
         }
         ClientMsg::SetGameMode { game } => {
             // Same trust model as patch editing: starting/stopping a game
@@ -2891,22 +2986,100 @@ mod diagnostics_tests {
         assert!(!client_is_admin(&state, remote(), ""));
     }
 
-    #[test]
-    fn remote_state_snapshots_never_carry_the_admin_token() {
+    fn redaction_fixture() -> ServerMsg {
         let mut config = AppConfig::default();
         config.server.admin_token = "operator-secret".into();
-        let msg = ServerMsg::State {
-            config: Box::new(config),
-            status: crate::protocol::RuntimeStatus::default(),
-        };
-        let ServerMsg::State { config, .. } = redact_for_remote(msg.clone(), false) else {
+        config.server.join_token = "join-secret".into();
+        config.server.staff_token = "staff-secret".into();
+        config.server.wifi_password = "hunter2".into();
+        config.public.keys.push(crate::config::UnlockKey {
+            id: "camp".into(),
+            secret: "FIREFLY".into(),
+            enabled: true,
+            ..Default::default()
+        });
+        config.clients = vec![
+            ClientRecord { id: "crew".into(), name: "Crew".into(), revoked: false, admin: true },
+            ClientRecord { id: "guest".into(), name: "Guest".into(), revoked: false, admin: false },
+        ];
+        let mut status = crate::protocol::RuntimeStatus::default();
+        for id in ["crew", "guest"] {
+            status.client_list.push(crate::protocol::ClientInfo {
+                id: id.into(),
+                name: id.into(),
+                connected: true,
+                revoked: false,
+                admin: id == "crew",
+                order: 1,
+                viewing: true,
+                queued: 0,
+                last_input: None,
+                last_input_secs: None,
+            });
+        }
+        ServerMsg::State { config: Box::new(config), status }
+    }
+
+    #[test]
+    fn remote_state_snapshots_never_carry_the_admin_token() {
+        let msg = redaction_fixture();
+        let ServerMsg::State { config, .. } = redact_for_remote(msg.clone(), false, true, "crew") else {
             panic!("redaction changed the message kind");
         };
         assert!(config.server.admin_token.is_empty());
-        let ServerMsg::State { config, .. } = redact_for_remote(msg, true) else {
+        // A remote admin keeps everything else: the roster needs the ids.
+        assert_eq!(config.server.join_token, "join-secret");
+        assert_eq!(config.clients.len(), 2);
+        let ServerMsg::State { config, .. } = redact_for_remote(msg, true, true, "") else {
             panic!("redaction changed the message kind");
         };
         assert_eq!(config.server.admin_token, "operator-secret");
+    }
+
+    #[test]
+    fn guests_get_no_tokens_and_no_other_devices_ids() {
+        let msg = redaction_fixture();
+        let ServerMsg::State { config, status } = redact_for_remote(msg, false, false, "guest") else {
+            panic!("redaction changed the message kind");
+        };
+        assert!(config.server.admin_token.is_empty());
+        assert!(config.server.join_token.is_empty());
+        assert!(config.server.staff_token.is_empty());
+        assert!(config.server.wifi_password.is_empty());
+        assert!(config.public.keys.iter().all(|k| k.secret.is_empty()));
+        // Only the guest's own record survives — ids are bearer credentials.
+        assert_eq!(config.clients.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["guest"]);
+        // The roster stays readable (names, activity) but carries no other id.
+        assert_eq!(status.client_list.len(), 2);
+        assert_eq!(status.client_list[0].name, "crew");
+        assert!(status.client_list[0].id.is_empty());
+        assert_eq!(status.client_list[1].id, "guest");
+    }
+
+    #[test]
+    fn guest_status_broadcasts_are_redacted_too() {
+        let ServerMsg::State { status, .. } = redaction_fixture() else { unreachable!() };
+        let ServerMsg::Status { status } =
+            redact_for_remote(ServerMsg::Status { status }, false, false, "guest")
+        else {
+            panic!("redaction changed the message kind");
+        };
+        assert!(status.client_list[0].id.is_empty());
+        assert_eq!(status.client_list[1].id, "guest");
+    }
+
+    #[test]
+    fn proxied_requests_are_recognised_by_any_forwarding_header() {
+        let mut headers = HeaderMap::new();
+        assert!(!is_proxied(&headers));
+        headers.insert("x-forwarded-for", "203.0.113.9".parse().unwrap());
+        assert!(is_proxied(&headers));
+        let mut headers = HeaderMap::new();
+        headers.insert("cf-connecting-ip", "203.0.113.9".parse().unwrap());
+        assert!(is_proxied(&headers));
+        let mut headers = HeaderMap::new();
+        headers.insert("forwarded", "for=203.0.113.9".parse().unwrap());
+        assert!(is_proxied(&headers));
     }
 
     #[test]

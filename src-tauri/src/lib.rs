@@ -21,6 +21,8 @@ pub mod display;
 pub mod power;
 pub mod prolink_analysis;
 pub mod protocol;
+pub mod public;
+pub mod public_server;
 pub mod report;
 pub mod rhythm;
 pub mod sacn;

@@ -530,6 +530,13 @@ pub struct SharedState {
     pub preview_gate: Mutex<PreviewGate>,
     /// Currently-connected WS clients: connection serial -> client id.
     pub connected_clients: Mutex<HashMap<u64, String>>,
+    /// Public-floor sessions and blocklists (see `public.rs`). Public
+    /// connections are never in `connected_clients` or `config.clients`.
+    pub public: Mutex<crate::public::Registry>,
+    /// The public listener is bound and accepting.
+    pub public_listening: AtomicBool,
+    /// Why it is not, when it should be.
+    pub public_error: Mutex<String>,
     pub conn_seq: AtomicU64,
     /// JSON events fanned out to every connected client.
     pub events: broadcast::Sender<ServerMsg>,
@@ -650,6 +657,9 @@ impl SharedState {
             video_cache: Mutex::new(HashMap::new()),
             preview_gate: Mutex::new(PreviewGate::default()),
             connected_clients: Mutex::new(HashMap::new()),
+            public: Mutex::new(crate::public::Registry::default()),
+            public_listening: AtomicBool::new(false),
+            public_error: Mutex::new(String::new()),
             conn_seq: AtomicU64::new(1),
             events,
             preview,

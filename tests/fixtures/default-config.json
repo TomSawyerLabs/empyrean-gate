@@ -37,7 +37,27 @@
     "wifi_ssid": "",
     "wifi_password": "",
     "wifi_security": "WPA",
-    "preview_fps_cap": 60
+    "preview_fps_cap": 60,
+    "refuse_proxied": true
+  },
+  "public": {
+    "enabled": false,
+    "bind": "127.0.0.1",
+    "port": 9521,
+    "url": "",
+    "trust_forwarded_headers": true,
+    "open": true,
+    "allow_draw": true,
+    "allow_effects": true,
+    "allow_games": true,
+    "allow_knobs": false,
+    "input_level": 1.0,
+    "preview_fps": 0,
+    "preview_decimate": 12,
+    "max_connections": 300,
+    "max_per_ip": 6,
+    "messages_per_second": 40,
+    "keys": []
   },
   "peer": {
     "follow": "",

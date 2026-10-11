@@ -49,6 +49,28 @@ pub enum ClientMsg {
         /// Auth token; only checked when `server.auth_token` is configured.
         #[serde(default)]
         token: String,
+        /// Which UI is connecting: `"public"` from the public floor page.
+        /// The public listener requires it (a full UI pointed at the public
+        /// port gets a clear refusal); the operator listener ignores it.
+        #[serde(default)]
+        surface: String,
+        /// Secret keys the public UI remembered (`?key=` / `/k/<secret>`),
+        /// redeemed on every hello so an unlock survives reloads.
+        #[serde(default)]
+        keys: Vec<String>,
+    },
+    /// Public floor: present a secret key typed into the UI. Rate-limited
+    /// per connection. Replies `ServerMsg::Unlocked` or `Error`.
+    Unlock {
+        key: String,
+    },
+    /// Operator (any admin): block a public player by id — kicked now, and
+    /// its id and addresses refused for the rest of the run.
+    BlockPublic {
+        id: String,
+    },
+    UnblockPublic {
+        id: String,
     },
     GetState,
     /// Full config replace (settings page "everything" updates go through this).
@@ -477,6 +499,17 @@ pub enum ServerMsg {
     Discovery {
         result: Box<crate::discovery::DiscoveryResult>,
     },
+    /// The public floor's whole view of the world — sent on hello and
+    /// whenever it changes (checked at 1 Hz). Public connections never
+    /// receive `State` or `Status`.
+    PublicState {
+        state: Box<PublicSnapshot>,
+    },
+    /// A key was redeemed on this connection.
+    Unlocked {
+        name: String,
+        perks: Vec<String>,
+    },
     /// Reply to `ClientMsg::PeerFollow`. `backup` says whether the backup role
     /// was actually granted (the leader's opt-in, one backup at a time).
     PeerWelcome {
@@ -791,7 +824,77 @@ pub struct TestModeStatus {
 
 /// Game mode, mirrored to every client: the GAME MODE banner, the Games tab's
 /// controls, and the phone controller surfaces all read this.
-#[derive(Debug, Clone, Serialize)]
+/// Operator's view of the public floor (part of `RuntimeStatus`).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct PublicStatus {
+    pub enabled: bool,
+    /// The listener is bound and accepting.
+    pub listening: bool,
+    /// Why it is not, when it should be (bind failure).
+    pub error: String,
+    /// `bind:port` as configured.
+    pub address: String,
+    pub url: String,
+    pub open: bool,
+    /// Sockets open (including ones that have not said hello yet).
+    pub connections: u32,
+    /// Sessions that said hello.
+    pub players: u32,
+    pub peak: u32,
+    pub total_joined: u64,
+    pub refused_full: u64,
+    pub kicked: u64,
+    pub blocked: u32,
+    /// Most recently active players, bounded; see `roster_truncated`.
+    pub roster: Vec<PublicPlayerInfo>,
+    pub roster_truncated: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct PublicPlayerInfo {
+    pub id: String,
+    pub name: String,
+    pub ip: String,
+    pub connected_secs: f32,
+    pub last_input: Option<String>,
+    pub last_input_secs: Option<f32>,
+    /// Names of the keys this player redeemed.
+    pub keys: Vec<String>,
+    /// Messages the rate limiter dropped.
+    pub dropped: u32,
+}
+
+/// Everything the public UI knows. Small on purpose: it goes to every public
+/// phone at up to 1 Hz over the venue's uplink.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct PublicSnapshot {
+    /// The show's name (the sACN source name).
+    pub title: String,
+    /// The floor's master switch (the UI explains a closed floor).
+    pub open: bool,
+    /// What this session may do right now, perks included.
+    pub caps: crate::public::Capabilities,
+    /// This session's perks (capability names and UI perks alike).
+    pub perks: Vec<String>,
+    /// Names of the keys this session redeemed.
+    pub unlocked: Vec<String>,
+    /// Public players connected (sessions that said hello).
+    pub players: u32,
+    /// This session's name as the server has it.
+    pub you: String,
+    pub game: GameModeStatus,
+    pub spokes: u32,
+    pub pixels: u32,
+    pub inner_radius_ft: f32,
+    pub outer_radius_ft: f32,
+    /// Preview stream this session may subscribe to; `fps` 0 = none.
+    pub preview_fps: u32,
+    pub preview_decimate: u32,
+    /// Stroke-size ceiling for this session (`big_brush` raises it).
+    pub max_dab_size: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GameModeStatus {
     /// The running game, if any.
     pub active: Option<crate::game::GameKind>,
@@ -1006,6 +1109,8 @@ pub struct RuntimeStatus {
     pub performance_recording_secs: f32,
     pub test: TestModeStatus,
     pub game: GameModeStatus,
+    /// The public floor listener and who is on it (see `public.rs`).
+    pub public: PublicStatus,
     /// True while a controller scan is in flight, so the Scan button can say so.
     pub discovery_running: bool,
     /// Leader/follower/backup relationship (see `PeerStatusInfo`).

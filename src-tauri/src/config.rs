@@ -174,6 +174,14 @@ pub struct ServerConfig {
     /// every remote viewer costs an encode + a send per frame). Applied live
     /// to existing subscriptions, not just new ones.
     pub preview_fps_cap: u32,
+    /// Refuse requests that arrive through a reverse proxy (`X-Forwarded-For`,
+    /// `CF-Connecting-IP`, `X-Real-IP`, `Forwarded`). This listener treats a
+    /// loopback peer as the operator, and a proxy on the show machine connects
+    /// from loopback — so proxying it would make every visitor the operator.
+    /// The public listener (`PublicConfig`) is the surface built to sit behind
+    /// a proxy. Leave this on; it exists so the one fatal misconfiguration
+    /// fails loudly instead of silently.
+    pub refuse_proxied: bool,
 }
 
 impl Default for ServerConfig {
@@ -182,6 +190,7 @@ impl Default for ServerConfig {
             bind: "0.0.0.0".into(),
             port: 9520,
             max_preview_clients: 10,
+            refuse_proxied: true,
             auth_token: None,
             join_token: String::new(),
             admin_token: String::new(),
@@ -197,6 +206,121 @@ impl Default for ServerConfig {
             require_token: true,
         }
     }
+}
+
+/// The public floor: a second listener built to sit behind a reverse proxy
+/// (cloudflared tunnel, Caddy) and be reached from the internet. It never
+/// grants show control, never consults the remembered-client list, never
+/// serves the operator UI, and accepts an allowlist of play messages under
+/// per-connection rate limits. See `public_server.rs`, `public.rs`, and
+/// `plans/public-floor.md`.
+///
+/// TLS is deliberately not here: the proxy terminates it (cloudflared at the
+/// edge; Caddy with DNS-01 for the LAN direct path). This listener speaks
+/// plain HTTP to the proxy next to it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PublicConfig {
+    /// Start the listener. Off on a fresh install; the floor is opened on
+    /// purpose, from Settings → Public floor.
+    pub enabled: bool,
+    /// Bind address. `127.0.0.1` for a proxy on the show machine (the
+    /// default); `0.0.0.0` only when the proxy runs on another LAN host.
+    pub bind: String,
+    pub port: u16,
+    /// The URL the public reaches the floor at (`https://play.example.com`).
+    /// Used for the public QR code and the key URLs; the listener itself does
+    /// not care. Empty until a domain exists.
+    pub url: String,
+    /// Take the client's IP from `CF-Connecting-IP` / `X-Forwarded-For` when
+    /// the TCP peer is the proxy (loopback or a private address). Used for the
+    /// per-IP connection cap and the roster only — never for privilege.
+    pub trust_forwarded_headers: bool,
+    /// Master switch for public *input* (the listener stays up and the UI says
+    /// "the floor is closed"). Flipped live mid-show.
+    pub open: bool,
+    /// What the public may do while the floor is open. Each is a live toggle.
+    pub allow_draw: bool,
+    pub allow_effects: bool,
+    pub allow_games: bool,
+    /// Exposed patch params. Off by default: every change persists the patch
+    /// file, which is a disk write per message.
+    pub allow_knobs: bool,
+    /// 0..1 multiplier on the intensity of every public dab and effect, on top
+    /// of the LAN "Floor input" fader — so the internet can be turned down
+    /// without touching the phones in the room.
+    pub input_level: f32,
+    /// Preview frames per second streamed to each public client; 0 = none
+    /// (default: the array is above their heads). Capped at 10; each viewer is
+    /// uplink bandwidth out of the venue.
+    pub preview_fps: u32,
+    /// Keep every Nth pixel along a spoke in public preview frames (min 6).
+    pub preview_decimate: u32,
+    /// Concurrent public connections; beyond it the upgrade gets 503.
+    pub max_connections: u32,
+    /// Concurrent connections from one client IP (one phone opens one).
+    pub max_per_ip: u32,
+    /// Sustained messages per second per connection; bursts of twice that are
+    /// absorbed. Drawing batches at ~30 Hz, so 40 leaves headroom and stops a
+    /// script cold.
+    pub messages_per_second: u32,
+    /// Secret keys that unlock perks — see `UnlockKey`.
+    pub keys: Vec<UnlockKey>,
+}
+
+impl Default for PublicConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bind: "127.0.0.1".into(),
+            port: 9521,
+            url: String::new(),
+            trust_forwarded_headers: true,
+            open: true,
+            allow_draw: true,
+            allow_effects: true,
+            allow_games: true,
+            allow_knobs: false,
+            input_level: 1.0,
+            preview_fps: 0,
+            preview_decimate: 12,
+            max_connections: 300,
+            max_per_ip: 6,
+            messages_per_second: 40,
+            keys: Vec::new(),
+        }
+    }
+}
+
+/// A secret the operator hands to a group — on a card, a wristband, a QR in
+/// the camp, or read out over the mic — that unlocks perks for whoever
+/// presents it: `https://play.example.com/?key=<secret>`,
+/// `https://play.example.com/k/<secret>`, or typed into the public UI.
+///
+/// Perks are plain strings. Five of them override the floor's capability
+/// toggles for the holder (`draw`, `effects`, `games`, `knobs`, `preview`);
+/// anything else is passed to the public UI for it to react to (`big_brush`,
+/// `strobe`, …). Adding an easter egg is adding a string and the code that
+/// honours it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UnlockKey {
+    /// Stable id for edits and the redemption counter.
+    pub id: String,
+    /// Shown in the roster and in the holder's "Unlocked: …" toast.
+    pub name: String,
+    /// The secret itself: URL-safe, case-sensitive, at least 4 characters.
+    pub secret: String,
+    pub perks: Vec<String>,
+    pub enabled: bool,
+    /// Redemptions allowed; 0 = unlimited. Counted per connection, so a
+    /// reload spends another use — size it for the group, not the person.
+    pub max_uses: u32,
+    /// Redemptions so far (persisted).
+    pub uses: u32,
+    /// Fire a bloom at the array's centre when the key is redeemed, so the
+    /// group sees its unlock land.
+    pub flourish: bool,
 }
 
 /// Networked redundancy: follow another instance on the LAN and optionally
@@ -972,6 +1096,8 @@ pub struct AppConfig {
     pub geometry: GeometryConfig,
     pub output: OutputConfig,
     pub server: ServerConfig,
+    /// The internet-facing play surface (second listener). Off by default.
+    pub public: PublicConfig,
     pub peer: PeerConfig,
     pub audio: AudioConfig,
     pub rhythm: RhythmConfig,
@@ -1024,6 +1150,7 @@ impl Default for AppConfig {
             geometry: GeometryConfig::default(),
             output: OutputConfig::default(),
             server: ServerConfig::default(),
+            public: PublicConfig::default(),
             peer: PeerConfig::default(),
             audio: AudioConfig::default(),
             rhythm: RhythmConfig::default(),
