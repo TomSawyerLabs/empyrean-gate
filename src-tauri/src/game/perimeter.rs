@@ -67,8 +67,8 @@ const PLANE_GAP_MIN: f32 = 22.0;
 const PLANE_GAP_MAX: f32 = 45.0;
 
 /// Sneakers: headlamps running in from the dark.
-const SNEAK_SPEED_MIN: f32 = 0.085;
-const SNEAK_SPEED_MAX: f32 = 0.16;
+const SNEAK_SPEED_MIN: f32 = 0.075;
+const SNEAK_SPEED_MAX: f32 = 0.14;
 /// Spawn angles this close to Gate Road are not used (sneakers do not queue).
 const ROAD_KEEPOUT: f32 = 14.0 * PI / 180.0;
 /// Within this distance of a truck a sneaker steers away…
@@ -92,13 +92,16 @@ const THROUGH_WINDOW: u32 = 400;
 const TRUCK_SPEED: f32 = 0.30;
 /// Chases at this fraction of the speed when the AI drives — a person
 /// aiming is the faster perimeter.
-const AI_SPEED: f32 = 0.74;
-const CATCH_RADIUS: f32 = 0.06;
+const AI_SPEED: f32 = 0.9;
+const CATCH_RADIUS: f32 = 0.075;
+/// A truck parked where its driver sent it still mops up any sneaker that
+/// comes this close — the driver can see them from the cab.
+const MOP_UP_RADIUS: f32 = 0.2;
 /// Ticks a human keeps a truck after a tap (~15 s).
 const HUMAN_TICKS: u32 = 300;
-/// AI re-target cadence in ticks (1.5 s .. 2.6 s).
-const AI_MIN_TICKS: u32 = 30;
-const AI_MAX_TICKS: u32 = 52;
+/// AI re-target cadence in ticks (1 s .. 2.2 s).
+const AI_MIN_TICKS: u32 = 20;
+const AI_MAX_TICKS: u32 = 44;
 const MAX_TRUCKS: usize = 8;
 
 /// Flash/splat glow decays this much per tick (~0.6 s visible).
@@ -591,16 +594,22 @@ impl PerimeterSim {
             let truck = self.trucks[i];
             let human = truck.human_until > ticks;
             if !human && ticks >= truck.ai_next {
-                // The AI chases the nearest sneaker's current spot — never
-                // ahead of it — or patrols the playa when there is none.
+                // The AI chases the nearest sneaker, aiming a little way
+                // inward of it (where it is heading) but re-aiming only
+                // every second or two, so fast ones still slip by — or it
+                // patrols the playa when there is none.
                 let (x, y) = (truck.x, truck.y);
                 let nearest = self
                     .sneakers
                     .iter()
-                    .map(|s| ((s.x - x).hypot(s.y - y), s.x, s.y))
+                    .map(|s| ((s.x - x).hypot(s.y - y), s.x, s.y, s.speed))
                     .min_by(|a, b| a.0.total_cmp(&b.0));
                 let (tx, ty) = match nearest {
-                    Some((_, sx, sy)) => (sx, sy),
+                    Some((_, sx, sy, speed)) => {
+                        let rn = sx.hypot(sy).max(1e-4);
+                        let lead = (speed * 0.8).min(rn - HOLE);
+                        (sx * (rn - lead) / rn, sy * (rn - lead) / rn)
+                    }
                     None => {
                         let a = self.unit() * TAU;
                         let rn = 0.78 + self.unit() * 0.18;
@@ -612,6 +621,26 @@ impl PerimeterSim {
                 t.tx = tx;
                 t.ty = ty;
                 t.ai_next = ticks + AI_MIN_TICKS + self.rng.next_below((AI_MAX_TICKS - AI_MIN_TICKS) as u64) as u32;
+            }
+            if human {
+                // Parked where the driver sent it: mop up anyone who wanders
+                // close, then come back to the spot.
+                let t = self.trucks[i];
+                let at_target = (t.tx - t.x).hypot(t.ty - t.y) < 0.02;
+                if at_target {
+                    let near = self
+                        .sneakers
+                        .iter()
+                        .map(|s| ((s.x - t.x).hypot(s.y - t.y), s.x, s.y))
+                        .filter(|n| n.0 < MOP_UP_RADIUS)
+                        .min_by(|a, b| a.0.total_cmp(&b.0));
+                    if let Some((_, sx, sy)) = near {
+                        let (nx, ny) = Self::outside_fence(sx, sy, TRUCK_MARGIN);
+                        let t = &mut self.trucks[i];
+                        t.tx = nx;
+                        t.ty = ny;
+                    }
+                }
             }
             let t = &mut self.trucks[i];
             let speed = TRUCK_SPEED * if human { 1.0 } else { AI_SPEED };
@@ -743,7 +772,7 @@ impl PerimeterSim {
                     }
                     Ground::Fence => orange,
                     Ground::Post => rgb(0.07, 0.6, 1.0),
-                    Ground::Road => rgb(0.09, 0.55, 0.11),
+                    Ground::Road => rgb(0.09, 0.5, 0.24),
                     Ground::Gate => {
                         if self.gate_blink > 0 {
                             rgb(0.33, 0.9, 1.0)
@@ -786,8 +815,11 @@ impl PerimeterSim {
             put(car.r * GATE_ANGLE.cos(), car.r * GATE_ANGLE.sin(), rgb(0.1, 0.6, 0.7));
         }
         for s in &self.sneakers {
+            // A headlamp and the person under it: two cells along the radial.
             let v = if s.hidden > 0 { 0.22 } else { 1.0 };
+            let rn = s.x.hypot(s.y).max(1e-4);
             put(s.x, s.y, rgb(0.14, 0.12, v));
+            put(s.x * (rn - 0.015) / rn, s.y * (rn - 0.015) / rn, rgb(0.14, 0.12, v * 0.5));
         }
         if let Some(p) = &self.plane {
             // Anti-collision strobe: red / white.
@@ -798,12 +830,18 @@ impl PerimeterSim {
             let hue = slot as f32 / self.slots as f32;
             let human = t.human_until > self.ticks;
             let body = rgb(hue, 0.85, if human { 0.95 } else { 0.7 });
-            // Three cells along the radial — a truck is longer than it is
-            // wide — with a light bar flashing on the middle one.
+            // A blob three cells along the radial and a spoke either side —
+            // a truck is bigger than a person — with a light bar flashing on
+            // the middle cell.
             let rn = t.x.hypot(t.y).max(1e-4);
             let (ux, uy) = (t.x / rn, t.y / rn);
-            put(t.x - ux * 0.02, t.y - uy * 0.02, body);
-            put(t.x + ux * 0.02, t.y + uy * 0.02, body);
+            let (vx, vy) = (-uy, ux);
+            let side = rn * TAU / self.theta as f32;
+            for dr in [-0.02f32, 0.0, 0.02] {
+                for dt in [-side, 0.0, side] {
+                    put(t.x + ux * dr + vx * dt, t.y + uy * dr + vy * dt, body);
+                }
+            }
             let bar = if (self.ticks / 3) % 2 == 0 { rgb(0.0, 0.0, 1.0) } else { body };
             put(t.x, t.y, bar);
         }
@@ -850,14 +888,40 @@ mod tests {
     }
 
     #[test]
-    fn with_nobody_driving_the_ai_catches_some_and_lets_some_through() {
+    fn with_nobody_driving_the_ai_catches_most_and_lets_some_through() {
         let mut s = sim();
-        for _ in 0..1800 {
+        for _ in 0..2400 {
             s.tick();
         }
         assert_eq!(s.drivers(), 0);
-        assert!(s.caught() > 0, "the AI perimeter never caught anyone in 90 s");
         assert!(s.through() > 0, "the AI perimeter was perfect — attract mode should leak");
+        // A perimeter that mostly works: at least two caught per one through.
+        assert!(
+            s.caught() >= 2 * s.through(),
+            "the AI perimeter leaks too much: {}",
+            s.detail()
+        );
+    }
+
+    #[test]
+    fn a_parked_truck_mops_up_a_sneaker_that_wanders_close() {
+        let mut s = sim();
+        park_trucks(&mut s);
+        // Truck 0 is sent to (0.85, 0) and sits there.
+        let ir = ((0.85 - HOLE) / (1.0 - HOLE) * 48.0) as i32;
+        s.inject(0, ir, 0);
+        for _ in 0..200 {
+            s.tick();
+        }
+        let t = s.trucks[0];
+        assert!((t.x - 0.85).abs() < 0.05 && t.y.abs() < 0.08, "truck not parked: ({}, {})", t.x, t.y);
+        // A sneaker creeps past within sight but outside the catch radius.
+        s.sneakers.push(Sneaker { x: 0.85, y: 0.15, speed: 0.0, hidden: 0 });
+        for _ in 0..60 {
+            s.tick();
+        }
+        assert!(s.caught() >= 1, "the parked truck ignored a sneaker in sight");
+        assert!(s.sneakers.iter().all(|k| k.speed > 0.0), "the planted sneaker is still there");
     }
 
     #[test]
@@ -871,8 +935,9 @@ mod tests {
         for _ in 0..200 {
             s.tick();
         }
-        assert_eq!(s.caught(), 1);
-        assert_eq!(s.trucks[1].caught, 1);
+        // At least the planted one (a parked truck mops up passers-by too).
+        assert!(s.caught() >= 1);
+        assert!(s.trucks[1].caught >= 1);
         // The planted one (speed 0) is gone; whatever spawned since is not it.
         assert!(s.sneakers.iter().all(|k| k.speed > 0.0), "the caught sneaker is still there");
         // A splat in truck 1's color, and the sneaker reappears as a car.

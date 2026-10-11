@@ -568,9 +568,13 @@ impl GatheringSim {
                     }
                 }
                 // The orb: a disc that grows and brightens with its fill,
-                // with a white shell once full.
+                // with a white shell once full. Stretched across the spokes
+                // (the rim's angular pitch is coarse) so it reads as an orb
+                // rather than a dash.
                 let (ox, oy) = Self::orb_pos(k);
-                let d = (x - ox).hypot(y - oy);
+                let along = (x - ox) * ox / ORB_R + (y - oy) * oy / ORB_R;
+                let across = (x - ox) * (-oy / ORB_R) + (y - oy) * (ox / ORB_R);
+                let d = along.hypot(across / 2.2);
                 let fill = (self.gathered[k] as f32 / needed).min(1.0);
                 let orb_r = 0.035 + 0.04 * fill;
                 if d < orb_r {
