@@ -34,6 +34,16 @@ export function generateDeviceName(): string {
   return `${pick(ADJECTIVES)} ${pick(NOUNS)}`;
 }
 
+/** A secret people can read off a card or hear over the mic and type:
+ *  `FIREFLY-COMET-47`. Two words and a number is enough entropy for a secret
+ *  that is also rate-limited server-side, and it survives being said aloud. */
+export function generateCodeWord(): string {
+  const n = new Uint32Array(1);
+  crypto.getRandomValues(n);
+  const word = (s: string) => s.toUpperCase().replace(/[^A-Z]/g, "");
+  return `${word(pick(NOUNS))}-${word(pick(NOUNS))}-${10 + (n[0] % 90)}`;
+}
+
 const NAME_KEY = "empyrean-client-name";
 /** Set while the stored name is a generated one nobody has confirmed yet. */
 const GENERATED_KEY = "empyrean-client-name-generated";

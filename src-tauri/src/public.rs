@@ -698,6 +698,7 @@ impl Registry {
             refused_full: self.refused_full,
             kicked: self.kicked,
             blocked: self.blocked_ids.len() as u32 + self.blocked_ips.len() as u32,
+            blocked_ids: self.blocked_ids(),
             roster: listed,
             roster_truncated: total.saturating_sub(ROSTER_LIMIT) as u32,
         }

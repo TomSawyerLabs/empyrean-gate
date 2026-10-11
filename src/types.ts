@@ -206,6 +206,114 @@ export interface ServerConfig {
   wifi_security: string;
   /** Ceiling on remote preview fps (load shedding); applied live. */
   preview_fps_cap: number;
+  /** Refuse requests that arrive through a reverse proxy (the operator port
+   *  treats loopback as the operator; the public listener is the surface
+   *  built for a proxy). */
+  refuse_proxied: boolean;
+}
+
+/** The internet-facing play surface: a second listener behind a reverse
+ *  proxy (mirrors src-tauri PublicConfig; see plans/public-floor.md). */
+export interface PublicConfig {
+  enabled: boolean;
+  /** 127.0.0.1 for a proxy on the show machine; 0.0.0.0 for one on the LAN. */
+  bind: string;
+  port: number;
+  /** Where the public reaches the floor (https://play.example.com); for the QR
+   *  and key URLs only. Empty until a domain exists. */
+  url: string;
+  trust_forwarded_headers: boolean;
+  /** Master switch for public input; the listener stays up either way. */
+  open: boolean;
+  allow_draw: boolean;
+  allow_effects: boolean;
+  allow_games: boolean;
+  allow_knobs: boolean;
+  /** 0..1 multiplier on public dab/effect intensity, on top of Floor input. */
+  input_level: number;
+  /** Preview fps per public client; 0 = no stream (default). Max 10. */
+  preview_fps: number;
+  preview_decimate: number;
+  max_connections: number;
+  max_per_ip: number;
+  messages_per_second: number;
+  keys: UnlockKey[];
+}
+
+/** A secret handed to a group that unlocks perks for whoever presents it. */
+export interface UnlockKey {
+  id: string;
+  name: string;
+  /** Redacted (empty) in configs sent to guests. */
+  secret: string;
+  /** `draw` `effects` `games` `knobs` `preview` override the floor's toggles;
+   *  anything else (`big_brush`, `strobe`) is for the public UI. */
+  perks: string[];
+  enabled: boolean;
+  /** 0 = unlimited. */
+  max_uses: number;
+  uses: number;
+  /** Fire a bloom at the centre when redeemed. */
+  flourish: boolean;
+}
+
+/** Operator's view of the public floor (part of RuntimeStatus). */
+export interface PublicStatus {
+  enabled: boolean;
+  listening: boolean;
+  error: string;
+  address: string;
+  url: string;
+  open: boolean;
+  connections: number;
+  players: number;
+  peak: number;
+  total_joined: number;
+  refused_full: number;
+  kicked: number;
+  blocked: number;
+  blocked_ids: string[];
+  roster: PublicPlayerInfo[];
+  roster_truncated: number;
+}
+
+export interface PublicPlayerInfo {
+  id: string;
+  name: string;
+  ip: string;
+  connected_secs: number;
+  last_input: string | null;
+  last_input_secs: number | null;
+  keys: string[];
+  dropped: number;
+}
+
+/** What one public session may do right now. */
+export interface PublicCapabilities {
+  draw: boolean;
+  effects: boolean;
+  games: boolean;
+  knobs: boolean;
+  preview: boolean;
+}
+
+/** Everything the public page knows (mirrors src-tauri PublicSnapshot). */
+export interface PublicSnapshot {
+  title: string;
+  open: boolean;
+  caps: PublicCapabilities;
+  perks: string[];
+  unlocked: string[];
+  players: number;
+  you: string;
+  game: GameModeStatus;
+  spokes: number;
+  pixels: number;
+  inner_radius_ft: number;
+  outer_radius_ft: number;
+  preview_fps: number;
+  preview_decimate: number;
+  max_dab_size: number;
 }
 
 /** Networked redundancy: follow a leader instance and optionally stand by as
@@ -372,6 +480,7 @@ export interface AppConfig {
   geometry: GeometryConfig;
   output: OutputConfig;
   server: ServerConfig;
+  public: PublicConfig;
   peer: PeerConfig;
   audio: AudioConfig;
   rhythm: RhythmConfig;
@@ -639,6 +748,8 @@ export interface RuntimeStatus {
   performance_recording_secs: number;
   test: TestModeStatus;
   game: GameModeStatus;
+  /** The public floor listener and who is on it. */
+  public: PublicStatus;
   /** True while a controller scan is in flight. */
   discovery_running: boolean;
   /** Leader/follower/backup relationship (both roles publish it). */
@@ -854,7 +965,9 @@ export type ServerMsg =
   | { type: "patches"; patches: PatchSummary[] }
   | { type: "patch"; patch: PatchDoc }
   | { type: "patch_param_changed"; node: string; param: string; value: number }
-  | { type: "discovery"; result: DiscoveryResult };
+  | { type: "discovery"; result: DiscoveryResult }
+  | { type: "public_state"; state: PublicSnapshot }
+  | { type: "unlocked"; name: string; perks: string[] };
 
 // --- node-graph patches (mirrors src-tauri/src/patch/) ---
 

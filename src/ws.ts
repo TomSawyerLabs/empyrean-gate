@@ -564,7 +564,7 @@ function parseMiniBatch(buf: ArrayBuffer): MiniBatch | null {
   return { batch, kind, spokes, pixels, cells, scalars };
 }
 
-function parsePreview(buf: ArrayBuffer): { bus: "program" | "ready"; frame: PreviewFrame } | null {
+export function parsePreview(buf: ArrayBuffer): { bus: "program" | "ready"; frame: PreviewFrame } | null {
   if (buf.byteLength < 12) return null;
   const view = new DataView(buf);
   const magic = view.getUint32(0, true);

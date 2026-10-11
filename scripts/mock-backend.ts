@@ -86,6 +86,27 @@ const status = {
   ],
   master_brightness: 1,
   master_speed: 1,
+  public: {
+    enabled: true,
+    listening: true,
+    error: "",
+    address: "127.0.0.1:9521",
+    url: "https://play.example.com",
+    open: true,
+    connections: 3,
+    players: 2,
+    peak: 5,
+    total_joined: 12,
+    refused_full: 0,
+    kicked: 1,
+    blocked: 1,
+    blocked_ids: ["pub-blocked-0000"],
+    roster: [
+      { id: "pub-a", name: "Cosmic Narwhal", ip: "203.0.113.9", connected_secs: 320, last_input: "tap", last_input_secs: 0.8, keys: ["Camp Mock"], dropped: 0 },
+      { id: "pub-b", name: "Velvet Pangolin", ip: "198.51.100.4", connected_secs: 45, last_input: null, last_input_secs: null, keys: [], dropped: 3 },
+    ],
+    roster_truncated: 0,
+  },
   load_history: [42, 45, 44, 48, 51, 47, 46, 49, 52, 50],
   load_warning: false,
   display_events: [],
@@ -137,6 +158,30 @@ const overrides = new Map<string, Record<string, unknown>>();
 /// Which client id each open socket said hello as.
 const clients = new WeakMap<object, string>();
 
+// The public floor page (public.html) speaks the allowlisted half of the
+// protocol and receives `public_state` instead of config/status. One snapshot
+// serves every public test; `POST /mock/public` patches it (globally — the
+// public specs are few and run against their own fields).
+const publicState = {
+  title: "Mock Gate",
+  open: true,
+  caps: { draw: true, effects: true, games: true, knobs: false, preview: false },
+  perks: [] as string[],
+  unlocked: [] as string[],
+  players: 7,
+  you: "Dusty Badger",
+  game: { active: null as string | null, summary: "", species: 3, effects_overlay: false, blocked_by_show: null },
+  spokes: SPOKES,
+  pixels: 378,
+  inner_radius_ft: initialConfig.geometry.inner_radius_ft,
+  outer_radius_ft: initialConfig.geometry.outer_radius_ft,
+  preview_fps: 0,
+  preview_decimate: 12,
+  max_dab_size: 0.25,
+};
+const publicOverrides = new Map<string, Record<string, unknown>>();
+const publicSockets = new WeakSet<object>();
+
 const server = Bun.serve({
   port: PORT,
   fetch(req, srv) {
@@ -186,13 +231,27 @@ const server = Bun.serve({
         return Response.json({ ok: true });
       });
     }
+    if (url.pathname === "/mock/public" && req.method === "POST") {
+      const client = url.searchParams.get("client") ?? "";
+      return req.json().then((patch) => {
+        publicOverrides.set(client, { ...(publicOverrides.get(client) ?? {}), ...(patch as object) });
+        return Response.json({ ok: true });
+      });
+    }
     if (url.pathname === "/qr.svg") {
       return new Response(
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1" fill="#fff"/></svg>',
         { headers: { "content-type": "image/svg+xml" } },
       );
     }
-    const path = url.pathname === "/" ? "/index.html" : url.pathname;
+    // The public listener serves public.html at its root and at /k/<secret>;
+    // the mock keeps the operator UI at / and offers the public page by name.
+    const path =
+      url.pathname === "/"
+        ? "/index.html"
+        : url.pathname.startsWith("/k/")
+          ? "/public.html"
+          : url.pathname;
     const file = Bun.file(join(DIST, path));
     const ext = path.split(".").pop() ?? "";
     return file.exists().then((exists) =>
@@ -208,10 +267,39 @@ const server = Bun.serve({
       ws.send(JSON.stringify({ type: "state", config, status }));
     },
     message(ws, raw) {
-      let msg: { type?: string; client_id?: string; include_ready?: boolean; ready_id?: string; stack?: unknown; config?: unknown };
+      let msg: { type?: string; client_id?: string; include_ready?: boolean; ready_id?: string; stack?: unknown; config?: unknown; surface?: string; key?: string; keys?: string[] };
       try {
         msg = JSON.parse(String(raw));
       } catch {
+        return;
+      }
+      if (msg.type === "hello" && msg.surface === "public") publicSockets.add(ws);
+      if (publicSockets.has(ws)) {
+        // The public half: a snapshot on hello, an unlock that grants perks
+        // when the code is the one the mock knows, nothing else answered.
+        if (msg.client_id) clients.set(ws, msg.client_id);
+        const snap = () => ({
+          ...publicState,
+          ...(publicOverrides.get(clients.get(ws) ?? "") ?? {}),
+        });
+        if (msg.type === "hello" || msg.type === "get_state") {
+          ws.send(JSON.stringify({ type: "public_state", state: snap() }));
+        } else if (msg.type === "unlock") {
+          if (msg.key === "FIREFLY-COMET-47") {
+            publicOverrides.set(clients.get(ws) ?? "", {
+              ...(publicOverrides.get(clients.get(ws) ?? "") ?? {}),
+              perks: ["big_brush", "strobe"],
+              unlocked: ["Camp Mock"],
+              max_dab_size: 0.5,
+            });
+            ws.send(JSON.stringify({ type: "unlocked", name: "Camp Mock", perks: ["big_brush", "strobe"] }));
+            ws.send(JSON.stringify({ type: "public_state", state: snap() }));
+          } else {
+            ws.send(JSON.stringify({ type: "error", message: "That code does not unlock anything." }));
+          }
+        } else if (msg.type === "subscribe_preview") {
+          ws.send(JSON.stringify({ type: "error", message: "No preview on the public floor right now." }));
+        }
         return;
       }
       switch (msg.type) {

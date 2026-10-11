@@ -1,0 +1,294 @@
+/* The public floor page. Shares the operator UI's variables, buttons, chips
+   and swatches (styles.css is loaded first); this file is only its layout.
+   Phone-first and sized so the whole thing fits one screen: the stage takes
+   what the viewport's shorter side allows, the tools scroll inside their own
+   box if they must, and the document itself never scrolls (a drag must play
+   the array, not pan the page). */
+
+.public-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.public-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  padding-top: max(8px, env(safe-area-inset-top));
+  border-bottom: 1px solid #241d3d;
+  background: rgba(10, 8, 20, 0.7);
+  min-height: 44px;
+}
+.public-top h1 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.public-players {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.public-banner {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.35;
+  max-height: 5.2em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.public-banner.game-banner {
+  letter-spacing: 0;
+}
+.public-connecting {
+  background: #1c1733;
+  color: var(--muted);
+  text-align: center;
+}
+.public-unlocked {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #ffe08a;
+  background: rgba(255, 213, 42, 0.08);
+  border-bottom: 1px solid rgba(255, 213, 42, 0.25);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.public-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 0;
+}
+
+/* The stage is a square: as wide as the viewport allows, but never more than
+   about half the height, so the tools always have room below it. On a wide
+   screen it simply sits centred at that height. */
+.public-stage {
+  position: relative;
+  flex: 0 0 auto;
+  width: min(100%, 52vh, 52dvh, 560px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  touch-action: none;
+}
+.public-stage > canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.public-stage .gate-canvas {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  width: 100%;
+}
+.public-schematic,
+.public-ripples {
+  pointer-events: none;
+}
+.public-app.closed .public-stage {
+  opacity: 0.45;
+}
+
+.public-tools {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: 560px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+}
+.public-row-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.public-pads {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 6px;
+}
+.public-pad {
+  min-height: 44px;
+  padding: 8px 6px;
+  font-size: 13px;
+  background-color: var(--panel);
+  background-image: var(--surface-grad);
+  border: 1px solid #332a55;
+  border-radius: 8px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.public-pad.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent) inset;
+}
+.public-pad.perk {
+  border-color: #8a6d1a;
+  color: #ffe08a;
+}
+.public-pad.shape svg {
+  width: 26px;
+  height: 26px;
+}
+.public-pens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: stretch;
+}
+.public-pen {
+  min-width: 60px;
+  min-height: 44px;
+}
+.public-size {
+  flex: 1 1 140px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 0;
+}
+.public-size input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.public-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.public-swatches .swatch {
+  flex: 1 1 32px;
+  height: 34px;
+  max-width: 56px;
+}
+.public-ringfall {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 6px;
+}
+.public-ringfall button {
+  min-height: 48px;
+}
+.public-summary {
+  margin: 0;
+}
+
+.public-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  padding-bottom: max(6px, env(safe-area-inset-bottom));
+  border-top: 1px solid #241d3d;
+  font-size: 11px;
+  color: var(--muted);
+  min-height: 40px;
+}
+.public-credit {
+  white-space: nowrap;
+}
+.public-code {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.public-code-toggle {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.public-code-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.public-code-form input {
+  width: 140px;
+  font-size: 14px;
+  padding: 6px 8px;
+}
+.public-toast {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #2a2245;
+  color: #ffe08a;
+  border: 1px solid #8a6d1a;
+  white-space: nowrap;
+  font-size: 13px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+/* Landscape phones and anything wide-and-short: stage left, tools right. */
+@media (min-aspect-ratio: 5/4) and (max-height: 600px) {
+  .public-main {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 8px;
+  }
+  .public-stage {
+    width: min(78vh, 78dvh, 420px);
+  }
+  .public-tools {
+    max-width: 420px;
+    height: 100%;
+  }
+}
+
+/* The name chip sits at the header's right edge here, so its "pick a name"
+   nudge wraps under the name instead of running past the viewport. */
+.public-top .name-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(200px, 46vw);
+  white-space: normal;
+  text-align: left;
+}
+.public-top .name-chip-nudge {
+  display: block;
+  margin-left: 0;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -25,8 +25,11 @@ import {
   type DjLinkEffectsConfig,
   type DjLinkEventKind,
   type EffectKind,
+  type PublicConfig,
+  type UnlockKey,
 } from "./types";
 import { hsvToHex, liveColor } from "./liveColors";
+import { generateCodeWord } from "./deviceNames";
 import { BRC_EVENT_CATEGORIES } from "./ambientScenes";
 import LayerColorControls from "./LayerColor";
 
@@ -44,6 +47,7 @@ export default function Settings() {
       <GeometryPanel config={config} />
       <RedundancyPanel config={config} />
       <ClientsPanel />
+      <PublicFloorPanel config={config} />
       <BrcEventsPanel />
       <DiagnosticsPanel />
       <UpdatesPanel config={config} />
@@ -879,6 +883,353 @@ function ClientsPanel() {
           </div>
         </div>
       ))}
+    </section>
+  );
+}
+
+/** Perks a key can grant. The first five override the floor's toggles for the
+ *  holder; the rest are read by the public page. Anything else can be typed. */
+const KNOWN_PERKS: { id: string; label: string; hint: string }[] = [
+  { id: "draw", label: "Draw", hint: "may draw even when the floor's drawing is off" },
+  { id: "effects", label: "Effects", hint: "may fire effects even when off" },
+  { id: "games", label: "Games", hint: "may play even when off" },
+  { id: "knobs", label: "Knobs", hint: "may turn exposed patch params" },
+  { id: "preview", label: "Preview", hint: "gets the small live stream" },
+  { id: "big_brush", label: "Big brush", hint: "stroke size up to half the array" },
+  { id: "strobe", label: "Strobe", hint: "the strobe pad appears" },
+];
+
+/** The internet-facing floor: its listener, what it may do, who is on it, and
+ *  the secret keys that unlock more (plans/public-floor.md). */
+function PublicFloorPanel({ config }: { config: AppConfig }) {
+  const { client, status } = useGate();
+  const pub = config.public;
+  const st = status?.public;
+  const patch = (next: Partial<PublicConfig>) =>
+    client.setConfig({ ...config, public: { ...pub, ...next } });
+  const patchKey = (id: string, next: Partial<UnlockKey>) =>
+    patch({ keys: pub.keys.map((k) => (k.id === id ? { ...k, ...next } : k)) });
+  const addKey = () =>
+    patch({
+      keys: [
+        ...pub.keys,
+        {
+          id: typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `key-${Date.now().toString(36)}`,
+          name: `Key ${pub.keys.length + 1}`,
+          secret: generateCodeWord(),
+          perks: ["draw", "effects"],
+          enabled: true,
+          max_uses: 0,
+          uses: 0,
+          flourish: true,
+        },
+      ],
+    });
+  // Where a key URL points: the public URL once there is one, else the
+  // listener itself (only reachable from this machine when bound to loopback).
+  const base = pub.url.replace(/\/+$/, "") || `http://${pub.bind}:${pub.port}`;
+  const keyUrl = (secret: string) => `${base}/k/${encodeURIComponent(secret)}`;
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+      window.setTimeout(() => setCopied(null), 1500);
+    } catch {
+      window.prompt("Copy this", text);
+    }
+  };
+  const perkToggle = (key: UnlockKey, perk: string) => {
+    const has = key.perks.includes(perk);
+    patchKey(key.id, { perks: has ? key.perks.filter((p) => p !== perk) : [...key.perks, perk] });
+  };
+  const extraPerks = (key: UnlockKey) =>
+    key.perks.filter((p) => !KNOWN_PERKS.some((k) => k.id === p)).join(", ");
+  return (
+    <section className="panel public-floor-panel">
+      <h2>Public floor</h2>
+      <p className="hint">
+        A second listener built to sit behind a reverse proxy (a cloudflared tunnel or
+        Caddy on this machine) so a public URL can play the array: effects, drawing and
+        games only, under rate limits, with its own level. It never grants show control
+        and never serves this UI. Never point a proxy at the operator port — it refuses
+        proxied requests on purpose. See <code>docs/public-deploy.md</code>.
+      </p>
+      <label className="toggle-row">
+        <input type="checkbox" checked={pub.enabled} onChange={(e) => patch({ enabled: e.target.checked })} />
+        Run the public listener
+        {st && (
+          <span className={`public-listen-state ${st.listening ? "ok" : pub.enabled ? "err" : ""}`}>
+            {st.listening
+              ? `listening on ${st.address}`
+              : pub.enabled
+                ? st.error || "starting…"
+                : "off"}
+          </span>
+        )}
+      </label>
+      <div className="public-grid">
+        <label className="field-row">
+          <span>Bind</span>
+          <select value={pub.bind} onChange={(e) => patch({ bind: e.target.value })}>
+            <option value="127.0.0.1">127.0.0.1 — proxy on this machine</option>
+            <option value="0.0.0.0">0.0.0.0 — proxy elsewhere on the LAN</option>
+            {!["127.0.0.1", "0.0.0.0"].includes(pub.bind) && <option value={pub.bind}>{pub.bind}</option>}
+          </select>
+        </label>
+        <label className="field-row">
+          <span>Port</span>
+          <input
+            type="number"
+            min={1}
+            max={65535}
+            value={pub.port}
+            onChange={(e) => patch({ port: Math.min(65535, Math.max(1, Number(e.target.value) || 9521)) })}
+          />
+        </label>
+        <label className="field-row public-url-field">
+          <span>Public URL</span>
+          <input
+            value={pub.url}
+            placeholder="https://play.example.com"
+            onChange={(e) => patch({ url: e.target.value.trim() })}
+          />
+        </label>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={pub.trust_forwarded_headers}
+            onChange={(e) => patch({ trust_forwarded_headers: e.target.checked })}
+          />
+          <span>Read the client IP from the proxy's headers (per-IP cap and roster only)</span>
+        </label>
+      </div>
+
+      <h3>What the floor may do</h3>
+      <label className="toggle-row">
+        <input type="checkbox" checked={pub.open} onChange={(e) => patch({ open: e.target.checked })} />
+        <strong>{pub.open ? "The floor is open" : "The floor is closed"}</strong>
+        <span className="hint">— the master switch; key holders keep their perks either way</span>
+      </label>
+      <div className="public-caps">
+        <label className="check-row">
+          <input type="checkbox" checked={pub.allow_draw} onChange={(e) => patch({ allow_draw: e.target.checked })} />
+          <span>Drawing</span>
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={pub.allow_effects} onChange={(e) => patch({ allow_effects: e.target.checked })} />
+          <span>Effects and shapes</span>
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={pub.allow_games} onChange={(e) => patch({ allow_games: e.target.checked })} />
+          <span>Playing games</span>
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={pub.allow_knobs} onChange={(e) => patch({ allow_knobs: e.target.checked })} />
+          <span>Exposed patch knobs (no public knob surface yet; each turn writes the patch file)</span>
+        </label>
+      </div>
+      <label className="field-row public-level">
+        <span>Internet input level</span>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={pub.input_level}
+          onChange={(e) => patch({ input_level: Number(e.target.value) })}
+        />
+        <span>{Math.round(pub.input_level * 100)}%</span>
+      </label>
+      <p className="hint">
+        Scales every public dab and effect, on top of the Floor input fader — turn the
+        internet down without touching the phones in the room.
+      </p>
+      <div className="public-grid">
+        <label className="field-row">
+          <span>Preview fps per phone (0 = none)</span>
+          <input
+            type="number"
+            min={0}
+            max={10}
+            value={pub.preview_fps}
+            onChange={(e) => patch({ preview_fps: Math.min(10, Math.max(0, Number(e.target.value) || 0)) })}
+          />
+        </label>
+        <label className="field-row">
+          <span>Preview decimation (≥ 6)</span>
+          <input
+            type="number"
+            min={6}
+            max={64}
+            value={pub.preview_decimate}
+            onChange={(e) => patch({ preview_decimate: Math.min(64, Math.max(6, Number(e.target.value) || 6)) })}
+          />
+        </label>
+        <label className="field-row">
+          <span>Max connections</span>
+          <input
+            type="number"
+            min={1}
+            max={5000}
+            value={pub.max_connections}
+            onChange={(e) => patch({ max_connections: Math.max(1, Number(e.target.value) || 1) })}
+          />
+        </label>
+        <label className="field-row">
+          <span>Max per IP</span>
+          <input
+            type="number"
+            min={1}
+            max={100}
+            value={pub.max_per_ip}
+            onChange={(e) => patch({ max_per_ip: Math.max(1, Number(e.target.value) || 1) })}
+          />
+        </label>
+        <label className="field-row">
+          <span>Messages / s per phone</span>
+          <input
+            type="number"
+            min={1}
+            max={1000}
+            value={pub.messages_per_second}
+            onChange={(e) => patch({ messages_per_second: Math.max(1, Number(e.target.value) || 1) })}
+          />
+        </label>
+      </div>
+      <p className="hint">
+        Every public viewer is uplink bandwidth out of the venue (≈ 1 KB per frame at the
+        default decimation), and the array is above their heads — the preview stays off
+        unless a show needs it.
+      </p>
+
+      <h3>Who is on the floor</h3>
+      {st && (
+        <p className="hint">
+          {st.players} playing · {st.connections} sockets · peak {st.peak} · {st.total_joined} joined this
+          run · {st.refused_full} refused as full · {st.kicked} kicked · {st.blocked} blocked
+        </p>
+      )}
+      {st?.roster.map((p) => (
+        <div className="client-row public-row" key={p.id}>
+          <span className="conn-dot on" />
+          <div className="client-identity">
+            <strong>{p.name}</strong>
+            <span className="hint">
+              {p.ip} · {Math.round(p.connected_secs / 60)} min
+              {p.last_input ? ` · ${p.last_input} ${Math.round(p.last_input_secs ?? 0)}s ago` : ""}
+              {p.keys.length ? ` · ✦ ${p.keys.join(", ")}` : ""}
+              {p.dropped ? ` · ${p.dropped} dropped` : ""}
+            </span>
+          </div>
+          <div className="client-actions">
+            <button className="danger" onClick={() => client.send({ type: "block_public", id: p.id })}>
+              Block
+            </button>
+          </div>
+        </div>
+      ))}
+      {st && st.roster_truncated > 0 && <p className="hint">…and {st.roster_truncated} more.</p>}
+      {st && st.blocked_ids.length > 0 && (
+        <div className="public-blocked">
+          <span className="hint">Blocked:</span>
+          {st.blocked_ids.map((id) => (
+            <button key={id} className="ghost" onClick={() => client.send({ type: "unblock_public", id })}>
+              {id.slice(0, 12)}… · Unblock
+            </button>
+          ))}
+        </div>
+      )}
+
+      <h3>Secret keys</h3>
+      <p className="hint">
+        A key is a secret you hand to a group — on a card, a wristband, a QR in the camp,
+        or read out over the mic. Whoever opens its link or types the code unlocks the
+        perks below for their phone. Share the link or the code, never this page.
+      </p>
+      {pub.keys.map((key) => (
+        <div className={`public-key ${key.enabled ? "" : "disabled"}`} key={key.id}>
+          <div className="public-key-head">
+            <label className="check-row">
+              <input type="checkbox" checked={key.enabled} onChange={(e) => patchKey(key.id, { enabled: e.target.checked })} />
+              <span>On</span>
+            </label>
+            <input
+              className="public-key-name"
+              value={key.name}
+              aria-label="Key name"
+              onChange={(e) => patchKey(key.id, { name: e.target.value })}
+            />
+            <input
+              className="public-key-secret"
+              value={key.secret}
+              aria-label="Secret code"
+              spellCheck={false}
+              onChange={(e) => patchKey(key.id, { secret: e.target.value.replace(/\s+/g, "") })}
+            />
+            <button className="ghost" title="New code" onClick={() => patchKey(key.id, { secret: generateCodeWord() })}>
+              🎲
+            </button>
+            <button className="ghost" onClick={() => copy(keyUrl(key.secret), key.id)}>
+              {copied === key.id ? "Copied" : "Copy link"}
+            </button>
+            <button className="danger" onClick={() => patch({ keys: pub.keys.filter((k) => k.id !== key.id) })}>
+              Delete
+            </button>
+          </div>
+          <div className="public-key-body">
+            <div className="public-key-perks">
+              {KNOWN_PERKS.map((perk) => (
+                <label key={perk.id} className={`public-perk ${key.perks.includes(perk.id) ? "on" : ""}`} title={perk.hint}>
+                  <input type="checkbox" checked={key.perks.includes(perk.id)} onChange={() => perkToggle(key, perk.id)} />
+                  <span>{perk.label}</span>
+                </label>
+              ))}
+              <input
+                className="public-key-extra"
+                placeholder="other perks, comma-separated"
+                aria-label="Other perks"
+                defaultValue={extraPerks(key)}
+                onBlur={(e) => {
+                  const extra = e.target.value
+                    .split(",")
+                    .map((p) => p.trim())
+                    .filter((p) => p && !KNOWN_PERKS.some((k) => k.id === p));
+                  const known = key.perks.filter((p) => KNOWN_PERKS.some((k) => k.id === p));
+                  patchKey(key.id, { perks: [...known, ...extra] });
+                }}
+              />
+            </div>
+            <div className="public-key-meta">
+              <label className="field-row">
+                <span>Max uses (0 = ∞)</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={key.max_uses}
+                  onChange={(e) => patchKey(key.id, { max_uses: Math.max(0, Number(e.target.value) || 0) })}
+                />
+              </label>
+              <span className="hint">used {key.uses}×</span>
+              <label className="check-row">
+                <input type="checkbox" checked={key.flourish} onChange={(e) => patchKey(key.id, { flourish: e.target.checked })} />
+                <span>Bloom on the array when redeemed</span>
+              </label>
+              {key.secret.length >= 4 ? (
+                <img
+                  className="qr public-key-qr"
+                  src={`${client.httpBase}/qr.svg?data=${encodeURIComponent(keyUrl(key.secret))}`}
+                  alt={`QR code for ${key.name}`}
+                />
+              ) : (
+                <span className="warn">The code needs at least 4 characters.</span>
+              )}
+              <code className="join-url">{keyUrl(key.secret)}</code>
+            </div>
+          </div>
+        </div>
+      ))}
+      <button onClick={addKey}>+ New key</button>
     </section>
   );
 }

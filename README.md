@@ -272,6 +272,30 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   ids and friendly names; Settings → Clients lets you rename, revoke (kicks live,
   blocks rejoin), and optionally require the join token so only QR-scanned devices
   can connect (rotate the token to lock everyone new out).
+- **The public floor** (`docs/public-deploy.md`): a **second listener** built to
+  sit behind a reverse proxy — a cloudflared tunnel, or Caddy on the show
+  machine with a DNS-01 certificate for the venue's own Wi-Fi — so a public URL
+  can play the array from anywhere. It serves a **purpose-built page**
+  (`public.html`): the array, what a touch does (effects and shapes, pens and
+  colours, or the running game's colour chips and controls), a name chip, and
+  "Have a code?". Nothing else — no settings, no roster, no show control — and
+  the server would refuse it anyway: the listener speaks the same JSON
+  protocol through an **allowlist** (draw / effects / games / exposed knobs /
+  a capped preview, each a live toggle in Settings → Public floor, with **The
+  floor is open/closed** as the master switch and an **internet input level**
+  on top of the Floor fader). Sessions are in memory under a per-connection
+  rate limit, connection and per-IP caps answered at the upgrade, an Origin
+  check, a hello deadline, an idle timeout and a strike counter; a public
+  phone receives a small `public_state` snapshot, never the config or status.
+  The roster lists public players separately with a Block that holds for the
+  run. **Secret keys** (`Settings → Public floor → Secret keys`) unlock
+  **perks** for a group: a link (`/k/<secret>`), a QR, or a code word read out
+  over the mic; five perks override the floor's toggles for the holder, the
+  rest (`big_brush`, `strobe`) are read by the page. TLS is deliberately the
+  proxy's job. The operator port, meanwhile, **refuses proxied requests** —
+  a proxy on the show machine connects from loopback, and loopback is the
+  operator — and guests no longer receive other devices' ids, the join/staff
+  tokens, the Wi-Fi password or key secrets in their state snapshots.
 - **Show-machine hardening**: the backend blocks system sleep while running (and
   display sleep while output is enabled — display sleep can take HDMI/DP
   display-audio loopback sources with it); config saves are crash-safe (temp +
@@ -331,6 +355,8 @@ src-tauri/src/
   rhythm.rs         external musical clocks (MIDI Clock first; deck/link adapters next)
   sacn.rs           allocation-free E1.31 sender (prebuilt per-universe packets)
   server.rs         axum HTTP + WS (serves UI, speaks the protocol)
+  public.rs         the public floor's rules: allowlist, limiter, sessions, keys
+  public_server.rs  the public floor's listener (second port, behind a proxy)
   media.rs          guarded URL resolver + ranged same-origin media proxy
   config.rs         geometry / output / audio / layers, persisted JSON
 ```
@@ -373,6 +399,10 @@ Useful during pattern development:
   `EMPYREAN_UPRISING_DIR` when needed.
 - `bun scripts/e2e-test.ts` — protocol smoke test against a running backend.
   It also sends a generated video texture and verifies live source status.
+- `bun scripts/public-floor-test.ts` — the public floor against a running backend
+  with `public.enabled` on: public routes present, operator routes absent, the
+  operator port refusing a proxied request, the hello gate, the allowlist, the
+  rate limiter, the strike limit, and a key (`KEY=<secret>`).
 - `bun scripts/report-test.ts` — drives operator input against a running backend,
   requests a feedback report, and verifies the bundle end to end (timeline folding,
   frames.bin geometry, PNG contact sheet, path-traversal defense).

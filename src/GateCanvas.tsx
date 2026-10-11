@@ -3,8 +3,8 @@
 // (View tab → burst), "draw" streams stroke dabs to the backend (Draw tab).
 
 import { useEffect, useRef, useState } from "react";
-import { useGate } from "./state";
-import type { PenKind, PreviewFrame, PreviewMeta } from "./types";
+import { useGateOptional } from "./state";
+import type { PenKind, PreviewFrame, PreviewMeta, ServerMsg } from "./types";
 
 const VS = `#version 300 es
 layout(location=0) in vec2 a_pos;
@@ -124,6 +124,17 @@ export interface GatePreviewSource {
   subscribe: (listener: (frame: PreviewFrame) => void) => () => void;
 }
 
+/** What the canvas needs from a connection. `GateClient` satisfies it; the
+ *  public floor page supplies its own slimmer client. */
+export interface CanvasTransport {
+  httpBase: string;
+  send(msg: Record<string, unknown>): void;
+  subscribePreview(fps: number, decimate: number): void;
+  onFrame(listener: (frame: PreviewFrame) => void): () => void;
+  onMessage(listener: (msg: ServerMsg) => void): () => void;
+  onStatus(listener: (connected: boolean) => void): () => void;
+}
+
 export interface DrawPen {
   pen: PenKind;
   hue: number; // turns; -1 = white
@@ -137,6 +148,9 @@ export default function GateCanvas({
   onTap,
   drawPen,
   previewSource,
+  transport,
+  previewFps,
+  previewDecimate,
 }: {
   /** Called with (angle, radius01) on a click/tap (when not drawing). */
   onTap?: (angle: number, radius: number) => void;
@@ -144,8 +158,17 @@ export default function GateCanvas({
   drawPen?: DrawPen;
   /** Replaces the live backend stream. Used by the archived-show replay screen. */
   previewSource?: GatePreviewSource;
+  /** Connection to use instead of the operator app's; required outside
+   *  GateProvider (the public floor page). */
+  transport?: CanvasTransport;
+  /** Override the subscription the canvas asks for (the public floor's
+   *  stream is whatever the operator allows). */
+  previewFps?: number;
+  previewDecimate?: number;
 }) {
-  const { client } = useGate();
+  const gate = useGateOptional();
+  const client = transport ?? gate?.client;
+  if (!client) throw new Error("GateCanvas needs a transport outside GateProvider");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glRef = useRef<Gl | null>(null);
   const [meta, setMeta] = useState<PreviewMeta | null>(previewSource?.meta ?? null);
@@ -165,7 +188,7 @@ export default function GateCanvas({
       return;
     }
     const phone = window.innerWidth < 700;
-    const decimate = phone ? 3 : 1;
+    const decimate = previewDecimate ?? (phone ? 3 : 1);
     // The Gate machine's preview never crosses the venue network. Show it at
     // render cadence so an already-low-latency deck reaction is not then held
     // for a 30 fps preview interval. Remote devices retain their Wi-Fi caps.
@@ -176,7 +199,7 @@ export default function GateCanvas({
       const loopback =
         client.httpBase.startsWith("http://127.0.0.1") ||
         client.httpBase.startsWith("http://localhost");
-      client.subscribePreview(loopback ? 60 : phone ? 24 : 30, decimate);
+      client.subscribePreview(previewFps ?? (loopback ? 60 : phone ? 24 : 30), decimate);
     };
     sub();
     const offStatus = client.onStatus((up) => up && sub());
@@ -188,7 +211,7 @@ export default function GateCanvas({
       offMsg();
       client.send({ type: "unsubscribe_preview" });
     };
-  }, [client, previewSource]);
+  }, [client, previewSource, previewFps, previewDecimate]);
 
   useEffect(() => {
     if (!meta || !canvasRef.current) return;

@@ -191,6 +191,12 @@ export function useGate(): Gate {
   return ctx;
 }
 
+/** For components that can also live outside the operator app (the public
+ *  floor page mounts GateCanvas with its own transport). */
+export function useGateOptional(): Gate | null {
+  return useContext(GateContext);
+}
+
 /** Throttle rapid slider changes to ~10 msg/s, always sending the trailing value. */
 export function useThrottled<T>(fn: (v: T) => void, ms = 100): (v: T) => void {
   const last = useRef(0);

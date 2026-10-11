@@ -211,6 +211,45 @@ for (const viewport of VIEWPORTS) {
       });
     }
 
+    // The public floor page (public.html) is its own entry: no tabs, one
+    // screen, and it must never scroll — a drag has to play the array. Checked
+    // with the tools that make it tallest (a game running, a key unlocked).
+    test("public floor page fits", async ({ page }) => {
+      const clientId = `layout-public-${viewport.name}`;
+      await page.addInitScript((id) => localStorage.setItem("empyrean-public-id", id), clientId);
+      await page.request.post(`/mock/public?client=${clientId}`, {
+        data: { unlocked: ["Camp Mock"], perks: ["big_brush", "strobe"] },
+      });
+      await page.goto("/public.html");
+      await expect(page.locator('.public-app[data-connected="yes"]')).toBeAttached();
+      await page.waitForTimeout(250);
+      const problems = await overflows(page, true);
+      expect(
+        problems,
+        `Clipped or overflowing regions on the public page at ${viewport.width}x${viewport.height}:\n` +
+          problems.map((p) => `  [${p.axis}] ${p.element} — ${p.detail}`).join("\n"),
+      ).toEqual([]);
+    });
+
+    test("public floor page fits with a game running", async ({ page }) => {
+      const clientId = `layout-public-game-${viewport.name}`;
+      await page.addInitScript((id) => localStorage.setItem("empyrean-public-id", id), clientId);
+      await page.request.post(`/mock/public?client=${clientId}`, {
+        data: {
+          game: { active: "radial_tetris", summary: "Ringfall · Dot falling · 3 rings", species: 6, effects_overlay: false, blocked_by_show: null },
+        },
+      });
+      await page.goto("/public.html");
+      await expect(page.locator('.public-app[data-connected="yes"]')).toBeAttached();
+      await page.waitForTimeout(250);
+      const problems = await overflows(page, true);
+      expect(
+        problems,
+        `Clipped or overflowing regions on the public page (game) at ${viewport.width}x${viewport.height}:\n` +
+          problems.map((p) => `  [${p.axis}] ${p.element} — ${p.detail}`).join("\n"),
+      ).toEqual([]);
+    });
+
     // The banner that appears when another sACN source is driving our universes.
     // It is the tallest thing that can push into <main> uninvited, on every tab
     // and in show mode, so Live still has to fit underneath it.

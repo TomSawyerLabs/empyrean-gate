@@ -72,6 +72,15 @@ export default defineConfig({
   },
   envPrefix: ["VITE_", "TAURI_ENV_"],
   build: {
+    // Two pages from one bundle: the operator UI (index.html) and the public
+    // floor (public.html), which the backend's public listener serves at its
+    // root. Same dist/, same embedded assets, no operator chrome on the floor.
+    rollupOptions: {
+      input: {
+        index: "index.html",
+        public: "public.html",
+      },
+    },
     // Not Chromium alone. The desktop app is WebView2, but the SAME bundle is
     // served over the LAN to iPads and phones — QR join, "Add to Home Screen",
     // remote mic — so WebKit is a first-class target, not an afterthought.

@@ -346,10 +346,13 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
   // The admin token is redacted from configs sent to remote clients, so the
   // Admin option only ever appears on the Gate machine itself.
   const adminToken = config?.server.admin_token ?? "";
-  const [access, setAccess] = useState<"guest" | "admin">("guest");
+  // The public floor's URL, once a domain exists: the same QR dialog hands it
+  // out, so the venue poster and the internet can share one address.
+  const publicUrl = config?.public.enabled && config.public.url ? config.public.url : "";
+  const [access, setAccess] = useState<"guest" | "admin" | "public">("guest");
   const token = access === "admin" && adminToken ? adminToken : config?.server.join_token ?? "";
   const port = config?.server.port ?? 9520;
-  const url = `http://${chosen}:${port}/?join=${token}`;
+  const url = access === "public" && publicUrl ? publicUrl : `http://${chosen}:${port}/?join=${token}`;
   // The Wi-Fi code sits beside the join code, well apart, each under a big
   // numbered heading — a phone camera must never see both at once.
   const wifi = config?.server.wifi_qr_enabled && config.server.wifi_ssid ? config.server : null;
@@ -392,7 +395,7 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
             })}
           </select>
         )}
-        {adminToken && (
+        {(adminToken || publicUrl) && (
           <div className="connect-access" role="group" aria-label="Access level">
             <button
               className={access === "guest" ? "active" : ""}
@@ -400,19 +403,31 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
             >
               Guest
             </button>
-            <button
-              className={access === "admin" ? "active" : ""}
-              onClick={() => setAccess("admin")}
-            >
-              Admin
-            </button>
+            {adminToken && (
+              <button
+                className={access === "admin" ? "active" : ""}
+                onClick={() => setAccess("admin")}
+              >
+                Admin
+              </button>
+            )}
+            {publicUrl && (
+              <button
+                className={access === "public" ? "active" : ""}
+                onClick={() => setAccess("public")}
+              >
+                Public
+              </button>
+            )}
           </div>
         )}
-        {adminToken && (
+        {(adminToken || publicUrl) && (
           <p className="hint">
             {access === "admin"
               ? "Admin: full show control — settings, scenes, layers, updates."
-              : "Guest: drawing, effects, and games only. Most people get this one."}
+              : access === "public"
+                ? "Public: the internet-facing floor — effects, drawing and games, with the operator's limits. Works from anywhere."
+                : "Guest: drawing, effects, and games only. Most people get this one."}
           </p>
         )}
         <div className="connect-codes">
@@ -429,7 +444,7 @@ function ConnectModal({ onClose }: { onClose: () => void }) {
           )}
           <section className="connect-code">
             {wifi && <h3>2 · Open the show</h3>}
-            {chosen ? (
+            {chosen || access === "public" ? (
               <img
                 className="qr"
                 src={`${client.httpBase}/qr.svg?data=${encodeURIComponent(url)}`}

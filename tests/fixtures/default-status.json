@@ -131,6 +131,7 @@
     "refused_full": 0,
     "kicked": 0,
     "blocked": 0,
+    "blocked_ids": [],
     "roster": [],
     "roster_truncated": 0
   },

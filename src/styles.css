@@ -6538,7 +6538,8 @@ button.hue-swatch-button[aria-expanded="true"] {
   color: var(--danger);
 }
 
-.roster-cutoff {
+.roster-cutoff,
+.roster-section {
   display: flex;
   justify-content: space-between;
   gap: 8px;
@@ -6712,4 +6713,160 @@ button.hue-swatch-button[aria-expanded="true"] {
   gap: 10px;
   font-size: 12px;
   color: var(--muted);
+}
+
+/* --- Settings → Public floor ------------------------------------------- */
+.public-floor-panel h3 {
+  margin: 18px 0 6px;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.public-listen-state {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+.public-listen-state.ok {
+  color: var(--ok);
+}
+.public-listen-state.err {
+  color: var(--danger);
+}
+.public-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 16px;
+  margin: 6px 0;
+}
+.public-grid .field-row input,
+.public-grid .field-row select {
+  max-width: 180px;
+}
+.public-url-field {
+  grid-column: 1 / -1;
+}
+.public-url-field input {
+  max-width: none !important;
+  flex: 1 1 auto;
+}
+.public-caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 4px 0 8px;
+}
+.public-level {
+  max-width: 420px;
+}
+.public-level input {
+  flex: 1 1 auto;
+}
+.public-row strong {
+  display: block;
+}
+.public-row .client-identity {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.public-blocked {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}
+.public-key {
+  background-color: var(--panel);
+  background-image: var(--surface-grad);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  border: 1px solid #2a2445;
+}
+.public-key.disabled {
+  opacity: 0.6;
+}
+.public-key-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.public-key-name {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.public-key-secret {
+  flex: 1 1 180px;
+  min-width: 0;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  letter-spacing: 0.04em;
+}
+.public-key-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 16px;
+  margin-top: 10px;
+}
+.public-key-perks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-content: flex-start;
+}
+.public-perk {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #332a55;
+  font-size: 12px;
+  cursor: pointer;
+}
+.public-perk input {
+  margin: 0;
+}
+.public-perk.on {
+  border-color: var(--accent);
+  background: rgba(124, 92, 255, 0.18);
+}
+.public-key-extra {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+.public-key-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  max-width: 260px;
+}
+.public-key-meta .field-row input {
+  max-width: 90px;
+}
+.public-key-qr {
+  width: 140px;
+  height: 140px;
+}
+.public-key-meta .join-url {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+@media (max-width: 700px) {
+  .public-key-body {
+    grid-template-columns: 1fr;
+  }
+}
+.roster-section.public {
+  margin-top: 8px;
+}
+.roster-tag.key {
+  color: #ffe08a;
 }

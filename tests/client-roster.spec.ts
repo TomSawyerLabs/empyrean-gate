@@ -21,8 +21,16 @@ test("Live folds the roster under the clients stat", async ({ page }) => {
   await expect(roster).toBeVisible();
 
   // Arrival order, viewing first, then the cutoff, then whoever is waiting.
-  const names = roster.locator(".roster-row:not(.offline) .roster-name");
+  const names = roster.locator(".roster-row:not(.offline):not(.public) .roster-name");
   await expect(names).toHaveText([/Layout test/, /Dusty Playa/, /Neon Badger/]);
+  // The public floor's players follow in their own section, tagged, with the
+  // key each one redeemed.
+  await expect(roster.locator(".roster-section.public")).toContainText("public floor · 2 playing");
+  const publicRows = roster.locator(".roster-row.public");
+  await expect(publicRows).toHaveCount(2);
+  await expect(publicRows.first()).toContainText("Cosmic Narwhal");
+  await expect(publicRows.first().locator(".roster-tag.key")).toHaveText("✦ Camp Mock");
+  await expect(publicRows.first().getByRole("button")).toHaveText("Block");
   await expect(roster.locator(".roster-cutoff")).toContainText("1 waiting");
   await expect(roster.locator(".roster-row").nth(1)).toContainText("drawing · now");
   await expect(roster.locator(".roster-row").nth(1)).toHaveClass(/playing/);
@@ -40,7 +48,9 @@ test("Control lists the roster as a panel with a Block per device", async ({ pag
   await page.goto("/#control");
   await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
   const panel = page.locator(".panel", { has: page.locator("h2", { hasText: "Clients" }) });
-  await expect(panel.locator(".roster-row:not(.offline)")).toHaveCount(3);
+  await expect(panel.locator(".roster-row:not(.offline):not(.public)")).toHaveCount(3);
   // Never a Block button on your own row; one on every other connected device.
-  await expect(panel.locator(".roster-row:not(.offline) .roster-toggle")).toHaveCount(2);
+  await expect(panel.locator(".roster-row:not(.offline):not(.public) .roster-toggle")).toHaveCount(2);
+  // And one per public player.
+  await expect(panel.locator(".roster-row.public .roster-toggle")).toHaveCount(2);
 });

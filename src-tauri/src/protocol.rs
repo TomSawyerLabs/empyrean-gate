@@ -845,6 +845,8 @@ pub struct PublicStatus {
     pub refused_full: u64,
     pub kicked: u64,
     pub blocked: u32,
+    /// Blocked public ids, so the operator can undo a Block.
+    pub blocked_ids: Vec<String>,
     /// Most recently active players, bounded; see `roster_truncated`.
     pub roster: Vec<PublicPlayerInfo>,
     pub roster_truncated: u32,

@@ -59,6 +59,51 @@ function Row({ c, me, admin, onToggle }: {
   );
 }
 
+/** Players on the public floor (the internet-facing listener). They are not
+ *  devices the show remembers, so they live in their own list, with a Block
+ *  that holds for the run. */
+function PublicRows({ admin }: { admin: boolean }) {
+  const { client, status } = useGate();
+  const pub = status?.public;
+  if (!pub || pub.players === 0) return null;
+  return (
+    <>
+      <div className="roster-section public">
+        <span>public floor · {pub.players} playing</span>
+        {pub.roster_truncated > 0 && <span>{pub.roster_truncated} more not listed</span>}
+      </div>
+      {pub.roster.map((p) => {
+        const recent = p.last_input_secs !== null && p.last_input_secs < 2;
+        return (
+          <div className={`roster-row public ${recent ? "playing" : ""}`} key={p.id}>
+            <span className="conn-dot on" />
+            <span className="roster-name">
+              {p.name}
+              <span className="roster-tag">public</span>
+              {p.keys.map((k) => (
+                <span className="roster-tag key" key={k}>
+                  ✦ {k}
+                </span>
+              ))}
+            </span>
+            <span className="roster-input">
+              {p.last_input ? `${INPUT_LABEL[p.last_input] ?? p.last_input} · ${age(p.last_input_secs)}` : "—"}
+            </span>
+            {admin && (
+              <button
+                className="ghost roster-toggle danger"
+                onClick={() => client.send({ type: "block_public", id: p.id })}
+              >
+                Block
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 export default function ClientRoster({ compact = false }: { compact?: boolean }) {
   const { client, config, status, admin } = useGate();
   const [showOffline, setShowOffline] = useState(false);
@@ -76,7 +121,7 @@ export default function ClientRoster({ compact = false }: { compact?: boolean })
 
   return (
     <div className={`client-roster ${compact ? "compact" : ""}`}>
-      {connected.length === 0 && <p className="hint">Nobody connected.</p>}
+      {connected.length === 0 && (status?.public.players ?? 0) === 0 && <p className="hint">Nobody connected.</p>}
       {viewing.map(row)}
       {(waiting.length > 0 || (limit > 0 && viewing.length >= limit)) && (
         <div className="roster-cutoff">
@@ -91,6 +136,7 @@ export default function ClientRoster({ compact = false }: { compact?: boolean })
         </button>
       )}
       {showOffline && offline.map(row)}
+      <PublicRows admin={admin} />
     </div>
   );
 }
