@@ -82,23 +82,37 @@ get a special icon they can draw with? An orange traffic cone would be great."
 
 ## Plan / steps
 
-1. [x] Read the game framework, public floor, shapes; this plan.
-2. [ ] **Cone shape** (own commit): `EffectKind::Cone` (GPU id 16, in
+1. [x] Read the game framework, public floor, shapes; this plan (`6608aac`).
+2. [x] **Cone shape** (`e5bcbda`): `EffectKind::Cone` (GPU id 16, in
    `SHAPES`), SDF stamp in both shaders, `ShapeKind` + `SHAPES` + `ShapeIcon`
    in the UI, `clamp_effect` refuses it without the `cone` perk, public page
    shows it with the perk, Settings known perk, tests.
-3. [ ] **Perimeter sim** (own commit): `game/perimeter.rs` (fence, city
+3. [x] **Perimeter sim** (`4e4bab5`): `game/perimeter.rs` (fence, city
    rainbow, Gate Road traffic, airport, sneakers, trucks + AI, pressure
    scaling, catch/through flashes, `detail()`), `GameKind::Perimeter`, catalog
    entry with `hidden` + `perk`, Games tab Hidden section. Unit tests.
-4. [ ] **Floor start/stop** (own commit): `Gate::HiddenGame`, perk-implied
-   games capability, `SharedState::set_game_mode_from_floor` +
+4. [x] **Floor start/stop** (`b57c11e`): `Gate::HiddenGame`, perk-implied
+   games capability, `SharedState::start_floor_game` / `stop_floor_game` /
    `expire_floor_game`, `GameModeStatus.from_floor`, fixture, public UI
    Start/Stop pads, mock backend, Playwright specs, headless e2e script
-   extension, run it.
-5. [ ] Docs: README (games list, perks), `docs/public-deploy.md` perks,
-   `plans/game-mode.md` roster/progress, this plan's log.
-6. [ ] Final sweep: all checks green, commits per step.
+   extension — run green against a real headless backend.
+5. [x] Docs (`3c0252e`): README (shapes, games, perks),
+   `docs/public-deploy.md` perks, `plans/game-mode.md` roster/progress.
+6. [x] Final sweep (2026-10-11): cargo 292, unit 1, layout 96, behaviour 109
+   (plus games + shape-definition), headless e2e with a game key and with a
+   plain key, cone rendered and inspected via `scripts/shape-probe.ts`.
+
+## Follow-ups (not started, Cameron's call)
+
+- **More hidden modes.** The mechanism is generic: a catalog entry with
+  `hidden: true` + `perk: "game:<kind>"`, `GameKind::floor_perk`, and the
+  sim. Nothing else to touch.
+- **A playlist cue for Perimeter** — deliberately left out of the cue picker.
+- **Idle timeout as config** (`FLOOR_GAME_IDLE` is a 180 s constant).
+- **Tuning on the real array**: truck speed / catch radius / AI leakiness
+  were tuned by unit test, not by eye on 64 spokes. Run it on the Gate
+  machine (Games tab → Hidden → Start) before the show and adjust the
+  constants at the top of `perimeter.rs`.
 
 ## Findings / gotchas
 
@@ -111,10 +125,39 @@ get a special icon they can draw with? An orange traffic cone would be great."
 - The engine converts a tap to cells with the configured inner radius; the sim
   never sees it, so Perimeter uses a fixed `HOLE = 0.32` to map rings back to
   normalized radius for its world-space motion (a game, not a survey).
+- `gate.wgsl` has *two* `case 15u`/`default` pairs (the layer switch and
+  `effect_color`); a text anchor on that pair alone lands in the wrong one.
+  The guard test `every_effect_kind_has_a_shader_case` caught it.
+- A truck steered "toward" a target across the city only slid along the
+  fence (the radial projection ate most of each step). `drive()` now goes
+  around: when the next step would enter the city it moves tangentially,
+  shorter way round, hugging the fence. Test
+  `a_tap_across_the_city_drives_around_the_fence`.
+- The public listener's 1 Hz tick pushes a snapshot whenever the world
+  changes, so an e2e script must *find* the snapshot with the game running
+  rather than count replies.
+- `scripts/shape-probe.ts` diffs a before/after frame; with the default
+  noise scene the diff is all scene motion. Blank `layers` in the headless
+  config (`"layers": []`) for a clean capture. The cone at `--size 0.7
+  --radius 0.66` reads as a cone: base plate inward, taper to the rim, two
+  white bands.
+- Headless recipe used: config from `tests/fixtures/default-config.json`
+  with `server.port` 9540, `public` enabled on 9541, `output.enabled`
+  false, `update.auto_check` false, `layers: []`, keys `GPE`
+  (`game:perimeter`, `cone`) and `Plain` (`big_brush`); write it under
+  `$TEMP` (Windows Python cannot open `/tmp`); then
+  `EMPYREAN_CONFIG=<path> target/debug/empyrean-gate.exe --headless` and
+  `PUBLIC_BASE=http://127.0.0.1:9541 OPERATOR_BASE=http://127.0.0.1:9540
+  KEY=<secret> bun scripts/public-floor-test.ts`.
 
 ## Progress log
 
 - [x] 2026-10-11 Explored; plan written.
+- [x] 2026-10-11 Cone shape landed and rendered.
+- [x] 2026-10-11 Perimeter sim landed (10 unit tests).
+- [x] 2026-10-11 Floor start/stop/expiry landed; e2e green both with a game
+      key and with a plain key; strangers refused.
+- [x] 2026-10-11 Docs updated; every check green on the final tree.
 
 ## Open questions for the user
 
