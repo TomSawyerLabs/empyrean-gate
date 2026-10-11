@@ -184,10 +184,11 @@ PNG (`test-results/games/<kind>.png`). Both games were looked at this way.
   sim. Nothing else to touch.
 - **A playlist cue for Perimeter** — deliberately left out of the cue picker.
 - **Idle timeout as config** (`FLOOR_GAME_IDLE` is a 180 s constant).
-- **Tuning on the real array**: truck speed / catch radius / AI leakiness
-  were tuned by unit test, not by eye on 64 spokes. Run it on the Gate
-  machine (Games tab → Hidden → Start) before the show and adjust the
-  constants at the top of `perimeter.rs`.
+- **Tuning on the real array**: both games were tuned by unit test and by
+  eye on the headless engine's preview (`scripts/game-probe.ts`), not under
+  the rig. Run them on the Gate machine (Games tab → Hidden → Start) before
+  the show and adjust the constants at the top of `perimeter.rs` /
+  `gathering.rs`.
 
 ## Findings / gotchas
 
