@@ -6,6 +6,7 @@
 
 pub mod flak;
 pub mod life;
+pub mod perimeter;
 pub mod radial_tetris;
 pub mod rps;
 pub mod spokewar;
@@ -28,6 +29,9 @@ pub enum GameKind {
     Flak,
     /// Mixed-size blocks falling inward; complete concentric rings collapse.
     RadialTetris,
+    /// Hidden: Gate, Perimeter & Exodus's trucks catching sneakers at the
+    /// trash fence (see `perimeter`, plans/hidden-modes.md).
+    Perimeter,
 }
 
 impl GameKind {
@@ -38,6 +42,30 @@ impl GameKind {
             GameKind::Spokewar => "Spokewar",
             GameKind::Flak => "Flak",
             GameKind::RadialTetris => "Ringfall",
+            GameKind::Perimeter => "Perimeter",
+        }
+    }
+
+    /// The perk a public-floor key must carry to start this game from the
+    /// floor; `None` for games that are the operator's alone. Mirrors the
+    /// catalog's `hidden` entries in `src/gameCatalog.ts`.
+    pub fn floor_perk(self) -> Option<&'static str> {
+        match self {
+            GameKind::Perimeter => Some("game:perimeter"),
+            _ => None,
+        }
+    }
+
+    /// Color slots a floor start opens with — the catalog's `knob.start`,
+    /// which the operator's Games tab sends after its own start.
+    pub fn floor_species(self) -> u8 {
+        match self {
+            GameKind::Rps => 5,
+            GameKind::Life => 6,
+            GameKind::Spokewar => 5,
+            GameKind::Flak => 5,
+            GameKind::RadialTetris => 6,
+            GameKind::Perimeter => 5,
         }
     }
 }
@@ -51,6 +79,7 @@ pub enum GameSim {
     Spokewar(spokewar::SpokewarSim),
     Flak(flak::FlakSim),
     RadialTetris(radial_tetris::RadialTetrisSim),
+    Perimeter(perimeter::PerimeterSim),
 }
 
 impl GameSim {
@@ -65,6 +94,9 @@ impl GameSim {
             GameKind::RadialTetris => GameSim::RadialTetris(radial_tetris::RadialTetrisSim::new(
                 theta, radial, species, seed,
             )),
+            GameKind::Perimeter => {
+                GameSim::Perimeter(perimeter::PerimeterSim::new(theta, radial, species, seed))
+            }
         }
     }
 
@@ -75,6 +107,7 @@ impl GameSim {
             GameSim::Spokewar(s) => s.theta(),
             GameSim::Flak(s) => s.theta(),
             GameSim::RadialTetris(s) => s.theta(),
+            GameSim::Perimeter(s) => s.theta(),
         }
     }
 
@@ -85,12 +118,13 @@ impl GameSim {
             GameSim::Spokewar(s) => s.radial(),
             GameSim::Flak(s) => s.radial(),
             GameSim::RadialTetris(s) => s.radial(),
+            GameSim::Perimeter(s) => s.radial(),
         }
     }
 
     /// The "species" admin knob: species count for the ecosystem, palette
     /// slots for Life, base count for Spokewar, color slots for Flak. One
-    /// knob, per-game meaning.
+    /// knob, per-game meaning (trucks for Perimeter).
     pub fn set_species(&mut self, species: u8) {
         match self {
             GameSim::Rps(s) => s.set_species_count(species),
@@ -98,6 +132,7 @@ impl GameSim {
             GameSim::Spokewar(s) => s.set_bases(species),
             GameSim::Flak(s) => s.set_slots(species),
             GameSim::RadialTetris(s) => s.set_slots(species),
+            GameSim::Perimeter(s) => s.set_slots(species),
         }
     }
 
@@ -109,6 +144,7 @@ impl GameSim {
             GameSim::Spokewar(_) => Some(spokewar::TICK_SECS),
             GameSim::Flak(_) => Some(flak::TICK_SECS),
             GameSim::RadialTetris(_) => Some(radial_tetris::TICK_SECS),
+            GameSim::Perimeter(_) => Some(perimeter::TICK_SECS),
         }
     }
 
@@ -119,6 +155,7 @@ impl GameSim {
             GameSim::Spokewar(s) => s.tick(),
             GameSim::Flak(s) => s.tick(),
             GameSim::RadialTetris(s) => s.tick(),
+            GameSim::Perimeter(s) => s.tick(),
         }
     }
 
@@ -129,6 +166,7 @@ impl GameSim {
             GameSim::Spokewar(s) => s.watchdog(),
             GameSim::Flak(s) => s.watchdog(),
             GameSim::RadialTetris(s) => s.watchdog(),
+            GameSim::Perimeter(s) => s.watchdog(),
         }
     }
 
@@ -139,6 +177,7 @@ impl GameSim {
             GameSim::Spokewar(s) => s.inject(it, ir, species),
             GameSim::Flak(s) => s.inject(it, ir, species),
             GameSim::RadialTetris(s) => s.inject(it, species),
+            GameSim::Perimeter(s) => s.inject(it, ir, species),
         }
     }
 
@@ -151,6 +190,7 @@ impl GameSim {
     pub fn detail(&self) -> Option<String> {
         match self {
             GameSim::RadialTetris(sim) => Some(sim.detail()),
+            GameSim::Perimeter(sim) => Some(sim.detail()),
             _ => None,
         }
     }
@@ -186,6 +226,7 @@ impl GameSim {
             GameSim::Spokewar(s) => s.pack_cells(),
             GameSim::Flak(s) => s.pack_cells(),
             GameSim::RadialTetris(s) => s.pack_cells(),
+            GameSim::Perimeter(s) => s.pack_cells(time),
         }
     }
 }
@@ -291,6 +332,10 @@ mod tests {
             serde_json::from_str::<GameKind>(&radial).unwrap(),
             GameKind::RadialTetris
         );
+        // The floor perk is built from the wire name.
+        assert_eq!(serde_json::to_string(&GameKind::Perimeter).unwrap(), "\"perimeter\"");
+        assert_eq!(GameKind::Perimeter.floor_perk(), Some("game:perimeter"));
+        assert_eq!(GameKind::Flak.floor_perk(), None);
     }
 
     /// WGSL uniform structs round their size to 16 bytes; a Rust struct that

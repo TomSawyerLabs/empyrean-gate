@@ -53,6 +53,26 @@ test("Ringfall exposes complete touch controls and sends immediate commands", as
   }
 });
 
+test("the Games tab keeps hidden games under a key-holders label, startable by the operator", async ({ page }) => {
+  const sent: string[] = [];
+  page.on("websocket", (socket) => socket.on("framesent", (frame) => {
+    if (typeof frame.payload === "string") sent.push(frame.payload);
+  }));
+  await page.goto("/#games");
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+
+  const card = page.locator(".games-card.hidden-game", { hasText: "Perimeter" });
+  await expect(card).toBeVisible();
+  await expect(card.locator(".games-hidden-badge")).toContainText("key holders");
+  await expect(page.locator(".games-hidden-label")).toContainText("Secret keys");
+  // Open games come first; the hidden one is last.
+  await expect(page.locator(".games-card").last()).toContainText("Perimeter");
+  await card.getByRole("button", { name: "Start" }).click();
+  await expect.poll(() => sent.some((m) => m.includes('"set_game_mode"') && m.includes('"perimeter"'))).toBe(true);
+  // And it opens with its own truck count.
+  await expect.poll(() => sent.some((m) => m.includes('"set_game_config"') && m.includes('"species":5'))).toBe(true);
+});
+
 test("Ringfall keyboard controls map to move, rotate, and drop commands", async ({ page }) => {
   const clientId = `ringfall-keys-${Date.now()}`;
   const sent: string[] = [];

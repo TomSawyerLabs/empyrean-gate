@@ -827,7 +827,7 @@ export interface TestModeStatus {
 
 // --- game mode (mirrors src-tauri/src/game/mod.rs, plans/game-mode.md) ---
 
-export type GameKind = "rps" | "life" | "spokewar" | "flak" | "radial_tetris";
+export type GameKind = "rps" | "life" | "spokewar" | "flak" | "radial_tetris" | "perimeter";
 export type GameCommand =
   | "move_counter_clockwise"
   | "move_clockwise"

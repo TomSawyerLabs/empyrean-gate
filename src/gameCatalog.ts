@@ -15,6 +15,11 @@ export const GAMES: {
   /** Player-facing: what the goal is and what a tap does. Shown on the play
    * surface, written for someone who just picked up a phone. */
   howTo: string;
+  /** A hidden game (plans/hidden-modes.md): the public floor offers it only
+   * to a session holding `perk`, which may then start and stop it; the
+   * operator's Games tab lists it under Hidden. */
+  hidden?: boolean;
+  perk?: string;
 }[] = [
   {
     kind: "rps",
@@ -87,7 +92,32 @@ export const GAMES: {
       "and drop it. Blocks settle inward on every spoke, so aim for the highlighted " +
       "inner gaps and complete a ring to clear it.",
   },
+  {
+    kind: "perimeter",
+    name: "Perimeter",
+    hidden: true,
+    perk: "game:perimeter",
+    blurb:
+      "Gate, Perimeter & Exodus's own: the city is a rainbow party inside the " +
+      "orange trash fence, and headlamps keep dashing in from the dark to hop " +
+      "it. Each player drives a perimeter truck; the AI drives the rest. Gate " +
+      "Road carries ticketed traffic in through one corner and a plane lands " +
+      "at the airport now and then. More drivers, more sneakers.",
+    knob: { label: "Trucks", min: 2, max: 8, start: 5 },
+    howTo:
+      "You drive a perimeter truck in your color. Tap anywhere on the playa " +
+      "and it heads there — run down the headlamps dashing in from the dark " +
+      "before they hop the fence into the party. Every catch flashes your " +
+      "color and sends them round to buy a ticket. Cars on Gate Road and the " +
+      "plane are legit: leave them be. The more of you driving, the more " +
+      "try their luck.",
+  },
 ];
+
+/** The games the operator's tab lists openly, and the ones it keeps under
+ *  Hidden for key holders. */
+export const OPEN_GAMES = GAMES.filter((g) => !g.hidden);
+export const HIDDEN_GAMES = GAMES.filter((g) => g.hidden);
 
 export const RINGFALL_COMMANDS: Array<{
   command: GameCommand;

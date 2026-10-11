@@ -12,6 +12,8 @@ import {
   ERASE_SPECIES,
   GAMES,
   GAP_FILLERS,
+  HIDDEN_GAMES,
+  OPEN_GAMES,
   RINGFALL_COMMANDS,
   speciesColor,
 } from "./gameCatalog";
@@ -128,10 +130,19 @@ export default function Games() {
           itself — players only steer it. Anyone connected can play; there are
           no rounds, so joining and leaving any time is the normal way in.
         </p>
-        {GAMES.map((g) => (
-          <div key={g.kind} className={`games-card ${active === g.kind ? "active" : ""}`}>
+        {[...OPEN_GAMES, ...HIDDEN_GAMES].map((g, i) => (
+          <div key={g.kind} className={`games-card ${g.hidden ? "hidden-game" : ""} ${active === g.kind ? "active" : ""}`}>
+            {g.hidden && i === OPEN_GAMES.length && (
+              <div className="games-hidden-label">
+                Hidden · the public floor offers these only to a key with the matching perk
+                (Settings → Public floor → Secret keys)
+              </div>
+            )}
             <div className="games-card-text">
-              <strong>{g.name}</strong>
+              <strong>
+                {g.name}
+                {g.hidden && <span className="games-hidden-badge" title={`Needs the ${g.perk} perk on the floor`}>✦ key holders</span>}
+              </strong>
               <p className="hint">{g.blurb}</p>
             </div>
             {isAdmin ? (

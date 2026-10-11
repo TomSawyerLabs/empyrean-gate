@@ -5404,6 +5404,41 @@ button:disabled {
   background: #10231b;
 }
 
+/* Hidden games (plans/hidden-modes.md): the operator sees them, the public
+   floor only with a key. The first hidden card carries the section label. */
+.games-card.hidden-game {
+  flex-wrap: wrap;
+  border-style: dashed;
+}
+
+.games-card.hidden-game.active {
+  border-style: solid;
+}
+
+.games-hidden-label {
+  flex: 1 0 100%;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #a89fd0;
+}
+
+.games-control.running .games-hidden-label {
+  display: none;
+}
+
+.games-hidden-badge {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid #8a6d1a;
+  border-radius: 999px;
+  color: #ffe08a;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
 /* Once a world is running, keep play above the fold. Stopping it restores the
    full chooser, so switching games remains a deliberate two-step action. */
 .games-control.running .games-card:not(.active) {
