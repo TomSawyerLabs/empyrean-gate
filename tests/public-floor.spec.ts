@@ -126,6 +126,30 @@ test("a key that unlocks a hidden game offers Start, then Stop once the floor's 
   await expect(page.getByRole("button", { name: /Start Perimeter/ })).toBeVisible();
 });
 
+test("Gathering's chips are the six orbs of the mark, whatever the knob says", async ({ page }) => {
+  const sent = collectSent(page);
+  const clientId = `public-gathering-${Date.now()}`;
+  await page.addInitScript((id) => localStorage.setItem("empyrean-public-id", id), clientId);
+  await page.request.post(`/mock/public?client=${clientId}`, {
+    data: {
+      perks: ["game:gathering"],
+      game: { active: "gathering", summary: "2 of 6 orbs lit · 20 of 60 sparks home · 0 gatherings", species: 5, effects_overlay: false, from_floor: true, blocked_by_show: null },
+    },
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/public.html");
+  await page.locator('.public-app[data-connected="yes"]').waitFor({ state: "attached" });
+  await expect(page.locator(".games-chip")).toHaveCount(6);
+  await expect(page.getByRole("button", { name: "Violet orb" })).toBeVisible();
+  await page.getByRole("button", { name: "Red orb" }).click();
+  const stage = page.locator(".public-stage canvas.gate-canvas");
+  const box = (await stage.boundingBox())!;
+  await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.5);
+  await expect.poll(() => sent.some((m) => m.includes('"game_input"') && m.includes('"species":5'))).toBe(true);
+  await expect(page.locator(".public-summary")).toContainText("orbs lit");
+  await expect(page.getByRole("button", { name: /Stop Gathering/ })).toBeVisible();
+});
+
 test("the operator's game shows no Stop to a key holder; a show blocks Start", async ({ page }) => {
   const clientId = `public-hidden-op-${Date.now()}`;
   await page.addInitScript((id) => localStorage.setItem("empyrean-public-id", id), clientId);

@@ -5,6 +5,7 @@
 //! wiring lives with the rest of the frame loop.
 
 pub mod flak;
+pub mod gathering;
 pub mod life;
 pub mod perimeter;
 pub mod radial_tetris;
@@ -32,6 +33,9 @@ pub enum GameKind {
     /// Hidden: Gate, Perimeter & Exodus's trucks catching sneakers at the
     /// trash fence (see `perimeter`, plans/hidden-modes.md).
     Perimeter,
+    /// Hidden: the host camp's — calling lost sparks home to the six orbs of
+    /// the Entheos mark until the sigil is whole (see `gathering`).
+    Gathering,
 }
 
 impl GameKind {
@@ -43,6 +47,7 @@ impl GameKind {
             GameKind::Flak => "Flak",
             GameKind::RadialTetris => "Ringfall",
             GameKind::Perimeter => "Perimeter",
+            GameKind::Gathering => "Gathering",
         }
     }
 
@@ -52,6 +57,7 @@ impl GameKind {
     pub fn floor_perk(self) -> Option<&'static str> {
         match self {
             GameKind::Perimeter => Some("game:perimeter"),
+            GameKind::Gathering => Some("game:gathering"),
             _ => None,
         }
     }
@@ -66,6 +72,7 @@ impl GameKind {
             GameKind::Flak => 5,
             GameKind::RadialTetris => 6,
             GameKind::Perimeter => 5,
+            GameKind::Gathering => 5,
         }
     }
 }
@@ -80,6 +87,7 @@ pub enum GameSim {
     Flak(flak::FlakSim),
     RadialTetris(radial_tetris::RadialTetrisSim),
     Perimeter(perimeter::PerimeterSim),
+    Gathering(gathering::GatheringSim),
 }
 
 impl GameSim {
@@ -97,6 +105,9 @@ impl GameSim {
             GameKind::Perimeter => {
                 GameSim::Perimeter(perimeter::PerimeterSim::new(theta, radial, species, seed))
             }
+            GameKind::Gathering => {
+                GameSim::Gathering(gathering::GatheringSim::new(theta, radial, species, seed))
+            }
         }
     }
 
@@ -108,6 +119,7 @@ impl GameSim {
             GameSim::Flak(s) => s.theta(),
             GameSim::RadialTetris(s) => s.theta(),
             GameSim::Perimeter(s) => s.theta(),
+            GameSim::Gathering(s) => s.theta(),
         }
     }
 
@@ -119,12 +131,13 @@ impl GameSim {
             GameSim::Flak(s) => s.radial(),
             GameSim::RadialTetris(s) => s.radial(),
             GameSim::Perimeter(s) => s.radial(),
+            GameSim::Gathering(s) => s.radial(),
         }
     }
 
     /// The "species" admin knob: species count for the ecosystem, palette
     /// slots for Life, base count for Spokewar, color slots for Flak. One
-    /// knob, per-game meaning (trucks for Perimeter).
+    /// knob, per-game meaning (trucks for Perimeter, sparks for Gathering).
     pub fn set_species(&mut self, species: u8) {
         match self {
             GameSim::Rps(s) => s.set_species_count(species),
@@ -133,6 +146,7 @@ impl GameSim {
             GameSim::Flak(s) => s.set_slots(species),
             GameSim::RadialTetris(s) => s.set_slots(species),
             GameSim::Perimeter(s) => s.set_slots(species),
+            GameSim::Gathering(s) => s.set_slots(species),
         }
     }
 
@@ -145,6 +159,7 @@ impl GameSim {
             GameSim::Flak(_) => Some(flak::TICK_SECS),
             GameSim::RadialTetris(_) => Some(radial_tetris::TICK_SECS),
             GameSim::Perimeter(_) => Some(perimeter::TICK_SECS),
+            GameSim::Gathering(_) => Some(gathering::TICK_SECS),
         }
     }
 
@@ -156,6 +171,7 @@ impl GameSim {
             GameSim::Flak(s) => s.tick(),
             GameSim::RadialTetris(s) => s.tick(),
             GameSim::Perimeter(s) => s.tick(),
+            GameSim::Gathering(s) => s.tick(),
         }
     }
 
@@ -167,6 +183,7 @@ impl GameSim {
             GameSim::Flak(s) => s.watchdog(),
             GameSim::RadialTetris(s) => s.watchdog(),
             GameSim::Perimeter(s) => s.watchdog(),
+            GameSim::Gathering(s) => s.watchdog(),
         }
     }
 
@@ -178,6 +195,7 @@ impl GameSim {
             GameSim::Flak(s) => s.inject(it, ir, species),
             GameSim::RadialTetris(s) => s.inject(it, species),
             GameSim::Perimeter(s) => s.inject(it, ir, species),
+            GameSim::Gathering(s) => s.inject(it, ir, species),
         }
     }
 
@@ -191,6 +209,7 @@ impl GameSim {
         match self {
             GameSim::RadialTetris(sim) => Some(sim.detail()),
             GameSim::Perimeter(sim) => Some(sim.detail()),
+            GameSim::Gathering(sim) => Some(sim.detail()),
             _ => None,
         }
     }
@@ -227,6 +246,7 @@ impl GameSim {
             GameSim::Flak(s) => s.pack_cells(),
             GameSim::RadialTetris(s) => s.pack_cells(),
             GameSim::Perimeter(s) => s.pack_cells(time),
+            GameSim::Gathering(s) => s.pack_cells(time),
         }
     }
 }
@@ -345,6 +365,7 @@ mod tests {
         // The floor perk is built from the wire name.
         assert_eq!(serde_json::to_string(&GameKind::Perimeter).unwrap(), "\"perimeter\"");
         assert_eq!(GameKind::Perimeter.floor_perk(), Some("game:perimeter"));
+        assert_eq!(GameKind::Gathering.floor_perk(), Some("game:gathering"));
         assert_eq!(GameKind::Flak.floor_perk(), None);
     }
 

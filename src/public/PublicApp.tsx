@@ -12,7 +12,7 @@ import GateCanvas, { type DrawPen, type GatePreviewSource } from "../GateCanvas"
 import ShapeIcon from "../ShapeIcon";
 import ToolIcon from "../ToolIcon";
 import { EFFECTS, isShape, publicShapes } from "../effects";
-import { ERASE_SPECIES, GAMES, HIDDEN_GAMES, RINGFALL_COMMANDS, speciesColor } from "../gameCatalog";
+import { chipColor, chipCount, chipLabel, ERASE_SPECIES, GAMES, HIDDEN_GAMES, RINGFALL_COMMANDS } from "../gameCatalog";
 import { BUILTIN_LIVE_COLORS, type LiveColor } from "../liveColors";
 import { deviceNameUnconfirmed, generateDeviceName } from "../deviceNames";
 import type { EffectKind, PenKind, PublicSnapshot, ServerMsg } from "../types";
@@ -331,13 +331,14 @@ export default function PublicApp() {
   const game = snap?.game.active ?? null;
   const gameInfo = GAMES.find((g) => g.kind === game);
   const species = Math.min(Math.max(snap?.game.species ?? 3, gameInfo?.knob.min ?? 2), gameInfo?.knob.max ?? 8);
+  const chips = chipCount(gameInfo, species);
   useEffect(() => {
     if (mySpecies === ERASE_SPECIES) {
       if (game !== "life") setMySpecies(0);
-    } else if (mySpecies >= species) {
+    } else if (mySpecies >= chips) {
       setMySpecies(0);
     }
-  }, [species, mySpecies, game]);
+  }, [chips, mySpecies, game]);
 
   const caps = snap?.caps ?? { draw: false, effects: false, games: false, knobs: false, preview: false };
   const perks = new Set(snap?.perks ?? []);
@@ -404,7 +405,7 @@ export default function PublicApp() {
     const stage = stageRef.current;
     if (!stage || !anything) return;
     const rect = stage.getBoundingClientRect();
-    const hex = playing && game ? speciesColor(speciesRef.current === ERASE_SPECIES ? 0 : speciesRef.current, species) : color.hex;
+    const hex = playing && game ? chipColor(gameInfo, speciesRef.current === ERASE_SPECIES ? 0 : speciesRef.current, species) : color.hex;
     ripples.current.push({ x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height, t: performance.now(), hex });
     if (ripples.current.length > 24) ripples.current.shift();
   };
@@ -490,12 +491,12 @@ export default function PublicApp() {
             <>
               <div className="public-row-label">Your color</div>
               <div className="games-species">
-                {Array.from({ length: species }, (_, s) => (
+                {Array.from({ length: chips }, (_, s) => (
                   <button
                     key={s}
                     className={`games-chip ${mySpecies === s ? "active" : ""}`}
-                    style={{ ["--chip" as string]: speciesColor(s, species) }}
-                    aria-label={`Color ${s + 1}`}
+                    style={{ ["--chip" as string]: chipColor(gameInfo, s, species) }}
+                    aria-label={chipLabel(gameInfo, s)}
                     onClick={() => setMySpecies(s)}
                   >
                     {s + 1}

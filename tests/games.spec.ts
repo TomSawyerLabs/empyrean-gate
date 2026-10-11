@@ -66,8 +66,10 @@ test("the Games tab keeps hidden games under a key-holders label, startable by t
   await expect(card).toBeVisible();
   await expect(card.locator(".games-hidden-badge")).toContainText("key holders");
   await expect(page.locator(".games-hidden-label")).toContainText("Secret keys");
-  // Open games come first; the hidden one is last.
-  await expect(page.locator(".games-card").last()).toContainText("Perimeter");
+  // Open games come first; the hidden ones are last.
+  await expect(page.locator(".games-card.hidden-game")).toHaveCount(2);
+  await expect(page.locator(".games-card").last()).toContainText("Gathering");
+  await expect(page.locator(".games-card.hidden-game", { hasText: "Gathering" }).locator(".games-hidden-badge")).toContainText("key holders");
   await card.getByRole("button", { name: "Start" }).click();
   await expect.poll(() => sent.some((m) => m.includes('"set_game_mode"') && m.includes('"perimeter"'))).toBe(true);
   // And it opens with its own truck count.

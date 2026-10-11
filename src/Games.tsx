@@ -9,13 +9,15 @@ import { useEffect, useRef, useState } from "react";
 import { useGate } from "./state";
 import GateCanvas from "./GateCanvas";
 import {
+  chipColor,
+  chipCount,
+  chipLabel,
   ERASE_SPECIES,
   GAMES,
   GAP_FILLERS,
   HIDDEN_GAMES,
   OPEN_GAMES,
   RINGFALL_COMMANDS,
-  speciesColor,
 } from "./gameCatalog";
 import type { GameCommand } from "./types";
 
@@ -41,6 +43,7 @@ export default function Games() {
   // The knob value is shared across games; show it clamped to the running
   // game's own bounds (the sim clamps the same way).
   const species = Math.min(Math.max(game?.species ?? 3, knob.min), knob.max);
+  const chips = chipCount(activeGame, species);
   const blockedBy = game?.blocked_by_show ?? null;
 
   // Same admin inference the Patch tab uses: the Gate machine's own window or
@@ -54,10 +57,10 @@ export default function Games() {
     if (mySpecies === ERASE_SPECIES) {
       // The eraser only exists in Life.
       if (active !== "life") setMySpecies(0);
-    } else if (mySpecies >= species) {
+    } else if (mySpecies >= chips) {
       setMySpecies(0);
     }
-  }, [species, mySpecies, active]);
+  }, [chips, mySpecies, active]);
 
   // Taps batch on the same ~33 ms cadence the drawing path uses, so a burst of
   // excited tapping is one message per frame, not one per finger.
@@ -232,11 +235,13 @@ export default function Games() {
                 <span className="hint games-picker-label">Your piece color</span>
               )}
               <div className="games-species">
-                {Array.from({ length: species }, (_, s) => (
+                {Array.from({ length: chips }, (_, s) => (
                   <button
                     key={s}
                     className={`games-chip ${mySpecies === s ? "active" : ""}`}
-                    style={{ ["--chip" as string]: speciesColor(s, species) }}
+                    style={{ ["--chip" as string]: chipColor(activeGame, s, species) }}
+                    aria-label={chipLabel(activeGame, s)}
+                    title={activeGame?.chips ? chipLabel(activeGame, s) : undefined}
                     onClick={() => setMySpecies(s)}
                   >
                     {s + 1}

@@ -20,6 +20,9 @@ export const GAMES: {
    * operator's Games tab lists it under Hidden. */
   hidden?: boolean;
   perk?: string;
+  /** Fixed chips, when a game's colours are its own (Gathering's six orbs)
+   * rather than evenly spaced hues counted by the knob. */
+  chips?: { label: string; color: string }[];
 }[] = [
   {
     kind: "rps",
@@ -112,7 +115,49 @@ export const GAMES: {
       "plane are legit: leave them be. The more of you driving, the more " +
       "try their luck.",
   },
+  {
+    kind: "gathering",
+    name: "Gathering",
+    hidden: true,
+    perk: "game:gathering",
+    blurb:
+      "Entheos's own: the six orbs of the camp mark wait near the rim, the " +
+      "star between them dark, and lost sparks wander the playa. A tap is a " +
+      "call in your orb's colour — every spark it reaches takes the colour " +
+      "and heads home. Fill an orb and its blade lights; light all six and " +
+      "the sigil is whole, then everyone is born again out of the fire.",
+    knob: { label: "Sparks", min: 2, max: 8, start: 5 },
+    howTo:
+      "Pick an orb. Tap out on the playa and your call spreads from your " +
+      "finger: lost sparks it reaches take your colour and set off for your " +
+      "orb; tap near them again to hurry them home. Nobody is ever taken " +
+      "from another orb — so call for the empty ones too. Fill all six and " +
+      "the star lights, and the whole gathering is reborn.",
+    chips: [
+      { label: "Orange orb", color: "#ff9a2e" },
+      { label: "Yellow orb", color: "#ffe03a" },
+      { label: "Green orb", color: "#3fd47a" },
+      { label: "Blue orb", color: "#5f89ee" },
+      { label: "Violet orb", color: "#9a5fd6" },
+      { label: "Red orb", color: "#ff4a4f" },
+    ],
+  },
 ];
+
+/** How many colour chips a running game shows, and what each one looks like:
+ *  a game's own fixed colours when it has them, else the knob's evenly spaced
+ *  hues. */
+export function chipCount(game: (typeof GAMES)[number] | undefined, species: number): number {
+  return game?.chips ? game.chips.length : species;
+}
+
+export function chipColor(game: (typeof GAMES)[number] | undefined, s: number, species: number): string {
+  return game?.chips?.[s]?.color ?? speciesColor(s, species);
+}
+
+export function chipLabel(game: (typeof GAMES)[number] | undefined, s: number): string {
+  return game?.chips?.[s]?.label ?? `Color ${s + 1}`;
+}
 
 /** The games the operator's tab lists openly, and the ones it keeps under
  *  Hidden for key holders. */
