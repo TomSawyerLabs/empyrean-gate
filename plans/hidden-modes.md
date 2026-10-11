@@ -102,7 +102,49 @@ get a special icon they can draw with? An orange traffic cone would be great."
    (plus games + shape-definition), headless e2e with a game key and with a
    plain key, cone rendered and inspected via `scripts/shape-probe.ts`.
 
-## Follow-ups (not started, Cameron's call)
+## Second hidden mode — Gathering, for Entheos (the host camp)
+
+Cameron (2026-10-11): "We need a game for the Entheos Community, the host
+camp … Some game about bringing the community together? idk..."
+
+Source material: entheosrising.org (Entheos = "the god within"; "Channel
+Your Strength Through Compassion"; radical inclusion, makers/healers/artists
+from 43+ countries; the Gate as "birth, and rebirth", fire and light), the
+camp mark (`public/media/entheos-precise.svg`: six orbs — orange, yellow,
+green, blue, violet, red — at 60° steps on an enclosing ring, around a
+six-point star whose blades point outward at the orbs), and Allison's
+`EntheosWeave` layer (`gate.wgsl` case 20: the same geometry on the array,
+blades wide at the hole and narrow at the tip, orbs at u≈0.79).
+
+**Design — `GameKind::Gathering`, perk `game:gathering`.** The six orbs of
+the mark sit near the rim in their colours; the star is dark. Sparks (lost
+lights, dim white) wander the playa. A tap is a *call*: a warm pulse in the
+player's colour spreading from the finger; every uncoloured spark it reaches
+takes that colour and sets off for the orb of that colour, and sparks already
+of that colour get a burst of speed home. Sparks are never re-coloured — no
+stealing, compassion — so players cover for each other's orbs rather than
+compete. A spark reaching its orb joins it; the orb brightens as it fills,
+and a full orb lights its blade of the star from the centre out toward it.
+When all six blades are lit the sigil is whole: the ring flares white, a
+wave runs inward to the fire at the centre, and then rebirth — the orbs
+empty, the blades fade, and every gathered spark is born again out of the
+hole as a new uncoloured wanderer. Cycles count; the status line says how
+many orbs are lit, how many sparks are home, how many gatherings so far.
+
+- Zero-player: every orb calls softly on its own every 6–10 s over a small
+  radius, so an empty floor completes a gathering in a few minutes; humans
+  go out onto the playa and make it minutes faster. Any number of players
+  simply add calls; nothing to balance against.
+- Chips are the six orb colours, fixed (`chips` on the catalog entry), so a
+  chip is "I call for the green orb". The admin knob is **Sparks** (2–8,
+  ×12 wanderers, start 5 → 60); an orb needs ~80 % of its sixth to fill.
+- Rendering: orbs at rn 0.86 (radius grows with fill, white shell when
+  full), blades as in the weave (inner wide, tip narrow, flowing fill),
+  a faint ring at rn 0.96 that flares on a gathering, sparks as dots (dim
+  white → their colour), call pulses as expanding rings, the gathering as
+  a white inward wave.
+
+
 
 - **More hidden modes.** The mechanism is generic: a catalog entry with
   `hidden: true` + `perk: "game:<kind>"`, `GameKind::floor_perk`, and the
