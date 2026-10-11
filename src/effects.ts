@@ -16,15 +16,22 @@ export const EFFECTS: { kind: MotionEffectKind; label: string; key: string }[] =
 
 /** Figures stamped where they are tapped. Keys are mnemonic, not positional —
  *  the number row was already spoken for and `s`/`h` are what an operator
- *  reaches for in the dark. */
-export const SHAPES: { kind: ShapeKind; label: string; key: string }[] = [
+ *  reaches for in the dark. A `perk` marks a figure the public floor shows
+ *  only to a key holding it (plans/hidden-modes.md); operators get them all. */
+export const SHAPES: { kind: ShapeKind; label: string; key: string; perk?: string }[] = [
   { kind: "star", label: "Star", key: "s" },
   { kind: "heart", label: "Heart", key: "h" },
   { kind: "flower", label: "Flower", key: "f" },
   { kind: "diamond", label: "Diamond", key: "d" },
   { kind: "triangle", label: "Triangle", key: "t" },
   { kind: "moon", label: "Moon", key: "m" },
+  { kind: "cone", label: "Cone", key: "c", perk: "cone" },
 ];
+
+/** Shapes a stranger on the public floor gets; the rest need their perk. */
+export function publicShapes(perks: ReadonlySet<string>) {
+  return SHAPES.filter((s) => !s.perk || perks.has(s.perk));
+}
 
 export const EFFECT_PADS = [...EFFECTS, ...SHAPES];
 

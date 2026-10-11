@@ -296,12 +296,16 @@ pub enum EffectKind {
     Ring,
     /// Spin the entire rendered Gate composition around its center.
     Rotate,
+    /// An orange traffic cone with white bands, tip toward the rim. Always
+    /// orange whatever color was picked (that is the joke); on the public
+    /// floor it needs the `cone` perk. See plans/hidden-modes.md.
+    Cone,
 }
 
 impl EffectKind {
     /// Order is the GPU id — the `case` arms in `gate.wgsl` are literal numbers.
     /// Append only.
-    pub const ALL: [EffectKind; 16] = [
+    pub const ALL: [EffectKind; 17] = [
         EffectKind::Burst,
         EffectKind::Strobe,
         EffectKind::Swoosh,
@@ -318,17 +322,19 @@ impl EffectKind {
         EffectKind::Moon,
         EffectKind::Ring,
         EffectKind::Rotate,
+        EffectKind::Cone,
     ];
 
     /// The figures — stamped center-array, `angle` is their rotation. Everything
     /// else is a motion effect that travels across the array.
-    pub const SHAPES: [EffectKind; 6] = [
+    pub const SHAPES: [EffectKind; 7] = [
         EffectKind::Star,
         EffectKind::Heart,
         EffectKind::Flower,
         EffectKind::Diamond,
         EffectKind::Triangle,
         EffectKind::Moon,
+        EffectKind::Cone,
     ];
 
     pub fn gpu_id(self) -> u32 {
@@ -359,7 +365,8 @@ impl EffectKind {
             | EffectKind::Flower
             | EffectKind::Diamond
             | EffectKind::Triangle
-            | EffectKind::Moon => 1.8,
+            | EffectKind::Moon
+            | EffectKind::Cone => 1.8,
         }
     }
 }

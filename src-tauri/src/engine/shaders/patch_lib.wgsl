@@ -402,6 +402,32 @@ fn sd_moon(p_in: vec2f, d: f32, ra: f32, rb: f32) -> f32 {
     return max(length(p) - ra, -(length(p - vec2f(d, 0.0)) - rb));
 }
 
+/// Isosceles trapezoid: half-widths `r1` at the bottom and `r2` at the top,
+/// half-height `he`, centred on the origin (iq).
+fn sd_trapezoid(p_in: vec2f, r1: f32, r2: f32, he: f32) -> f32 {
+    let k1 = vec2f(r2, he);
+    let k2 = vec2f(r2 - r1, 2.0 * he);
+    let p = vec2f(abs(p_in.x), p_in.y);
+    let ca = vec2f(p.x - min(p.x, select(r2, r1, p.y < 0.0)), abs(p.y) - he);
+    let cb = p - k1 + k2 * clamp(dot(k1 - p, k2) / dot(k2, k2), 0.0, 1.0);
+    let s = select(1.0, -1.0, cb.x < 0.0 && ca.y < 0.0);
+    return s * sqrt(min(dot(ca, ca), dot(cb, cb)));
+}
+
+/// Axis-aligned box of half-size `b`, centred on the origin (iq).
+fn sd_box(p: vec2f, b: vec2f) -> f32 {
+    let d = abs(p) - b;
+    return length(max(d, vec2f(0.0))) + min(max(d.x, d.y), 0.0);
+}
+
+/// The traffic cone's two reflective bands, as a mask over the figure's local
+/// `y` in units of its radius: tape at 0.01..0.17 and 0.37..0.53 up the body.
+fn cone_bands(y: f32) -> f32 {
+    let a = 1.0 - smoothstep(0.08, 0.11, abs(y - 0.09));
+    let b = 1.0 - smoothstep(0.08, 0.11, abs(y - 0.45));
+    return max(a, b);
+}
+
 const SHAPE_UNIT: f32 = 0.38;
 
 fn shape_scale(t: f32) -> f32 {
@@ -572,6 +598,17 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
         }
         case 15u: {
             return vec3f(0.0);
+        }
+        case 16u: {
+            let s = stamp_frame(E, ctx, t, E.angle - PI * 0.5);
+            let body = sd_trapezoid(s.p - vec2f(0.0, 0.20 * s.r), 0.42 * s.r, 0.10 * s.r, 0.65 * s.r);
+            let plate = sd_box(s.p - vec2f(0.0, -0.60 * s.r), vec2f(0.72 * s.r, 0.14 * s.r));
+            let sd = min(body, plate);
+            let orange = hsv2rgb(0.07, 0.95, 1.0);
+            let inside = clamp(-body / (0.08 * s.r), 0.0, 1.0);
+            let tape = cone_bands(s.p.y / s.r) * inside * 0.85;
+            return (orange * shape_stamp(sd, s.r, E.edge, E.fill, ctx.rn) + vec3f(1.0) * tape)
+                * shape_hold(t) * E.intensity * 1.5;
         }
         default: {
             return vec3f(0.0);

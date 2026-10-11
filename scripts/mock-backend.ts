@@ -299,11 +299,11 @@ const server = Bun.serve({
           if (msg.key === "FIREFLY-COMET-47") {
             publicOverrides.set(clients.get(ws) ?? "", {
               ...(publicOverrides.get(clients.get(ws) ?? "") ?? {}),
-              perks: ["big_brush", "strobe"],
+              perks: ["big_brush", "strobe", "cone"],
               unlocked: ["Camp Mock"],
               max_dab_size: 0.5,
             });
-            ws.send(JSON.stringify({ type: "unlocked", name: "Camp Mock", perks: ["big_brush", "strobe"] }));
+            ws.send(JSON.stringify({ type: "unlocked", name: "Camp Mock", perks: ["big_brush", "strobe", "cone"] }));
             ws.send(JSON.stringify({ type: "public_state", state: snap() }));
           } else {
             ws.send(JSON.stringify({ type: "error", message: "That code does not unlock anything." }));

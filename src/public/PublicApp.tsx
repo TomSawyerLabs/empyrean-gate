@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import GateCanvas, { type DrawPen, type GatePreviewSource } from "../GateCanvas";
 import ShapeIcon from "../ShapeIcon";
 import ToolIcon from "../ToolIcon";
-import { EFFECTS, SHAPES, isShape } from "../effects";
+import { EFFECTS, isShape, publicShapes } from "../effects";
 import { ERASE_SPECIES, GAMES, RINGFALL_COMMANDS, speciesColor } from "../gameCatalog";
 import { BUILTIN_LIVE_COLORS, type LiveColor } from "../liveColors";
 import { deviceNameUnconfirmed, generateDeviceName } from "../deviceNames";
@@ -532,10 +532,10 @@ export default function PublicApp() {
                   </button>
                 )}
                 {caps.effects &&
-                  SHAPES.map((s) => (
+                  publicShapes(perks).map((s) => (
                     <button
                       key={s.kind}
-                      className={`public-pad shape ${tool.kind === "effect" && tool.effect === s.kind ? "active" : ""}`}
+                      className={`public-pad shape ${s.perk ? "perk" : ""} ${tool.kind === "effect" && tool.effect === s.kind ? "active" : ""}`}
                       aria-label={s.label}
                       onClick={() => setTool({ kind: "effect", effect: s.kind })}
                     >

@@ -897,6 +897,7 @@ const KNOWN_PERKS: { id: string; label: string; hint: string }[] = [
   { id: "preview", label: "Preview", hint: "gets the small live stream" },
   { id: "big_brush", label: "Big brush", hint: "stroke size up to half the array" },
   { id: "strobe", label: "Strobe", hint: "the strobe pad appears" },
+  { id: "cone", label: "Traffic cone", hint: "the orange cone shape pad appears" },
 ];
 
 /** The internet-facing floor: its listener, what it may do, who is on it, and

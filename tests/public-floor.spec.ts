@@ -32,11 +32,13 @@ test("says hello as the public surface and offers only play tools", async ({ pag
   await expect(page.locator(".topbar")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /settings/i })).toHaveCount(0);
   await expect(page.locator(".public-players")).toHaveText("7 playing");
-  // The pads a stranger gets: motion effects without strobe, the six shapes,
-  // the pens, and the colours.
+  // The pads a stranger gets: motion effects without strobe, the six shapes
+  // (the cone is a perk), the pens, and the colours.
   await expect(page.getByRole("button", { name: "Burst" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Strobe/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Heart" })).toBeVisible();
+  await expect(page.locator(".public-pad.shape")).toHaveCount(6);
+  await expect(page.getByRole("button", { name: "Cone" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Glow pen" })).toBeVisible();
   await expect(page.locator(".public-swatches .swatch")).toHaveCount(9);
   // The page itself never scrolls.
@@ -120,8 +122,10 @@ test("a key in the URL is kept on the phone and replayed on hello; a typed code 
   const hello = JSON.parse(sent.find((m) => m.includes('"hello"'))!);
   expect(hello.keys).toEqual(["SECRET-WORD-12"]);
 
-  // The strobe pad and the bigger brush appear only once a key grants them.
+  // The strobe pad, the cone, and the bigger brush appear only once a key
+  // grants them.
   await expect(page.getByRole("button", { name: /Strobe/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Cone" })).toHaveCount(0);
   await page.getByRole("button", { name: "Have a code?" }).click();
   await page.getByLabel("Secret code").fill("FIREFLY-COMET-47");
   await page.getByRole("button", { name: "Unlock" }).click();
@@ -130,4 +134,10 @@ test("a key in the URL is kept on the phone and replayed on hello; a typed code 
   await expect(page.getByRole("button", { name: /Strobe/ })).toBeVisible();
   const max = await page.getByLabel("Stroke size").getAttribute("max");
   expect(Number(max)).toBeCloseTo(0.5);
+  // The cone stamps where it is tapped, like any shape.
+  await page.getByRole("button", { name: "Cone" }).click();
+  const stage = page.locator(".public-stage canvas.gate-canvas");
+  const box = (await stage.boundingBox())!;
+  await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.2);
+  await expect.poll(() => sent.some((m) => m.includes('"trigger_effect"') && m.includes('"cone"'))).toBe(true);
 });

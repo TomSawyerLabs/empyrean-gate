@@ -303,9 +303,18 @@ pub fn preview_limits(cfg: &PublicConfig, caps: &Capabilities) -> (u32, u32) {
 
 /// Bound a public effect: intensity scaled by the floor's input level,
 /// footprint and lifetime capped, `strobe` only with its perk (it is the one
-/// effect that can make a dance floor unpleasant from a distance).
+/// effect that can make a dance floor unpleasant from a distance) and the
+/// traffic cone only with `cone` (it is a group's easter egg, see
+/// plans/hidden-modes.md).
 pub fn clamp_effect(effect: &mut EffectCfg, cfg: &PublicConfig, perks: &BTreeSet<String>) -> bool {
-    if effect.kind == crate::layers::EffectKind::Strobe && !perks.contains("strobe") {
+    let needs = match effect.kind {
+        crate::layers::EffectKind::Strobe => Some("strobe"),
+        crate::layers::EffectKind::Cone => Some("cone"),
+        _ => None,
+    };
+    if let Some(perk) = needs
+        && !perks.contains(perk)
+    {
         return false;
     }
     let level = cfg.input_level.clamp(0.0, 1.0);
@@ -900,6 +909,11 @@ mod tests {
         assert!(!clamp_effect(&mut strobe, &c, &none));
         let perks: BTreeSet<String> = ["strobe".to_string()].into_iter().collect();
         assert!(clamp_effect(&mut strobe, &c, &perks));
+        // The cone is the same deal under its own perk.
+        let mut cone = EffectCfg { kind: crate::layers::EffectKind::Cone, ..EffectCfg::default() };
+        assert!(!clamp_effect(&mut cone, &c, &perks));
+        let perks: BTreeSet<String> = ["cone".to_string()].into_iter().collect();
+        assert!(clamp_effect(&mut cone, &c, &perks));
         // NaN never reaches the engine.
         let mut nan = EffectCfg { intensity: f32::NAN, angle: f32::INFINITY, ..EffectCfg::default() };
         assert!(clamp_effect(&mut nan, &c, &none));

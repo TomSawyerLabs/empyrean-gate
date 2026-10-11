@@ -65,5 +65,16 @@ export default function ShapeIcon({ kind }: { kind: ShapeKind }) {
           <path d="M20.69 5.27A11 11 0 1 0 20.69 22.73A9 9 0 1 1 20.69 5.27Z" fill={c} />
         </svg>
       );
+    case "cone":
+      return (
+        <svg className="tool-icon" viewBox="0 0 28 28" aria-hidden="true">
+          {/* Orange whatever the button colour is — the array draws it orange
+              too — with the two bands of tape that make a cone a cone. */}
+          <path d="M11.6 4h4.8l4.1 17H7.5Z" fill="#ff7a1a" />
+          <rect x="4" y="21" width="20" height="3.2" rx="1" fill="#ff7a1a" />
+          <path d="M10.3 10.4h7.4l.8 3.2H9.5Z" fill="#fff" />
+          <path d="M9.1 15.6h9.8l.8 3.2H8.3Z" fill="#fff" />
+        </svg>
+      );
   }
 }

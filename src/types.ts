@@ -42,7 +42,7 @@ export type MotionEffectKind =
   | "ring"
   | "rotate";
 
-export type ShapeKind = "star" | "heart" | "flower" | "diamond" | "triangle" | "moon";
+export type ShapeKind = "star" | "heart" | "flower" | "diamond" | "triangle" | "moon" | "cone";
 
 export type EffectKind = MotionEffectKind | ShapeKind;
 

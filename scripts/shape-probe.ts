@@ -6,7 +6,7 @@
 // the effect from whatever layer stack happens to be live, so this works against
 // a real show without touching its configuration.
 //
-//   bun scripts/shape-probe.ts star heart flower diamond triangle moon
+//   bun scripts/shape-probe.ts star heart flower diamond triangle moon cone
 //   bun scripts/shape-probe.ts --url ws://gate.local:9520/ws --at 0.35 bloom
 //
 // Output lands in test-results/shapes/<kind>.png.
