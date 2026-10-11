@@ -81,6 +81,10 @@ GAME MODE banner. Commits `c7f3bb6`, `608a85d`, `f0b7a6b`.
       cue defaults) instead of the backend's conservative 3. Layout gate
       grew 16 cases: live + games tabs with a running game (banner + active
       play surface) at all 8 viewports, via the mock status patch.
+- [x] **Gathering** (`game/gathering.rs`, 2026-10-11): the second hidden
+      game, for Entheos. Shepherd-style attractor taps over wandering sparks;
+      six fixed home orbs from the camp mark; a lonely orb calls louder and a
+      full orb passes surplus sparks back out, so the cycle always completes.
 - [x] **Perimeter** (`game/perimeter.rs`, 2026-10-11): the first *hidden*
       game — listed under Hidden on the Games tab, offered on the public
       floor only to a key with `game:perimeter`, which may start and stop it
@@ -146,6 +150,12 @@ GAME MODE banner. Commits `c7f3bb6`, `608a85d`, `f0b7a6b`.
   around the middle, a rainbow city inside, trucks (one per color slot)
   catching headlamps that dash in from the rim, Gate Road traffic through
   one corner, an airport on the next edge. See plans/hidden-modes.md.
+- **Gathering** — built 2026-10-11. The host camp's (Entheos): the six orbs
+  of the camp mark near the rim, lost sparks wandering, taps as calls in an
+  orb's colour, blades lighting as orbs fill, the whole sigil then rebirth.
+  Pure co-op; the orbs call for themselves when nobody does. The first game
+  with fixed chips (`chips` on the catalog entry) instead of knob-counted
+  hues. See plans/hidden-modes.md.
 
 ### Tier 1 — build first
 

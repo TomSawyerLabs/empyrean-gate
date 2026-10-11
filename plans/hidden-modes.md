@@ -144,7 +144,40 @@ many orbs are lit, how many sparks are home, how many gatherings so far.
   white → their colour), call pulses as expanding rings, the gathering as
   a white inward wave.
 
+Built 2026-10-11 as `game/gathering.rs` with ten unit tests. Two rules were
+added when the zero-player test stalled: a **lonely orb calls louder** (its
+own call radius grows from 0.18 to 0.5 over a minute without an arrival),
+and a **full orb passes surplus sparks back out** (an arrival at a full orb
+is reborn from the fire instead of counted), so the last orb can never be
+starved once every spark is coloured. Wanderers roam out past the orbs
+(rn 0.35–0.93) with a gentler turn so they actually cover ground. Fixed
+chips are a new catalog field (`chips`), with `chipCount` / `chipColor` /
+`chipLabel` used by both the Games tab and the public page.
 
+
+
+### Seen on the array (2026-10-11, headless engine via `scripts/game-probe.ts`)
+
+`scripts/game-probe.ts` is new for this: it starts a game on a loopback
+backend, lets it run, fires random taps if asked, and saves the preview as a
+PNG (`test-results/games/<kind>.png`). Both games were looked at this way.
+
+- Gathering: blades light per orb in the mark's colours, the ring flares and
+  the white wave runs in on a gathering, sparks read as dots. The orbs were
+  single-spoke dashes at first; they are now stretched 2.2x across the
+  spokes so they read as orbs.
+- Perimeter: the fence pentagon, rainbow city, Gate Road with cars and the
+  runway all read. First pass leaked badly (0 caught, 16 in, with random
+  taps) and trucks/headlamps were single cells. Tuned: trucks are 3x3
+  blobs, headlamps two cells, Gate Road brighter, the AI aims a little
+  inward of its target and re-aims every 1-2.2 s at 0.9x truck speed,
+  catch radius 0.075, a parked truck mops up anyone within 0.2, sneakers
+  0.075-0.14. Live zero-player over 90 s: 17 caught, 8 in. The unit test
+  now demands >= 2 caught per 1 through with nobody driving. Random taps
+  (the probe's "player") still do worse than the AI - they yank trucks to
+  random spots - which is expected; a person aims at the headlamps.
+
+## Follow-ups (not started, Cameron's call)
 
 - **More hidden modes.** The mechanism is generic: a catalog entry with
   `hidden: true` + `perk: "game:<kind>"`, `GameKind::floor_perk`, and the
@@ -200,6 +233,10 @@ many orbs are lit, how many sparks are home, how many gatherings so far.
 - [x] 2026-10-11 Floor start/stop/expiry landed; e2e green both with a game
       key and with a plain key; strangers refused.
 - [x] 2026-10-11 Docs updated; every check green on the final tree.
+- [x] 2026-10-11 Gathering (Entheos) designed, built, seen live (`2931c23`
+      + tuning commit); fixed-colour chips; `scripts/game-probe.ts`.
+- [x] 2026-10-11 Perimeter tuned after seeing it live; zero-player test is
+      quantitative now.
 
 ## Open questions for the user
 

@@ -125,7 +125,8 @@ Perks are strings. Five override the floor's toggles for the holder — `draw`,
 the floor is closed to everyone else. The public page reads the rest:
 `big_brush` (strokes up to half the array), `strobe` (the strobe pad
 appears), `cone` (an orange traffic-cone shape pad appears), and
-`game:<kind>` for a **hidden game** — `game:perimeter` today — which gives
+`game:<kind>` for a **hidden game** — `game:perimeter` (GPE's) and
+`game:gathering` (the host camp's) today — which gives
 the holder a Start pad for that game while nothing else is running, a Stop
 while the floor's own game runs, and the games capability whatever the
 floor's toggle says. A floor-started game stops by itself after three

@@ -182,10 +182,17 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   player drives a perimeter truck in their colour to run them down, Gate Road
   carries ticketed traffic in through one corner and a plane lands at the
   airport now and then; more drivers means more sneakers, and the rate backs
-  off a little for every one that gets in. The Games tab lists it under
-  Hidden; the public floor offers it only to a key carrying `game:perimeter`,
-  whose holders may start and stop it from their phones (it also stops itself
-  after three quiet minutes). Starting/stopping the other
+  off a little for every one that gets in. A seventh, **Gathering**, is the
+  host camp's: the six orbs of the Entheos mark wait near the rim with the
+  star between them dark while lost sparks wander the playa; a tap is a call
+  in your orb's colour, every spark it reaches takes the colour and heads
+  home, nobody is ever taken from another orb, a full orb lights its blade,
+  and when all six are lit the sigil is whole, the ring flares, and the
+  whole gathering is born again out of the fire. The Games tab lists both
+  under Hidden; the public floor offers them only to a key carrying
+  `game:perimeter` or `game:gathering`, whose holders may start and stop
+  them from their phones (a floor-started game also stops itself after
+  three quiet minutes). Starting/stopping the other
   games is Gate-machine-only (and refused while a playlist runs, though a
   playlist cue can itself *schedule* a game); playing is open to every
   connected phone, and every world runs fine with zero players, so there is
@@ -303,9 +310,10 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   run. **Secret keys** (`Settings → Public floor → Secret keys`) unlock
   **perks** for a group: a link (`/k/<secret>`), a QR, or a code word read out
   over the mic; five perks override the floor's toggles for the holder, the
-  rest (`big_brush`, `strobe`, `cone`, `game:perimeter`) are read by the page —
-  the last two are the **hidden modes** (`plans/hidden-modes.md`): a shape pad
-  and a whole game that exist only for the group holding the key. Once a public URL is set
+  rest (`big_brush`, `strobe`, `cone`, `game:perimeter`, `game:gathering`) are
+  read by the page — the last three are the **hidden modes**
+  (`plans/hidden-modes.md`): a shape pad and whole games that exist only for
+  the group holding the key. Once a public URL is set
   it is the venue QR too: ⊕ Connect opens on it and the poster carries it
   (Guest and Admin stay a tap away for crew). TLS is deliberately the
   proxy's job. The operator port, meanwhile, **refuses proxied requests** —
@@ -415,6 +423,9 @@ Useful during pattern development:
   `EMPYREAN_UPRISING_DIR` when needed.
 - `bun scripts/e2e-test.ts` — protocol smoke test against a running backend.
   It also sends a generated video texture and verifies live source status.
+- `bun scripts/game-probe.ts <game> [--after s] [--taps n] [--stop]` — start a
+  game on a running loopback backend, let it run, and save what the array
+  shows as `test-results/games/<game>.png` (how the hidden games were tuned)
 - `bun scripts/public-floor-test.ts` — the public floor against a running backend
   with `public.enabled` on: public routes present, operator routes absent, the
   operator port refusing a proxied request, the hello gate, the allowlist, the
