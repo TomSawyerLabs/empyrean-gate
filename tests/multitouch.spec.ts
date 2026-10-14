@@ -75,9 +75,18 @@ test("a synthesized fire swallows the browser's duplicate click", async ({ page 
   // double fire there would be two effects on the rig.
   const pad = page.locator(".live-side .effect-btn").first();
   await pad.waitFor();
+  // The Burst pad is the last cluster in column A. The column scrolls, and on
+  // Linux WebKit's taller font metrics it already overflows at 1400x900 (see
+  // ISSUES.md), which would park the pad's centre outside the viewport and
+  // put elementFromPoint on something else. The test is about click
+  // synthesis, not the column's height: bring the pad in first.
+  await pad.scrollIntoViewIfNeeded();
   const box = (await pad.boundingBox())!;
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;
+  const viewport = page.viewportSize()!;
+  expect(x).toBeLessThan(viewport.width);
+  expect(y).toBeLessThan(viewport.height);
   await page.evaluate(() => {
     (window as unknown as { __clicks: number }).__clicks = 0;
     document.addEventListener("click", (e) => {

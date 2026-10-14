@@ -82,6 +82,12 @@ The only thing this machine does is **push a version tag**.
    ```
 8. **Watch the run** — `gh run list --workflow=release.yml --limit 3`. A release
    nobody watched is a release that failed quietly.
+9. **If the run fails before the `release` job**, nothing was published (the
+   draft is only created there). Fix forward and cut the next patch version
+   with a fresh tag; do not delete and re-push the failed tag — that is a
+   rewrite of a published ref, and the dangling tag with no release is
+   harmless (the updater reads `releases/latest`). v0.13.0 → v0.13.1 was the
+   first: a WebKit-only behaviour test failed on Linux (see ISSUES.md).
 
 ## Build time and the cache
 
