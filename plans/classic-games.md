@@ -74,14 +74,22 @@ suggestions. do them all").
    Spacewar ship → turn and burn toward the point, Trails cycle → turn toward
    it, Rally paddle → that angle (inside its own arc), Echo → that wedge.
    Buttons are extras on top, never required to play.
-5. **Echo ticks on the beat** (`cadence() = None`): the pattern plays one step
-   per beat of the DJ's music. A correct tap scores immediately; a step that
-   gets only wrong taps fails at the next beat, so one right answer from
-   anyone in the crowd rescues a step. The more people play, the easier it
-   gets. That's on purpose: it's a party.
-6. Echo has no color chips: you play by tapping wedges, and wedge colors are
-   the knob's hues.
+5. **Echo keeps time with the music** but runs on the 50 ms step, and hears
+   each confident beat through `GameSim::beat()`. Its own 120 bpm takes over
+   when the music has no beat. (Ticking *on* the beat, `cadence() = None`,
+   fades each change in across the whole beat, which lands late; see
+   Findings.) The pattern plays one step per beat, or every other beat for
+   fast music. A correct tap counts at once; a step with only wrong taps fails
+   two beats later, so one right answer from anyone in the crowd rescues a
+   step. The more people play, the easier it gets. That's on purpose: it's a
+   party.
+6. Echo has no color chips: you play by tapping wedges. At four wedges they
+   are Simon's colors in Simon's places on the phone preview; otherwise the
+   hues are evenly spaced.
 7. No shader changes: everything rides the polar grid lookup.
+8. **Rimfire's claws have their own palette** (2–6 claws, Tempest's yellow
+   first, none of them an enemy's red, violet or green). It's mirrored in the
+   catalog's new `palette` field.
 
 ## Plan / steps
 
@@ -93,12 +101,20 @@ suggestions. do them all").
 3. [x] Echo (+ `GameSim::beat()` hook). `4f9b569`.
 4. [x] Spacewar. `774a0a1`.
 5. [x] Trails. `e593712`.
-6. [ ] Rally. ← current
-7. [ ] Playwright: buttons send `game_command` with the chosen color; the
-       Games tab lists the new cards.
-8. [ ] Real backend run: start each game, tap, press buttons, screenshot the
-       preview; tune what looks wrong.
-9. [ ] README game paragraph, this plan, commit per game.
+6. [x] Rally. `0df8967`.
+7. [x] Playwright: buttons send `game_command` with the chosen color, the
+       Games tab lists the new cards, Echo has no chips, the layout gate
+       covers a game with the button row. `759843a`. The games spec now runs
+       in CI's `test:behavior` (`3b2f560`; it never had before).
+8. [x] Real backend run: every game probed to PNG and tuned. Superzap and a
+       Trails turn were checked end to end through `game_command` (the status
+       summary changed: destroyed 6 → 9 with color 2 leading, 0 → 1 rider).
+       Echo screenshotted on the real phone preview: Simon's layout exactly.
+9. [x] README game paragraph and probe options; this plan. rustfmt
+       `9be634f`.
+10. [ ] **(needs the rig)** See all five on the real array from the floor:
+        trail/ship/ball sizes, Echo's wedge brightness, whether Rimfire's
+        tube lines are visible in daylight-ish conditions.
 
 ## Game designs
 
@@ -136,7 +152,7 @@ suggestions. do them all").
 - World coordinates (Perimeter style). The hole is the star: gravity ∝ 1/r²
   toward the center; touching the hole ends a ship (the star flares).
 - One ship per color (knob 2–8, start 4). A tap means turn toward the point
-  and burn for about 0.6 s. Buttons: **Fire** (a torpedo forward, with a
+  and burn for about 0.4 s. Buttons: **Fire** (a torpedo forward, with a
   cooldown; torpedoes feel gravity) and **Hyperspace** (vanish, reappear at
   random, with a small chance of not coming back).
 - Leaving at the rim brings you back in at the antipodal point, the
@@ -190,6 +206,9 @@ suggestions. do them all").
 ## Progress log
 
 - [x] 2026-10-14 explored the game plumbing; plan written.
+- [x] 2026-10-14 all five built, tested and committed, checks green:
+      `cargo test --lib` 378, `bun run typecheck`, `test:unit`,
+      `test:layout` 128, `test:behavior` 114. Not pushed.
 - [x] Rimfire, Echo, Spacewar, Trails built, unit-tested, tuned with the
       probe against the headless backend on :9540 (`$TEMP/EmpyreanClassics/
       start.sh`), and committed one per game. The `game-probe` helper's new
@@ -203,9 +222,17 @@ suggestions. do them all").
 
 1. Names (Rimfire, Echo, Spacewar, Trails, Rally): easy to change later; the
    wire names are the kinds above. Recommendation: keep.
+2. Push to `origin/master`? Not done: commits stay local until asked.
 
 ## Things not to do
 
+- Don't run `rustfmt` on `game/mod.rs` in place: it follows `pub mod` into
+  every sibling and reformats sims that predate this work (Perimeter,
+  Gathering and Ringfall aren't rustfmt-clean). Format a copy next to
+  empty stub siblings and copy it back, as `9be634f` did.
+- Don't tune an AI by changing only its fire rate: in Spacewar the kill rate
+  ignored the cooldown because the aim error was re-rolled every tick. Measure
+  shots against kills first.
 - Don't add storage buffers or shader paths: the grid lookup is enough.
 - Don't make buttons the only way to play; a tap must always do something
   useful.

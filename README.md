@@ -165,7 +165,7 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   In the desktop app, "New window" pops the current tab out into its own window.
   Old `/#view` and `/#draw` links redirect to Live.
 - **Game mode (early)**: the Games tab turns the array into a continuous game
-  world. Five so far — **Ecosystem** (cyclic predator-prey cellular automaton
+  world. Ten open ones so far — **Ecosystem** (cyclic predator-prey cellular automaton
   whose spiral fronts advance on the beat and never converge), **Primordial**
   (Game of Life where color is lineage: taps splat living soup, newborns blend
   their parents' hues), **Spokewar** (rim bases firing army-particle squads
@@ -176,13 +176,26 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   how hard the crowd is firing), plus **Ringfall** (pieces fall inward from the
   rim; complete rings collapse, and a deliberately small-piece-heavy bag of
   dots, dominoes, triominoes, and tetrominoes keeps awkward gaps playable).
-  A sixth, **Perimeter**, is *hidden*: Gate, Perimeter & Exodus's own — the
+  Five more are classics reworked for a ring with a hole in it
+  (`plans/classic-games.md`): **Rimfire** (Tempest seen end-on — enemies
+  climb out of the hole along sixteen lanes and every color is a claw on the
+  rim firing inward, with a Superzap button), **Echo** (Simon for the whole
+  floor — the Gate plays a pattern of colored wedges on the beat and a right
+  tap from anyone answers it), **Spacewar** (the 1962 duel around a real
+  star: the hole's gravity bends ships and torpedoes, and flying off the rim
+  brings you back in on the far side; Fire and Hyperspace buttons),
+  **Trails** (light cycles whose fading walls, the hole and the rim are all
+  deadly; turn buttons as seen on the phone), and **Rally** (Pong for any
+  number of players: each color owns an arc of the rim with a paddle, and
+  balls bounce off the hole). A game's buttons act for the color you picked,
+  and a tap on the array always does something useful too.
+  **Perimeter** is *hidden*: Gate, Perimeter & Exodus's own — the
   city is a rainbow party inside the orange trash fence (a pentagon around
   the middle of the array), headlamps dash in from the dark to hop it, each
   player drives a perimeter truck in their colour to run them down, Gate Road
   carries ticketed traffic in through one corner and a plane lands at the
   airport now and then; more drivers means more sneakers, and the rate backs
-  off a little for every one that gets in. A seventh, **Gathering**, is the
+  off a little for every one that gets in. **Gathering**, also hidden, is the
   host camp's: the six orbs of the Entheos mark wait near the rim with the
   star between them dark while lost sparks wander the playa; a tap is a call
   in your orb's colour, every spark it reaches takes the colour and heads
@@ -441,9 +454,11 @@ Useful during pattern development:
   `EMPYREAN_UPRISING_DIR` when needed.
 - `bun scripts/e2e-test.ts` — protocol smoke test against a running backend.
   It also sends a generated video texture and verifies live source status.
-- `bun scripts/game-probe.ts <game> [--after s] [--taps n] [--stop]` — start a
-  game on a running loopback backend, let it run, and save what the array
-  shows as `test-results/games/<game>.png` (how the hidden games were tuned)
+- `bun scripts/game-probe.ts <game> [--after s] [--taps n] [--species n]
+  [--command name] [--stop]` — start a game on a running loopback backend
+  (optionally at a knob value, pressing a game button halfway), let it run,
+  and save what the array shows as `test-results/games/<game>.png` (how the
+  hidden games and the classics were tuned)
 - `bun scripts/public-floor-test.ts` — the public floor against a running backend
   with `public.enabled` on: public routes present, operator routes absent, the
   operator port refusing a proxied request, the hello gate, the allowlist, the
