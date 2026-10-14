@@ -210,7 +210,12 @@ it in non-free; its hashes are recorded in `src-tauri/doom/README.md`).
 - [x] v0.13.0: bump committed on top; pushed as a fast-forward of
       `origin/master` together with the other thread's commits.
 - [ ] seen on the rig (mapping constants may need tuning).
-- [ ] the v0.13.0 release run proves the two-variant build steps.
+- [x] v0.13.0's run failed on a WebKit-only Live layout overflow (not DOOM;
+      ISSUES.md), nothing published; v0.13.1 (`877590d`) shipped 2026-10-14:
+      4 default + 4 `-nodoom` binaries, every one signed, plus
+      `THIRD-PARTY-LICENSES.md`. DOOM adds ~4.6 MB per binary (the WAD).
+      macOS took 24 min on the free runner with the second build; Windows
+      and Linux 9–10 min on Blacksmith.
 
 ## Open questions for the user
 
