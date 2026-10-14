@@ -32,6 +32,10 @@ The only thing this machine does is **push a version tag**.
   `bun tauri build --no-bundle`, `cargo test --release --lib`,
   `cargo test --release --bin engine-smoke`, plus the Linux AppImage build.
   Three platforms; a run takes roughly 20–25 minutes.
+- Every platform ships a `-nodoom` twin (plain MIT, no GPL engine; plans/doom.md),
+  built in the same job after the default assets are staged, and
+  `THIRD-PARTY-LICENSES.md` rides along as a signed asset. The updater picks its
+  own variant by name.
 - Linux ships **two** assets (bare binary + AppImage) because the bare one needs
   `libwebkit2gtk` already installed. The workflow deliberately has no `|| true`
   on the AppImage step: a release that silently drops an asset is worse than a

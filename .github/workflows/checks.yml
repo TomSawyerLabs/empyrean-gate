@@ -90,3 +90,10 @@ jobs:
       - name: Library tests
         working-directory: src-tauri
         run: cargo test --lib
+
+      # The DOOM-free release variant must keep compiling: everything behind
+      # the `doom` feature is cfg-gated, and this is the only place a missing
+      # gate shows up before release day.
+      - name: Check the DOOM-free build
+        working-directory: src-tauri
+        run: cargo check --lib --bins --no-default-features --features shader-hot-reload

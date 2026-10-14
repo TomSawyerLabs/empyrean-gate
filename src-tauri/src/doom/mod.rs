@@ -126,7 +126,9 @@ struct Inbox {
     frames: u64,
     /// Set once: why the pipe ended.
     exited: Option<String>,
-    /// DOOM's last few stderr lines, for the exit message.
+    /// DOOM's last few stderr lines, for the exit message. Only the child's
+    /// reader threads fill it, which a DOOM-free build does not have.
+    #[cfg_attr(not(feature = "doom"), allow(dead_code))]
     stderr_tail: VecDeque<String>,
 }
 

@@ -49,9 +49,19 @@ pub fn effective_version() -> String {
     std::env::var("EMPYREAN_FAKE_VERSION").unwrap_or_else(|_| CURRENT_VERSION.to_string())
 }
 
+/// Every release ships each platform twice: the default build with DOOM
+/// (plans/doom.md) and a `-nodoom` build without the GPL engine. A running
+/// copy updates to its OWN variant — a DOOM-free install must stay DOOM-free
+/// through updates, since that is the whole reason it was chosen.
+const DOOM: bool = cfg!(feature = "doom");
+
 fn asset_name() -> Option<&'static str> {
     if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-        Some("empyrean-gate-windows-x64.exe")
+        Some(if DOOM {
+            "empyrean-gate-windows-x64.exe"
+        } else {
+            "empyrean-gate-windows-x64-nodoom.exe"
+        })
     } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         // Linux ships two shapes of the same release: a bare binary, which needs
         // libwebkit2gtk already on the machine, and an AppImage that carries it.
@@ -63,14 +73,40 @@ fn asset_name() -> Option<&'static str> {
         // The AppImage runtime exports APPIMAGE with the path to the bundle it
         // launched from; nothing else sets it.
         if std::env::var_os("APPIMAGE").is_some() {
-            Some("empyrean-gate-linux-x64.AppImage")
+            Some(if DOOM {
+                "empyrean-gate-linux-x64.AppImage"
+            } else {
+                "empyrean-gate-linux-x64-nodoom.AppImage"
+            })
         } else {
-            Some("empyrean-gate-linux-x64")
+            Some(if DOOM {
+                "empyrean-gate-linux-x64"
+            } else {
+                "empyrean-gate-linux-x64-nodoom"
+            })
         }
     } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        Some("empyrean-gate-macos-arm64")
+        Some(if DOOM {
+            "empyrean-gate-macos-arm64"
+        } else {
+            "empyrean-gate-macos-arm64-nodoom"
+        })
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod variant_tests {
+    use super::*;
+
+    /// The asset a build looks for carries its own variant, and the names
+    /// match what release.yml stages (`<asset>` / `<asset_nodoom>` there).
+    #[test]
+    fn asset_name_carries_the_build_variant() {
+        let name = asset_name().expect("a release asset exists for CI platforms");
+        assert_eq!(name.contains("-nodoom"), !DOOM, "{name}");
+        assert!(name.starts_with("empyrean-gate-"), "{name}");
     }
 }
 

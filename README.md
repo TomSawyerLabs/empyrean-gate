@@ -511,6 +511,12 @@ git tag v0.2.0 && git push origin v0.2.0
 
 Grab binaries from https://github.com/TomSawyerLabs/empyrean-gate/releases.
 
+Every platform ships twice: the default build, which includes DOOM and is therefore
+a GPL-2.0-or-later combined work (see [License](#license)), and a `-nodoom` build
+(`empyrean-gate-windows-x64-nodoom.exe` and friends) that is plain MIT. A running
+copy self-updates to its own variant, so pick once. `THIRD-PARTY-LICENSES.md` is
+attached to every release with the GPL text.
+
 Windows and Linux release builds run on paid 16-vCPU Blacksmith runners while the
 month is inside Blacksmith's free tier, and fall back to GitHub's free (slower) runners
 once it is spent. For a show, where a fast release is worth paying for, lift the cap
@@ -802,14 +808,19 @@ its backing square under a tap.
 
 MIT — see [LICENSE](LICENSE).
 
-The vendored DOOM engine in `src-tauri/doom/doomgeneric` is GPL-2.0 (id Software /
-doomgeneric), and the shareware IWAD beside it is redistributable as shareware. A
-binary built with the default `doom` feature links the engine, which makes that
-*binary* a GPL-2 combined work — satisfied by this public MIT source, but worth
-knowing before bundling anything proprietary into a build. Details and hashes in
-[src-tauri/doom/README.md](src-tauri/doom/README.md).
+The vendored DOOM engine in `src-tauri/doom/doomgeneric` is GPL-2.0-or-later (id
+Software / doomgeneric), and the shareware IWAD beside it is redistributable as
+shareware. A binary built with the default `doom` feature links the engine, which
+makes that *binary* a GPL-2 combined work: distributing it means distributing it
+under GPL terms, with the complete source available (this public repo at the
+release tag) and the license text alongside (`THIRD-PARTY-LICENSES.md`, attached to
+every release). The source stays MIT; the `-nodoom` release assets link none of it
+and are plain MIT. Details and hashes in [src-tauri/doom/README.md](src-tauri/doom/README.md).
 
 One caveat if you plan to redistribute builds: the `prodjlink-rs` git dependency
-carries no license of its own (no `license` field, no LICENSE file), which leaves it
-all-rights-reserved by default. That doesn't affect this repository's own terms, but a
-distributed binary linking it needs that resolved upstream first.
+(pinned to `anweiss/prodjlink-rs`) carries no license of its own (no `license`
+field, no LICENSE file), which leaves it all-rights-reserved by default. That
+doesn't affect this repository's own terms, but a distributed binary linking it
+needs that resolved upstream first. Note the name collision: `Compellerai/prodjlink-rs`
+on GitHub is MIT, but it is a different, single-file crate (beat packets only) with no
+`dbserver`/`data` API, not a relicensed copy of the one `rhythm.rs` uses.

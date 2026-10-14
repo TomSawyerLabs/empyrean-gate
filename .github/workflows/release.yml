@@ -41,18 +41,26 @@ jobs:
           # 10-20x its Linux rate. Keep the warm cache on the same provider as
           # these jobs (see warm-cache.yml) — a cache written on one provider's
           # backend may not be readable from the other's runners.
+          #
+          # Each platform ships twice: the default build (with DOOM — a GPL-2
+          # combined work, see THIRD-PARTY-LICENSES.md) and a `-nodoom` build
+          # that is plain MIT. The updater picks its own variant by name
+          # (`updater::asset_name`), so both names are load-bearing.
           - os: ${{ needs.gate.outputs.windows }}
             artifact: empyrean-gate-windows-x64
             binary: src-tauri/target/release/empyrean-gate.exe
             asset: empyrean-gate-windows-x64.exe
+            asset_nodoom: empyrean-gate-windows-x64-nodoom.exe
           - os: ${{ needs.gate.outputs.linux }}
             artifact: empyrean-gate-linux-x64
             binary: src-tauri/target/release/empyrean-gate
             asset: empyrean-gate-linux-x64
+            asset_nodoom: empyrean-gate-linux-x64-nodoom
           - os: macos-latest
             artifact: empyrean-gate-macos-arm64
             binary: src-tauri/target/release/empyrean-gate
             asset: empyrean-gate-macos-arm64
+            asset_nodoom: empyrean-gate-macos-arm64-nodoom
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -154,7 +162,41 @@ jobs:
             echo "::error::AppImage build produced nothing"
             exit 1
           fi
-          cp "$src" "release-assets/${{ matrix.asset }}.AppImage"
+          mv "$src" "release-assets/${{ matrix.asset }}.AppImage"
+          ls -lh release-assets/
+
+      # The same again without the GPL DOOM engine (plans/doom.md). Staged
+      # AFTER the default build's assets are copied away, because it overwrites
+      # the same target paths. Only this crate recompiles — the dependency
+      # graph is unchanged — so it is minutes, not another cold build. The
+      # bundle license metadata is overridden to plain MIT for this one.
+      - name: Build standalone binary (without DOOM)
+        run: >-
+          bun tauri build --no-bundle
+          --config '{"bundle":{"license":"MIT","licenseFile":"../LICENSE"}}'
+          -- --no-default-features --features shader-hot-reload
+
+      - name: Stage release asset (without DOOM)
+        shell: bash
+        run: cp "${{ matrix.binary }}" "release-assets/${{ matrix.asset_nodoom }}"
+
+      - name: Build AppImage (Linux, without DOOM)
+        if: runner.os == 'Linux'
+        run: >-
+          bun tauri build --bundles appimage
+          --config '{"bundle":{"license":"MIT","licenseFile":"../LICENSE"}}'
+          -- --no-default-features --features shader-hot-reload
+
+      - name: Stage the AppImage (Linux, without DOOM)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          src=$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' | head -1)
+          if [ -z "$src" ]; then
+            echo "::error::DOOM-free AppImage build produced nothing"
+            exit 1
+          fi
+          mv "$src" "release-assets/${{ matrix.asset_nodoom }}.AppImage"
           ls -lh release-assets/
 
       # Signs a provenance statement binding each asset's SHA-256 to THIS
@@ -206,6 +248,12 @@ jobs:
         with:
           path: assets
           merge-multiple: true
+
+      # The GPL text and notices travel with the binaries that link the DOOM
+      # engine (a GPL-2 obligation on distribution). Signed like everything
+      # else; the updater ignores assets it does not look for by name.
+      - name: Stage the third-party license file
+        run: cp THIRD-PARTY-LICENSES.md assets/THIRD-PARTY-LICENSES.md
 
       # What the in-app updater actually enforces before it will run a
       # downloaded binary. The attestation added in the build job is an audit

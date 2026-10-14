@@ -85,6 +85,16 @@ short timeout when the player walks away so the show gets its array back.
     average the pixels they cover rather than sparkle.
 11. Behind a Cargo feature `doom` (default on) so a platform where the C build
     breaks can still ship (`--no-default-features --features shader-hot-reload`).
+12. **Every release ships both variants** (user, 2026-10-14): the default assets
+    include DOOM; `-nodoom` twins are plain MIT. Built in the same job after the
+    default assets are staged (only this crate recompiles). The updater's
+    `asset_name` carries the variant so an install never switches sides, the
+    bundle license metadata says `MIT AND GPL-2.0-or-later` (overridden to MIT
+    for the nodoom build), and `THIRD-PARTY-LICENSES.md` (full GPL-2 text) is
+    attached to every release.
+13. `prodjlink-rs`: `Compellerai/prodjlink-rs` is MIT but is a *different*
+    single-file crate under the same name; the app's pin (`anweiss`) is still
+    unlicensed. Left as the README caveat, not a switch.
 
 ## Licensing (flag, not a blocker)
 
