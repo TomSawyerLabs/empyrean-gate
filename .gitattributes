@@ -7,3 +7,6 @@ tests/fixtures/*.json eol=lf
 # into the binary, and `tr -d '[:space:]'` in release.yml. Both tolerate CRLF,
 # but a key this load-bearing does not need a line-ending variable in it.
 src-tauri/release-signing.pub eol=lf
+
+# The shareware DOOM IWAD is a binary blob; never let autocrlf near it.
+src-tauri/doom/doom1.wad binary

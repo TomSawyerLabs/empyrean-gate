@@ -108,11 +108,16 @@ naga = { version = "29", features = ["wgsl-in"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Compiles the vendored DOOM engine (src-tauri/doom) when the `doom` feature is on.
+cc = "1.2"
 
 [features]
-default = ["shader-hot-reload"]
+default = ["shader-hot-reload", "doom"]
 # Read WGSL from disk and rebuild the pipeline on change (pattern dev).
 shader-hot-reload = ["dep:notify"]
+# Shareware DOOM as a game world, run in a child process of this same binary
+# (plans/doom.md). Off = no C toolchain needed and no GPL code linked.
+doom = []
 # Enabled by `tauri build` for release; serves embedded frontend assets.
 custom-protocol = ["tauri/custom-protocol"]
 

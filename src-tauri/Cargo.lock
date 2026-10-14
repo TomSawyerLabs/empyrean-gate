@@ -1354,6 +1354,7 @@ dependencies = [
  "anyhow",
  "axum",
  "bytemuck",
+ "cc",
  "chrono",
  "cpal",
  "crossbeam-channel",
