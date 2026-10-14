@@ -179,6 +179,26 @@ export const GAMES: {
     ],
   },
   {
+    kind: "trails",
+    name: "Trails",
+    blurb:
+      "Light cycles on the ring: every color is a cycle laying a wall of " +
+      "light behind it, and touching any wall — a rival's, your own, the " +
+      "hole's edge or the rim — derezzes you. Walls fade from the tail, so " +
+      "the arena never fills for good. The AI rides until someone takes a color.",
+    knob: { label: "Cycles", min: 2, max: 8, start: 4 },
+    howTo:
+      "You're a light cycle in your color, always moving and laying a wall " +
+      "behind you. Turn left or right with the buttons (as you see it on " +
+      "the screen), or tap where you want to go. Hit any wall, the hole's " +
+      "edge or the rim and you derez — whoever's wall it was gets the " +
+      "point. Box people in. You're back two seconds later.",
+    buttons: [
+      { command: "turn_left", icon: "↰", label: "Turn left", keys: ["ArrowLeft", "a", "A"], keyHint: "← / A" },
+      { command: "turn_right", icon: "↱", label: "Turn right", keys: ["ArrowRight", "d", "D"], keyHint: "→ / D" },
+    ],
+  },
+  {
     kind: "perimeter",
     name: "Perimeter",
     hidden: true,
