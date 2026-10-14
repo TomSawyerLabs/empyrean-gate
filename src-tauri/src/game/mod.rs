@@ -9,6 +9,7 @@ pub mod gathering;
 pub mod life;
 pub mod perimeter;
 pub mod radial_tetris;
+pub mod rimfire;
 pub mod rps;
 pub mod spokewar;
 
@@ -36,6 +37,9 @@ pub enum GameKind {
     /// Hidden: the host camp's — calling lost sparks home to the six orbs of
     /// the Entheos mark until the sigil is whole (see `gathering`).
     Gathering,
+    /// Tempest on the ring: enemies climb out of the hole along the lanes,
+    /// claws on the rim shoot them down (see `rimfire`).
+    Rimfire,
     /// Shareware DOOM, the real thing, in a child process; the phone is the
     /// controller and the HUD (plans/doom.md). Reached by a secret code, not
     /// the Games tab, and not a playlist cue.
@@ -52,6 +56,7 @@ impl GameKind {
             GameKind::RadialTetris => "Ringfall",
             GameKind::Perimeter => "Perimeter",
             GameKind::Gathering => "Gathering",
+            GameKind::Rimfire => "Rimfire",
             GameKind::Doom => "DOOM",
         }
     }
@@ -78,6 +83,7 @@ impl GameKind {
             GameKind::RadialTetris => 6,
             GameKind::Perimeter => 5,
             GameKind::Gathering => 5,
+            GameKind::Rimfire => 4,
             // DOOM's knob is its skill; the floor never starts it anyway.
             GameKind::Doom => 3,
         }
@@ -101,6 +107,7 @@ pub enum GameSim {
     RadialTetris(radial_tetris::RadialTetrisSim),
     Perimeter(perimeter::PerimeterSim),
     Gathering(gathering::GatheringSim),
+    Rimfire(rimfire::RimfireSim),
     Doom(crate::doom::DoomSim),
 }
 
@@ -124,6 +131,7 @@ impl GameSim {
             GameKind::Gathering => {
                 GameSim::Gathering(gathering::GatheringSim::new(theta, radial, species, seed))
             }
+            GameKind::Rimfire => GameSim::Rimfire(rimfire::RimfireSim::new(theta, radial, species, seed)),
             GameKind::Doom => GameSim::Doom(crate::doom::DoomSim::new(species)),
         }
     }
@@ -146,6 +154,7 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.theta(),
             GameSim::Perimeter(s) => s.theta(),
             GameSim::Gathering(s) => s.theta(),
+            GameSim::Rimfire(s) => s.theta(),
             GameSim::Doom(_) => crate::doom::WIDTH,
         }
     }
@@ -159,6 +168,7 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.radial(),
             GameSim::Perimeter(s) => s.radial(),
             GameSim::Gathering(s) => s.radial(),
+            GameSim::Rimfire(s) => s.radial(),
             GameSim::Doom(_) => crate::doom::HEIGHT,
         }
     }
@@ -175,6 +185,7 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.set_slots(species),
             GameSim::Perimeter(s) => s.set_slots(species),
             GameSim::Gathering(s) => s.set_slots(species),
+            GameSim::Rimfire(s) => s.set_slots(species),
             // Skill is fixed at launch; DOOM has no live knob.
             GameSim::Doom(_) => {}
         }
@@ -190,6 +201,7 @@ impl GameSim {
             GameSim::RadialTetris(_) => Some(radial_tetris::TICK_SECS),
             GameSim::Perimeter(_) => Some(perimeter::TICK_SECS),
             GameSim::Gathering(_) => Some(gathering::TICK_SECS),
+            GameSim::Rimfire(_) => Some(rimfire::TICK_SECS),
             // Every render frame: the tick only polls the child's newest frame.
             GameSim::Doom(_) => Some(0.0),
         }
@@ -204,6 +216,7 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.tick(),
             GameSim::Perimeter(s) => s.tick(),
             GameSim::Gathering(s) => s.tick(),
+            GameSim::Rimfire(s) => s.tick(),
             GameSim::Doom(s) => s.tick(),
         }
     }
@@ -217,6 +230,7 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.watchdog(),
             GameSim::Perimeter(s) => s.watchdog(),
             GameSim::Gathering(s) => s.watchdog(),
+            GameSim::Rimfire(s) => s.watchdog(),
             GameSim::Doom(_) => {}
         }
     }
@@ -230,6 +244,7 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.inject(it, species),
             GameSim::Perimeter(s) => s.inject(it, ir, species),
             GameSim::Gathering(s) => s.inject(it, ir, species),
+            GameSim::Rimfire(s) => s.inject(it, ir, species),
             // A tap on the array preview is "face me": the screen's bottom
             // edge swings to point at the tapped spoke. The engine computed
             // `it` against this sim's theta(), which for DOOM is the raster
@@ -296,6 +311,7 @@ impl GameSim {
     pub fn command(&mut self, command: GameCommand, species: u8) {
         match self {
             GameSim::RadialTetris(sim) => sim.command(command),
+            GameSim::Rimfire(sim) => sim.command(command, species),
             _ => {
                 let _ = species;
             }
@@ -307,6 +323,7 @@ impl GameSim {
             GameSim::RadialTetris(sim) => Some(sim.detail()),
             GameSim::Perimeter(sim) => Some(sim.detail()),
             GameSim::Gathering(sim) => Some(sim.detail()),
+            GameSim::Rimfire(sim) => Some(sim.detail()),
             GameSim::Doom(sim) => Some(sim.detail()),
             _ => None,
         }
@@ -345,6 +362,7 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.pack_cells(),
             GameSim::Perimeter(s) => s.pack_cells(time),
             GameSim::Gathering(s) => s.pack_cells(time),
+            GameSim::Rimfire(s) => s.pack_cells(),
             GameSim::Doom(s) => s.pack_cells(),
         }
     }

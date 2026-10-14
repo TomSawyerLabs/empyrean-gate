@@ -35,6 +35,10 @@ export const GAMES: {
   /** Fixed chips, when a game's colours are its own (Gathering's six orbs)
    * rather than evenly spaced hues counted by the knob. */
   chips?: { label: string; color: string }[];
+  /** Chip colors in order when the game picks its own (Rimfire keeps its
+   *  claws off the enemies' red, violet and green); the knob still says how
+   *  many. Must match the backend's table for that game. */
+  palette?: string[];
   /** Per-color buttons shown under the chips (see `GameButton`). */
   buttons?: GameButton[];
   /** No color chips at all: the taps are the whole game (Echo). */
@@ -114,6 +118,28 @@ export const GAMES: {
       "inner gaps and complete a ring to clear it.",
   },
   {
+    kind: "rimfire",
+    name: "Rimfire",
+    blurb:
+      "Tempest, wrapped around the hole: the array is the tube seen end-on. " +
+      "Flippers, tankers and spikers climb out of the hole along sixteen " +
+      "lanes, and every color is a claw on the rim firing inward down its " +
+      "lane. The AI holds the rim until someone picks up a color.",
+    knob: { label: "Claws", min: 2, max: 6, start: 4 },
+    // game::rimfire::CLAW_COLORS
+    palette: ["#ffe326", "#26e5ff", "#ff8119", "#ff66c2", "#ffffff", "#599cff"],
+    howTo:
+      "You are a claw on the rim, and you fire down your lane by yourself. " +
+      "Tap anywhere and your claw slides round to that lane. Red flippers " +
+      "that reach the rim hop toward you to grab you — shoot them as they " +
+      "land or get out of the way. A violet tanker splits in two when shot; " +
+      "green spikes hide whatever climbs beneath them, so wear them down. " +
+      "Superzap clears the whole board, once every 30 seconds.",
+    buttons: [
+      { command: "superzap", icon: "✷", label: "Superzap", keys: ["z", "Z"], keyHint: "clears the board · Z" },
+    ],
+  },
+  {
     kind: "perimeter",
     name: "Perimeter",
     hidden: true,
@@ -170,7 +196,7 @@ export function chipCount(game: (typeof GAMES)[number] | undefined, species: num
 }
 
 export function chipColor(game: (typeof GAMES)[number] | undefined, s: number, species: number): string {
-  return game?.chips?.[s]?.color ?? speciesColor(s, species);
+  return game?.chips?.[s]?.color ?? game?.palette?.[s] ?? speciesColor(s, species);
 }
 
 export function chipLabel(game: (typeof GAMES)[number] | undefined, s: number): string {
