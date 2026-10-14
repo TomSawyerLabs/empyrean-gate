@@ -158,6 +158,27 @@ export const GAMES: {
     join: "No colors to pick: when the middle glows white, tap the wedges back in order. Anyone who remembers saves the round.",
   },
   {
+    kind: "spacewar",
+    name: "Spacewar",
+    blurb:
+      "The first video game (1962), around a real star: the hole's gravity " +
+      "bends every ship and torpedo, so orbits are the way to travel and the " +
+      "best shots curve round the star. Fly off the rim and you come back in " +
+      "on the far side. Every color is a ship, AI-flown until someone takes it.",
+    knob: { label: "Ships", min: 2, max: 8, start: 4 },
+    howTo:
+      "Your color is a ship in orbit round the star in the middle. Tap where " +
+      "you want to go and it swings its nose that way and burns — gravity " +
+      "does the rest, so small taps steer an orbit. Fire looses a torpedo " +
+      "along your nose (they curve too). Hyperspace jumps you somewhere " +
+      "random when it's tight — but now and then it doesn't come back. " +
+      "Touch the star and you're done.",
+    buttons: [
+      { command: "fire", icon: "✦", label: "Fire", keys: [" ", "f", "F"], keyHint: "a torpedo · Space" },
+      { command: "hyperspace", icon: "⟡", label: "Hyperspace", keys: ["h", "H"], keyHint: "jump, risky · H" },
+    ],
+  },
+  {
     kind: "perimeter",
     name: "Perimeter",
     hidden: true,

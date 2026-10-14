@@ -79,6 +79,7 @@ const GAME_CUES: { kind: GameKind; name: string; species: number }[] = [
   { kind: "radial_tetris", name: "Ringfall", species: 6 },
   { kind: "rimfire", name: "Rimfire", species: 4 },
   { kind: "echo", name: "Echo", species: 4 },
+  { kind: "spacewar", name: "Spacewar", species: 4 },
 ];
 
 /// A cue that runs a game world (plans/game-mode.md). The underlying stack is

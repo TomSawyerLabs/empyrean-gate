@@ -12,6 +12,7 @@ pub mod perimeter;
 pub mod radial_tetris;
 pub mod rimfire;
 pub mod rps;
+pub mod spacewar;
 pub mod spokewar;
 
 use serde::{Deserialize, Serialize};
@@ -44,6 +45,9 @@ pub enum GameKind {
     /// Simon for the whole floor: coloured wedges, a pattern on the beat,
     /// the crowd answers together (see `echo`).
     Echo,
+    /// Spacewar! around a real star: the hole's gravity bends ships and
+    /// torpedoes; the rim wraps to the opposite side (see `spacewar`).
+    Spacewar,
     /// Shareware DOOM, the real thing, in a child process; the phone is the
     /// controller and the HUD (plans/doom.md). Reached by a secret code, not
     /// the Games tab, and not a playlist cue.
@@ -62,6 +66,7 @@ impl GameKind {
             GameKind::Gathering => "Gathering",
             GameKind::Rimfire => "Rimfire",
             GameKind::Echo => "Echo",
+            GameKind::Spacewar => "Spacewar",
             GameKind::Doom => "DOOM",
         }
     }
@@ -90,6 +95,7 @@ impl GameKind {
             GameKind::Gathering => 5,
             GameKind::Rimfire => 4,
             GameKind::Echo => 4,
+            GameKind::Spacewar => 4,
             // DOOM's knob is its skill; the floor never starts it anyway.
             GameKind::Doom => 3,
         }
@@ -115,6 +121,7 @@ pub enum GameSim {
     Gathering(gathering::GatheringSim),
     Rimfire(rimfire::RimfireSim),
     Echo(echo::EchoSim),
+    Spacewar(spacewar::SpacewarSim),
     Doom(crate::doom::DoomSim),
 }
 
@@ -140,6 +147,7 @@ impl GameSim {
             }
             GameKind::Rimfire => GameSim::Rimfire(rimfire::RimfireSim::new(theta, radial, species, seed)),
             GameKind::Echo => GameSim::Echo(echo::EchoSim::new(theta, radial, species, seed)),
+            GameKind::Spacewar => GameSim::Spacewar(spacewar::SpacewarSim::new(theta, radial, species, seed)),
             GameKind::Doom => GameSim::Doom(crate::doom::DoomSim::new(species)),
         }
     }
@@ -164,6 +172,7 @@ impl GameSim {
             GameSim::Gathering(s) => s.theta(),
             GameSim::Rimfire(s) => s.theta(),
             GameSim::Echo(s) => s.theta(),
+            GameSim::Spacewar(s) => s.theta(),
             GameSim::Doom(_) => crate::doom::WIDTH,
         }
     }
@@ -179,6 +188,7 @@ impl GameSim {
             GameSim::Gathering(s) => s.radial(),
             GameSim::Rimfire(s) => s.radial(),
             GameSim::Echo(s) => s.radial(),
+            GameSim::Spacewar(s) => s.radial(),
             GameSim::Doom(_) => crate::doom::HEIGHT,
         }
     }
@@ -197,6 +207,7 @@ impl GameSim {
             GameSim::Gathering(s) => s.set_slots(species),
             GameSim::Rimfire(s) => s.set_slots(species),
             GameSim::Echo(s) => s.set_slots(species),
+            GameSim::Spacewar(s) => s.set_slots(species),
             // Skill is fixed at launch; DOOM has no live knob.
             GameSim::Doom(_) => {}
         }
@@ -214,6 +225,7 @@ impl GameSim {
             GameSim::Gathering(_) => Some(gathering::TICK_SECS),
             GameSim::Rimfire(_) => Some(rimfire::TICK_SECS),
             GameSim::Echo(_) => Some(echo::TICK_SECS),
+            GameSim::Spacewar(_) => Some(spacewar::TICK_SECS),
             // Every render frame: the tick only polls the child's newest frame.
             GameSim::Doom(_) => Some(0.0),
         }
@@ -230,6 +242,7 @@ impl GameSim {
             GameSim::Gathering(s) => s.tick(),
             GameSim::Rimfire(s) => s.tick(),
             GameSim::Echo(s) => s.tick(),
+            GameSim::Spacewar(s) => s.tick(),
             GameSim::Doom(s) => s.tick(),
         }
     }
@@ -245,6 +258,7 @@ impl GameSim {
             GameSim::Gathering(s) => s.watchdog(),
             GameSim::Rimfire(s) => s.watchdog(),
             GameSim::Echo(s) => s.watchdog(),
+            GameSim::Spacewar(s) => s.watchdog(),
             GameSim::Doom(_) => {}
         }
     }
@@ -260,6 +274,7 @@ impl GameSim {
             GameSim::Gathering(s) => s.inject(it, ir, species),
             GameSim::Rimfire(s) => s.inject(it, ir, species),
             GameSim::Echo(s) => s.inject(it, ir, species),
+            GameSim::Spacewar(s) => s.inject(it, ir, species),
             // A tap on the array preview is "face me": the screen's bottom
             // edge swings to point at the tapped spoke. The engine computed
             // `it` against this sim's theta(), which for DOOM is the raster
@@ -334,6 +349,7 @@ impl GameSim {
     pub fn command(&mut self, command: GameCommand, species: u8) {
         match self {
             GameSim::RadialTetris(sim) => sim.command(command),
+            GameSim::Spacewar(sim) => sim.command(command, species),
             GameSim::Echo(sim) => sim.command(command, species),
             GameSim::Rimfire(sim) => sim.command(command, species),
             _ => {}
@@ -347,6 +363,7 @@ impl GameSim {
             GameSim::Gathering(sim) => Some(sim.detail()),
             GameSim::Rimfire(sim) => Some(sim.detail()),
             GameSim::Echo(sim) => Some(sim.detail()),
+            GameSim::Spacewar(sim) => Some(sim.detail()),
             GameSim::Doom(sim) => Some(sim.detail()),
             _ => None,
         }
@@ -387,6 +404,7 @@ impl GameSim {
             GameSim::Gathering(s) => s.pack_cells(time),
             GameSim::Rimfire(s) => s.pack_cells(),
             GameSim::Echo(s) => s.pack_cells(),
+            GameSim::Spacewar(s) => s.pack_cells(),
             GameSim::Doom(s) => s.pack_cells(),
         }
     }
