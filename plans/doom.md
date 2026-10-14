@@ -121,6 +121,9 @@ it in non-free; its hashes are recorded in `src-tauri/doom/README.md`).
 11. [x] Frontend: types, ws wrapper, `Doom.tsx` (start screen, HUD, held-key
         controls, face-me canvas, keyboard), hidden `doom` tab + typed code in
         `App.tsx`, banner ▶ Play → `#doom` when DOOM runs, admin card in Games.
+        Alignment row added on request: ↺ ↻ nudge a sixteenth of a turn, 180°,
+        ⇋ Flip (mirror); `[` `]` `\` on a keyboard. Nudges ride the face-me
+        input (absolute angle) and chain off the last value sent, not status.
 12. [x] Tests: Rust (codec, key map, expiry, round trip), Playwright
         `doom.spec.ts`, layout matrix entry for `#doom` with a running game.
 13. [x] README (feature + license caveat), this plan, commit at logical steps.

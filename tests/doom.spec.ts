@@ -106,6 +106,20 @@ test("pad buttons hold keys down and let go, and the keyboard works too", async 
     expect(b?.height).toBeGreaterThanOrEqual(44);
   }
 
+  // Alignment: a clockwise nudge is a face-me input a sixteenth of a turn
+  // on from the current facing (0 in this status); Flip toggles the mirror.
+  await page.getByRole("button", { name: "Rotate clockwise" }).click();
+  await expect.poll(() => sent.some((m) => m.includes('"game_input"'))).toBe(true);
+  const nudge = JSON.parse(sent.find((m) => m.includes('"game_input"'))!);
+  expect(nudge.points[0].angle).toBeCloseTo(Math.PI / 8, 3);
+  // A second nudge before status catches up builds on the first, not on 0.
+  await page.keyboard.press("]");
+  await expect.poll(() => sent.filter((m) => m.includes('"game_input"')).length).toBe(2);
+  const second = JSON.parse(sent.filter((m) => m.includes('"game_input"'))[1]);
+  expect(second.points[0].angle).toBeCloseTo(Math.PI / 4, 3);
+  await page.getByRole("button", { name: "Flip (mirror)" }).click();
+  await expect.poll(() => sent.some((m) => m.includes('"set_game_config"') && m.includes('"mirror":true'))).toBe(true);
+
   await page.getByRole("button", { name: "Quit DOOM" }).click();
   await expect.poll(() => sent.some((m) => m.includes('"set_game_mode"') && m.includes('"game":null'))).toBe(true);
 });

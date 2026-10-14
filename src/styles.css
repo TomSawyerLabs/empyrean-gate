@@ -7145,18 +7145,12 @@ button.hue-swatch-button[aria-expanded="true"] {
 }
 
 .doom-face {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
   margin: 0;
 }
 
-.doom-mirror {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
+/* Alignment nudges: four small keys in one row, Flip lit while mirrored. */
+.doom-align .doom-key {
+  flex: 1 1 0;
 }
 
 .games-card-doom {

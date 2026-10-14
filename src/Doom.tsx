@@ -53,6 +53,9 @@ const KEYBOARD: Record<string, GameKey> = {
 
 type Press = (key: GameKey, down: boolean) => void;
 
+/** One alignment nudge: a sixteenth of a turn (four spokes). */
+const ALIGN_STEP = Math.PI / 8;
+
 /** A pad button that holds a key for as long as the finger is on it. */
 function HoldKey({
   k,
@@ -137,6 +140,29 @@ export default function Doom() {
     for (const key of Array.from(held.current)) press(key, false);
   }, [press]);
 
+  // Alignment nudges ride the same "face me" input as a tap on the preview:
+  // an absolute facing, so a run of quick taps builds on the last one SENT
+  // rather than on a status that has not caught up yet.
+  const turnSent = useRef<number | null>(null);
+  const turnNow = doom?.turn ?? 0;
+  useEffect(() => {
+    if (turnSent.current !== null && Math.abs(turnSent.current - turnNow) < 0.02) {
+      turnSent.current = null;
+    }
+  }, [turnNow]);
+  const rotate = useCallback(
+    (delta: number) => {
+      const base = turnSent.current ?? turnNow;
+      const next = (((base + delta) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      turnSent.current = next;
+      client.gameInput(0, [{ angle: next, radius: 1 }]);
+    },
+    [client, turnNow],
+  );
+  const flip = useCallback(() => {
+    client.setGameConfig({ mirror: !(doom?.mirror ?? false) });
+  }, [client, doom?.mirror]);
+
   // Leaving the page (another tab, back to Live) also gives the controls up,
   // so the next phone is not locked out until this one's socket drops.
   const mineRef = useRef(mine);
@@ -177,6 +203,12 @@ export default function Doom() {
       e.target instanceof HTMLSelectElement;
     const onDown = (e: KeyboardEvent) => {
       if (target(e) || e.metaKey) return;
+      if (e.key === "[" || e.key === "]" || e.key === "\\") {
+        e.preventDefault();
+        if (e.key === "\\") flip();
+        else rotate(e.key === "[" ? -ALIGN_STEP : ALIGN_STEP);
+        return;
+      }
       const key = KEYBOARD[e.key] ?? KEYBOARD[e.key.toLowerCase()];
       if (!key) return;
       e.preventDefault();
@@ -195,7 +227,7 @@ export default function Doom() {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
     };
-  }, [canPlay, press]);
+  }, [canPlay, press, rotate, flip]);
 
   if (!status) return <p className="hint">Waiting for backend…</p>;
 
@@ -345,16 +377,29 @@ export default function Doom() {
             }}
           />
         </div>
+        <div className="doom-row doom-align" role="group" aria-label="Align the screen">
+          <button type="button" className="doom-key small" aria-label="Rotate counter-clockwise" onClick={() => rotate(-ALIGN_STEP)}>
+            ↺
+          </button>
+          <button type="button" className="doom-key small" aria-label="Rotate clockwise" onClick={() => rotate(ALIGN_STEP)}>
+            ↻
+          </button>
+          <button type="button" className="doom-key small" aria-label="Turn upside down" onClick={() => rotate(Math.PI)}>
+            180°
+          </button>
+          <button
+            type="button"
+            className={`doom-key small doom-toggle ${doom?.mirror ? "on" : ""}`}
+            aria-pressed={doom?.mirror ?? false}
+            aria-label="Flip (mirror)"
+            onClick={flip}
+          >
+            ⇋ Flip
+          </button>
+        </div>
         <p className="hint doom-face">
-          Tap the ring where you are standing to turn the screen to face you.
-          <label className="doom-mirror">
-            <input
-              type="checkbox"
-              checked={doom?.mirror ?? false}
-              onChange={(e) => client.setGameConfig({ mirror: e.target.checked })}
-            />
-            Mirror
-          </label>
+          Tap the ring where you are standing, or nudge it with the arrows ([ and ] on a
+          keyboard), until the picture is upright for you. Flip (\) if it reads mirrored.
         </p>
       </section>
     </div>

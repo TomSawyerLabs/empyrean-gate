@@ -209,8 +209,10 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   lights down, rendered as a 4:3 raster across the ring with the crosshair
   lifted clear of the hole and the status bar swallowed by it. The phone is
   the controller *and* the HUD (health, armor, ammo, kills, map), with
-  held-key pad buttons, a sticky Run, weapons, menu keys, and a tap on the
-  array preview to turn the screen to face wherever you are standing. It is
+  held-key pad buttons, a sticky Run, weapons, menu keys, and alignment for
+  wherever you are standing under the ring: tap the array preview to turn the
+  screen to face you, nudge it a notch at a time, turn it 180°, or flip it if
+  it reads mirrored from your side. It is
   an easter egg, not a Games card: players reach it at `/#doom` or by typing
   `doom` on any keyboard (the Gate machine's window has no URL bar), anyone
   on the LAN can start it, even over a running playlist, which resumes when
