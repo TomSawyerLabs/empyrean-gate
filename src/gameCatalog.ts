@@ -140,6 +140,24 @@ export const GAMES: {
     ],
   },
   {
+    kind: "echo",
+    name: "Echo",
+    blurb:
+      "Simon for the whole floor: the ring is cut into coloured wedges and " +
+      "the Gate plays a pattern on the beat of the music, one wedge a beat. " +
+      "Then everyone answers it together. Get it all and it grows by one; " +
+      "miss and it starts over. With nobody playing it answers itself.",
+    knob: { label: "Wedges", min: 3, max: 8, start: 4 },
+    howTo:
+      "Watch the wedges light up on the beat — that's the pattern. When the " +
+      "middle glows white it's the floor's turn: tap the wedges back in the " +
+      "same order, right on the array. Everyone answers together, and a right " +
+      "tap from anyone counts, so if you remember, tap. Every round adds one " +
+      "more wedge.",
+    noChips: true,
+    join: "No colors to pick: when the middle glows white, tap the wedges back in order. Anyone who remembers saves the round.",
+  },
+  {
     kind: "perimeter",
     name: "Perimeter",
     hidden: true,

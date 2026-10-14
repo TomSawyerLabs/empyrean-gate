@@ -32,8 +32,10 @@ suggestions. do them all").
     everywhere.
   - Grid: `theta` = spokes (64) × `GRID_RINGS` = 48; ring 0 at the hole
     (radius 0.32 of the disc), ring 47 at the rim. Index `ir * theta + it`.
-    θ increases **clockwise on the phone preview** (`GateCanvas`: angle =
-    atan2(y, x) + π/2 with screen y down, spoke 0 at the top).
+    On the phone preview **spoke 0 is at the bottom and θ increases
+    counterclockwise** (`GateCanvas` feeds `cos/sin(θ − π/2)` straight into
+    WebGL clip space, y up; its "spoke 0 at top" comment is wrong). The
+    game probe draws spoke 0 at 3 o'clock, also counterclockwise.
   - Packed RGB `r | g<<8 | b<<16`; the engine crossfades `prev`→`next` over
     one tick. `cadence() = None` ticks on the beat (Life, Ecosystem),
     `Some(0.05)` is the particle step.
@@ -166,7 +168,23 @@ suggestions. do them all").
 
 ## Findings / gotchas
 
-(none yet)
+- **Preview orientation** (see Environment): I first assumed clockwise from
+  the top and laid Echo's Simon colors out wrong; caught on the first probe
+  image. Trails' left/right turns use the counterclockwise convention.
+- **Same-color collisions in Rimfire**: evenly spaced slot hues put claw 0
+  on the flippers' red and claw 3 on the tankers' violet. Rimfire's claws now
+  have their own palette (`CLAW_COLORS`, the catalog's `palette`).
+- **AI that never doubles up was too good**: once Rimfire's AI claws spread
+  across lanes, nothing reached the rim in 2 minutes and the tube was empty.
+  The fix was a lazier AI that reacts only past halfway, fires every 9
+  ticks, and has a calm rate of 1.1/s: 2–6 grabs per 2 minutes, 3–12
+  enemies on the board.
+- **Echo's tempo**: a sim that measures beats from the first one sees a
+  1-tick gap and calls it fast music; only consecutive beats (2..40 ticks
+  apart) set the tempo now.
+- Beat-ticked games (`cadence() = None`) fade each change in across the whole
+  beat, so the light peaks just *before* the next beat. That's why Echo runs on
+  the 50 ms step and hears beats via `GameSim::beat()`.
 
 ## Progress log
 

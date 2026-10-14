@@ -2791,6 +2791,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 None => 0.35,
             };
             let beat_wrapped = audio[0].beat_phase < game_prev_beat - 0.5;
+            // Sims that keep time with the music on their own fixed step
+            // (Echo) hear each confident beat.
+            if beat_wrapped && audio[0].bpm_conf > 0.3 && audio[0].bpm > 20.0 {
+                rt.sim.beat();
+            }
             let since_tick = rt.last_tick.elapsed().as_secs_f32();
             // On-beat when locked (with a free-run backstop if beats stall);
             // the half-interval guard swallows double-fires around the wrap.
