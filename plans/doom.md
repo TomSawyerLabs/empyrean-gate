@@ -195,7 +195,22 @@ it in non-free; its hashes are recorded in `src-tauri/doom/README.md`).
       `playwright test doom` (5), layout gate's 16 DOOM cases, games/mobile-nav
       unchanged.
 - [x] played it for real: see Findings (two live-only bugs found and fixed).
+- [x] 2026-10-14 rebased onto local `master`, which carried another thread's
+      17 unpushed commits (public floor + hidden games Perimeter/Gathering).
+      Merge points: `apply_game_mode(game, from_floor, species, starter)` now
+      serves both the floor start and DOOM's claim; `floor_species`/`label`
+      gained the Doom arm; the public listener's `SetGameMode` pattern ignores
+      the new fields; DOOM's Games card trails the hidden games (their spec's
+      "last card" assertion now checks the last *hidden* card). Gotcha: a
+      `--union` merge of `game/mod.rs` dropped one arm into the wrong match,
+      and `.replace("\\n", nl)` on text that was already CRLF produced CR CR
+      lines — `git ls-files --eol` then showed `engine/mod.rs` as binary and
+      the commit as 8k changed lines. Rebuilt from master's bytes + the real
+      hunks (109/17) and autosquashed.
+- [x] v0.13.0: bump committed on top; pushed as a fast-forward of
+      `origin/master` together with the other thread's commits.
 - [ ] seen on the rig (mapping constants may need tuning).
+- [ ] the v0.13.0 release run proves the two-variant build steps.
 
 ## Open questions for the user
 
