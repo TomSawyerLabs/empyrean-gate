@@ -10,6 +10,9 @@
 // `--taps` random taps with random chips spread over that time (default 0),
 // `--every` seconds between captures when more than one is wanted via
 // `--frames`, `--stop` ends the game afterwards (default: leave it running).
+// `--species n` sets the knob the way the Games tab's Start does, and
+// `--command name` (repeatable) presses a game button with chip 0 halfway
+// through the run (plans/classic-games.md).
 // Output lands in test-results/games/<kind>[-<n>].png, the array drawn as a
 // disc with pixel 0 at the rim like the shape probe.
 
@@ -23,6 +26,8 @@ let taps = 0;
 let frames = 1;
 let every = 5;
 let stop = false;
+let species: number | null = null;
+const commands: string[] = [];
 const kinds: string[] = [];
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
@@ -32,10 +37,12 @@ for (let i = 0; i < args.length; i++) {
   else if (a === "--frames") frames = Number(args[++i]);
   else if (a === "--every") every = Number(args[++i]);
   else if (a === "--stop") stop = true;
+  else if (a === "--species") species = Number(args[++i]);
+  else if (a === "--command") commands.push(args[++i]);
   else kinds.push(a);
 }
 if (kinds.length !== 1) {
-  console.error("usage: bun scripts/game-probe.ts [--url ws] [--after s] [--taps n] [--frames n] [--every s] [--stop] <game>");
+  console.error("usage: bun scripts/game-probe.ts [--url ws] [--after s] [--taps n] [--frames n] [--every s] [--species n] [--command name]… [--stop] <game>");
   process.exit(2);
 }
 const kind = kinds[0];
@@ -187,7 +194,9 @@ ws.onopen = async () => {
   ws.send(JSON.stringify({ type: "hello", name: "game-probe", client_id: "game-probe", token: "" }));
   ws.send(JSON.stringify({ type: "subscribe_preview", fps: 20, decimate: 1 }));
   ws.send(JSON.stringify({ type: "set_game_mode", game: kind }));
+  if (species !== null) ws.send(JSON.stringify({ type: "set_game_config", species }));
   mkdirSync(OUT_DIR, { recursive: true });
+  let pressed = false;
   const tapEvery = taps > 0 ? after / taps : 0;
   let tapped = 0;
   const t0 = Date.now();
@@ -197,6 +206,10 @@ ws.onopen = async () => {
       const radius = 0.4 + Math.random() * 0.55;
       ws.send(JSON.stringify({ type: "game_input", species: tapped % 6, points: [{ angle, radius, dir: 0 }] }));
       tapped++;
+    }
+    if (!pressed && Date.now() - t0 >= (after * 1000) / 2) {
+      for (const command of commands) ws.send(JSON.stringify({ type: "game_command", command, species: 0 }));
+      pressed = true;
     }
     await sleep(0.1);
   }
