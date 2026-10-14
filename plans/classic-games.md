@@ -85,14 +85,15 @@ suggestions. do them all").
 
 ## Plan / steps
 
-1. [ ] Infrastructure: `species` on `GameCommand`, new command variants,
+1. [x] Infrastructure: `species` on `GameCommand`, new command variants,
        `GameSim::command(command, species)`, ws/public clients, a shared
        per-game button row (`src/GameButtons.tsx`, data in the catalog).
-2. [ ] Rimfire (sim + tests + wiring + catalog + cues + buttons).
-3. [ ] Echo.
-4. [ ] Spacewar.
-5. [ ] Trails.
-6. [ ] Rally.
+       `aa70937`; probe options `8bab1ed`.
+2. [x] Rimfire (sim + tests + wiring + catalog + cues + buttons). `bdd2315`.
+3. [x] Echo (+ `GameSim::beat()` hook). `4f9b569`.
+4. [x] Spacewar. `774a0a1`.
+5. [x] Trails. `e593712`.
+6. [ ] Rally. ← current
 7. [ ] Playwright: buttons send `game_command` with the chosen color; the
        Games tab lists the new cards.
 8. [ ] Real backend run: start each game, tap, press buttons, screenshot the
@@ -189,6 +190,14 @@ suggestions. do them all").
 ## Progress log
 
 - [x] 2026-10-14 explored the game plumbing; plan written.
+- [x] Rimfire, Echo, Spacewar, Trails built, unit-tested, tuned with the
+      probe against the headless backend on :9540 (`$TEMP/EmpyreanClassics/
+      start.sh`), and committed one per game. The `game-probe` helper's new
+      `--species` / `--command` options match what the Games tab sends.
+- Tuning notes: Spacewar's AI hit 30% of its shots until its aim error
+  stopped being re-rolled every tick (now ~18 kills / 2 min with 4 AI
+  ships); Trails' AI almost never crashed until walls grew to 3.0 units and
+  it started hunting rivals (~10 crashes / 2 min).
 
 ## Open questions for the user
 

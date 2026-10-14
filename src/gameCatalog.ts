@@ -199,6 +199,22 @@ export const GAMES: {
     ],
   },
   {
+    kind: "rally",
+    name: "Rally",
+    blurb:
+      "Pong for any number of players: the rim is dealt out in equal arcs, " +
+      "one per color, each with a paddle sliding inside it. Balls bounce off " +
+      "the hole in the middle and off the paddles; one that gets past a " +
+      "paddle is a point for whoever hit it last. More players, more balls.",
+    knob: { label: "Paddles", min: 2, max: 8, start: 4 },
+    howTo:
+      "Your color owns a stretch of the rim with a paddle on it. Tap along " +
+      "your stretch and the paddle slides there — keep the balls from " +
+      "getting past it. Where a ball meets your paddle sets where it goes: " +
+      "the middle sends it straight back, the edges send it off at a slant " +
+      "toward someone else's stretch. Every hit speeds it up a little.",
+  },
+  {
     kind: "perimeter",
     name: "Perimeter",
     hidden: true,

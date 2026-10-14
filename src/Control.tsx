@@ -81,6 +81,7 @@ const GAME_CUES: { kind: GameKind; name: string; species: number }[] = [
   { kind: "echo", name: "Echo", species: 4 },
   { kind: "spacewar", name: "Spacewar", species: 4 },
   { kind: "trails", name: "Trails", species: 4 },
+  { kind: "rally", name: "Rally", species: 4 },
 ];
 
 /// A cue that runs a game world (plans/game-mode.md). The underlying stack is
