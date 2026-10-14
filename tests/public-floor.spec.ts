@@ -97,6 +97,28 @@ test("a running game takes the surface: colour chips, commands, game input", asy
   await expect.poll(() => sent.some((m) => m.includes('"hard_drop"'))).toBe(true);
 });
 
+test("a classic with buttons shows them, and they act for the chosen color", async ({ page }) => {
+  const sent = collectSent(page);
+  const clientId = `public-trails-${Date.now()}`;
+  await page.addInitScript((id) => localStorage.setItem("empyrean-public-id", id), clientId);
+  await page.request.post(`/mock/public?client=${clientId}`, {
+    data: {
+      game: { active: "trails", summary: "no derezzes yet · 0 riders", species: 4, effects_overlay: false, from_floor: false, blocked_by_show: null },
+    },
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/public.html");
+  await page.locator('.public-app[data-connected="yes"]').waitFor({ state: "attached" });
+
+  await expect(page.locator(".public-banner")).toContainText("Trails");
+  await page.locator(".games-chip").nth(3).click();
+  const controls = page.getByRole("group", { name: "Game controls" });
+  await controls.getByRole("button", { name: "Turn left" }).click();
+  await expect.poll(() => sent.some((m) => m.includes('"turn_left"') && m.includes('"species":3'))).toBe(true);
+  await controls.getByRole("button", { name: "Turn right" }).click();
+  await expect.poll(() => sent.some((m) => m.includes('"turn_right"') && m.includes('"species":3'))).toBe(true);
+});
+
 test("a key that unlocks a hidden game offers Start, then Stop once the floor's game runs", async ({ page }) => {
   const sent = collectSent(page);
   const clientId = `public-hidden-${Date.now()}`;

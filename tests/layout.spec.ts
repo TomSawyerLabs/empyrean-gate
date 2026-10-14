@@ -231,24 +231,29 @@ for (const viewport of VIEWPORTS) {
       ).toEqual([]);
     });
 
-    test("public floor page fits with a game running", async ({ page }) => {
-      const clientId = `layout-public-game-${viewport.name}`;
-      await page.addInitScript((id) => localStorage.setItem("empyrean-public-id", id), clientId);
-      await page.request.post(`/mock/public?client=${clientId}`, {
-        data: {
-          game: { active: "radial_tetris", summary: "Ringfall · Dot falling · 3 rings", species: 6, effects_overlay: false, from_floor: false, blocked_by_show: null },
-        },
+    for (const game of [
+      { active: "radial_tetris", summary: "Ringfall · Dot falling · 3 rings", species: 6 },
+      { active: "spacewar", summary: "color 2 leads with 3 kills · 1 fell into the star", species: 8 },
+    ]) {
+      test(`public floor page fits with ${game.active} running`, async ({ page }) => {
+        const clientId = `layout-public-game-${game.active}-${viewport.name}`;
+        await page.addInitScript((id) => localStorage.setItem("empyrean-public-id", id), clientId);
+        await page.request.post(`/mock/public?client=${clientId}`, {
+          data: {
+            game: { ...game, effects_overlay: false, from_floor: false, blocked_by_show: null },
+          },
+        });
+        await page.goto("/public.html");
+        await expect(page.locator('.public-app[data-connected="yes"]')).toBeAttached();
+        await page.waitForTimeout(250);
+        const problems = await overflows(page, true);
+        expect(
+          problems,
+          `Clipped or overflowing regions on the public page (${game.active}) at ${viewport.width}x${viewport.height}:\n` +
+            problems.map((p) => `  [${p.axis}] ${p.element} — ${p.detail}`).join("\n"),
+        ).toEqual([]);
       });
-      await page.goto("/public.html");
-      await expect(page.locator('.public-app[data-connected="yes"]')).toBeAttached();
-      await page.waitForTimeout(250);
-      const problems = await overflows(page, true);
-      expect(
-        problems,
-        `Clipped or overflowing regions on the public page (game) at ${viewport.width}x${viewport.height}:\n` +
-          problems.map((p) => `  [${p.axis}] ${p.element} — ${p.detail}`).join("\n"),
-      ).toEqual([]);
-    });
+    }
 
     // The banner that appears when another sACN source is driving our universes.
     // It is the tallest thing that can push into <main> uninvited, on every tab
@@ -314,9 +319,9 @@ for (const viewport of VIEWPORTS) {
     // Game mode's two stateful layouts: the banner with its ▶ Play join path
     // (on every tab — Live is the tightest), and the Games tab's active play
     // surface (how-to text, join line, color chips).
-    for (const tab of ["live", "games"] as const) {
-      test(`${tab} tab fits while a game runs`, async ({ page }) => {
-        const clientId = `layout-game-${tab}-${viewport.name}`;
+    for (const [tab, active] of [["live", "spokewar"], ["games", "spokewar"], ["games", "spacewar"]] as const) {
+      test(`${tab} tab fits while ${active} runs`, async ({ page }) => {
+        const clientId = `layout-game-${tab}-${active}-${viewport.name}`;
         await page.addInitScript(
           (id) => localStorage.setItem("empyrean-client-id", id),
           clientId,
@@ -324,8 +329,8 @@ for (const viewport of VIEWPORTS) {
         await page.request.post(`/mock/status?client=${clientId}`, {
           data: {
             game: {
-              active: "spokewar",
-              summary: "Spokewar · 5 species · 12 min",
+              active,
+              summary: `${active} · 5 colors · 12 min`,
               species: 5,
               effects_overlay: false,
               blocked_by_show: null,
@@ -337,6 +342,9 @@ for (const viewport of VIEWPORTS) {
         await expect(page.locator(".game-banner")).toBeVisible();
         if (tab === "games") {
           await expect(page.locator(".games-join")).toBeVisible();
+        }
+        if (active === "spacewar") {
+          await expect(page.getByRole("group", { name: "Game controls" })).toBeVisible();
         }
         await page.waitForTimeout(250);
 

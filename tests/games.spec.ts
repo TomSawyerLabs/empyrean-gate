@@ -99,3 +99,74 @@ test("Ringfall keyboard controls map to move, rotate, and drop commands", async 
   expect(sent.some((message) => message.includes('"rotate_clockwise"'))).toBe(true);
   expect(sent.some((message) => message.includes('"hard_drop"'))).toBe(true);
 });
+
+// The classic-games set (plans/classic-games.md).
+
+test("the five classics each have an open card that starts with its own count", async ({ page }) => {
+  const sent: string[] = [];
+  page.on("websocket", (socket) => socket.on("framesent", (frame) => {
+    if (typeof frame.payload === "string") sent.push(frame.payload);
+  }));
+  await page.goto("/#games");
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+  for (const name of ["Rimfire", "Echo", "Spacewar", "Trails", "Rally"]) {
+    const card = page.locator(".games-card:not(.hidden-game)", { hasText: name });
+    await expect(card, name).toBeVisible();
+    await expect(card.getByRole("button", { name: "Start" })).toBeVisible();
+  }
+  await page.locator(".games-card", { hasText: "Rimfire" }).getByRole("button", { name: "Start" }).click();
+  await expect.poll(() => sent.some((m) => m.includes('"set_game_mode"') && m.includes('"rimfire"'))).toBe(true);
+  await expect.poll(() => sent.some((m) => m.includes('"set_game_config"') && m.includes('"species":4'))).toBe(true);
+});
+
+test("Spacewar's buttons act for the chosen color, by touch and by keyboard", async ({ page }) => {
+  const clientId = `spacewar-${Date.now()}`;
+  const sent: string[] = [];
+  await page.addInitScript((id) => localStorage.setItem("empyrean-client-id", id), clientId);
+  page.on("websocket", (socket) => socket.on("framesent", (frame) => {
+    if (typeof frame.payload === "string") sent.push(frame.payload);
+  }));
+  await page.request.post(`/mock/status?client=${clientId}`, {
+    data: { game: { active: "spacewar", summary: "no kills yet · 0 fell into the star", species: 4, effects_overlay: false, from_floor: false, blocked_by_show: null } },
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#games");
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+
+  await expect(page.locator(".games-chip")).toHaveCount(4);
+  await page.locator(".games-chip").nth(2).click();
+  const controls = page.getByRole("group", { name: "Game controls" });
+  await expect(controls.getByRole("button")).toHaveCount(2);
+  await controls.getByRole("button", { name: "Fire" }).click();
+  await expect.poll(() => sent.some((m) => m.includes('"game_command"') && m.includes('"fire"') && m.includes('"species":2'))).toBe(true);
+  // One press is one torpedo: the touch-down sends it, the click doesn't again.
+  expect(sent.filter((m) => m.includes('"fire"')).length).toBe(1);
+  await page.locator("body").click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press("h");
+  await expect.poll(() => sent.some((m) => m.includes('"hyperspace"') && m.includes('"species":2'))).toBe(true);
+  for (const button of await controls.getByRole("button").all()) {
+    expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(48);
+  }
+});
+
+test("Echo is played by tapping wedges: no chips, its own join line", async ({ page }) => {
+  const clientId = `echo-${Date.now()}`;
+  const sent: string[] = [];
+  await page.addInitScript((id) => localStorage.setItem("empyrean-client-id", id), clientId);
+  page.on("websocket", (socket) => socket.on("framesent", (frame) => {
+    if (typeof frame.payload === "string") sent.push(frame.payload);
+  }));
+  await page.request.post(`/mock/status?client=${clientId}`, {
+    data: { game: { active: "echo", summary: "your turn — 0 of 3 · pattern 3 · best 5", species: 4, effects_overlay: false, from_floor: false, blocked_by_show: null } },
+  });
+  await page.goto("/#games");
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+
+  await expect(page.locator(".games-chip")).toHaveCount(0);
+  await expect(page.locator(".games-join")).toContainText("tap the wedges back in order");
+  await expect(page.getByRole("group", { name: "Game controls" })).toHaveCount(0);
+  const canvas = page.locator(".games-canvas-wrap canvas");
+  const box = (await canvas.boundingBox())!;
+  await page.mouse.click(box.x + box.width * 0.8, box.y + box.height * 0.3);
+  await expect.poll(() => sent.some((m) => m.includes('"game_input"'))).toBe(true);
+});
