@@ -5,6 +5,13 @@ fn main() {
     configure_macos_vulkan_icd();
 
     let args: Vec<String> = std::env::args().collect();
+    // The DOOM child (plans/doom.md): this same binary IS the engine's host
+    // process. Decided before logging, the taskbar identity or anything else
+    // the app proper sets up, because none of it belongs to a DOOM.
+    #[cfg(feature = "doom")]
+    if let Some(i) = args.iter().position(|a| a == "--doom-host") {
+        empyrean_gate_lib::doom::host::run_host(&args[i + 1..]);
+    }
     let headless = args.iter().any(|a| a == "--headless")
         || std::env::var("EMPYREAN_HEADLESS").is_ok_and(|v| v == "1");
     // Set by a self-update: the path we were launched from, which still holds

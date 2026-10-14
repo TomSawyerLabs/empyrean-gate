@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Control from "./Control";
+import Doom from "./Doom";
 import Games from "./Games";
 import { EFFECTS } from "./effects";
 import Live from "./Live";
@@ -31,20 +32,29 @@ const TABS = [
   { id: "settings", label: "Settings" },
 ] as const;
 
-const NAV_TABS: ReadonlyArray<{ id: TabId; label: string }> = TABS;
+// Pages with a hash but no nav entry: the easter eggs. /#doom (plans/doom.md)
+// is reached by the URL or by typing "doom" on any keyboard — see the secret
+// code in the global key handler.
+const HIDDEN_TABS = [{ id: "doom", label: "DOOM" }] as const;
 
-type TabId = (typeof TABS)[number]["id"];
+const NAV_TABS: ReadonlyArray<{ id: TabId; label: string }> = TABS;
+const ALL_TABS: ReadonlyArray<{ id: TabId; label: string }> = [...TABS, ...HIDDEN_TABS];
+
+type TabId = (typeof TABS)[number]["id"] | (typeof HIDDEN_TABS)[number]["id"];
 
 /// What a guest connection (joined without the admin token) gets to see. The
 /// backend refuses show-control messages from guests anyway; this keeps the UI
 /// honest about it instead of offering controls that error.
-const GUEST_TAB_IDS: ReadonlyArray<TabId> = ["live", "games"];
+const GUEST_TAB_IDS: ReadonlyArray<TabId> = ["live", "games", "doom"];
+
+/// Keystrokes within this gap chain into a typed code.
+const SECRET_CODE_GAP_MS = 1500;
 
 function tabFromHash(): TabId {
   const h = location.hash.replace("#", "");
   // Old bookmarks / PWA shortcuts used #view and #draw; both merged into Live.
   if (h === "view" || h === "draw") return "live";
-  return (TABS.find((t) => t.id === h)?.id ?? "live") as TabId;
+  return ALL_TABS.find((t) => t.id === h)?.id ?? "live";
 }
 
 const IN_TAURI = "__TAURI_INTERNALS__" in window;
@@ -1032,6 +1042,8 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [newWindowBusy, setNewWindowBusy] = useState(false);
   const [newWindowError, setNewWindowError] = useState<string | null>(null);
+  // The last few letters typed outside a text field, for the secret code.
+  const typed = useRef({ text: "", at: 0 });
 
   const handleOpenNewWindow = useCallback(async () => {
     if (newWindowBusy) return;
@@ -1099,6 +1111,18 @@ export default function App() {
       ) {
         return;
       }
+      // The secret code (plans/doom.md): type "doom" anywhere. The Gate
+      // machine's own window has no URL bar, so this is how it gets to /#doom.
+      if (e.key.length === 1 && !e.repeat) {
+        const now = performance.now();
+        const chain = now - typed.current.at < SECRET_CODE_GAP_MS ? typed.current.text : "";
+        typed.current = { text: (chain + e.key.toLowerCase()).slice(-4), at: now };
+        if (typed.current.text === "doom") {
+          typed.current = { text: "", at: 0 };
+          location.hash = "doom";
+          return;
+        }
+      }
       const fx = EFFECTS.find((f) => f.key === e.key.toLowerCase());
       if (fx) {
         const color = loadSelectedLiveColor();
@@ -1147,7 +1171,7 @@ export default function App() {
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((open) => !open)}
         >
-          ☰ <span className="topbar-menu-here">{TABS.find((t) => t.id === visibleTab)?.label}</span>
+          ☰ <span className="topbar-menu-here">{ALL_TABS.find((t) => t.id === visibleTab)?.label}</span>
         </button>
         <h1>Empyrean Gate</h1>
         <nav>
@@ -1252,11 +1276,12 @@ export default function App() {
           <span className="game-dot" />
           <strong>GAME MODE</strong>
           <span className="testmode-summary">{status.game.summary}</span>
-          {tab !== "games" && (
+          {/* DOOM's play surface is its own page, not the Games tab. */}
+          {tab !== (status.game.active === "doom" ? "doom" : "games") && (
             <button
               className="game-banner-play"
               onClick={() => {
-                location.hash = "games";
+                location.hash = status.game.active === "doom" ? "doom" : "games";
               }}
             >
               ▶ Play
@@ -1387,6 +1412,7 @@ export default function App() {
         )}
         {visibleTab === "control" && <Control />}
         {visibleTab === "games" && <Games />}
+        {visibleTab === "doom" && <Doom />}
         {visibleTab === "test" && <Test />}
         {visibleTab === "settings" && <Settings />}
       </main>

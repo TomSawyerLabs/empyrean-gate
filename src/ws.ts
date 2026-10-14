@@ -8,6 +8,7 @@ import type {
   EffectCfg,
   GameKind,
   GameCommand,
+  GameKey,
   LayerCfg,
   MiniBatch,
   PatchDoc,
@@ -435,12 +436,22 @@ export class GateClient {
   }
   /** Start (kind) or stop (null) game mode. Gate machine only — the backend
    *  refuses it from remote clients, and while a show playlist is running. */
-  setGameMode(game: GameKind | null) {
-    this.send({ type: "set_game_mode", game });
+  setGameMode(game: GameKind | null, species?: number, claim = false) {
+    this.send({ type: "set_game_mode", game, species, claim });
   }
-  /** Live game parameters (species count, effects overlay). Gate machine only. */
-  setGameConfig(cfg: { species?: number; effects_overlay?: boolean }) {
+  /** Leaving the DOOM page: give the controls up now. */
+  gameRelease() {
+    this.send({ type: "game_release" });
+  }
+  /** Live game parameters (species count, effects overlay). Gate machine
+   *  only — except `mirror`, which is the DOOM player's own view. */
+  setGameConfig(cfg: { species?: number; effects_overlay?: boolean; mirror?: boolean }) {
     this.send({ type: "set_game_config", ...cfg });
+  }
+  /** Hold (down) or release a DOOM key. The first connection to send one
+   *  holds the controls until it disconnects. */
+  gameKey(key: GameKey, down: boolean) {
+    this.send({ type: "game_key", key, down });
   }
   /** Inject into the running game. Open to every client; inputs merge. */
   gameInput(species: number, points: { angle: number; radius: number }[]) {

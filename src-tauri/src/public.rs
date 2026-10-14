@@ -255,8 +255,8 @@ pub fn gate(msg: &ClientMsg) -> Gate {
         M::GameInput { .. } | M::GameCommand { .. } => Gate::Needs("games"),
         // Only games with a floor perk can be asked for; the operator's own
         // games are not part of the public protocol.
-        M::SetGameMode { game: Some(kind) } if kind.floor_perk().is_some() => Gate::HiddenGame(Some(*kind)),
-        M::SetGameMode { game: None } => Gate::HiddenGame(None),
+        M::SetGameMode { game: Some(kind), .. } if kind.floor_perk().is_some() => Gate::HiddenGame(Some(*kind)),
+        M::SetGameMode { game: None, .. } => Gate::HiddenGame(None),
         M::PatchParam { .. } => Gate::Needs("knobs"),
         M::SubscribePreview { .. } => Gate::Needs("preview"),
         _ => Gate::Refuse,
@@ -877,16 +877,16 @@ mod tests {
         assert_eq!(gate(&ClientMsg::CheckUpdate), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::InstallUpdate), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::SetTestMode { active: true }), Gate::Refuse);
-        assert_eq!(gate(&ClientMsg::SetGameConfig { species: Some(3), effects_overlay: None }), Gate::Refuse);
+        assert_eq!(gate(&ClientMsg::SetGameConfig { species: Some(3), effects_overlay: None, mirror: None }), Gate::Refuse);
         // Hidden games go through their own gate; the operator's games are
         // not part of the protocol at all.
         use crate::game::GameKind;
-        assert_eq!(gate(&ClientMsg::SetGameMode { game: Some(GameKind::Flak) }), Gate::Refuse);
+        assert_eq!(gate(&ClientMsg::SetGameMode { game: Some(GameKind::Flak), species: None, claim: false }), Gate::Refuse);
         assert_eq!(
-            gate(&ClientMsg::SetGameMode { game: Some(GameKind::Perimeter) }),
+            gate(&ClientMsg::SetGameMode { game: Some(GameKind::Perimeter), species: None, claim: false }),
             Gate::HiddenGame(Some(GameKind::Perimeter))
         );
-        assert_eq!(gate(&ClientMsg::SetGameMode { game: None }), Gate::HiddenGame(None));
+        assert_eq!(gate(&ClientMsg::SetGameMode { game: None, species: None, claim: false }), Gate::HiddenGame(None));
         assert_eq!(gate(&ClientMsg::SubscribeMiniPreviews { fps: 1.0 }), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::PatchList), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::RotateJoinToken), Gate::Refuse);

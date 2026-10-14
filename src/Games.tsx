@@ -39,6 +39,10 @@ export default function Games() {
   const game = status?.game;
   const active = game?.active ?? null;
   const activeGame = GAMES.find((g) => g.kind === active);
+  // DOOM (plans/doom.md) is not on the chooser: it lives behind a secret
+  // code and its controls are its own page. Admins get a card so they can
+  // see it, stop it, and start it to show someone — and learn the code.
+  const doomRunning = active === "doom";
   const knob = activeGame?.knob ?? { label: "Species", min: 3, max: 5, start: 3 };
   // The knob value is shared across games; show it clamped to the running
   // game's own bounds (the sim clamps the same way).
@@ -173,6 +177,26 @@ export default function Games() {
             )}
           </div>
         ))}
+        {isAdmin && (
+          <div className={`games-card games-card-doom ${doomRunning ? "active" : ""}`}>
+            <div className="games-card-text">
+              <strong>DOOM</strong>
+              <p className="hint">
+                The easter egg. Shareware E1M1 on the array, one phone as the
+                controller. Players reach it at <code>/#doom</code> or by typing
+                “doom” on any keyboard; it starts over a running show and ends
+                by itself when nobody is playing.
+              </p>
+            </div>
+            {doomRunning ? (
+              <button className="ghost" onClick={() => client.setGameMode(null)}>
+                Stop
+              </button>
+            ) : (
+              <button onClick={() => client.setGameMode("doom", 3)}>Start</button>
+            )}
+          </div>
+        )}
         {isAdmin && blockedBy && !active && (
           <p className="hint">
             “{blockedBy}” is running on the show scheduler — stop the show
@@ -185,7 +209,7 @@ export default function Games() {
             after 3 minutes without input; Stop ends it now.
           </p>
         )}
-        {isAdmin && active && (
+        {isAdmin && active && !doomRunning && (
           <label className="row">
             <span>{knob.label}</span>
             <input
@@ -212,8 +236,20 @@ export default function Games() {
       </section>
 
       <section className="panel games-play">
-        <h3>{active ? `Play ${activeGame?.name ?? ""}` : "Play"}</h3>
-        {active ? (
+        <h3>{active ? `Play ${activeGame?.name ?? (doomRunning ? "DOOM" : "")}` : "Play"}</h3>
+        {doomRunning ? (
+          <p className="games-join">
+            DOOM is running. The controller and HUD are on the DOOM page.{" "}
+            <button
+              className="game-banner-play"
+              onClick={() => {
+                location.hash = "doom";
+              }}
+            >
+              ▶ Play DOOM
+            </button>
+          </p>
+        ) : active ? (
           <div className={active === "radial_tetris" ? "ringfall-game-layout" : "games-active-content"}>
             {active === "radial_tetris" && (
               <div className="ringfall-stage">

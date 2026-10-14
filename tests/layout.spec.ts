@@ -352,6 +352,62 @@ for (const viewport of VIEWPORTS) {
       });
     }
 
+    // The secret DOOM page (plans/doom.md): the start screen, and the
+    // controller with its HUD, pad and preview while DOOM runs. It scrolls on
+    // a phone like Games does; what must never happen is a clipped pad.
+    for (const running of [false, true]) {
+      test(`doom page fits ${running ? "while DOOM runs" : "before start"}`, async ({ page }) => {
+        const clientId = `layout-doom-${running}-${viewport.name}`;
+        await page.addInitScript(
+          (id) => localStorage.setItem("empyrean-client-id", id),
+          clientId,
+        );
+        if (running) {
+          await page.request.post(`/mock/status?client=${clientId}`, {
+            data: {
+              game: {
+                active: "doom",
+                summary: "DOOM · E1M1 · 100 % · 0 kills · 1 min",
+                species: 3,
+                effects_overlay: false,
+                blocked_by_show: null,
+                doom: {
+                  health: 100,
+                  armor: 0,
+                  ammo: 50,
+                  max_ammo: 200,
+                  weapon: "Pistol",
+                  kills: 0,
+                  total_kills: 23,
+                  map: "E1M1",
+                  playing: true,
+                  menu: false,
+                  idle_secs: 0,
+                  frames: 120,
+                  controller_id: clientId,
+                  controller: "Dusty Badger",
+                  turn: 0,
+                  mirror: false,
+                },
+                ended: null,
+              },
+            },
+          });
+        }
+        await page.goto("/#doom");
+        await expect(page.locator('.app[data-connected="yes"]')).toBeAttached();
+        await expect(page.locator(running ? ".doom-pad" : ".doom-start")).toBeVisible();
+        await page.waitForTimeout(250);
+
+        const problems = await overflows(page, false);
+        expect(
+          problems,
+          `Clipped or overflowing regions on the DOOM page (${running ? "running" : "start"}) at ${viewport.width}x${viewport.height}:\n` +
+            problems.map((p) => `  [${p.axis}] ${p.element} — ${p.detail}`).join("\n"),
+        ).toEqual([]);
+      });
+    }
+
     test("the corner menu fits", async ({ page }) => {
       test.skip(!viewport.mobile, "the corner menu only exists below the 700px breakpoint");
       await page.goto("/#live");

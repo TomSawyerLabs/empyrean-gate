@@ -10,6 +10,7 @@ pub mod diagnostics;
 pub mod discovery;
 pub mod engine;
 pub mod firewall;
+pub mod doom;
 pub mod game;
 pub mod geometry;
 pub mod layers;

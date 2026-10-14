@@ -827,13 +827,61 @@ export interface TestModeStatus {
 
 // --- game mode (mirrors src-tauri/src/game/mod.rs, plans/game-mode.md) ---
 
-export type GameKind = "rps" | "life" | "spokewar" | "flak" | "radial_tetris" | "perimeter" | "gathering";
+export type GameKind = "rps" | "life" | "spokewar" | "flak" | "radial_tetris" | "perimeter" | "gathering" | "doom";
 export type GameCommand =
   | "move_counter_clockwise"
   | "move_clockwise"
   | "rotate_clockwise"
   | "soft_drop"
   | "hard_drop";
+
+/** A key a phone can hold down for DOOM (mirrors `game::GameKey`). */
+export type GameKey =
+  | "up"
+  | "down"
+  | "left"
+  | "right"
+  | "strafe_left"
+  | "strafe_right"
+  | "fire"
+  | "use"
+  | "run"
+  | "strafe"
+  | "weapon1"
+  | "weapon2"
+  | "weapon3"
+  | "weapon4"
+  | "weapon5"
+  | "weapon6"
+  | "weapon7"
+  | "escape"
+  | "enter"
+  | "yes"
+  | "no"
+  | "map";
+
+/** DOOM's HUD and controller (mirrors `doom::DoomStatus`, plans/doom.md). */
+export interface DoomStatus {
+  health: number;
+  armor: number;
+  /** null for weapons that need none (fist, chainsaw). */
+  ammo: number | null;
+  max_ammo: number | null;
+  weapon: string;
+  kills: number;
+  total_kills: number;
+  /** "E1M1" */
+  map: string;
+  playing: boolean;
+  menu: boolean;
+  idle_secs: number;
+  frames: number;
+  /** Client id and name of whoever holds the controls; null = free. */
+  controller_id: string | null;
+  controller: string | null;
+  turn: number;
+  mirror: boolean;
+}
 
 /** A playlist entry that runs a game world over its scene. */
 export interface GameCue {
@@ -852,6 +900,10 @@ export interface GameModeStatus {
   from_floor: boolean;
   /** Name of the playlist blocking a manual start, when a show is running. */
   blocked_by_show: string | null;
+  /** DOOM's HUD while DOOM is the running game. Older backends omit it. */
+  doom?: DoomStatus | null;
+  /** Why the last game ended by itself, for a few seconds after. */
+  ended?: string | null;
 }
 
 // --- controller discovery (mirrors src-tauri/src/discovery.rs) ---

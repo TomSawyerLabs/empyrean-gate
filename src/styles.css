@@ -6905,3 +6905,289 @@ button.hue-swatch-button[aria-expanded="true"] {
 .roster-tag.key {
   color: #ffe08a;
 }
+
+/* ---- DOOM (plans/doom.md): the secret page ---- */
+
+.doom-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.doom-start {
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+
+.doom-title {
+  margin: 4px 0 0;
+  font-size: 44px;
+  letter-spacing: 0.18em;
+  color: #ff5a3c;
+  text-shadow: 0 0 18px #ff3b1f66;
+}
+
+.doom-tagline {
+  margin: 0;
+  font-size: 16px;
+  color: #ffd9cf;
+}
+
+.doom-ended {
+  margin: 0;
+  padding: 6px 12px;
+  border: 1px solid #8a2f22;
+  border-radius: 8px;
+  background: #2a1210;
+  color: #ffb3a4;
+}
+
+.doom-skills {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 360px;
+}
+
+.doom-skill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  text-align: left;
+  border: 1px solid #3a2a3f;
+}
+
+.doom-skill span {
+  width: 22px;
+  color: #ff5a3c;
+  font-weight: 700;
+  text-align: center;
+}
+
+.doom-skill.active {
+  border-color: #ff5a3c;
+  background: #2a1512;
+}
+
+.doom-start-btn {
+  min-height: 60px;
+  width: 100%;
+  max-width: 360px;
+  font-size: 20px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: #b3301b;
+  border-color: #ff5a3c;
+}
+
+/* The phone is the HUD: big numbers, one line of who-has-the-controls. */
+.doom-hud {
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.doom-hud-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.doom-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+
+.doom-stat small {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #a89fd0;
+}
+
+.doom-stat strong {
+  font-size: 22px;
+  line-height: 1.1;
+  color: #ffe9e3;
+  font-variant-numeric: tabular-nums;
+}
+
+.doom-stat strong.low {
+  color: #ff5a3c;
+}
+
+.doom-stat em {
+  font-style: normal;
+  font-size: 13px;
+  color: #a89fd0;
+}
+
+.doom-hud-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: #d6d2ea;
+}
+
+.doom-who {
+  color: #a89fd0;
+  text-align: right;
+}
+
+.doom-who.mine {
+  color: #8ff0c0;
+}
+
+.doom-controller {
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #4a2a2a;
+  background: linear-gradient(145deg, #1a1012, #0e0c1d);
+  /* Fingers slide off pad buttons mid-hold; never let that scroll or zoom. */
+  touch-action: none;
+}
+
+.doom-pad {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.doom-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(3, 1fr);
+  gap: 6px;
+  aspect-ratio: 1;
+}
+
+.doom-dpad .up { grid-area: 1 / 2; }
+.doom-dpad .left { grid-area: 2 / 1; }
+.doom-dpad .right { grid-area: 2 / 3; }
+.doom-dpad .down { grid-area: 3 / 2; }
+
+.doom-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: 2fr 1fr 1fr;
+  gap: 6px;
+}
+
+.doom-actions .fire { grid-column: 1 / 3; }
+.doom-actions .use { grid-column: 1 / 3; }
+
+.doom-key {
+  min-height: 48px;
+  min-width: 0;
+  padding: 6px;
+  font-size: 20px;
+  font-weight: 700;
+  border: 1px solid #5a3a3a;
+  background: #251618;
+  color: #ffe9e3;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.doom-key:active,
+.doom-key.on {
+  background: #b3301b;
+  border-color: #ff5a3c;
+}
+
+.doom-key.fire {
+  font-size: 22px;
+  letter-spacing: 0.14em;
+  background: #4a1a12;
+  border-color: #ff5a3c;
+}
+
+.doom-key.small {
+  min-height: 44px;
+  font-size: 15px;
+  padding: 4px;
+}
+
+.doom-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.doom-row .doom-key {
+  flex: 1 1 0;
+  min-width: 40px;
+}
+
+.doom-quit {
+  flex: 1 1 100%;
+  min-height: 40px;
+}
+
+.doom-view {
+  gap: 6px;
+}
+
+.doom-stage {
+  display: flex;
+  justify-content: center;
+  height: min(32vh, 260px);
+  touch-action: none;
+}
+
+.doom-face {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+}
+
+.doom-mirror {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.games-card-doom {
+  border-color: #5a3a3a;
+}
+
+.games-card-doom.active {
+  border-color: #ff5a3c;
+  background: #2a1512;
+}
+
+.games-card-doom code {
+  color: #ffb3a4;
+}
+
+@media (min-width: 700px) {
+  .doom-running {
+    max-width: 1100px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "hud view"
+      "pad view";
+    align-items: start;
+  }
+
+  .doom-running .doom-hud { grid-area: hud; }
+  .doom-running .doom-controller { grid-area: pad; }
+  .doom-running .doom-view { grid-area: view; }
+
+  .doom-running .doom-stage {
+    height: min(60vh, 520px);
+  }
+}

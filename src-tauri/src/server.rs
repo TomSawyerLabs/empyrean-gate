@@ -1225,6 +1225,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
         state.preview_gate.lock().release(conn_id, max);
     }
     state.connected_clients.lock().remove(&conn_id);
+    state.game_controller_left(conn_id);
     if state.stop_video(Some(conn_id)) {
         deactivate_video_audio(&ctx);
     }
@@ -1679,7 +1680,9 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
         | ClientMsg::TakeReady { .. } => Some("scene"),
         ClientMsg::StartVideo { .. } | ClientMsg::StopVideo { .. } => Some("video"),
         ClientMsg::SetGameMode { .. } | ClientMsg::GameCommand { .. } => Some("game"),
-        ClientMsg::GameInput { .. } => Some("play"),
+        ClientMsg::GameInput { .. } | ClientMsg::GameKey { .. } | ClientMsg::GameRelease => {
+            Some("play")
+        }
         ClientMsg::SetTestMode { .. } | ClientMsg::SetTestConfig { .. } => Some("test"),
         ClientMsg::PatchParam { .. } => Some("knob"),
         _ => None,
@@ -1775,7 +1778,7 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
         // Game mode replaces the whole look of the array, so mode changes and
         // player injections belong on the timeline — a report captured during a
         // game should say plainly that the array was a game world.
-        ClientMsg::SetGameMode { game } => rec.event("game_mode", &name(), json!({ "game": game })),
+        ClientMsg::SetGameMode { game, .. } => rec.event("game_mode", &name(), json!({ "game": game })),
         ClientMsg::GameInput { species, points } => rec.event(
             "game_input",
             &name(),
@@ -1785,6 +1788,11 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
             "game_command",
             &name(),
             serde_json::json!({ "command": command }),
+        ),
+        ClientMsg::GameKey { key, down } => rec.event(
+            "game_key",
+            &name(),
+            serde_json::json!({ "key": key, "down": down }),
         ),
         // Test mode replaces every pixel on the rig, so both the arming and the
         // pattern changes belong on the timeline — a report captured during
@@ -2593,26 +2601,15 @@ async fn handle_msg(
                 let _ = send_json(tx, &ServerMsg::Error { message }).await;
             }
         }
-        ClientMsg::SetGameMode { game } => {
+        ClientMsg::SetGameMode { game, species, claim } => {
             // Same trust model as patch editing: starting/stopping a game
             // replaces the whole look of the array — the Gate machine's call.
-            if !addr.ip().is_loopback() {
-                let _ = send_json(
-                    tx,
-                    &ServerMsg::Error {
-                        message: "Game control is only available on the Gate machine.".into(),
-                    },
-                )
-                .await;
-            } else if let Err(message) = state.set_game_mode(game) {
-                let _ = send_json(tx, &ServerMsg::Error { message }).await;
-            }
-        }
-        ClientMsg::SetGameConfig {
-            species,
-            effects_overlay,
-        } => {
-            if !addr.ip().is_loopback() {
+            // Except DOOM (plans/doom.md): the secret page is its gate, so
+            // any client may start it, and any client may stop it while it
+            // is the running game.
+            let doom = game == Some(crate::game::GameKind::Doom)
+                || (game.is_none() && state.game.lock().active == Some(crate::game::GameKind::Doom));
+            if !addr.ip().is_loopback() && !doom {
                 let _ = send_json(
                     tx,
                     &ServerMsg::Error {
@@ -2621,7 +2618,45 @@ async fn handle_msg(
                 )
                 .await;
             } else {
-                state.set_game_config(species, effects_overlay);
+                let starter = (claim && doom).then(|| crate::game::GameController {
+                    conn_id,
+                    client_id: client_id.clone(),
+                });
+                if let Err(message) = state.set_game_mode(game, species, starter) {
+                    let _ = send_json(tx, &ServerMsg::Error { message }).await;
+                }
+            }
+        }
+        ClientMsg::GameRelease => {
+            state.game_controller_left(conn_id);
+        }
+        ClientMsg::SetGameConfig {
+            species,
+            effects_overlay,
+            mirror,
+        } => {
+            // `mirror` is the player's own view of DOOM; the rest is show
+            // control and stays with the Gate machine.
+            let admin_fields = species.is_some() || effects_overlay.is_some();
+            if !addr.ip().is_loopback() && admin_fields {
+                let _ = send_json(
+                    tx,
+                    &ServerMsg::Error {
+                        message: "Game control is only available on the Gate machine.".into(),
+                    },
+                )
+                .await;
+            } else {
+                state.set_game_config(species, effects_overlay, mirror);
+            }
+        }
+        ClientMsg::GameKey { key, down } => {
+            // Only a refused press is worth a toast; a refused release is the
+            // tail of a press that was already refused.
+            if let Err(message) = state.game_key(conn_id, client_id, key, down)
+                && down
+            {
+                let _ = send_json(tx, &ServerMsg::Error { message }).await;
             }
         }
         ClientMsg::GameInput { species, points } => {

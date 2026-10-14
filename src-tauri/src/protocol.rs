@@ -292,6 +292,15 @@ pub enum ClientMsg {
     /// scheduler runs a playlist — see `SharedState::set_game_mode`.
     SetGameMode {
         game: Option<crate::game::GameKind>,
+        /// The admin knob to start with (species / colors / bases; DOOM's
+        /// skill). Saves the start-then-configure round trip.
+        #[serde(default)]
+        species: Option<u8>,
+        /// DOOM: the sender wants the controls from the first frame (the
+        /// secret page's own start button). Without it they are free until
+        /// someone presses a key — how the Games tab hands a demo to a phone.
+        #[serde(default)]
+        claim: bool,
     },
     /// Live game parameters (species count, effects overlay). Loopback only.
     SetGameConfig {
@@ -299,6 +308,10 @@ pub enum ClientMsg {
         species: Option<u8>,
         #[serde(default)]
         effects_overlay: Option<bool>,
+        /// Mirror a raster game (DOOM) left-right for a player on the other
+        /// side of the ring. The one field any client may set.
+        #[serde(default)]
+        mirror: Option<bool>,
     },
     /// Player input into the running game: a batch of polar points (same space
     /// as `Paint`) injecting the chosen species. Open to every client —
@@ -312,6 +325,17 @@ pub enum ClientMsg {
     GameCommand {
         command: crate::game::GameCommand,
     },
+    /// A held key for DOOM (plans/doom.md): down on press, up on release.
+    /// Open to every client, but the first connection to send one holds the
+    /// controls until it disconnects; others are refused with an error.
+    GameKey {
+        key: crate::game::GameKey,
+        down: bool,
+    },
+    /// The DOOM page is being left (another tab, back to Live): give the
+    /// controls up now rather than holding them until this connection
+    /// drops. The leave clock starts; anyone else may take them.
+    GameRelease,
     /// Arm/disarm hardware test mode. Open to every client (the commissioning
     /// workflow is a phone in your hand at the array), but refused while the
     /// show scheduler is running a playlist — see `SharedState::set_test_mode`.
@@ -911,6 +935,11 @@ pub struct GameModeStatus {
     pub from_floor: bool,
     /// Name of the playlist blocking a manual start, when one is running.
     pub blocked_by_show: Option<String>,
+    /// DOOM's HUD and controller, while DOOM is the running game.
+    pub doom: Option<crate::doom::DoomStatus>,
+    /// Why the last game ended by itself ("the player left"), for a few
+    /// seconds after it did, so the page that started it can say so.
+    pub ended: Option<String>,
 }
 
 impl Default for GameModeStatus {
@@ -925,6 +954,8 @@ impl Default for GameModeStatus {
             effects_overlay: false,
             from_floor: false,
             blocked_by_show: None,
+            doom: None,
+            ended: None,
         }
     }
 }

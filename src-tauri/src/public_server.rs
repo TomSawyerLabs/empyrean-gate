@@ -806,7 +806,7 @@ async fn handle(ctx: &Ctx, msg: ClientMsg, conn_id: u64, flow: &mut Flow<'_>, tx
             state.public.lock().note_input(conn_id, "game", now);
             state.game_command(command);
         }
-        ClientMsg::SetGameMode { game } => {
+        ClientMsg::SetGameMode { game, .. } => {
             // A hidden game, by a key holder (the gate above checked the
             // perk). Starting opens with the game's own color count;
             // stopping is only for a game the floor started.
@@ -939,13 +939,13 @@ mod tests {
         assert_eq!(state.game.lock().active, None);
         // …but not what the operator started, which never expires either,
         // and the operator's start of the same game is still the operator's.
-        state.set_game_mode(Some(GameKind::Perimeter)).unwrap();
+        state.set_game_mode(Some(GameKind::Perimeter), None, None).unwrap();
         assert_eq!(state.floor_game(), None);
         assert!(state.stop_floor_game().is_err());
         assert_eq!(state.expire_floor_game(Duration::ZERO), None);
         state.start_floor_game(GameKind::Perimeter).unwrap();
         assert_eq!(state.floor_game(), None, "a floor start must not take over the operator's game");
-        state.set_game_mode(None).unwrap();
+        state.set_game_mode(None, None, None).unwrap();
         assert!(state.stop_floor_game().is_ok(), "stopping nothing is fine");
     }
 

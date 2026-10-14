@@ -41,8 +41,8 @@ struct Globals {
     game_rings: u32,
     game_alpha: f32,   // 0..1 from the previous sim generation to the current
     game_beat: f32,    // beat envelope for the brightness pulse
-    _pad_game0: f32,
-    _pad_game1: f32,
+    game_style: u32,   // 0 polar grid; 1 planar raster (DOOM); 2 raster, mirrored
+    game_turn: f32,    // raster: radians of the screen's "down" direction
     rotation: f32,
     // Master hue pull ("warm colors now"): target hue in turns, strength
     // 0..1 (0 = off), and the loose-mask amount 0..1. See hue_pull().
@@ -1468,10 +1468,68 @@ fn game_unpack(v: u32) -> vec3f {
     ) / 255.0;
 }
 
+// Raster games (DOOM, plans/doom.md): the frame is a plane the disc looks at.
+// Shown at 4:3 as DOOM's 320×200 is meant to be, RASTER_WIDTH disc units
+// wide, its centre lifted RASTER_LIFT along screen-up so the crosshair clears
+// the hole — the hole swallows the status bar and the gun instead (the phone
+// is the HUD). Screen-down points at game_turn ("face me"); style 2 mirrors.
+const RASTER_WIDTH: f32 = 2.0;
+const RASTER_LIFT: f32 = 0.43;
+const RASTER_TAPS: u32 = 8u;
+
+fn raster_texel(x: i32, y: i32) -> vec3f {
+    if x < 0 || y < 0 || x >= i32(G.game_theta) || y >= i32(G.game_rings) {
+        return vec3f(0.0);
+    }
+    return game_unpack(GAME[u32(y) * G.game_theta + u32(x)]);
+}
+
+// Bilinear, uv 0..1 with row 0 at the top; outside the frame is black.
+fn raster_sample(uv: vec2f) -> vec3f {
+    if uv.x < 0.0 || uv.y < 0.0 || uv.x >= 1.0 || uv.y >= 1.0 {
+        return vec3f(0.0);
+    }
+    let p = uv * vec2f(f32(G.game_theta), f32(G.game_rings)) - vec2f(0.5);
+    let p0 = floor(p);
+    let f = p - p0;
+    let x0 = i32(p0.x);
+    let y0 = i32(p0.y);
+    let a = mix(raster_texel(x0, y0), raster_texel(x0 + 1, y0), f.x);
+    let b = mix(raster_texel(x0, y0 + 1), raster_texel(x0 + 1, y0 + 1), f.x);
+    return mix(a, b, f.y);
+}
+
+fn raster_color(ctx: Ctx) -> vec3f {
+    let down = vec2f(cos(G.game_turn), sin(G.game_turn));
+    let up = -down;
+    var right = vec2f(up.y, -up.x);
+    if G.game_style == 2u {
+        right = -right;
+    }
+    let w = RASTER_WIDTH;
+    let h = w * 0.75;
+    // Each LED stands in for one spoke's share of the circumference at its
+    // radius; the strip is ~19× finer radially, so a box filter along the
+    // tangent is what keeps a 320-px frame from sparkling on 64 spokes.
+    let foot = ctx.rn * TAU / f32(G.spokes);
+    let tangent = vec2f(-sin(ctx.theta), cos(ctx.theta));
+    var acc = vec3f(0.0);
+    for (var k = 0u; k < RASTER_TAPS; k++) {
+        let off = ((f32(k) + 0.5) / f32(RASTER_TAPS) - 0.5) * foot;
+        let p = ctx.pos + tangent * off;
+        let uv = vec2f(dot(p, right) / w + 0.5, 0.5 - (dot(p, up) - RASTER_LIFT) / h);
+        acc += raster_sample(uv);
+    }
+    return acc / f32(RASTER_TAPS);
+}
+
 // The game world: a dumb lookup into the CPU simulation's cell grid,
 // interpolating between the previous and current generation so fronts glide
 // instead of strobing, with a gentle beat pulse on top.
 fn game_color(ctx: Ctx) -> vec3f {
+    if G.game_style != 0u {
+        return raster_color(ctx);
+    }
     let it = ctx.spoke * G.game_theta / G.spokes;
     // Ring 0 is at the hole; r01 is 0 at the OUTER end of the spoke.
     let t = 1.0 - ctx.r01;

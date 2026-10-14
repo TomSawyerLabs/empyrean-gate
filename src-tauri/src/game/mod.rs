@@ -36,6 +36,10 @@ pub enum GameKind {
     /// Hidden: the host camp's — calling lost sparks home to the six orbs of
     /// the Entheos mark until the sigil is whole (see `gathering`).
     Gathering,
+    /// Shareware DOOM, the real thing, in a child process; the phone is the
+    /// controller and the HUD (plans/doom.md). Reached by a secret code, not
+    /// the Games tab, and not a playlist cue.
+    Doom,
 }
 
 impl GameKind {
@@ -48,6 +52,7 @@ impl GameKind {
             GameKind::RadialTetris => "Ringfall",
             GameKind::Perimeter => "Perimeter",
             GameKind::Gathering => "Gathering",
+            GameKind::Doom => "DOOM",
         }
     }
 
@@ -73,7 +78,15 @@ impl GameKind {
             GameKind::RadialTetris => 6,
             GameKind::Perimeter => 5,
             GameKind::Gathering => 5,
+            // DOOM's knob is its skill; the floor never starts it anyway.
+            GameKind::Doom => 3,
         }
+    }
+
+    /// The games the Games tab offers and a playlist can cue. DOOM is an
+    /// easter egg: it starts from its secret page, over a show if need be.
+    pub fn is_listed(self) -> bool {
+        !matches!(self, GameKind::Doom)
     }
 }
 
@@ -88,9 +101,12 @@ pub enum GameSim {
     RadialTetris(radial_tetris::RadialTetrisSim),
     Perimeter(perimeter::PerimeterSim),
     Gathering(gathering::GatheringSim),
+    Doom(crate::doom::DoomSim),
 }
 
 impl GameSim {
+    /// `species` is the one admin knob, per-game meaning (see `set_species`);
+    /// for DOOM it is the skill (1–5) the engine starts at.
     pub fn new(kind: GameKind, theta: usize, radial: usize, species: u8, seed: u64) -> Self {
         match kind {
             GameKind::Rps => GameSim::Rps(rps::RpsSim::new(theta, radial, species, seed)),
@@ -108,6 +124,16 @@ impl GameSim {
             GameKind::Gathering => {
                 GameSim::Gathering(gathering::GatheringSim::new(theta, radial, species, seed))
             }
+            GameKind::Doom => GameSim::Doom(crate::doom::DoomSim::new(species)),
+        }
+    }
+
+    /// `Some((width, height))` for sims whose cells are a planar raster the
+    /// shader maps across the disc (DOOM), `None` for the polar grid games.
+    pub fn raster(&self) -> Option<(usize, usize)> {
+        match self {
+            GameSim::Doom(_) => Some((crate::doom::WIDTH, crate::doom::HEIGHT)),
+            _ => None,
         }
     }
 
@@ -120,6 +146,7 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.theta(),
             GameSim::Perimeter(s) => s.theta(),
             GameSim::Gathering(s) => s.theta(),
+            GameSim::Doom(_) => crate::doom::WIDTH,
         }
     }
 
@@ -132,6 +159,7 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.radial(),
             GameSim::Perimeter(s) => s.radial(),
             GameSim::Gathering(s) => s.radial(),
+            GameSim::Doom(_) => crate::doom::HEIGHT,
         }
     }
 
@@ -147,6 +175,8 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.set_slots(species),
             GameSim::Perimeter(s) => s.set_slots(species),
             GameSim::Gathering(s) => s.set_slots(species),
+            // Skill is fixed at launch; DOOM has no live knob.
+            GameSim::Doom(_) => {}
         }
     }
 
@@ -160,6 +190,8 @@ impl GameSim {
             GameSim::RadialTetris(_) => Some(radial_tetris::TICK_SECS),
             GameSim::Perimeter(_) => Some(perimeter::TICK_SECS),
             GameSim::Gathering(_) => Some(gathering::TICK_SECS),
+            // Every render frame: the tick only polls the child's newest frame.
+            GameSim::Doom(_) => Some(0.0),
         }
     }
 
@@ -172,6 +204,7 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.tick(),
             GameSim::Perimeter(s) => s.tick(),
             GameSim::Gathering(s) => s.tick(),
+            GameSim::Doom(s) => s.tick(),
         }
     }
 
@@ -184,6 +217,7 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.watchdog(),
             GameSim::Perimeter(s) => s.watchdog(),
             GameSim::Gathering(s) => s.watchdog(),
+            GameSim::Doom(_) => {}
         }
     }
 
@@ -196,6 +230,65 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.inject(it, species),
             GameSim::Perimeter(s) => s.inject(it, ir, species),
             GameSim::Gathering(s) => s.inject(it, ir, species),
+            // A tap on the array preview is "face me": the screen's bottom
+            // edge swings to point at the tapped spoke. The engine computed
+            // `it` against this sim's theta(), which for DOOM is the raster
+            // width, so it is a fraction of a turn in WIDTH units.
+            GameSim::Doom(s) => {
+                s.face(it as f32 / crate::doom::WIDTH as f32 * std::f32::consts::TAU)
+            }
+        }
+    }
+
+    /// Held-key input (DOOM). Games without keys ignore it.
+    pub fn key(&mut self, key: GameKey, down: bool) {
+        if let GameSim::Doom(sim) = self {
+            sim.key(key, down);
+        }
+    }
+
+    /// Who holds the controls, for sims that have a single controller.
+    pub fn set_controller(&mut self, id: Option<&str>, name: Option<&str>) {
+        if let GameSim::Doom(sim) = self {
+            sim.set_controller(id, name);
+        }
+    }
+
+    pub fn set_mirror(&mut self, mirror: bool) {
+        if let GameSim::Doom(sim) = self {
+            sim.set_mirror(mirror);
+        }
+    }
+
+    /// Raster orientation for the shader: (radians of screen-down, mirrored).
+    pub fn orientation(&self) -> (f32, bool) {
+        match self {
+            GameSim::Doom(sim) => (sim.turn(), sim.mirror()),
+            _ => (0.0, false),
+        }
+    }
+
+    /// Sims that end themselves report why; the engine stops the game.
+    pub fn expired(&self) -> Option<String> {
+        match self {
+            GameSim::Doom(sim) => sim.expired(),
+            _ => None,
+        }
+    }
+
+    /// Raster sims flag when a new frame arrived; grid sims are uploaded on
+    /// tick/injection by the engine's own bookkeeping.
+    pub fn take_dirty(&mut self) -> bool {
+        match self {
+            GameSim::Doom(sim) => sim.take_dirty(),
+            _ => false,
+        }
+    }
+
+    pub fn doom_status(&self) -> Option<crate::doom::DoomStatus> {
+        match self {
+            GameSim::Doom(sim) => Some(sim.status()),
+            _ => None,
         }
     }
 
@@ -210,6 +303,7 @@ impl GameSim {
             GameSim::RadialTetris(sim) => Some(sim.detail()),
             GameSim::Perimeter(sim) => Some(sim.detail()),
             GameSim::Gathering(sim) => Some(sim.detail()),
+            GameSim::Doom(sim) => Some(sim.detail()),
             _ => None,
         }
     }
@@ -247,8 +341,39 @@ impl GameSim {
             GameSim::RadialTetris(s) => s.pack_cells(),
             GameSim::Perimeter(s) => s.pack_cells(time),
             GameSim::Gathering(s) => s.pack_cells(time),
+            GameSim::Doom(s) => s.pack_cells(),
         }
     }
+}
+
+/// A key a phone can hold down (DOOM). Names are DOOM's actions, not the
+/// keyboard keys that happen to default to them, so the controller surface
+/// says what it does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GameKey {
+    Up,
+    Down,
+    Left,
+    Right,
+    StrafeLeft,
+    StrafeRight,
+    Fire,
+    Use,
+    Run,
+    Strafe,
+    Weapon1,
+    Weapon2,
+    Weapon3,
+    Weapon4,
+    Weapon5,
+    Weapon6,
+    Weapon7,
+    Escape,
+    Enter,
+    Yes,
+    No,
+    Map,
 }
 
 /// Explicit controller actions for games that need buttons. Keeping these out
@@ -289,6 +414,15 @@ pub struct GameControl {
     pub inputs: Vec<QueuedInput>,
     /// Explicit button/keyboard actions, drained once per render frame.
     pub commands: Vec<GameCommand>,
+    /// Held-key events (DOOM), drained once per render frame.
+    pub keys: Vec<(GameKey, bool)>,
+    /// The connection holding DOOM's controls (plans/doom.md): the first to
+    /// send a key, until it disconnects. `None` = up for grabs.
+    pub controller: Option<GameController>,
+    /// Mirror the raster left-right (viewed from the other side of the ring).
+    pub mirror: bool,
+    /// Why the last game ended on its own, and when — shown for a few seconds.
+    pub ended: Option<(String, Instant)>,
     /// When the current game was started (None while inactive).
     pub started: Option<Instant>,
     /// Started from the public floor by a key holder (plans/hidden-modes.md).
@@ -301,6 +435,12 @@ pub struct GameControl {
     pub last_input: Option<Instant>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameController {
+    pub conn_id: u64,
+    pub client_id: String,
+}
+
 pub const MAX_QUEUED_INPUTS: usize = 256;
 
 impl Default for GameControl {
@@ -311,6 +451,10 @@ impl Default for GameControl {
             effects_overlay: false,
             inputs: Vec::new(),
             commands: Vec::new(),
+            keys: Vec::new(),
+            controller: None,
+            mirror: false,
+            ended: None,
             started: None,
             from_floor: false,
             last_input: None,
@@ -367,6 +511,13 @@ mod tests {
         assert_eq!(GameKind::Perimeter.floor_perk(), Some("game:perimeter"));
         assert_eq!(GameKind::Gathering.floor_perk(), Some("game:gathering"));
         assert_eq!(GameKind::Flak.floor_perk(), None);
+        assert_eq!(serde_json::to_string(&GameKind::Doom).unwrap(), "\"doom\"");
+        assert_eq!(
+            serde_json::to_string(&GameKey::StrafeLeft).unwrap(),
+            "\"strafe_left\""
+        );
+        assert!(!GameKind::Doom.is_listed());
+        assert!(GameKind::Rps.is_listed());
     }
 
     /// WGSL uniform structs round their size to 16 bytes; a Rust struct that

@@ -69,6 +69,59 @@ pub struct AudioFeatures {
 mod tests {
     use super::*;
 
+    /// DOOM's controls (plans/doom.md): the starter can claim them, a second
+    /// connection is refused, a release or disconnect frees them, the next key
+    /// claims them, and ending the game clears everything.
+    #[test]
+    fn doom_controls_belong_to_one_connection_at_a_time() {
+        use crate::game::{GameController, GameKey, GameKind};
+        let state = SharedState::new(AppConfig::default());
+        let starter = GameController {
+            conn_id: 1,
+            client_id: "phone-a".into(),
+        };
+        state
+            .set_game_mode(Some(GameKind::Doom), Some(4), Some(starter.clone()))
+            .unwrap();
+        {
+            let g = state.game.lock();
+            assert_eq!(g.active, Some(GameKind::Doom));
+            assert_eq!(g.species, 4);
+            assert_eq!(g.controller.as_ref(), Some(&starter));
+        }
+        assert!(state.game_key(1, "phone-a", GameKey::Fire, true).is_ok());
+        assert!(state.game_key(2, "phone-b", GameKey::Fire, true).is_err());
+        assert_eq!(state.game.lock().keys.len(), 1, "a refused key is not queued");
+
+        // Releasing (page left) or disconnecting frees them for the next key.
+        state.game_controller_left(1);
+        assert!(state.game.lock().controller.is_none());
+        assert!(state.game_key(2, "phone-b", GameKey::Up, true).is_ok());
+        assert_eq!(
+            state.game.lock().controller.as_ref().map(|c| c.conn_id),
+            Some(2)
+        );
+        // A stranger's disconnect changes nothing.
+        state.game_controller_left(9);
+        assert_eq!(
+            state.game.lock().controller.as_ref().map(|c| c.conn_id),
+            Some(2)
+        );
+
+        // Starting without a claim leaves them free (the Games tab demo path).
+        state.set_game_mode(None, None, None).unwrap();
+        state
+            .set_game_mode(Some(GameKind::Doom), None, None)
+            .unwrap();
+        assert!(state.game.lock().controller.is_none());
+
+        state.end_game("the player left");
+        let g = state.game.lock();
+        assert_eq!(g.active, None);
+        assert!(g.controller.is_none());
+        assert_eq!(g.ended.as_ref().map(|(r, _)| r.as_str()), Some("the player left"));
+    }
+
     #[test]
     fn video_frames_are_bounded_and_owned_by_one_connection() {
         let state = SharedState::new(AppConfig::default());
@@ -747,8 +800,17 @@ impl SharedState {
     /// playlist *game cue* enters through the scheduler itself, not here, so
     /// this guard only ever applies to the manual path.) Never touches
     /// `output.enabled`. Stopping is always allowed; the engine crossfades out.
-    pub fn set_game_mode(&self, game: Option<crate::game::GameKind>) -> Result<(), String> {
-        self.apply_game_mode(game, false, None)
+    ///
+    /// `species` is the knob to start with (the Games tab's and the DOOM
+    /// page's own start value); `starter` is the connection that gets DOOM's
+    /// controls from the first frame (plans/doom.md).
+    pub fn set_game_mode(
+        &self,
+        game: Option<crate::game::GameKind>,
+        species: Option<u8>,
+        starter: Option<crate::game::GameController>,
+    ) -> Result<(), String> {
+        self.apply_game_mode(game, false, species, starter)
     }
 
     /// A key holder on the public floor starting their hidden game
@@ -760,7 +822,7 @@ impl SharedState {
         if kind.floor_perk().is_none() {
             return Err(format!("{} is started from the Gate machine.", kind.label()));
         }
-        self.apply_game_mode(Some(kind), true, Some(kind.floor_species()))
+        self.apply_game_mode(Some(kind), true, Some(kind.floor_species()), None)
     }
 
     /// The running game, if it was started from the public floor.
@@ -781,7 +843,7 @@ impl SharedState {
                 return Err("This game was started from the Gate machine; only the operator can stop it.".into());
             }
         }
-        self.apply_game_mode(None, false, None)
+        self.apply_game_mode(None, false, None, None)
     }
 
     /// Stop a floor-started game that has had no input for `idle`. Called
@@ -801,18 +863,22 @@ impl SharedState {
                 kind.label(),
                 idle.as_secs()
             );
-            let _ = self.apply_game_mode(None, false, None);
+            let _ = self.apply_game_mode(None, false, None, None);
         }
         expired
     }
 
+    /// DOOM (plans/doom.md) is the exception to the show guard: it starts from
+    /// its secret page over a running playlist — the engine gives the manual
+    /// game precedence and the cue resumes when it ends.
     fn apply_game_mode(
         &self,
         game: Option<crate::game::GameKind>,
         from_floor: bool,
         species: Option<u8>,
+        starter: Option<crate::game::GameController>,
     ) -> Result<(), String> {
-        if game.is_some()
+        if game.is_some_and(|k| k.is_listed())
             && let Some(playlist) = self.config.read().running_show()
         {
             return Err(format!(
@@ -822,6 +888,9 @@ impl SharedState {
         }
         {
             let mut g = self.game.lock();
+            if let Some(s) = species {
+                g.species = s.clamp(1, 8);
+            }
             if g.active == game {
                 return Ok(());
             }
@@ -830,11 +899,12 @@ impl SharedState {
             g.started = game.map(|_| now);
             g.from_floor = from_floor && game.is_some();
             g.last_input = game.map(|_| now);
-            if let Some(s) = species {
-                g.species = s.clamp(2, 8);
-            }
             g.inputs.clear();
             g.commands.clear();
+            g.keys.clear();
+            g.controller = starter.filter(|_| game.is_some());
+            g.mirror = false;
+            g.ended = None;
         }
         match game {
             Some(kind) if from_floor => log::info!("game mode: {} started from the public floor", kind.label()),
@@ -847,18 +917,87 @@ impl SharedState {
 
     /// Live game parameters. Accepted while inactive too, so the Games tab's
     /// controls can be set up before anything reaches the array.
-    pub fn set_game_config(&self, species: Option<u8>, effects_overlay: Option<bool>) {
+    pub fn set_game_config(
+        &self,
+        species: Option<u8>,
+        effects_overlay: Option<bool>,
+        mirror: Option<bool>,
+    ) {
         {
             let mut g = self.game.lock();
             if let Some(s) = species {
                 // The union of every game's knob range; each sim clamps to its
-                // own (rps 3–5, life/spokewar 2–8), and the UI slider carries
-                // the per-game bounds.
-                g.species = s.clamp(2, 8);
+                // own (rps 3–5, life/spokewar 2–8, DOOM skill 1–5), and the UI
+                // slider carries the per-game bounds.
+                g.species = s.clamp(1, 8);
             }
             if let Some(o) = effects_overlay {
                 g.effects_overlay = o;
             }
+            if let Some(m) = mirror {
+                g.mirror = m;
+            }
+        }
+        self.broadcast_state();
+    }
+
+    /// A held key for DOOM from `conn_id`. The first connection to press one
+    /// holds the controls until it disconnects (`game_controller_left`);
+    /// anyone else is refused, so a second phone cannot wrestle the player.
+    pub fn game_key(
+        &self,
+        conn_id: u64,
+        client_id: &str,
+        key: crate::game::GameKey,
+        down: bool,
+    ) -> Result<(), String> {
+        let mut g = self.game.lock();
+        match &g.controller {
+            Some(c) if c.conn_id != conn_id => {
+                return Err("Someone else has the DOOM controls right now.".into());
+            }
+            Some(_) => {}
+            None => {
+                g.controller = Some(crate::game::GameController {
+                    conn_id,
+                    client_id: client_id.to_owned(),
+                });
+            }
+        }
+        if g.keys.len() >= crate::game::MAX_QUEUED_INPUTS {
+            g.keys.remove(0);
+        }
+        g.keys.push((key, down));
+        g.last_input = Some(Instant::now());
+        Ok(())
+    }
+
+    /// Connection teardown: a departing controller frees the controls. The
+    /// engine lifts its held keys and starts the leave clock when it sees the
+    /// change on its next frame.
+    pub fn game_controller_left(&self, conn_id: u64) {
+        let mut g = self.game.lock();
+        if g.controller.as_ref().is_some_and(|c| c.conn_id == conn_id) {
+            g.controller = None;
+        }
+    }
+
+    /// The running game ended itself (DOOM's child exited, nobody was
+    /// playing). Stops the game like `set_game_mode(None)` and keeps the
+    /// reason in status for a few seconds.
+    pub fn end_game(&self, reason: &str) {
+        let active = {
+            let mut g = self.game.lock();
+            let active = g.active;
+            g.active = None;
+            g.started = None;
+            g.controller = None;
+            g.keys.clear();
+            g.ended = Some((reason.to_owned(), Instant::now()));
+            active
+        };
+        if let Some(kind) = active {
+            log::info!("game mode: {} ended — {reason}", kind.label());
         }
         self.broadcast_state();
     }

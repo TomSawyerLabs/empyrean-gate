@@ -203,6 +203,22 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   game's goal and that colors are shared freely — there are no seats, no
   turns, and no player cap. Design notes and the game roster:
   `plans/game-mode.md`.
+- **It runs DOOM.** Shareware Episode 1, the real engine (the vendored
+  doomgeneric core, GPL-2 — see `src-tauri/doom/README.md`), running in a
+  child process of this same binary so a 1993 `exit()` can never take the
+  lights down, rendered as a 4:3 raster across the ring with the crosshair
+  lifted clear of the hole and the status bar swallowed by it. The phone is
+  the controller *and* the HUD (health, armor, ammo, kills, map), with
+  held-key pad buttons, a sticky Run, weapons, menu keys, and a tap on the
+  array preview to turn the screen to face wherever you are standing. It is
+  an easter egg, not a Games card: players reach it at `/#doom` or by typing
+  `doom` on any keyboard (the Gate machine's window has no URL bar), anyone
+  on the LAN can start it, even over a running playlist, which resumes when
+  it ends. One phone holds the controls at a time; it ends by itself 15 s
+  after that phone disconnects or after 90 s with no input, and admins can
+  stop it from the banner or the Games tab (where the card shows the code).
+  `--no-default-features --features shader-hot-reload` builds without it.
+  Design notes: `plans/doom.md`.
 - **Patches (early)**: a node-graph alternative to the layer stack — wire
   generators, transforms, blends, and inputs (audio features, beats, LFOs,
   envelopes, IMU) into a typed dataflow whose sink is the array. Graphs compile
@@ -783,6 +799,13 @@ its backing square under a tap.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+The vendored DOOM engine in `src-tauri/doom/doomgeneric` is GPL-2.0 (id Software /
+doomgeneric), and the shareware IWAD beside it is redistributable as shareware. A
+binary built with the default `doom` feature links the engine, which makes that
+*binary* a GPL-2 combined work — satisfied by this public MIT source, but worth
+knowing before bundling anything proprietary into a build. Details and hashes in
+[src-tauri/doom/README.md](src-tauri/doom/README.md).
 
 One caveat if you plan to redistribute builds: the `prodjlink-rs` git dependency
 carries no license of its own (no `license` field, no LICENSE file), which leaves it

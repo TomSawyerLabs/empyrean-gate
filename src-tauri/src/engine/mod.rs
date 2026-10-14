@@ -70,7 +70,12 @@ pub struct Globals {
     pub game_alpha: f32,
     /// Beat envelope (1 on the beat, decaying) for the game's brightness pulse.
     pub game_beat: f32,
-    pub _pad_game: [f32; 2],
+    /// Raster games (DOOM, plans/doom.md): 1 = a planar frame of
+    /// `game_theta` × `game_rings` pixels mapped across the disc, 2 = the same
+    /// mirrored left-right; 0 = the polar cell grid.
+    pub game_style: u32,
+    /// Raster orientation: radians of the screen's "down" direction.
+    pub game_turn: f32,
     /// Whole-composition rotation, integrated on the CPU so it remains
     /// continuous as transient button pulses expire.
     pub rotation: f32,
@@ -263,7 +268,7 @@ impl Engine {
         // the maximum grid so a geometry change never needs a realloc.
         let game_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("game-cells"),
-            size: (crate::game::GRID_MAX_THETA * crate::game::GRID_RINGS * 2 * 4) as u64,
+            size: (GAME_BUFFER_U32S * 4) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1458,6 +1463,18 @@ mod beat_time_tests {
 /// Seconds for the scene ↔ game-world crossfade on enter/exit.
 const GAME_FADE_SECS: f32 = 2.0;
 
+/// The GAME storage buffer holds either two polar grids (previous + current
+/// generation) or one DOOM frame, whichever is larger.
+const GAME_BUFFER_U32S: usize = {
+    let grids = crate::game::GRID_MAX_THETA * crate::game::GRID_RINGS * 2;
+    let raster = crate::doom::WIDTH * crate::doom::HEIGHT;
+    if grids > raster { grids } else { raster }
+};
+
+/// How long "the game ended by itself" stays in status for the page that
+/// started it to show.
+const GAME_ENDED_SECS: f32 = 12.0;
+
 // Nothing turns on instantly (plans/no-hard-cuts.md): every on/off that reaches
 // light output rides one of these short envelopes instead of hard-cutting.
 
@@ -2651,7 +2668,18 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // step with it, and drive the crossfade. Ticks follow the beat when
         // the tracker is confident, else a fixed cadence; the shader
         // interpolates between generations so nothing strobes.
-        let (manual_game, manual_species, game_overlay, game_from_floor, game_inputs, game_commands) = {
+        let (
+            manual_game,
+            manual_species,
+            game_overlay,
+            game_from_floor,
+            game_inputs,
+            game_commands,
+            game_keys,
+            game_controller,
+            game_mirror,
+            game_ended_recently,
+        ) = {
             let mut g = state.game.lock();
             (
                 g.active,
@@ -2660,6 +2688,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 g.from_floor,
                 std::mem::take(&mut g.inputs),
                 std::mem::take(&mut g.commands),
+                std::mem::take(&mut g.keys),
+                g.controller.clone(),
+                g.mirror,
+                g.ended
+                    .as_ref()
+                    .filter(|(_, at)| at.elapsed().as_secs_f32() < GAME_ENDED_SECS)
+                    .map(|(reason, _)| reason.clone()),
             )
         };
         // A playlist game cue enters here rather than through `set_game_mode`:
@@ -2676,9 +2711,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let game_now = state.started.elapsed().as_secs_f32();
         if let Some(kind) = game_desired {
             let theta = (cfg.geometry.spokes as usize).clamp(8, crate::game::GRID_MAX_THETA);
-            let stale = game_rt
-                .as_ref()
-                .is_none_or(|rt| rt.kind != kind || rt.sim.theta() != theta);
+            // A raster sim's θ is its frame width, not a spoke count; only
+            // the grid games follow the geometry.
+            let stale = game_rt.as_ref().is_none_or(|rt| {
+                rt.kind != kind || (rt.sim.raster().is_none() && rt.sim.theta() != theta)
+            });
             if stale {
                 // Seeded from the wall clock so every game session's soup is
                 // different; determinism within a session is what matters.
@@ -2696,8 +2733,31 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         }
         let mut game_alpha = 1.0f32;
         let mut game_cells: Option<Vec<u32>> = None;
+        let mut game_style = 0u32;
+        let mut game_turn = 0.0f32;
+        let mut game_self_ended: Option<String> = None;
         let (game_theta, game_rings) = if let Some(rt) = game_rt.as_mut() {
             rt.sim.set_species(game_species);
+            let raster = rt.sim.raster();
+            if raster.is_some() {
+                // DOOM: who holds the controls (name resolved for the HUD),
+                // the player's mirror choice, and this frame's held keys.
+                let name = game_controller.as_ref().map(|c| {
+                    cfg.clients
+                        .iter()
+                        .find(|k| k.id == c.client_id)
+                        .map(|k| k.name.clone())
+                        .unwrap_or_else(|| c.client_id.clone())
+                });
+                rt.sim.set_controller(
+                    game_controller.as_ref().map(|c| c.client_id.as_str()),
+                    name.as_deref(),
+                );
+                rt.sim.set_mirror(game_mirror);
+                for (key, down) in &game_keys {
+                    rt.sim.key(*key, *down);
+                }
+            }
             // Player injections: polar (angle, 0..1 disc radius) → cell
             // coordinates. Cells cover the strip only; a tap in the hole
             // clamps to the innermost ring.
@@ -2713,9 +2773,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             for command in &game_commands {
                 rt.sim.command(*command);
             }
-            if !game_inputs.is_empty() || !game_commands.is_empty() {
+            if (!game_inputs.is_empty() || !game_commands.is_empty()) && raster.is_none() {
                 // Repack "next" so the blob blends in over the rest of this
-                // generation instead of waiting a beat to exist.
+                // generation instead of waiting a beat to exist. (A raster
+                // sim's taps only turn the screen; its frames come from the
+                // child, below.)
                 rt.next = rt.sim.pack_cells(game_now);
                 rt.dirty = true;
             }
@@ -2740,22 +2802,48 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             if tick_now {
                 rt.sim.tick();
                 rt.sim.watchdog();
-                std::mem::swap(&mut rt.prev, &mut rt.next);
-                rt.next = rt.sim.pack_cells(game_now);
+                if raster.is_some() {
+                    // A new frame from the child, or nothing to upload.
+                    if rt.sim.take_dirty() {
+                        rt.next = rt.sim.pack_cells(game_now);
+                        rt.dirty = true;
+                    }
+                } else {
+                    std::mem::swap(&mut rt.prev, &mut rt.next);
+                    rt.next = rt.sim.pack_cells(game_now);
+                    rt.dirty = true;
+                }
                 rt.last_tick = Instant::now();
-                rt.dirty = true;
             }
             game_alpha =
                 (rt.last_tick.elapsed().as_secs_f32() / rt.interval.max(0.01)).clamp(0.0, 1.0);
-            if std::mem::take(&mut rt.dirty) {
-                let mut cells = rt.prev.clone();
-                cells.extend_from_slice(&rt.next);
-                game_cells = Some(cells);
+            if let Some((w, h)) = raster {
+                let (turn, mirror) = rt.sim.orientation();
+                game_style = if mirror { 2 } else { 1 };
+                game_turn = turn;
+                if std::mem::take(&mut rt.dirty) {
+                    game_cells = Some(rt.next.clone());
+                }
+                // Only the game that is still wanted can end itself; once it
+                // is fading out the verdict has already been acted on.
+                if game_desired == Some(rt.kind) {
+                    game_self_ended = rt.sim.expired();
+                }
+                (w as u32, h as u32)
+            } else {
+                if std::mem::take(&mut rt.dirty) {
+                    let mut cells = rt.prev.clone();
+                    cells.extend_from_slice(&rt.next);
+                    game_cells = Some(cells);
+                }
+                (rt.sim.theta() as u32, rt.sim.radial() as u32)
             }
-            (rt.sim.theta() as u32, rt.sim.radial() as u32)
         } else {
             (0, 0)
         };
+        if let Some(reason) = game_self_ended {
+            state.end_game(&reason);
+        }
         game_prev_beat = audio[0].beat_phase;
         // Smoothstepped here so the shader mix stays a plain lerp.
         let game_mix = game_fade * game_fade * (3.0 - 2.0 * game_fade);
@@ -3055,7 +3143,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 game_rings,
                 game_alpha,
                 game_beat: (-audio[0].beat_phase * 6.0).exp() * audio[0].bpm_conf,
-                _pad_game: [0.0; 2],
+                game_style,
+                game_turn,
                 rotation: rotation_angle,
                 hue_target: cfg.render.master_hue.rem_euclid(1.0),
                 hue_amount: hue_env,
@@ -3195,6 +3284,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             ready_inputs.globals.game_mix = 0.0;
             ready_inputs.globals.game_theta = 0;
             ready_inputs.globals.game_rings = 0;
+            ready_inputs.globals.game_style = 0;
             match ready.render(&ready_inputs) {
                 Ok(Some(rgb)) => {
                     ready_rgb.clear();
@@ -3648,6 +3738,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     effects_overlay: game_overlay,
                     from_floor: game_from_floor,
                     blocked_by_show: cfg.running_show().map(|p| p.name.clone()),
+                    doom: game_rt.as_ref().and_then(|rt| rt.sim.doom_status()),
+                    ended: game_ended_recently.clone(),
                 };
                 st.discovery_running = state
                     .discovery_running

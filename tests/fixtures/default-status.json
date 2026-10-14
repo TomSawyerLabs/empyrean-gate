@@ -116,7 +116,9 @@
     "species": 3,
     "effects_overlay": false,
     "from_floor": false,
-    "blocked_by_show": null
+    "blocked_by_show": null,
+    "doom": null,
+    "ended": null
   },
   "public": {
     "enabled": false,
