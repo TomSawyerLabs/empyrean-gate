@@ -221,7 +221,10 @@ impl RallySim {
     }
 
     fn humans(&self) -> usize {
-        self.paddles.iter().filter(|p| p.human_until > self.ticks).count()
+        self.paddles
+            .iter()
+            .filter(|p| p.human_until > self.ticks)
+            .count()
     }
 
     fn balls_wanted(&self) -> usize {
@@ -453,12 +456,22 @@ impl RallySim {
             if !seam {
                 // A miss lights the whole arc white for a moment (not red:
                 // red is somebody's color).
-                let (s, v) = if p.miss_flash > 0 { (0.0, 0.65) } else { (0.8, 0.12) };
+                let (s, v) = if p.miss_flash > 0 {
+                    (0.0, 0.65)
+                } else {
+                    (0.8, 0.12)
+                };
                 out[(radial - 1) * theta + it] = rgb(hue(k), s, v);
             }
             if wrap(a - p.at).abs() <= half {
                 let human = p.human_until > self.ticks;
-                let v = if p.hit_flash > 0 { 1.0 } else if human { 0.95 } else { 0.75 };
+                let v = if p.hit_flash > 0 {
+                    1.0
+                } else if human {
+                    0.95
+                } else {
+                    0.75
+                };
                 let s = if p.hit_flash > 0 { 0.4 } else { 0.85 };
                 let c = rgb(hue(k), s, v);
                 for ir in radial.saturating_sub(4)..radial - 1 {
@@ -483,7 +496,11 @@ impl RallySim {
         for b in &self.balls {
             if let Some((it, ir)) = self.cell_of(b.x, b.y) {
                 let blink = b.wait > 0 && (b.wait / 3) % 2 == 0;
-                let c = if blink { rgb(0.0, 0.0, 0.3) } else { rgb(0.14, 0.1, 1.0) };
+                let c = if blink {
+                    rgb(0.0, 0.0, 0.3)
+                } else {
+                    rgb(0.14, 0.1, 1.0)
+                };
                 for r in ir.saturating_sub(1)..=(ir + 1).min(radial - 1) {
                     out[r * theta + it] = c;
                 }
@@ -551,7 +568,12 @@ mod tests {
         let mut s = sim();
         hold(&mut s);
         let mid = s.paddles[0].at;
-        s.balls = vec![ball(0.85 * mid.cos(), 0.85 * mid.sin(), 0.6 * mid.cos(), 0.6 * mid.sin())];
+        s.balls = vec![ball(
+            0.85 * mid.cos(),
+            0.85 * mid.sin(),
+            0.6 * mid.cos(),
+            0.6 * mid.sin(),
+        )];
         for _ in 0..8 {
             s.tick();
         }
@@ -568,14 +590,22 @@ mod tests {
         hold(&mut s);
         let mid = s.paddles[0].at;
         let a = mid + s.paddle_half() * 0.9;
-        s.balls = vec![ball(0.85 * a.cos(), 0.85 * a.sin(), 0.6 * a.cos(), 0.6 * a.sin())];
+        s.balls = vec![ball(
+            0.85 * a.cos(),
+            0.85 * a.sin(),
+            0.6 * a.cos(),
+            0.6 * a.sin(),
+        )];
         for _ in 0..8 {
             s.tick();
         }
         let b = s.balls[0];
         assert_eq!(b.last_hitter, Some(0));
         let out = b.vy.atan2(b.vx);
-        assert!(wrap(out - (a + PI)).abs() > 0.5, "an edge hit goes off at a slant");
+        assert!(
+            wrap(out - (a + PI)).abs() > 0.5,
+            "an edge hit goes off at a slant"
+        );
     }
 
     #[test]
@@ -593,7 +623,10 @@ mod tests {
         assert_eq!(s.paddles[3].points, 1);
         assert_eq!(s.goals, 1);
         assert_eq!(s.ball_count(), s.balls_wanted(), "served again");
-        assert!(s.balls.iter().any(|b| b.wait > 0), "the new ball waits a moment");
+        assert!(
+            s.balls.iter().any(|b| b.wait > 0),
+            "the new ball waits a moment"
+        );
     }
 
     #[test]
@@ -649,7 +682,10 @@ mod tests {
             goals += s.goals;
         }
         assert!(goals > 4, "the AI never misses: {goals} goals, {hits} hits");
-        assert!(hits > goals * 2, "the AI can't rally: {hits} hits, {goals} goals");
+        assert!(
+            hits > goals * 2,
+            "the AI can't rally: {hits} hits, {goals} goals"
+        );
     }
 
     #[test]
@@ -674,4 +710,3 @@ mod tests {
         assert_eq!(a.pack_cells(), b.pack_cells());
     }
 }
-

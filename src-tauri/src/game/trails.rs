@@ -183,7 +183,11 @@ impl TrailsSim {
     }
 
     pub fn detail(&self) -> String {
-        let riders = self.cycles.iter().filter(|c| c.human_until > self.ticks).count();
+        let riders = self
+            .cycles
+            .iter()
+            .filter(|c| c.human_until > self.ticks)
+            .count();
         let mut line = match self
             .cycles
             .iter()
@@ -365,7 +369,11 @@ impl TrailsSim {
         for _ in 0..24 {
             let it = self.rng.next_below(self.theta as u64) as usize;
             let ir = self.radial / 4 + self.rng.next_below(self.radial as u64 / 2) as usize;
-            let d = if self.rng.next_below(2) == 0 { Dir::Ccw } else { Dir::Cw };
+            let d = if self.rng.next_below(2) == 0 {
+                Dir::Ccw
+            } else {
+                Dir::Cw
+            };
             if !self.open(Some((it, ir))) {
                 continue;
             }
@@ -473,7 +481,11 @@ impl TrailsSim {
             }
         }
         if self.rng.next_below(AI_WANDER) == 0 {
-            let turn = if self.rng.next_below(2) == 0 { d.left() } else { d.right() };
+            let turn = if self.rng.next_below(2) == 0 {
+                d.left()
+            } else {
+                d.right()
+            };
             if self.road(it, ir, turn, 0.2) >= 0.2 {
                 self.cycles[k].heading = turn;
             }
@@ -616,7 +628,11 @@ mod tests {
                 s.tick();
             }
             assert!(s.cycles[0].dead_until != 0, "ring {ir} heading {d:?}");
-            assert_eq!(s.cycles.iter().map(|c| c.kills).sum::<u32>(), 0, "nobody's credit");
+            assert_eq!(
+                s.cycles.iter().map(|c| c.kills).sum::<u32>(),
+                0,
+                "nobody's credit"
+            );
         }
     }
 
@@ -720,4 +736,3 @@ mod tests {
         assert_eq!(a.pack_cells(), b.pack_cells());
     }
 }
-

@@ -157,7 +157,10 @@ struct Glow {
     glow: u8,
 }
 
-const DARK: Glow = Glow { tone: WHITE, glow: 0 };
+const DARK: Glow = Glow {
+    tone: WHITE,
+    glow: 0,
+};
 
 pub struct SpacewarSim {
     theta: usize,
@@ -304,7 +307,11 @@ impl SpacewarSim {
         for _ in 0..14 {
             let a = self.unit() * TAU;
             let d = self.unit() * 0.11;
-            let t = if self.rng.next_below(3) == 0 { WHITE } else { tone };
+            let t = if self.rng.next_below(3) == 0 {
+                WHITE
+            } else {
+                tone
+            };
             self.glow_at(p.add(V2::dir(a).scale(d)), t, 230);
         }
     }
@@ -465,7 +472,11 @@ impl SpacewarSim {
         // correction toward the band.
         let mid = (AI_ORBIT_MIN + AI_ORBIT_MAX) / 2.0;
         let r_goal = r.clamp(AI_ORBIT_MIN, AI_ORBIT_MAX);
-        let along = if me.vel.x * tangent.x + me.vel.y * tangent.y >= 0.0 { 1.0 } else { -1.0 };
+        let along = if me.vel.x * tangent.x + me.vel.y * tangent.y >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
         let v_goal = tangent
             .scale(along * (GM / r_goal).sqrt())
             .add(radial.scale((mid - r) * 0.8));
@@ -718,8 +729,14 @@ mod tests {
             lo = lo.min(r);
             hi = hi.max(r);
         }
-        assert!(s.ships[0].dead_until == 0, "the orbit decayed into the star");
-        assert!(lo > r0 - 0.05 && hi < r0 + 0.05, "orbit at {r0} wandered {lo}..{hi}");
+        assert!(
+            s.ships[0].dead_until == 0,
+            "the orbit decayed into the star"
+        );
+        assert!(
+            lo > r0 - 0.05 && hi < r0 + 0.05,
+            "orbit at {r0} wandered {lo}..{hi}"
+        );
     }
 
     #[test]
@@ -748,7 +765,10 @@ mod tests {
         SpacewarSim::wrap(&mut p, &mut v);
         assert!(p.x < -0.9 && p.len() <= RIM, "{p:?}");
         assert!(p.x * v.x + p.y * v.y < 0.0, "now heading inward: {v:?}");
-        assert!((v.len() - V2::new(0.6, 0.1).len()).abs() < 1e-5, "same speed");
+        assert!(
+            (v.len() - V2::new(0.6, 0.1).len()).abs() < 1e-5,
+            "same speed"
+        );
     }
 
     #[test]
@@ -801,10 +821,16 @@ mod tests {
         }
         let sh = s.ships[3];
         assert!(sh.hyper_until == 0);
-        assert!(sh.dead_until != 0 || sh.pos.sub(before).len() > 1e-3, "it went somewhere (or died trying)");
+        assert!(
+            sh.dead_until != 0 || sh.pos.sub(before).len() > 1e-3,
+            "it went somewhere (or died trying)"
+        );
         let ready = sh.hyper_ready;
         s.command(GameCommand::Hyperspace, 3);
-        assert!(s.ticks < ready && s.ships[3].hyper_until == 0, "cooling down");
+        assert!(
+            s.ticks < ready && s.ships[3].hyper_until == 0,
+            "cooling down"
+        );
     }
 
     #[test]

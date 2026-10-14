@@ -160,7 +160,10 @@ struct Glow {
     glow: u8,
 }
 
-const DARK: Glow = Glow { tone: WHITE, glow: 0 };
+const DARK: Glow = Glow {
+    tone: WHITE,
+    glow: 0,
+};
 
 pub struct RimfireSim {
     theta: usize,
@@ -316,7 +319,10 @@ impl RimfireSim {
     }
 
     fn humans(&self) -> usize {
-        self.claws.iter().filter(|c| c.human_until > self.ticks).count()
+        self.claws
+            .iter()
+            .filter(|c| c.human_until > self.ticks)
+            .count()
     }
 
     pub fn spawn_rate(&self) -> f32 {
@@ -324,7 +330,10 @@ impl RimfireSim {
     }
 
     pub fn detail(&self) -> String {
-        let mut line = format!("{} destroyed · {} claws grabbed", self.destroyed, self.grabs);
+        let mut line = format!(
+            "{} destroyed · {} claws grabbed",
+            self.destroyed, self.grabs
+        );
         if let Some((k, c)) = self
             .claws
             .iter()
@@ -393,7 +402,10 @@ impl RimfireSim {
                 lane,
                 depth,
                 speed,
-                motion: Motion::Flip { to, left: FLIP_TICKS },
+                motion: Motion::Flip {
+                    to,
+                    left: FLIP_TICKS,
+                },
                 turn_at: 0.0,
             });
         }
@@ -597,12 +609,17 @@ impl RimfireSim {
                             self.split(e.lane, rim);
                             continue;
                         }
-                        e.motion = Motion::Rim { wait: RIM_HOP_TICKS };
+                        e.motion = Motion::Rim {
+                            wait: RIM_HOP_TICKS,
+                        };
                     } else if e.kind == Kind::Flipper && self.rng.next_below(CLIMB_FLIP_CHANCE) == 0
                     {
                         let d = if self.rng.next_below(2) == 0 { -1 } else { 1 };
                         let to = (e.lane as i32 + d).rem_euclid(self.lanes as i32) as usize;
-                        e.motion = Motion::Flip { to, left: FLIP_TICKS };
+                        e.motion = Motion::Flip {
+                            to,
+                            left: FLIP_TICKS,
+                        };
                     }
                 }
                 Motion::Flip { to, left } => {
@@ -611,7 +628,9 @@ impl RimfireSim {
                     } else {
                         e.lane = to;
                         e.motion = if e.depth >= rim - 0.01 {
-                            Motion::Rim { wait: RIM_HOP_TICKS }
+                            Motion::Rim {
+                                wait: RIM_HOP_TICKS,
+                            }
                         } else {
                             Motion::Climb
                         };
@@ -622,14 +641,21 @@ impl RimfireSim {
                         e.motion = Motion::Rim { wait: wait - 1 };
                     } else if let Some((_, d)) = self.nearest_live_claw(e.lane) {
                         if d != 0 {
-                            let to = (e.lane as i32 + d.signum()).rem_euclid(self.lanes as i32)
-                                as usize;
-                            e.motion = Motion::Flip { to, left: FLIP_TICKS };
+                            let to =
+                                (e.lane as i32 + d.signum()).rem_euclid(self.lanes as i32) as usize;
+                            e.motion = Motion::Flip {
+                                to,
+                                left: FLIP_TICKS,
+                            };
                         } else {
-                            e.motion = Motion::Rim { wait: RIM_HOP_TICKS };
+                            e.motion = Motion::Rim {
+                                wait: RIM_HOP_TICKS,
+                            };
                         }
                     } else {
-                        e.motion = Motion::Rim { wait: RIM_HOP_TICKS };
+                        e.motion = Motion::Rim {
+                            wait: RIM_HOP_TICKS,
+                        };
                     }
                 }
                 Motion::Grab { left } => {
@@ -889,7 +915,11 @@ mod tests {
         hold_fire(&mut s);
         s.enemies.push(enemy(Kind::Flipper, 3, 10.0, Motion::Climb));
         s.enemies.push(enemy(Kind::Flipper, 3, 30.0, Motion::Climb));
-        s.shots.push(Shot { lane: 3, depth: 47.5, owner: 1 });
+        s.shots.push(Shot {
+            lane: 3,
+            depth: 47.5,
+            owner: 1,
+        });
         for _ in 0..12 {
             s.tick_shots();
         }
@@ -903,7 +933,11 @@ mod tests {
         let mut s = sim();
         hold_fire(&mut s);
         s.enemies.push(enemy(Kind::Tanker, 5, 20.0, Motion::Climb));
-        s.shots.push(Shot { lane: 5, depth: 47.5, owner: 0 });
+        s.shots.push(Shot {
+            lane: 5,
+            depth: 47.5,
+            owner: 0,
+        });
         for _ in 0..15 {
             s.tick_shots();
         }
@@ -928,7 +962,11 @@ mod tests {
         s.spikes[2] = 20.0;
         s.enemies.push(enemy(Kind::Flipper, 2, 8.0, Motion::Climb));
         for _ in 0..3 {
-            s.shots.push(Shot { lane: 2, depth: 47.5, owner: 0 });
+            s.shots.push(Shot {
+                lane: 2,
+                depth: 47.5,
+                owner: 0,
+            });
             for _ in 0..25 {
                 s.tick_shots();
             }
@@ -936,11 +974,18 @@ mod tests {
         assert_eq!(s.enemies.len(), 1, "the spike took the shots");
         assert!((s.spikes[2] - (20.0 - 3.0 * SPIKE_EROSION)).abs() < 0.01);
         s.spikes[2] = 0.0;
-        s.shots.push(Shot { lane: 2, depth: 47.5, owner: 0 });
+        s.shots.push(Shot {
+            lane: 2,
+            depth: 47.5,
+            owner: 0,
+        });
         for _ in 0..25 {
             s.tick_shots();
         }
-        assert!(s.enemies.is_empty(), "with the spike gone the flipper is hit");
+        assert!(
+            s.enemies.is_empty(),
+            "with the spike gone the flipper is hit"
+        );
     }
 
     #[test]
@@ -950,7 +995,8 @@ mod tests {
         // Claw 0 is in lane 0 and claw 3 in lane 12; a flipper reaches the
         // rim in lane 15, one hop from claw 0.
         assert_eq!(s.claw_lane(0), 0);
-        s.enemies.push(enemy(Kind::Flipper, 15, 47.0, Motion::Rim { wait: 1 }));
+        s.enemies
+            .push(enemy(Kind::Flipper, 15, 47.0, Motion::Rim { wait: 1 }));
         for _ in 0..120 {
             s.tick_enemies();
             s.ticks += 1;
@@ -973,7 +1019,12 @@ mod tests {
             c.fire_wait = 0;
         }
         let lane0 = s.claw_lane(0);
-        s.enemies.push(enemy(Kind::Flipper, lane0, 47.0, Motion::Grab { left: GRAB_TICKS }));
+        s.enemies.push(enemy(
+            Kind::Flipper,
+            lane0,
+            47.0,
+            Motion::Grab { left: GRAB_TICKS },
+        ));
         // No new spawns for the test.
         s.spawn_acc = -1000.0;
         for _ in 0..GRAB_TICKS as usize {
@@ -993,14 +1044,18 @@ mod tests {
             s.tick();
         }
         assert_eq!(s.claw_lane(2), 10);
-        assert!(s.claws[2].human_until > s.ticks, "a tap takes the claw from the AI");
+        assert!(
+            s.claws[2].human_until > s.ticks,
+            "a tap takes the claw from the AI"
+        );
     }
 
     #[test]
     fn the_superzapper_clears_the_board_then_cools_down() {
         let mut s = sim();
         for lane in 0..8 {
-            s.enemies.push(enemy(Kind::Flipper, lane, 20.0, Motion::Climb));
+            s.enemies
+                .push(enemy(Kind::Flipper, lane, 20.0, Motion::Climb));
         }
         s.command(GameCommand::Superzap, 1);
         assert!(s.enemies.is_empty());
@@ -1024,7 +1079,10 @@ mod tests {
             s.tick();
         }
         assert!(s.destroyed > 40, "the AI barely fought: {}", s.destroyed);
-        assert!(s.grabs > 0, "the attract mode should lose a claw now and then");
+        assert!(
+            s.grabs > 0,
+            "the attract mode should lose a claw now and then"
+        );
         assert!(s.enemies.len() < MAX_ENEMIES, "the board filled up");
     }
 
@@ -1058,7 +1116,11 @@ mod tests {
                     let mut targets: Vec<usize> = s.claws.iter().map(|c| c.target).collect();
                     targets.sort();
                     targets.dedup();
-                    assert_eq!(targets.len(), 4, "seed {seed} tick {t}: two claws share a lane");
+                    assert_eq!(
+                        targets.len(),
+                        4,
+                        "seed {seed} tick {t}: two claws share a lane"
+                    );
                 }
             }
         }
@@ -1099,7 +1161,10 @@ mod tests {
         // Claw 0 is Tempest's yellow: red and green bright, blue low.
         let claw = out[47 * 64 + 1];
         let (r, g, b) = (claw & 0xff, (claw >> 8) & 0xff, claw >> 16);
-        assert!(r > 150 && g > 150 && b < 100, "claw 0 should be yellow: {claw:06x}");
+        assert!(
+            r > 150 && g > 150 && b < 100,
+            "claw 0 should be yellow: {claw:06x}"
+        );
     }
 
     #[test]
@@ -1115,4 +1180,3 @@ mod tests {
         assert_eq!(a.pack_cells(), b.pack_cells());
     }
 }
-

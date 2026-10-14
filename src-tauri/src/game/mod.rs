@@ -159,10 +159,16 @@ impl GameSim {
             GameKind::Gathering => {
                 GameSim::Gathering(gathering::GatheringSim::new(theta, radial, species, seed))
             }
-            GameKind::Rimfire => GameSim::Rimfire(rimfire::RimfireSim::new(theta, radial, species, seed)),
+            GameKind::Rimfire => {
+                GameSim::Rimfire(rimfire::RimfireSim::new(theta, radial, species, seed))
+            }
             GameKind::Echo => GameSim::Echo(echo::EchoSim::new(theta, radial, species, seed)),
-            GameKind::Spacewar => GameSim::Spacewar(spacewar::SpacewarSim::new(theta, radial, species, seed)),
-            GameKind::Trails => GameSim::Trails(trails::TrailsSim::new(theta, radial, species, seed)),
+            GameKind::Spacewar => {
+                GameSim::Spacewar(spacewar::SpacewarSim::new(theta, radial, species, seed))
+            }
+            GameKind::Trails => {
+                GameSim::Trails(trails::TrailsSim::new(theta, radial, species, seed))
+            }
             GameKind::Rally => GameSim::Rally(rally::RallySim::new(theta, radial, species, seed)),
             GameKind::Doom => GameSim::Doom(crate::doom::DoomSim::new(species)),
         }
@@ -618,7 +624,10 @@ mod tests {
             GameKind::RadialTetris
         );
         // The floor perk is built from the wire name.
-        assert_eq!(serde_json::to_string(&GameKind::Perimeter).unwrap(), "\"perimeter\"");
+        assert_eq!(
+            serde_json::to_string(&GameKind::Perimeter).unwrap(),
+            "\"perimeter\""
+        );
         assert_eq!(GameKind::Perimeter.floor_perk(), Some("game:perimeter"));
         assert_eq!(GameKind::Gathering.floor_perk(), Some("game:gathering"));
         assert_eq!(GameKind::Flak.floor_perk(), None);
@@ -640,15 +649,20 @@ mod tests {
             serde_json::from_str(r#"{"type":"game_command","command":"hard_drop"}"#).unwrap();
         assert!(matches!(
             old,
-            ClientMsg::GameCommand { command: GameCommand::HardDrop, species: 0 }
+            ClientMsg::GameCommand {
+                command: GameCommand::HardDrop,
+                species: 0
+            }
         ));
-        let new: ClientMsg = serde_json::from_str(
-            r#"{"type":"game_command","command":"turn_left","species":3}"#,
-        )
-        .unwrap();
+        let new: ClientMsg =
+            serde_json::from_str(r#"{"type":"game_command","command":"turn_left","species":3}"#)
+                .unwrap();
         assert!(matches!(
             new,
-            ClientMsg::GameCommand { command: GameCommand::TurnLeft, species: 3 }
+            ClientMsg::GameCommand {
+                command: GameCommand::TurnLeft,
+                species: 3
+            }
         ));
     }
 

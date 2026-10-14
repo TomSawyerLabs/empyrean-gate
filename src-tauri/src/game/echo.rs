@@ -68,11 +68,19 @@ enum Phase {
     /// The floor answers `pattern[step]`. `wrong` = a wrong wedge was tapped
     /// and this many beats of grace are left; `quiet` = beats with no right
     /// answer.
-    Listen { step: usize, wrong: Option<(u8, u8)>, quiet: u8 },
+    Listen {
+        step: usize,
+        wrong: Option<(u8, u8)>,
+        quiet: u8,
+    },
     /// The whole pattern came back: a celebration, then one more step.
     Win { beats: u8 },
     /// `wrong` was tapped (or nobody answered) where `right` was wanted.
-    Miss { beats: u8, wrong: Option<u8>, right: u8 },
+    Miss {
+        beats: u8,
+        wrong: Option<u8>,
+        right: u8,
+    },
 }
 
 pub struct EchoSim {
@@ -249,27 +257,49 @@ impl EchoSim {
     fn on_beat(&mut self) {
         self.beats += 1;
         self.phase = match self.phase {
-            Phase::Show { step, wait } if wait > 0 => Phase::Show { step, wait: wait - 1 },
+            Phase::Show { step, wait } if wait > 0 => Phase::Show {
+                step,
+                wait: wait - 1,
+            },
             Phase::Show { step, .. } => {
                 let w = self.pattern[step];
                 self.show(w);
                 // Fast music shows a step every other beat.
                 let wait = u8::from(self.beat_ticks < FAST_BEAT_TICKS);
                 if step + 1 < self.pattern.len() {
-                    Phase::Show { step: step + 1, wait }
+                    Phase::Show {
+                        step: step + 1,
+                        wait,
+                    }
                 } else {
                     Phase::Cue
                 }
             }
-            Phase::Cue => Phase::Listen { step: 0, wrong: None, quiet: 0 },
-            Phase::Listen { step, wrong: Some((w, grace)), quiet } => {
+            Phase::Cue => Phase::Listen {
+                step: 0,
+                wrong: None,
+                quiet: 0,
+            },
+            Phase::Listen {
+                step,
+                wrong: Some((w, grace)),
+                quiet,
+            } => {
                 if grace > 1 {
-                    Phase::Listen { step, wrong: Some((w, grace - 1)), quiet }
+                    Phase::Listen {
+                        step,
+                        wrong: Some((w, grace - 1)),
+                        quiet,
+                    }
                 } else {
                     self.miss(Some(w), step)
                 }
             }
-            Phase::Listen { step, wrong: None, quiet } => {
+            Phase::Listen {
+                step,
+                wrong: None,
+                quiet,
+            } => {
                 if self.attract() {
                     // The Gate answers itself, a little worse the longer the
                     // pattern gets.
@@ -287,7 +317,11 @@ impl EchoSim {
                 } else if quiet + 1 >= PATIENCE_BEATS {
                     self.miss(None, step)
                 } else {
-                    Phase::Listen { step, wrong: None, quiet: quiet + 1 }
+                    Phase::Listen {
+                        step,
+                        wrong: None,
+                        quiet: quiet + 1,
+                    }
                 }
             }
             Phase::Win { beats } if beats > 1 => {
@@ -302,11 +336,19 @@ impl EchoSim {
                 self.grow();
                 Phase::Show { step: 0, wait: 1 }
             }
-            Phase::Miss { beats, wrong, right } if beats > 1 => {
+            Phase::Miss {
+                beats,
+                wrong,
+                right,
+            } if beats > 1 => {
                 if beats % 2 == 0 {
                     self.flash(right);
                 }
-                Phase::Miss { beats: beats - 1, wrong, right }
+                Phase::Miss {
+                    beats: beats - 1,
+                    wrong,
+                    right,
+                }
             }
             Phase::Miss { .. } => {
                 self.pattern.clear();
@@ -323,7 +365,11 @@ impl EchoSim {
             self.rounds_won += 1;
             Phase::Win { beats: WIN_BEATS }
         } else {
-            Phase::Listen { step: step + 1, wrong: None, quiet: 0 }
+            Phase::Listen {
+                step: step + 1,
+                wrong: None,
+                quiet: 0,
+            }
         }
     }
 
@@ -472,7 +518,9 @@ mod tests {
         let mut shown = Vec::new();
         for _ in 0..3 {
             one_beat(&mut s);
-            let brightest = (0..4).max_by(|a, b| s.lit[*a].total_cmp(&s.lit[*b])).unwrap();
+            let brightest = (0..4)
+                .max_by(|a, b| s.lit[*a].total_cmp(&s.lit[*b]))
+                .unwrap();
             shown.push(brightest as u8);
         }
         assert_eq!(shown, vec![2, 0, 3]);
@@ -498,7 +546,11 @@ mod tests {
         s.lit = vec![0.0; 8];
         fast(&mut s);
         assert!(s.lit[2] > 0.0 && s.lit[0] == 0.0, "step 0 shown");
-        assert!(matches!(s.phase, Phase::Show { step: 1, wait: 1 }), "{:?}", s.phase);
+        assert!(
+            matches!(s.phase, Phase::Show { step: 1, wait: 1 }),
+            "{:?}",
+            s.phase
+        );
         fast(&mut s);
         assert_eq!(s.lit[0], 0.0, "a beat of rest");
         fast(&mut s);
@@ -519,7 +571,11 @@ mod tests {
             one_beat(&mut s);
         }
         assert_eq!(s.pattern_len(), pattern.len() + 1);
-        assert_eq!(&s.pattern[..pattern.len()], &pattern[..], "the pattern grows, it doesn't change");
+        assert_eq!(
+            &s.pattern[..pattern.len()],
+            &pattern[..],
+            "the pattern grows, it doesn't change"
+        );
         assert_eq!(s.best(), pattern.len());
     }
 
@@ -527,25 +583,51 @@ mod tests {
     fn one_right_tap_rescues_a_wrong_one() {
         let mut s = sim();
         s.pattern = vec![1, 2];
-        s.phase = Phase::Listen { step: 0, wrong: None, quiet: 0 };
+        s.phase = Phase::Listen {
+            step: 0,
+            wrong: None,
+            quiet: 0,
+        };
         s.human_beat = Some(0);
         s.inject(cell(&s, 3), 30, 0); // someone gets it wrong…
         one_beat(&mut s);
         s.inject(cell(&s, 1), 30, 0); // …someone else remembers
-        assert!(matches!(s.phase, Phase::Listen { step: 1, wrong: None, .. }));
+        assert!(matches!(
+            s.phase,
+            Phase::Listen {
+                step: 1,
+                wrong: None,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn only_wrong_taps_fail_after_the_grace() {
         let mut s = sim();
         s.pattern = vec![1, 2];
-        s.phase = Phase::Listen { step: 0, wrong: None, quiet: 0 };
+        s.phase = Phase::Listen {
+            step: 0,
+            wrong: None,
+            quiet: 0,
+        };
         s.human_beat = Some(0);
         s.inject(cell(&s, 3), 30, 0);
         for _ in 0..WRONG_GRACE_BEATS {
             one_beat(&mut s);
         }
-        assert!(matches!(s.phase, Phase::Miss { wrong: Some(3), right: 1, .. }), "{:?}", s.phase);
+        assert!(
+            matches!(
+                s.phase,
+                Phase::Miss {
+                    wrong: Some(3),
+                    right: 1,
+                    ..
+                }
+            ),
+            "{:?}",
+            s.phase
+        );
         for _ in 0..MISS_BEATS {
             one_beat(&mut s);
         }
@@ -557,7 +639,11 @@ mod tests {
     fn a_second_finger_on_the_same_wedge_is_not_the_next_answer() {
         let mut s = sim();
         s.pattern = vec![1, 1, 2];
-        s.phase = Phase::Listen { step: 0, wrong: None, quiet: 0 };
+        s.phase = Phase::Listen {
+            step: 0,
+            wrong: None,
+            quiet: 0,
+        };
         s.inject(cell(&s, 1), 30, 0);
         s.inject(cell(&s, 1), 30, 4); // the same instant: a duplicate
         assert!(matches!(s.phase, Phase::Listen { step: 1, .. }));
@@ -581,7 +667,11 @@ mod tests {
     fn people_playing_who_go_quiet_time_out() {
         let mut s = sim();
         s.pattern = vec![1, 2];
-        s.phase = Phase::Listen { step: 0, wrong: None, quiet: 0 };
+        s.phase = Phase::Listen {
+            step: 0,
+            wrong: None,
+            quiet: 0,
+        };
         s.human_beat = Some(s.beats);
         for _ in 0..PATIENCE_BEATS {
             one_beat(&mut s);
@@ -597,7 +687,11 @@ mod tests {
             one_beat(&mut s);
             lengths.push(s.pattern_len());
         }
-        assert!(s.best() >= 4, "the attract mode never got going: best {}", s.best());
+        assert!(
+            s.best() >= 4,
+            "the attract mode never got going: best {}",
+            s.best()
+        );
         assert!(
             lengths.windows(2).any(|w| w[1] < w[0]),
             "the attract mode never missed"
