@@ -5697,6 +5697,48 @@ button:disabled {
   line-height: 1.2;
 }
 
+/* Per-color game buttons (src/GameButtons.tsx): the icon wears the player's
+   chip color so the row reads as "my ship's controls". */
+.game-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.game-buttons button {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  text-align: left;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.game-buttons button > span:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.game-buttons small {
+  color: #9f98bd;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.game-button-icon {
+  width: 25px;
+  flex: 0 0 25px;
+  color: var(--chip);
+  font-size: 24px;
+  line-height: 1;
+  text-align: center;
+}
+
 .ringfall-control-icon {
   width: 25px;
   flex: 0 0 25px;

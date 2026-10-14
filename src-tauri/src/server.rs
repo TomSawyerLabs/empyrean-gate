@@ -1784,10 +1784,10 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
             &name(),
             json!({ "species": species, "points": points.len() }),
         ),
-        ClientMsg::GameCommand { command } => rec.event(
+        ClientMsg::GameCommand { command, species } => rec.event(
             "game_command",
             &name(),
-            serde_json::json!({ "command": command }),
+            serde_json::json!({ "command": command, "species": species }),
         ),
         ClientMsg::GameKey { key, down } => rec.event(
             "game_key",
@@ -2662,8 +2662,8 @@ async fn handle_msg(
         ClientMsg::GameInput { species, points } => {
             state.game_input(species, &points);
         }
-        ClientMsg::GameCommand { command } => {
-            state.game_command(command);
+        ClientMsg::GameCommand { command, species } => {
+            state.game_command(command, species);
         }
         ClientMsg::SetTestMode { active } => {
             if let Err(message) = state.set_test_mode(active) {
@@ -2990,6 +2990,7 @@ mod diagnostics_tests {
         assert!(!requires_admin(&ClientMsg::GetState));
         assert!(!requires_admin(&ClientMsg::GameCommand {
             command: crate::game::GameCommand::HardDrop,
+            species: 0,
         }));
         assert!(!requires_admin(&ClientMsg::PatchParam {
             node: "n".into(),

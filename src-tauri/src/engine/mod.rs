@@ -2770,8 +2770,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 let ir = (t * (rt.sim.radial() as f32 - 1.0)).round() as i32;
                 rt.sim.inject(it, ir, 1.5, 3.0, input.species);
             }
-            for command in &game_commands {
-                rt.sim.command(*command);
+            for (command, species) in &game_commands {
+                rt.sim.command(*command, *species);
             }
             if (!game_inputs.is_empty() || !game_commands.is_empty()) && raster.is_none() {
                 // Repack "next" so the blob blends in over the rest of this

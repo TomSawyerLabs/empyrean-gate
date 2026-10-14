@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useGate } from "./state";
 import GateCanvas from "./GateCanvas";
+import GameButtons from "./GameButtons";
 import {
   chipColor,
   chipCount,
@@ -263,6 +264,8 @@ export default function Games() {
               <p className="games-join">
                 {active === "radial_tetris" ? (
                   <><strong>Aim.</strong> Rotate. Drop. Complete any full ring to pull the whole stack inward.</>
+                ) : activeGame?.join ? (
+                  activeGame.join
                 ) : (
                   <><strong>1.</strong> Pick a color &nbsp;<strong>2.</strong> Tap the array below. That&apos;s joining — there are no seats and no turns, and any number of people can play, sharing colors freely.</>
                 )}
@@ -270,7 +273,7 @@ export default function Games() {
               {active === "radial_tetris" && (
                 <span className="hint games-picker-label">Your piece color</span>
               )}
-              <div className="games-species">
+              {!activeGame?.noChips && <div className="games-species">
                 {Array.from({ length: chips }, (_, s) => (
                   <button
                     key={s}
@@ -291,7 +294,15 @@ export default function Games() {
                     ✕
                   </button>
                 )}
-              </div>
+              </div>}
+              {activeGame?.buttons && (
+                <GameButtons
+                  buttons={activeGame.buttons}
+                  color={chipColor(activeGame, mySpecies, species)}
+                  onCommand={(command) => client.gameCommand(command, speciesRef.current)}
+                  keyboard
+                />
+              )}
               {active === "radial_tetris" && (
                 <div className="ringfall-play">
                   <div className="ringfall-piece-key">

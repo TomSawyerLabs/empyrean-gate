@@ -1025,13 +1025,13 @@ impl SharedState {
     /// Queue a named game action. Unlike the old hidden tap-quadrant scheme,
     /// controls say exactly what the engine will do. Commands are bounded by
     /// the same flood limit as point inputs.
-    pub fn game_command(&self, command: crate::game::GameCommand) {
+    pub fn game_command(&self, command: crate::game::GameCommand, species: u8) {
         let mut game = self.game.lock();
         game.last_input = Some(Instant::now());
         if game.commands.len() >= crate::game::MAX_QUEUED_INPUTS {
             game.commands.remove(0);
         }
-        game.commands.push(command);
+        game.commands.push((command, species));
     }
 
     /// One-shot: the operator has confirmed a close, so the next CloseRequested

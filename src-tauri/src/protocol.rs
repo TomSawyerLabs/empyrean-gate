@@ -322,8 +322,12 @@ pub enum ClientMsg {
     },
     /// A named game action from an on-screen button or keyboard. Open to every
     /// connected player; games that do not use commands simply ignore it.
+    /// `species` is the presser's color chip (whose ship fires, whose cycle
+    /// turns); absent from older clients, which only drove Ringfall.
     GameCommand {
         command: crate::game::GameCommand,
+        #[serde(default)]
+        species: u8,
     },
     /// A held key for DOOM (plans/doom.md): down on press, up on release.
     /// Open to every client, but the first connection to send one holds the

@@ -4,6 +4,18 @@
 
 import type { GameCommand, GameKind } from "./types";
 
+/** A button for a game with more to it than "go there" (plans/classic-games.md).
+ *  Every press is sent with the player's chosen color, so it moves *their*
+ *  ship or cycle. Taps on the array always work too; buttons are extras. */
+export type GameButton = {
+  command: GameCommand;
+  icon: string;
+  label: string;
+  /** `KeyboardEvent.key` values that press it, and how to say them. */
+  keys: string[];
+  keyHint: string;
+};
+
 export const GAMES: {
   kind: GameKind;
   name: string;
@@ -23,6 +35,12 @@ export const GAMES: {
   /** Fixed chips, when a game's colours are its own (Gathering's six orbs)
    * rather than evenly spaced hues counted by the knob. */
   chips?: { label: string; color: string }[];
+  /** Per-color buttons shown under the chips (see `GameButton`). */
+  buttons?: GameButton[];
+  /** No color chips at all: the taps are the whole game (Echo). */
+  noChips?: boolean;
+  /** Replaces the generic "pick a color, tap the array" join line. */
+  join?: string;
 }[] = [
   {
     kind: "rps",

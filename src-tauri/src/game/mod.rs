@@ -292,9 +292,13 @@ impl GameSim {
         }
     }
 
-    pub fn command(&mut self, command: GameCommand) {
-        if let GameSim::RadialTetris(sim) = self {
-            sim.command(command);
+    /// A button press from the player holding color `species`.
+    pub fn command(&mut self, command: GameCommand, species: u8) {
+        match self {
+            GameSim::RadialTetris(sim) => sim.command(command),
+            _ => {
+                let _ = species;
+            }
         }
     }
 
@@ -378,7 +382,8 @@ pub enum GameKey {
 
 /// Explicit controller actions for games that need buttons. Keeping these out
 /// of polar tap coordinates makes the play surface self-explanatory and keeps
-/// canvas taps free to mean “move here”.
+/// canvas taps free to mean “move here”. Each arrives with the presser's
+/// color slot (plans/classic-games.md); Ringfall's shared piece ignores it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GameCommand {
@@ -387,6 +392,15 @@ pub enum GameCommand {
     RotateClockwise,
     SoftDrop,
     HardDrop,
+    /// Trails: turn the cycle a quarter turn, as seen on the phone preview.
+    TurnLeft,
+    TurnRight,
+    /// Spacewar: a torpedo along the ship's heading.
+    Fire,
+    /// Spacewar: vanish and reappear somewhere random — usually.
+    Hyperspace,
+    /// Rimfire: clear the board, once per color per cooldown.
+    Superzap,
 }
 
 /// One queued player injection, in the same polar space as drawing dabs:
@@ -412,8 +426,9 @@ pub struct GameControl {
     /// Queued player injections, drained by the engine each frame. Bounded so
     /// a hammering client cannot grow memory.
     pub inputs: Vec<QueuedInput>,
-    /// Explicit button/keyboard actions, drained once per render frame.
-    pub commands: Vec<GameCommand>,
+    /// Explicit button/keyboard actions with the presser's color slot,
+    /// drained once per render frame.
+    pub commands: Vec<(GameCommand, u8)>,
     /// Held-key events (DOOM), drained once per render frame.
     pub keys: Vec<(GameKey, bool)>,
     /// The connection holding DOOM's controls (plans/doom.md): the first to
@@ -518,6 +533,27 @@ mod tests {
         );
         assert!(!GameKind::Doom.is_listed());
         assert!(GameKind::Rps.is_listed());
+    }
+
+    /// Buttons carry the presser's color; a client from before that (only
+    /// Ringfall had buttons) still parses, as color 0.
+    #[test]
+    fn game_commands_carry_a_color_and_default_it_for_older_clients() {
+        use crate::protocol::ClientMsg;
+        let old: ClientMsg =
+            serde_json::from_str(r#"{"type":"game_command","command":"hard_drop"}"#).unwrap();
+        assert!(matches!(
+            old,
+            ClientMsg::GameCommand { command: GameCommand::HardDrop, species: 0 }
+        ));
+        let new: ClientMsg = serde_json::from_str(
+            r#"{"type":"game_command","command":"turn_left","species":3}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            new,
+            ClientMsg::GameCommand { command: GameCommand::TurnLeft, species: 3 }
+        ));
     }
 
     /// WGSL uniform structs round their size to 16 bytes; a Rust struct that

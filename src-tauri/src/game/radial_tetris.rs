@@ -440,6 +440,18 @@ impl RadialTetrisSim {
     }
 
     pub fn command(&mut self, command: GameCommand) {
+        // Another game's buttons (a stale page) are not Ringfall input and
+        // must not pause the autopilot.
+        if !matches!(
+            command,
+            GameCommand::MoveCounterClockwise
+                | GameCommand::MoveClockwise
+                | GameCommand::RotateClockwise
+                | GameCommand::SoftDrop
+                | GameCommand::HardDrop
+        ) {
+            return;
+        }
         self.human_ticks = HUMAN_TICKS;
         match command {
             GameCommand::MoveCounterClockwise => {
@@ -455,6 +467,7 @@ impl RadialTetrisSim {
                 }
             }
             GameCommand::HardDrop => self.hard_drop(),
+            _ => {}
         }
     }
 

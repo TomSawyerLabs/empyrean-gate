@@ -457,9 +457,10 @@ export class GateClient {
   gameInput(species: number, points: { angle: number; radius: number }[]) {
     this.send({ type: "game_input", species, points });
   }
-  /** Named game action from a visible control or keyboard shortcut. */
-  gameCommand(command: GameCommand) {
-    this.send({ type: "game_command", command });
+  /** Named game action from a visible control or keyboard shortcut, by the
+   *  player holding color chip `species` (whose ship fires, whose cycle turns). */
+  gameCommand(command: GameCommand, species = 0) {
+    this.send({ type: "game_command", command, species });
   }
   addLayer(layer: LayerCfg) {
     this.send({ type: "add_layer", layer });

@@ -9,6 +9,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import GateCanvas, { type DrawPen, type GatePreviewSource } from "../GateCanvas";
+import GameButtons from "../GameButtons";
 import ShapeIcon from "../ShapeIcon";
 import ToolIcon from "../ToolIcon";
 import { EFFECTS, isShape, publicShapes } from "../effects";
@@ -489,8 +490,8 @@ export default function PublicApp() {
           )}
           {playing && gameInfo && (
             <>
-              <div className="public-row-label">Your color</div>
-              <div className="games-species">
+              {!gameInfo.noChips && <div className="public-row-label">Your color</div>}
+              {!gameInfo.noChips && <div className="games-species">
                 {Array.from({ length: chips }, (_, s) => (
                   <button
                     key={s}
@@ -511,7 +512,15 @@ export default function PublicApp() {
                     ✕
                   </button>
                 )}
-              </div>
+              </div>}
+              {gameInfo.buttons && (
+                <GameButtons
+                  buttons={gameInfo.buttons}
+                  color={chipColor(gameInfo, mySpecies, species)}
+                  onCommand={(command) => client.gameCommand(command, speciesRef.current)}
+                  keyboard
+                />
+              )}
               {game === "radial_tetris" && (
                 <div className="ringfall-controls public-ringfall" role="group" aria-label="Ringfall controls">
                   {RINGFALL_COMMANDS.map((control) => (

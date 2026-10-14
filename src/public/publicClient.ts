@@ -251,8 +251,8 @@ export class PublicClient implements CanvasTransport {
     this.send({ type: "game_input", species, points });
   }
 
-  gameCommand(command: GameCommand) {
-    this.send({ type: "game_command", command });
+  gameCommand(command: GameCommand, species = 0) {
+    this.send({ type: "game_command", command, species });
   }
 
   /** Start (kind) or stop (null) a hidden game this session's key unlocks

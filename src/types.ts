@@ -833,7 +833,12 @@ export type GameCommand =
   | "move_clockwise"
   | "rotate_clockwise"
   | "soft_drop"
-  | "hard_drop";
+  | "hard_drop"
+  | "turn_left"
+  | "turn_right"
+  | "fire"
+  | "hyperspace"
+  | "superzap";
 
 /** A key a phone can hold down for DOOM (mirrors `game::GameKey`). */
 export type GameKey =

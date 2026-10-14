@@ -796,15 +796,15 @@ async fn handle(ctx: &Ctx, msg: ClientMsg, conn_id: u64, flow: &mut Flow<'_>, tx
             state.public.lock().note_input(conn_id, "play", now);
             state.game_input(species, &points);
         }
-        ClientMsg::GameCommand { command } => {
+        ClientMsg::GameCommand { command, species } => {
             let who = name_of(state, conn_id);
             state.recorder.event(
                 "game_command",
                 &who,
-                serde_json::json!({ "command": command, "public": true }),
+                serde_json::json!({ "command": command, "species": species, "public": true }),
             );
             state.public.lock().note_input(conn_id, "game", now);
-            state.game_command(command);
+            state.game_command(command, species);
         }
         ClientMsg::SetGameMode { game, .. } => {
             // A hidden game, by a key holder (the gate above checked the
@@ -928,7 +928,7 @@ mod tests {
         assert_eq!(state.floor_game(), Some(GameKind::Perimeter));
         // A long idle allowance keeps it; input refreshes it; zero ends it.
         assert_eq!(state.expire_floor_game(Duration::from_secs(3600)), None);
-        state.game_command(GameCommand::HardDrop);
+        state.game_command(GameCommand::HardDrop, 0);
         assert_eq!(state.expire_floor_game(Duration::from_secs(3600)), None);
         assert_eq!(state.expire_floor_game(Duration::ZERO), Some(GameKind::Perimeter));
         assert_eq!(state.game.lock().active, None);
