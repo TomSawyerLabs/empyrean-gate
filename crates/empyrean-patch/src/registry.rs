@@ -483,7 +483,27 @@ pub const TYPES: &[NodeType] = &[
         inputs: &[],
         outputs: SCALAR_OUT,
         params: &[
-            sel("op", "Op", &["add", "subtract", "multiply", "min", "max"]),
+            // Append only: patches store the index. Unary ops use A.
+            sel(
+                "op",
+                "Op",
+                &[
+                    "add",
+                    "subtract",
+                    "multiply",
+                    "min",
+                    "max",
+                    "divide",
+                    "modulo (wraps into 0..B)",
+                    "power",
+                    "greater than (1/0)",
+                    "less than (1/0)",
+                    "abs (A)",
+                    "floor (A)",
+                    "sine (A in turns)",
+                    "cosine (A in turns)",
+                ],
+            ),
             num("a", "A", -8.0, 8.0, 0.0),
             num("b", "B", -8.0, 8.0, 0.0),
         ],

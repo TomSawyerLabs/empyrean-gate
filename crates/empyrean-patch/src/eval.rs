@@ -200,14 +200,18 @@ impl Runtime {
 
     /// A CPU node's input: the wired upstream output, else the knob value.
     fn input(&self, node: usize, port: &str) -> f32 {
-        let raw = match self.prog.wires.get(&(node, port.to_string())) {
-            Some((from, from_port)) => self.outputs[*from].get(from_port).copied().unwrap_or(0.0),
+        match self.prog.wires.get(&(node, port.to_string())) {
+            // A wired value is not held to the knob's range: that range is the
+            // slider's, and clamping it froze `time` → Rotate after one turn.
+            // Nodes that need a hard limit apply it themselves.
+            Some((from, from_port)) => {
+                let raw = self.outputs[*from].get(from_port).copied().unwrap_or(0.0);
+                let fallback = registry::lookup(&self.doc.nodes[node].kind)
+                    .and_then(|ty| ty.param(port))
+                    .map_or(0.0, |def| def.default);
+                finite_or(raw, fallback)
+            }
             None => self.param(node, port),
-        };
-        let inst = &self.doc.nodes[node];
-        match registry::lookup(&inst.kind).and_then(|ty| ty.param(port)) {
-            Some(def) => sanitize_param(def, raw),
-            None => finite_or(raw, 0.0),
         }
     }
 
@@ -374,7 +378,8 @@ impl Runtime {
                                 hue: self.input(node, "hue"),
                                 saturation: self.input(node, "saturation"),
                                 brightness: self.input(node, "brightness"),
-                                duration: self.input(node, "duration"),
+                                // The one effect field with no limit downstream.
+                                duration: self.input(node, "duration").clamp(0.0, 10.0),
                                 rotation: self.input(node, "rotation"),
                                 grow: self.input(node, "grow"),
                                 edge: self.input(node, "edge"),
@@ -386,13 +391,30 @@ impl Runtime {
                 "scalar_math" => {
                     let a = self.input(node, "a");
                     let b = self.input(node, "b");
+                    // Indices are the registry's op list; appended ops never
+                    // renumber existing ones (patches store the index).
                     let v = match self.param(node, "op").round() as u32 {
                         0 => a + b,
                         1 => a - b,
                         2 => a * b,
                         3 => a.min(b),
-                        _ => a.max(b),
+                        4 => a.max(b),
+                        5 if b != 0.0 => a / b,
+                        5 => 0.0,
+                        // Always in [0, b): `time mod 1` loops 0→1 forever,
+                        // negative inputs included.
+                        6 if b != 0.0 => a.rem_euclid(b),
+                        6 => 0.0,
+                        7 => a.powf(b),
+                        8 => f32::from(a > b),
+                        9 => f32::from(a < b),
+                        10 => a.abs(),
+                        11 => a.floor(),
+                        12 => (TAU * a).sin(),
+                        13 => (TAU * a).cos(),
+                        _ => 0.0,
                     };
+                    let v = finite_or(v, 0.0);
                     self.outputs[node].insert("out".into(), v);
                 }
                 "lfo" => {
@@ -452,15 +474,17 @@ impl Runtime {
                 (None, Some(param)) => self.param(slot.node, param),
                 (None, None) => 0.0,
             };
-            let v = match &slot.param {
-                Some(param) => {
-                    let inst = &self.doc.nodes[slot.node];
-                    registry::lookup(&inst.kind)
+            // Knob values were range-checked by `param`; wired ones only need
+            // to be finite (see `input`). Every shader loop bound is clamped in
+            // WGSL, so an out-of-range value can look odd but never hang.
+            let v = match (&slot.wired, &slot.param) {
+                (Some(_), Some(param)) => {
+                    let fallback = registry::lookup(&self.doc.nodes[slot.node].kind)
                         .and_then(|ty| ty.param(param))
-                        .map(|def| sanitize_param(def, raw))
-                        .unwrap_or_else(|| finite_or(raw, 0.0))
+                        .map_or(0.0, |def| def.default);
+                    finite_or(raw, fallback)
                 }
-                None => finite_or(raw, 0.0),
+                _ => finite_or(raw, 0.0),
             };
             if slot.integrate {
                 self.slot_acc[k] += (v * ms * dt) as f64;
@@ -571,6 +595,77 @@ mod tests {
             assert_eq!(frame(&t, &mut rt), vec!["up"], "follow {follow}");
             assert_eq!(rt.scalar_value(0, "active"), 0.0);
         }
+    }
+
+    /// Reported 2026-10-15: `time` wired into Transform's Rotate spun once and
+    /// stopped, because wired values were clamped to the knob's range (Rotate
+    /// is ±1 turn; Math's operands were ±8). Wired values now pass through.
+    #[test]
+    fn wired_values_are_not_held_to_the_knob_range() {
+        let doc: PatchDoc = serde_json::from_value(serde_json::json!({
+            "nodes": [
+                { "id": "t", "kind": "time" },
+                { "id": "m", "kind": "scalar_math", "params": { "op": 6, "b": 1 } },
+                { "id": "n", "kind": "noise_field" },
+                { "id": "x", "kind": "transform" },
+                { "id": "o", "kind": "output" }
+            ],
+            "edges": [
+                { "from": { "node": "t", "port": "out" }, "to": { "node": "x", "port": "rotate" } },
+                { "from": { "node": "t", "port": "out" }, "to": { "node": "m", "port": "a" } },
+                { "from": { "node": "n", "port": "out" }, "to": { "node": "x", "port": "in" } },
+                { "from": { "node": "x", "port": "out" }, "to": { "node": "o", "port": "in" } }
+            ]
+        }))
+        .unwrap();
+        let rotate_slot = {
+            let prog = compile(&doc).unwrap();
+            prog.slots
+                .iter()
+                .find(|s| s.param.as_deref() == Some("rotate"))
+                .unwrap()
+                .slot
+        };
+        let mut rt = runtime(doc);
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        // dt is clamped to 0.5 s per frame; 25 s of time.
+        let mut inp = inputs(&audio);
+        inp.dt = 0.5;
+        let mut rotate = 0.0;
+        for _ in 0..50 {
+            rotate = rt.eval(&inp)[rotate_slot];
+        }
+        assert!((rotate - 25.0).abs() < 1e-3, "Rotate keeps turning: {rotate}");
+        let wrapped = rt.scalar_value(1, "out");
+        assert!((0.0..1.0).contains(&wrapped), "time mod 1 stays in 0..1: {wrapped}");
+        assert!(wrapped.abs() < 1e-3, "25 mod 1 = 0 (time past Math's ±8 knob range)");
+    }
+
+    #[test]
+    fn math_ops() {
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let eval_op = |op: f32, a: f32, b: f32| {
+            let doc: PatchDoc = serde_json::from_value(serde_json::json!({
+                "nodes": [
+                    { "id": "m", "kind": "scalar_math", "params": { "op": op, "a": a, "b": b } },
+                    { "id": "o", "kind": "output" }
+                ]
+            }))
+            .unwrap();
+            let mut rt = runtime(doc);
+            rt.eval(&inputs(&audio));
+            rt.scalar_value(0, "out")
+        };
+        assert_eq!(eval_op(5.0, 3.0, 2.0), 1.5);
+        assert_eq!(eval_op(5.0, 3.0, 0.0), 0.0, "divide by zero is 0, not inf");
+        assert_eq!(eval_op(6.0, -0.25, 1.0), 0.75, "modulo wraps negatives into 0..b");
+        assert_eq!(eval_op(7.0, 2.0, 3.0), 8.0);
+        assert_eq!(eval_op(8.0, 2.0, 1.0), 1.0);
+        assert_eq!(eval_op(9.0, 2.0, 1.0), 0.0);
+        assert_eq!(eval_op(10.0, -2.5, 0.0), 2.5);
+        assert_eq!(eval_op(11.0, -2.5, 0.0), -3.0);
+        assert!((eval_op(12.0, 0.25, 0.0) - 1.0).abs() < 1e-6, "sine takes turns");
+        assert!((eval_op(13.0, 0.5, 0.0) + 1.0).abs() < 1e-6, "cosine takes turns");
     }
 
     fn runtime(doc: PatchDoc) -> Runtime {
