@@ -1,6 +1,6 @@
 # Patch editor, round 2 (feedback 2026-10-15)
 
-Status: **in progress** (gate `master`, worktree
+Status: **done; on gate `master` and the site's `dev` Preview** (gate `master`, worktree
 `C:\Users\camer\.t3\worktrees\Empyrean\playground`, branch `patch-crate`
 fast-forwarded to `master`). Site follows via web-dist and `dev`.
 
@@ -40,14 +40,25 @@ Cameron, from people using the playground:
 
 ## Plan / steps
 
-1. **[current]** State carry (crate + engine), tests.
-2. Time node, tests.
-3. Per-node images: design details, then crate/engine/runtime/editor.
-4. Publish (gate master → CI web-dist → site `dev`), verify on the Preview.
+1. **Done** (`f49a085`). State carry (crate + engine), tests.
+2. **Done** (`81346d5`). Time node, tests.
+3. **Done** (`022d932`, `7330f48`). Per-node images (format 3): crate,
+   engine decode + media cells, runtime upload, side-panel picker; site
+   moved its video picker onto Video in (`aca9085`).
+4. **Done**. Gate master → CI web-dist `e205690` → site `dev` `aca9085`;
+   verified on the Preview.
 
 ## Progress log
 
-- [ ] Steps 1–4
+- [x] Steps 1–4 (2026-10-15). Tests: crate 74, app 336 (incl. image
+      decode), engine-smoke `--patch` renders a Still image on Vulkan, gate
+      behaviour suite incl. tests/patch-image.spec.ts, site 156. In Chrome:
+      two Still images (red, blue) each render their own picture (mask 6);
+      the side-panel picker stores a 256×256 WebP; the Preview shows the new
+      Time controls and the picker.
+- [ ] Missing-node proposals from the same day (Map range, Mix/Clamp,
+      Random, event tools, step sequencer, field math, colour adjust, undo /
+      duplicate): waiting on Cameron's pick.
 
 ## Things not to do
 
