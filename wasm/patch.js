@@ -97,6 +97,25 @@ export class PatchSim {
         return v1;
     }
     /**
+     * The running patch's Still images as JSON
+     * `[{"node": id, "slot": cell, "media": dataUrl | null}]`: upload each
+     * node's picture (IMAGE_SIZE², RGBA) to its cell of the media buffer and
+     * call `setImageLoaded`.
+     * @returns {string}
+     */
+    images() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.patchsim_images(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * Compile `doc` (patch JSON) for an array of `spokes` × `pixels` LEDs.
      * Throws with the validation/codegen message if it cannot run.
      * @param {string} doc
@@ -221,6 +240,14 @@ export class PatchSim {
      */
     setHuePull(target, amount, loose) {
         wasm.patchsim_setHuePull(this.__wbg_ptr, target, amount, loose);
+    }
+    /**
+     * Mark media cell `slot` as holding (or not) its Still image.
+     * @param {number} slot
+     * @param {boolean} loaded
+     */
+    setImageLoaded(slot, loaded) {
+        wasm.patchsim_setImageLoaded(this.__wbg_ptr, slot, loaded);
     }
     /**
      * Master brightness 0..1 and speed multiplier.

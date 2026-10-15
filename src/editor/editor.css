@@ -323,3 +323,48 @@
   padding: 8px 10px;
   color: var(--pe-danger, #ff5c7a);
 }
+
+/* Still image nodes: their own picture, on the node and in the side panel. */
+.pnode-image {
+  display: flex;
+  justify-content: center;
+  padding: 6px 10px 0;
+}
+
+.pnode-image img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.patch-image {
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.patch-image-preview {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #2a2445;
+}
+
+.patch-image-choose {
+  cursor: pointer;
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid #332a55;
+  border-radius: 6px;
+  color: var(--pe-text, #e8e6f4);
+}
+
+.patch-image-choose input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}

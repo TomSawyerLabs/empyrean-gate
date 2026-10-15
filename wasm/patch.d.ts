@@ -40,6 +40,13 @@ export class PatchSim {
      */
     globals(): Uint8Array;
     /**
+     * The running patch's Still images as JSON
+     * `[{"node": id, "slot": cell, "media": dataUrl | null}]`: upload each
+     * node's picture (IMAGE_SIZE², RGBA) to its cell of the media buffer and
+     * call `setImageLoaded`.
+     */
+    images(): string;
+    /**
      * Compile `doc` (patch JSON) for an array of `spokes` × `pixels` LEDs.
      * Throws with the validation/codegen message if it cannot run.
      */
@@ -87,6 +94,10 @@ export class PatchSim {
      * Master hue pull (target in turns, amount 0..1, looseness 0..1).
      */
     setHuePull(target: number, amount: number, loose: number): void;
+    /**
+     * Mark media cell `slot` as holding (or not) its Still image.
+     */
+    setImageLoaded(slot: number, loaded: boolean): void;
     /**
      * Master brightness 0..1 and speed multiplier.
      */
@@ -204,6 +215,7 @@ export interface InitOutput {
     readonly patchsim_feedAudio: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly patchsim_fireDjEvent: (a: number, b: number) => void;
     readonly patchsim_globals: (a: number) => [number, number];
+    readonly patchsim_images: (a: number) => [number, number];
     readonly patchsim_new: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly patchsim_previewGlobals: (a: number) => [number, number];
     readonly patchsim_previewNodes: (a: number) => [number, number];
@@ -214,6 +226,7 @@ export interface InitOutput {
     readonly patchsim_setAudio: (a: number, b: number, c: number, d: number) => void;
     readonly patchsim_setDjLink: (a: number, b: number, c: number) => void;
     readonly patchsim_setHuePull: (a: number, b: number, c: number, d: number) => void;
+    readonly patchsim_setImageLoaded: (a: number, b: number, c: number) => void;
     readonly patchsim_setMaster: (a: number, b: number, c: number) => void;
     readonly patchsim_setMotion: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly patchsim_setParam: (a: number, b: number, c: number, d: number, e: number, f: number) => void;

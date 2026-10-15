@@ -189,7 +189,8 @@ export class GateGpu {
     this.out = buf(leds * 4, U.STORAGE | U.COPY_SRC);
     this.dabs = buf(limits.dabBytes * limits.maxDabs, U.STORAGE | U.COPY_DST);
     this.scope = buf(limits.scopeFloats * limits.audioSources * 4, U.STORAGE | U.COPY_DST);
-    this.video = buf(4, U.STORAGE | U.COPY_DST);
+    // Cell 0: the live video frame; cells 1..: the patch's Still images.
+    this.video = buf(limits.mediaBufferBytes, U.STORAGE | U.COPY_DST);
     this.slab = buf(limits.maxSlabFloats * 4, U.STORAGE | U.COPY_DST);
     // A fixed-length uniform array in the shader (storage buffers are at the
     // default per-stage limit on the gate's shared layout).
@@ -345,6 +346,13 @@ export class GateGpu {
       if (this.previewOut) this.previewBind = this.bindGroup(this.previewGlobals, this.previewOut);
     }
     this.device.queue.writeBuffer(this.video, 0, rgba as GPUAllowSharedBufferSource, 0, width * height * 4);
+  }
+
+  /** A Still image (IMAGE_SIZE² RGBA) into media cell `slot` (1..). */
+  writeImage(slot: number, rgba: Uint8Array) {
+    const cell = this.limits.imageSize * this.limits.imageSize * 4;
+    if (slot < 1 || slot > this.limits.maxImages || rgba.byteLength !== cell) return;
+    this.device.queue.writeBuffer(this.video, slot * cell, rgba as GPUAllowSharedBufferSource);
   }
 
   /** Render the frame: dispatch the patch, then draw every attached view. */

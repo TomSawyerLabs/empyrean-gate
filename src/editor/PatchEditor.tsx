@@ -35,6 +35,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./editor.css";
+import { imageFileToMedia } from "./files";
 import { MiniMeter, MiniRing, type MiniSource } from "./minis";
 import {
   PATCH_FORMAT,
@@ -95,6 +96,9 @@ export interface PatchEditorProps {
     doc: PatchDoc | null;
     open: (doc: PatchDoc, asNew?: boolean) => void;
   }) => ReactNode;
+  /** Host-specific settings shown in a node's side panel (e.g. where a
+   * Video in's picture comes from on this host). */
+  nodeExtras?: (node: PatchNode) => ReactNode;
 }
 
 /** What node views need from the editor without threading it through data. */
@@ -212,6 +216,15 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
           ))}
         </div>
       )}
+      {node.kind === "image_in" && (
+        <div className="pnode-image">
+          {node.media ? (
+            <img src={node.media} alt="" />
+          ) : (
+            <span className="hint">no image — pick one on the right</span>
+          )}
+        </div>
+      )}
       <div className="pnode-body">
         <div className="pnode-col">
           {ins.map((p) => (
@@ -283,18 +296,78 @@ function toFlowEdges(doc: PatchDoc, registry: Registry): FlowEdge[] {
 
 // --- side panel ------------------------------------------------------------
 
+/** A Still image node's picture: preview, choose, remove. Stored in the
+ * patch itself, so files and submissions carry it. */
+function ImagePicker({
+  node,
+  canEdit,
+  onChange,
+}: {
+  node: PatchNode;
+  canEdit: boolean;
+  onChange: (mutate: (d: PatchDoc) => void) => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const setMedia = (media: string | undefined) =>
+    onChange((d) => {
+      const n = d.nodes.find((x) => x.id === node.id);
+      if (!n) return;
+      if (media) n.media = media;
+      else delete n.media;
+    });
+  return (
+    <div className="patch-image">
+      <span className="patch-param-head">Image</span>
+      {node.media ? (
+        <img className="patch-image-preview" src={node.media} alt="This node's image" />
+      ) : (
+        <p className="hint">No image yet.</p>
+      )}
+      {canEdit && (
+        <div className="patch-param-row">
+          <label className="patch-image-choose">
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                setError(null);
+                imageFileToMedia(file)
+                  .then(setMedia)
+                  .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+              }}
+            />
+            {node.media ? "Replace…" : "Choose image…"}
+          </label>
+          {node.media && (
+            <button type="button" onClick={() => setMedia(undefined)}>
+              Remove
+            </button>
+          )}
+        </div>
+      )}
+      {error && <p className="patch-status error">{error}</p>}
+      <p className="hint">Stored in the patch (256×256), so saved files and submissions keep it.</p>
+    </div>
+  );
+}
+
 function ParamPanel({
   doc,
   nodeId,
   registry,
   canEdit,
   onChange,
+  extras,
 }: {
   doc: PatchDoc;
   nodeId: string;
   registry: Registry;
   canEdit: boolean;
   onChange: (mutate: (d: PatchDoc) => void) => void;
+  extras?: (node: PatchNode) => ReactNode;
 }) {
   const node = doc.nodes.find((n) => n.id === nodeId);
   const def = node && registry.get(node.kind);
@@ -391,6 +464,10 @@ function ParamPanel({
           </div>
         );
       })}
+      {node.kind === "image_in" && (
+        <ImagePicker node={node} canEdit={canEdit} onChange={onChange} />
+      )}
+      {extras?.(node)}
       {canEdit && node.kind !== "output" && (
         <button
           className="danger"
@@ -426,6 +503,7 @@ function Editor({
   showActivate = true,
   onDocChange,
   toolbarExtra,
+  nodeExtras,
 }: PatchEditorProps) {
   const flow = useReactFlow();
   const registry = useMemo<Registry | null>(
@@ -842,6 +920,7 @@ function Editor({
             registry={registry}
             canEdit={canEdit}
             onChange={mutateDoc}
+            extras={nodeExtras}
           />
         )}
       </div>
