@@ -243,6 +243,11 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   While a patch is on air a **◆ chip in the top bar names it on every tab** (red
   with "fallback" if it failed to build and the stack is covering) — tap it to
   jump to the editor.
+  **Nothing reaches the output unless it is wired**: effects a node fires,
+  effects from pads/keys/taps (Triggered effects) and pen strokes (Touch
+  strokes) show only through Render effects / Render points wired into the
+  graph (patch format 2; older patches are upgraded on load with the wiring
+  they used to imply, `plans/explicit-output.md`).
   **Touch is a node too**: a patch with a Touch, Touch mask or Touch glow node
   owns the touch surface. Every finger on the Live tab, a phone or the public
   floor reaches it raw (down / move / up, position, hold time, speed, the

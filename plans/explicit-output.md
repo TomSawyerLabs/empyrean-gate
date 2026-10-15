@@ -1,6 +1,7 @@
 # Nothing reaches the output unless it's wired
 
-Status: **in progress** (branch `patch-crate`). Follows `plans/touch-nodes.md`.
+Status: **built and tested; on the empyreangate.org `dev` Preview** (branch
+`patch-crate`, pushed, not merged). Follows `plans/touch-nodes.md`.
 
 ## Goal
 
@@ -40,18 +41,26 @@ looking the same through a one-time migration.
 
 ## Plan / steps
 
-1. **[current]** Crate: source field, Event effect ports, codegen filter,
+1. **Done** (`c9c984c`). Crate: source field, Event effect ports, codegen filter,
    `finish()` without overlays, `migrate()` + format 2, presets rewritten,
    tests.
-2. Engine/state/Sim: effects carry their source; store migrates;
+2. **Done** (`c9c984c`). Engine/state/Sim: effects carry their source; store migrates;
    `/patch/migrate` route; gate.wgsl draws source 0 only.
-3. Editor/TS: `PATCH_FORMAT` 2 for new patches; gate Import migrates via the
+3. **Done** (`234263e`, site playground commit). Editor/TS: `PATCH_FORMAT` 2 for new patches; gate Import migrates via the
    route; playground migrates on load/open via wasm.
-4. Republish web-dist, bump the site, push `dev` (never `master`), verify.
+4. **Done**. Republish web-dist, bump the site, push `dev` (never `master`), verify.
 
 ## Progress log
 
-- [ ] Steps 1–4
+- [x] Steps 1–4 (2026-10-15). Verified: crate 67, app 333 (incl. a store
+      test loading a format-1 file upgraded), engine-smoke incl. `--patch`,
+      gate UI specs, and in Chrome: an old format-1 Touch Ripples from
+      IndexedDB opens with the added wiring; with Touch Ripples (format 2),
+      a tap's burst adds ~1.3M units of light when wired through Render
+      effects and none beyond the glow (~47K) when that one wire is removed.
+- [ ] Follow-up to consider: pads/keys show nothing on a patch that doesn't
+      wire Triggered effects, which could puzzle an operator mid-show. A status
+      flag (e.g. `patch_shows_effects`) plus a hint on the Live/Control pads.
 
 ## Things not to do
 
