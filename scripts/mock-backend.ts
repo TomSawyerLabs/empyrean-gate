@@ -162,6 +162,33 @@ const configOverrides = new Map<string, Record<string, unknown>>();
 /// Which client id each open socket said hello as.
 const clients = new WeakMap<object, string>();
 
+// The patch protocol, per socket (the gate runs fully parallel against one
+// mock, so a shared library would leak between cases): list/get/save/
+// activate, with one built-in preset made of the two mock registry nodes.
+type MockPatch = { format: number; id: string; name: string; description: string; nodes: unknown[]; edges: unknown[]; exposed: unknown[] };
+const MOCK_PRESET: MockPatch = {
+  format: 2,
+  id: "builtin-mock-noise",
+  name: "Mock Noise",
+  description: "",
+  nodes: [
+    { id: "n1", kind: "noise_field", name: "", params: {}, pos: [40, 60] },
+    { id: "n2", kind: "output", name: "", params: {}, pos: [420, 120] },
+  ],
+  edges: [{ from: { node: "n1", port: "out" }, to: { node: "n2", port: "in" } }],
+  exposed: [],
+};
+const patchLibraries = new WeakMap<object, Map<string, MockPatch>>();
+const activePatch = new WeakMap<object, string | null>();
+let mintedPatches = 0;
+const library = (ws: object) => {
+  let lib = patchLibraries.get(ws);
+  if (!lib) patchLibraries.set(ws, (lib = new Map()));
+  return lib;
+};
+const patchSummaries = (ws: object) =>
+  [...library(ws).values()].map((p) => ({ id: p.id, name: p.name, description: p.description, nodes: p.nodes.length }));
+
 // The public floor page (public.html) speaks the allowlisted half of the
 // protocol and receives `public_state` instead of config/status. One snapshot
 // serves every public test; `POST /mock/public` patches it (globally — the
@@ -220,7 +247,7 @@ const server = Bun.serve({
         },
       ]);
     }
-    if (url.pathname === "/patch/presets") return Response.json([]);
+    if (url.pathname === "/patch/presets") return Response.json([MOCK_PRESET]);
     // Test-only lever for states the backend reaches on its own but a mock never
     // will (the sACN contention banner needs something else to be on the wire).
     // POST a `RuntimeStatus` fragment with `?client=<empyrean-client-id>`; the
@@ -399,6 +426,34 @@ const server = Bun.serve({
           clearInterval(timers.get(ws));
           timers.delete(ws);
           break;
+        case "patch_list":
+          ws.send(JSON.stringify({ type: "patches", patches: patchSummaries(ws) }));
+          break;
+        case "patch_get": {
+          const doc = library(ws).get(msg.id);
+          if (doc) ws.send(JSON.stringify({ type: "patch", patch: doc }));
+          break;
+        }
+        case "patch_save": {
+          const doc = { ...(msg.patch as MockPatch) };
+          if (!doc.id) doc.id = `mock-patch-${++mintedPatches}`;
+          library(ws).set(doc.id, doc);
+          ws.send(JSON.stringify({ type: "patch", patch: doc }));
+          ws.send(JSON.stringify({ type: "patches", patches: patchSummaries(ws) }));
+          break;
+        }
+        case "patch_activate": {
+          activePatch.set(ws, msg.id ?? null);
+          const configPatch = configOverrides.get(clients.get(ws) ?? "") ?? {};
+          ws.send(
+            JSON.stringify({
+              type: "state",
+              config: { ...config, ...configPatch, active_patch: msg.id ?? null },
+              status: { ...status, patch_active: msg.id != null },
+            }),
+          );
+          break;
+        }
       }
     },
     close(ws) {

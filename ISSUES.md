@@ -26,3 +26,12 @@ symptom but not the layout. Passes on Windows WebKit and on Chromium, so the
 Chromium-only layout gate (`tests/layout.spec.ts`, `MUST_FIT_VERTICALLY` has
 Live) cannot see it. Worth a look on a real iPad in landscape, which the
 column-balancing comment in `src/Live.tsx` ("span-neutral") was written for.
+
+## `multitouch` duplicate-click test flakes on Windows WebKit
+
+`tests/multitouch.spec.ts` "a synthesized fire swallows the browser's
+duplicate click" intermittently sees **2** clicks where it expects 1
+(`expect(clicks).toBe(1)`, line ~107), WebKit project only: 1 failure in 4
+repeats on clean `master` (faee0ec), 3 in 12 on `patch-crate`, Windows
+(2026-10-15). Chromium passes. Looks timing-dependent (the drag router's
+swallow window vs WebKit's click delivery under load), not a behaviour change.
