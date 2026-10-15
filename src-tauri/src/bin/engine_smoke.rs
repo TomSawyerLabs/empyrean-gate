@@ -329,6 +329,7 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
             shake: 0.0,
             effect_seq: 0,
             dj_link: patch::eval::DjLinkInputs::default(),
+            touch: &empyrean_patch::touch::NO_TOUCH,
         });
         inputs.patch_params = Some(slab.to_vec());
         if let Some(rgb) = engine
@@ -506,6 +507,7 @@ fn make_inputs(scenario: &Scenario, spokes: u32, pixels: u32) -> FrameInputs {
         layers,
         effects,
         dabs,
+        touches: Vec::new(),
         scope,
         video_upload: has_video.then(benchmark_video_frame),
         patch_params: None,

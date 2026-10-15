@@ -154,6 +154,7 @@ mod tests {
             shake: 0.0,
             effect_seq: 0,
             dj_link: DjLinkInputs { active: 1.0, ..Default::default() },
+            touch: &crate::touch::NO_TOUCH,
         };
         let connected_silent = runtime.eval(&inputs).to_vec();
         assert!(

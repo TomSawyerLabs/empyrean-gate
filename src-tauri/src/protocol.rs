@@ -165,6 +165,15 @@ pub enum ClientMsg {
         #[serde(default = "default_intensity")]
         intensity: f32,
     },
+    /// Raw touches for a patch that owns the touch surface (status
+    /// `patch_touch`): pointer events as they happen, in the physical frame.
+    /// The patch decides what they do (Touch / Touch mask / Touch glow nodes).
+    Touch {
+        points: Vec<empyrean_patch::touch::TouchInput>,
+        /// The toucher's color (their current pen/effect color).
+        #[serde(default)]
+        color: empyrean_patch::touch::TouchColor,
+    },
     SubscribePreview {
         /// Max frames per second this client wants.
         fps: f32,
@@ -1144,6 +1153,10 @@ pub struct RuntimeStatus {
     /// Why the active patch is NOT rendering (compile/pipeline failure); the
     /// engine falls back to the layer stack when this is set.
     pub patch_error: Option<String>,
+    /// The active patch reads raw touch (it has a Touch, Touch mask or Touch
+    /// glow node), so it owns the touch surface: clients send `touch` instead
+    /// of applying their own tap or pen tool.
+    pub patch_touch: bool,
     pub show: ScheduledShowStatus,
     pub performance_recording: bool,
     pub performance_recording_name: String,

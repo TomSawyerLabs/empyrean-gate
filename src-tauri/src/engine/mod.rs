@@ -39,6 +39,8 @@ pub struct FrameInputs {
     pub layers: Vec<GpuLayer>,
     pub effects: Vec<GpuEffect>,
     pub dabs: Vec<GpuDab>,
+    /// Raw touches for the patch shader's touch nodes (binding 10).
+    pub touches: Vec<empyrean_patch::abi::GpuTouch>,
     /// Per-source waveform + spectrum, flattened (see `SCOPE_FLOATS`).
     pub scope: Vec<f32>,
     /// Present only when a newer browser-decoded frame needs uploading.
@@ -80,6 +82,7 @@ pub struct Engine {
     video_buf: wgpu::Buffer,
     params_buf: wgpu::Buffer,
     game_buf: wgpu::Buffer,
+    touch_buf: wgpu::Buffer,
     out_buf: wgpu::Buffer,
     staging: [wgpu::Buffer; 2],
     /// Submission index of the copy targeting each staging buffer.
@@ -189,6 +192,13 @@ impl Engine {
         });
         // Two packed-RGB grid snapshots (previous + current sim tick), sized for
         // the maximum grid so a geometry change never needs a realloc.
+        let touch_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("touches"),
+            size: (std::mem::size_of::<empyrean_patch::abi::GpuTouch>()
+                * empyrean_patch::touch::MAX_TOUCHES) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let game_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("game-cells"),
             size: (GAME_BUFFER_U32S * 4) as u64,
@@ -211,6 +221,7 @@ impl Engine {
                 storage_entry(7, true),
                 storage_entry(8, true),
                 storage_entry(9, true),
+                storage_entry(10, true),
             ],
         });
 
@@ -228,6 +239,7 @@ impl Engine {
                 &video_buf,
                 &params_buf,
                 &game_buf,
+                &touch_buf,
             ),
             pipeline: Self::make_pipeline(&device, &bind_group_layout)?,
             patch_pipeline: None,
@@ -243,6 +255,7 @@ impl Engine {
             video_buf,
             params_buf,
             game_buf,
+            touch_buf,
             out_buf,
             staging,
             staging_submission: [None, None],
@@ -353,6 +366,7 @@ impl Engine {
         video: &wgpu::Buffer,
         params: &wgpu::Buffer,
         game: &wgpu::Buffer,
+        touches: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("gate"),
@@ -368,6 +382,7 @@ impl Engine {
                 bind(7, video),
                 bind(8, params),
                 bind(9, game),
+                bind(10, touches),
             ],
         })
     }
@@ -397,6 +412,7 @@ impl Engine {
             &self.video_buf,
             &self.params_buf,
             &self.game_buf,
+            &self.touch_buf,
         );
     }
 
@@ -421,6 +437,10 @@ impl Engine {
         if !inputs.dabs.is_empty() {
             self.queue
                 .write_buffer(&self.dabs_buf, 0, bytemuck::cast_slice(&inputs.dabs));
+        }
+        if !inputs.touches.is_empty() {
+            self.queue
+                .write_buffer(&self.touch_buf, 0, bytemuck::cast_slice(&inputs.touches));
         }
         self.queue
             .write_buffer(&self.scope_buf, 0, bytemuck::cast_slice(&inputs.scope));
@@ -2933,6 +2953,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 .map_or(0.0, |(_, phrase)| f32::from(phrase.fill_in_active)),
             event_seq: dj_events.seq,
         };
+        // Raw touches: the evaluator's view uses this frame's rotation (the
+        // same one effects are placed with); the GPU records are packed after
+        // the rotation steps, below.
+        let touch_clock = state.started.elapsed().as_secs_f32();
+        let touch_view = {
+            let mut touches = state.touches.lock();
+            touches.expire(touch_clock);
+            touches.view(touch_clock, state.rotation.lock().angle)
+        };
         let patch_params = patch_rt.as_mut().map(|rt| {
             for (node, param, value) in state.patch_params.lock().drain(..) {
                 rt.set_param(&node, &param, value);
@@ -2950,6 +2979,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     shake: control.shake,
                     effect_seq: state.effect_seq.load(Ordering::Relaxed),
                     dj_link,
+                    touch: &touch_view,
                 })
                 .to_vec();
             for effect in rt.take_emitted_effects() {
@@ -2971,6 +3001,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
 
         let rotation_angle = {
             state.rotation.lock().step(dt)
+        };
+        let touches = if game_suppress {
+            Vec::new()
+        } else {
+            state.touches.lock().gpu(touch_clock, rotation_angle)
         };
 
         // Master brightness never steps: the Blackout quick-setting and slider
@@ -3009,6 +3044,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 shake: control.shake,
                 yaw: control.yaw,
                 dab_count: dabs.len() as u32,
+                touch_count: touches.len() as u32,
+                _pad_touch: [0; 3],
                 video_width,
                 video_height,
                 video_active: u32::from(video_active),
@@ -3037,6 +3074,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             layers,
             effects,
             dabs,
+            touches,
             scope: scope_data,
             video_upload,
             patch_params,
@@ -3220,6 +3258,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     bus.inputs.audio = inputs.audio;
                     bus.inputs.effects.clone_from(&inputs.effects);
                     bus.inputs.dabs.clone_from(&inputs.dabs);
+                    // Touch belongs to what is on air; the off-air bus never
+                    // reacts to it (its patch's touch nodes see no fingers).
+                    bus.inputs.touches.clear();
+                    bus.inputs.globals.touch_count = 0;
                     bus.inputs.scope.clone_from(&inputs.scope);
                     bus.inputs.video_upload.clone_from(&inputs.video_upload);
                     for (layer, rate) in bus.inputs.layers.iter_mut().zip(&bus.layer_phase_rates) {
@@ -3237,6 +3279,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                                 shake: control.shake,
                                 effect_seq: state.effect_seq.load(Ordering::Relaxed),
                                 dj_link,
+                                touch: &empyrean_patch::touch::NO_TOUCH,
                             })
                             .to_vec()
                     });
@@ -3580,6 +3623,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 st.render_transition_active = handoff_active;
                 st.render_transition_progress = handoff_progress;
                 st.patch_active = patch_rt.is_some();
+                st.patch_touch = patch_rt
+                    .as_ref()
+                    .is_some_and(|rt| crate::patch::codegen::uses_touch(rt.doc()));
                 st.show = show_status.clone();
                 let recording = state.performance_recording.lock();
                 st.performance_recording = recording.is_some();

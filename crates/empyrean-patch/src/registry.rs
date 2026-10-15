@@ -221,6 +221,16 @@ const HUE_RANGE: ParamDef = num("hue_range", "Hue range", 0.0, 1.0, 0.2);
 const SATURATION: ParamDef = num("saturation", "Saturation", 0.0, 1.0, 0.9);
 const BRIGHTNESS: ParamDef = num("brightness", "Brightness", 0.0, 2.0, 1.0);
 
+/// Shared by Touch mask and Touch glow.
+const TOUCH_FIELD_PARAMS: &[ParamDef] = &[
+    num("radius", "Radius", 0.01, 0.8, 0.12),
+    num("soft", "Softness", 0.0, 1.0, 0.6),
+    num("fade", "Fade after release (s)", 0.0, 2.0, 0.8),
+    num("grow", "Grow while held", 0.0, 3.0, 0.0),
+    num("trail", "Motion trail", 0.0, 2.0, 0.3),
+    num("intensity", "Intensity", 0.0, 3.0, 1.0),
+];
+
 pub const TYPES: &[NodeType] = &[
     // -- Inputs -------------------------------------------------------------
     NodeType {
@@ -310,8 +320,10 @@ pub const TYPES: &[NodeType] = &[
         params: &[],
     },
     NodeType {
+        // Fires whenever any effect is triggered (pads, keys, a client's tap
+        // tool) — not raw touch; that is the Touch node below.
         id: "tap",
-        label: "Taps",
+        label: "Effect taps",
         category: Category::Input,
         inputs: &[],
         outputs: &[PortDef {
@@ -319,6 +331,30 @@ pub const TYPES: &[NodeType] = &[
             shape: Shape::Event,
         }],
         params: &[],
+    },
+    NodeType {
+        // Raw touch, one finger followed (see crate::touch). A patch with any
+        // touch node owns the touch surface: clients send raw touches instead
+        // of applying their own tap or pen tool.
+        id: "touch",
+        label: "Touch",
+        category: Category::Input,
+        inputs: &[],
+        outputs: &[
+            PortDef { name: "down", shape: Shape::Event },
+            PortDef { name: "up", shape: Shape::Event },
+            PortDef { name: "active", shape: Shape::Scalar },
+            PortDef { name: "count", shape: Shape::Scalar },
+            PortDef { name: "angle", shape: Shape::Scalar },
+            PortDef { name: "radius", shape: Shape::Scalar },
+            PortDef { name: "x", shape: Shape::Scalar },
+            PortDef { name: "y", shape: Shape::Scalar },
+            PortDef { name: "held", shape: Shape::Scalar },
+            PortDef { name: "speed", shape: Shape::Scalar },
+            PortDef { name: "dir", shape: Shape::Scalar },
+            PortDef { name: "hue", shape: Shape::Scalar },
+        ],
+        params: &[sel("follow", "Follow", &["Latest finger", "First finger"])],
     },
     NodeType {
         id: "dj_link",
@@ -607,6 +643,30 @@ pub const TYPES: &[NodeType] = &[
             SATURATION,
             BRIGHTNESS,
         ],
+    },
+    NodeType {
+        // Every finger at once as a soft blob (a mask for colorize/blend).
+        id: "touch_mask",
+        label: "Touch mask",
+        category: Category::Generator,
+        inputs: &[],
+        outputs: &[PortDef {
+            name: "out",
+            shape: Shape::FieldScalar,
+        }],
+        params: TOUCH_FIELD_PARAMS,
+    },
+    NodeType {
+        // The same blobs, each in its toucher's own color.
+        id: "touch_glow",
+        label: "Touch glow",
+        category: Category::Generator,
+        inputs: &[],
+        outputs: &[PortDef {
+            name: "out",
+            shape: Shape::FieldColor,
+        }],
+        params: TOUCH_FIELD_PARAMS,
     },
     NodeType {
         id: "sparkle",

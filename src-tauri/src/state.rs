@@ -471,6 +471,9 @@ pub struct SharedState {
     /// velocity; the render loop integrates it and applies smooth drag.
     pub rotation: Mutex<RotationState>,
     pub dabs: Mutex<Vec<ActiveDab>>,
+    /// Raw touches from every client (see `empyrean_patch::touch`), clocked by
+    /// `started`.
+    pub touches: Mutex<empyrean_patch::touch::Touches>,
     pub audio: [Mutex<AudioFeatures>; MAX_AUDIO_SOURCES],
     pub scope: [Mutex<ScopeData>; MAX_AUDIO_SOURCES],
     pub midi_clock: Mutex<crate::rhythm::MidiClockState>,
@@ -653,6 +656,7 @@ impl SharedState {
             effects: Mutex::new(Vec::new()),
             rotation: Mutex::new(RotationState::default()),
             dabs: Mutex::new(Vec::new()),
+            touches: Mutex::new(empyrean_patch::touch::Touches::new()),
             audio: Default::default(),
             scope: Default::default(),
             midi_clock: Mutex::new(crate::rhythm::MidiClockState::default()),
@@ -1151,6 +1155,35 @@ impl SharedState {
         let config = Box::new(self.config.read().clone());
         let status = self.status.lock().clone();
         let _ = self.events.send(ServerMsg::State { config, status });
+    }
+
+    /// Apply raw touches from `source` (a connection; public-floor sources are
+    /// namespaced by the caller). `max_live` caps how many fingers this source
+    /// may hold at once: extra touchdowns are ignored.
+    pub fn touch(
+        &self,
+        source: u64,
+        points: &[empyrean_patch::touch::TouchInput],
+        color: empyrean_patch::touch::TouchColor,
+        max_live: Option<usize>,
+    ) {
+        use empyrean_patch::touch::TouchPhase;
+        let now = self.started.elapsed().as_secs_f32();
+        let mut touches = self.touches.lock();
+        for p in points {
+            if p.phase == TouchPhase::Down
+                && max_live.is_some_and(|max| touches.live_count(source) >= max)
+            {
+                continue;
+            }
+            touches.apply(source, now, *p, color);
+        }
+    }
+
+    /// Lift every finger a disconnected source still holds.
+    pub fn release_touches(&self, source: u64) {
+        let now = self.started.elapsed().as_secs_f32();
+        self.touches.lock().release_source(source, now);
     }
 
     /// Add live-draw dabs; the oldest are evicted when the buffer is full so a

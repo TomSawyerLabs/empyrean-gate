@@ -10,6 +10,7 @@ use super::codegen::Program;
 use super::registry::{self, ParamKind};
 use crate::abi::{AudioUniform, MAX_AUDIO_SOURCES};
 use crate::effects::{EffectCfg, EffectKind};
+use crate::touch::{FingerState, TouchView};
 use std::collections::HashMap;
 use std::f32::consts::TAU;
 
@@ -40,6 +41,8 @@ pub struct EvalInputs<'a> {
     /// node fires an event whenever it advances.
     pub effect_seq: u64,
     pub dj_link: DjLinkInputs,
+    /// Raw touches this frame (composition frame), for the Touch node.
+    pub touch: &'a TouchView,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -94,6 +97,11 @@ struct NodeState {
     prev_seq: u64,
     /// Last seen sequence for every PRO DJ LINK event output.
     prev_dj_seq: [u64; DJ_EVENT_COUNT],
+    /// Last seen touchdown / release counts and held-finger count (touch);
+    /// MAX = not yet initialized, so touches already under way never fire.
+    prev_downs: u64,
+    prev_ups: u64,
+    prev_held: usize,
 }
 
 impl Default for NodeState {
@@ -105,6 +113,9 @@ impl Default for NodeState {
             prev_beat: 0.0,
             prev_seq: u64::MAX,
             prev_dj_seq: [u64::MAX; DJ_EVENT_COUNT],
+            prev_downs: u64::MAX,
+            prev_ups: u64::MAX,
+            prev_held: 0,
         }
     }
 }
@@ -142,6 +153,11 @@ impl Runtime {
             events: vec![Vec::new(); n],
             emitted_effects: Vec::new(),
         }
+    }
+
+    /// The document this runtime evaluates.
+    pub fn doc(&self) -> &PatchDoc {
+        &self.doc
     }
 
     /// Drain effects emitted by the most recent frame. Keeping this separate
@@ -254,6 +270,57 @@ impl Runtime {
                         self.events[node].push("tap");
                     }
                     st.prev_seq = inp.effect_seq;
+                }
+                "touch" => {
+                    let view = inp.touch;
+                    let first = self.param(node, "follow").round() as u32 == 1;
+                    let held = view.held_count();
+                    let followed: Option<FingerState> = {
+                        let live = view.fingers.iter().filter(|f| f.held);
+                        let pick = if first {
+                            live.min_by_key(|f| f.seq)
+                        } else {
+                            live.max_by_key(|f| f.seq)
+                        };
+                        pick.copied().or(view.last)
+                    };
+                    let st = &mut self.state[node];
+                    if st.prev_downs != u64::MAX {
+                        let downs = view.downs > st.prev_downs;
+                        let ups = view.ups > st.prev_ups;
+                        if first {
+                            // The first finger lands / the last one lifts. A
+                            // whole tap inside one frame still gives both.
+                            if downs && st.prev_held == 0 {
+                                self.events[node].push("down");
+                            }
+                            if ups && held == 0 {
+                                self.events[node].push("up");
+                            }
+                        } else {
+                            if downs {
+                                self.events[node].push("down");
+                            }
+                            if ups {
+                                self.events[node].push("up");
+                            }
+                        }
+                    }
+                    st.prev_downs = view.downs;
+                    st.prev_ups = view.ups;
+                    st.prev_held = held;
+                    let f = followed.unwrap_or_default();
+                    let o = &mut self.outputs[node];
+                    o.insert("active".into(), f32::from(followed.is_some_and(|f| f.held)));
+                    o.insert("count".into(), held as f32);
+                    o.insert("angle".into(), f.angle);
+                    o.insert("radius".into(), f.radius);
+                    o.insert("x".into(), f.x);
+                    o.insert("y".into(), f.y);
+                    o.insert("held".into(), f.held_for);
+                    o.insert("speed".into(), f.speed);
+                    o.insert("dir".into(), f.dir);
+                    o.insert("hue".into(), if followed.is_some() { f.hue } else { -1.0 });
                 }
                 "dj_link" => {
                     let dj = inp.dj_link;
@@ -454,6 +521,53 @@ mod tests {
             shake: 0.0,
             effect_seq: 0,
             dj_link: DjLinkInputs::default(),
+            touch: &crate::touch::NO_TOUCH,
+        }
+    }
+
+    #[test]
+    fn touch_node_follows_latest_or_first_and_fires_once_per_change() {
+        use crate::touch::{TouchColor, TouchInput, TouchPhase, Touches};
+        let doc = |follow: f32| PatchDoc {
+            nodes: vec![
+                NodeInst {
+                    id: "t".into(),
+                    kind: "touch".into(),
+                    params: [("follow".to_string(), follow)].into(),
+                    ..Default::default()
+                },
+                NodeInst {
+                    id: "o".into(),
+                    kind: "output".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let c = TouchColor::default();
+        let at = |id, phase, angle| TouchInput { id, phase, angle, radius: 0.5 };
+        for (follow, expect_second_down, expect_angle) in [(0.0, true, 2.0), (1.0, false, 1.0)] {
+            let mut rt = runtime(doc(follow));
+            let mut t = Touches::new();
+            let mut frame = |t: &Touches, rt: &mut Runtime| {
+                let view = t.view(0.0, 0.0);
+                let mut inp = inputs(&audio);
+                inp.touch = &view;
+                rt.eval(&inp);
+                rt.events[0].clone()
+            };
+            assert!(frame(&t, &mut rt).is_empty());
+            t.apply(1, 0.0, at(1, TouchPhase::Down, 1.0), c);
+            assert_eq!(frame(&t, &mut rt), vec!["down"]);
+            t.apply(1, 0.0, at(2, TouchPhase::Down, 2.0), c);
+            assert_eq!(frame(&t, &mut rt).contains(&"down"), expect_second_down);
+            assert_eq!(rt.scalar_value(0, "angle"), expect_angle);
+            assert_eq!(rt.scalar_value(0, "count"), 2.0);
+            t.apply(1, 0.0, at(1, TouchPhase::Up, 1.0), c);
+            t.apply(1, 0.0, at(2, TouchPhase::Up, 2.0), c);
+            assert_eq!(frame(&t, &mut rt), vec!["up"], "follow {follow}");
+            assert_eq!(rt.scalar_value(0, "active"), 0.0);
         }
     }
 

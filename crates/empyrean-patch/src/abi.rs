@@ -70,6 +70,9 @@ pub struct Globals {
     pub hue_target: f32,
     pub hue_amount: f32,
     pub hue_loose: f32,
+    /// Live records in the TOUCH buffer (binding 10); see `crate::touch`.
+    pub touch_count: u32,
+    pub _pad_touch: [u32; 3],
 }
 
 #[repr(C)]
@@ -126,6 +129,27 @@ pub struct GpuEffect {
     pub fill: f32,
 }
 
+/// One finger in the TOUCH storage buffer (binding 10), read only by the
+/// patch shader's touch nodes. Composition frame, like dabs.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GpuTouch {
+    pub angle: f32,
+    pub radius: f32,
+    /// Seconds since touchdown.
+    pub age: f32,
+    /// Seconds since release; negative while the finger is down.
+    pub released: f32,
+    pub hue: f32,
+    pub saturation: f32,
+    pub brightness: f32,
+    /// Units (array radii) per second.
+    pub speed: f32,
+    /// Direction of motion, composition cartesian frame.
+    pub dir: f32,
+    pub _pad: [f32; 3],
+}
+
 /// Floats per audio source in the SCOPE buffer (binding 6): a waveform ring of
 /// `SCOPE_WAVE` samples, then `SCOPE_SPECTRUM` spectrum bins.
 pub const SCOPE_WAVE: usize = 256;
@@ -163,6 +187,7 @@ mod tests {
             ("AudioU", std::mem::size_of::<AudioUniform>()),
             ("Effect", std::mem::size_of::<GpuEffect>()),
             ("Dab", std::mem::size_of::<GpuDab>()),
+            ("Touch", std::mem::size_of::<GpuTouch>()),
         ] {
             assert_eq!(
                 wgsl_fields(name).len() * 4,
@@ -171,7 +196,7 @@ mod tests {
             );
         }
         assert_eq!(wgsl_fields("Globals")[0], "spokes");
-        assert_eq!(wgsl_fields("Globals").last().unwrap(), "hue_loose");
+        assert_eq!(wgsl_fields("Globals").last().unwrap(), "_pad_touch2");
     }
 
     #[test]

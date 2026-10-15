@@ -38,6 +38,15 @@ pub const MAX_BLOCKLIST: usize = 1024;
 /// at ~30 Hz, so a finger produces a handful per message.
 pub const MAX_PAINT_POINTS: usize = 64;
 pub const MAX_GAME_POINTS: usize = 32;
+/// Raw touch: pointer events per message, and fingers one visitor may hold.
+pub const MAX_TOUCH_POINTS: usize = 64;
+pub const MAX_PUBLIC_FINGERS: usize = 5;
+
+/// Public-floor touches live in their own source namespace, so a public
+/// connection id can never alias a LAN one in the touch tracker.
+pub fn touch_source(conn_id: u64) -> u64 {
+    conn_id | (1 << 63)
+}
 /// Stroke radius as a fraction of the array radius, without and with the
 /// `big_brush` perk.
 pub const MAX_DAB_SIZE: f32 = 0.25;
@@ -250,7 +259,8 @@ pub fn gate(msg: &ClientMsg) -> Gate {
         | M::Unlock { .. }
         | M::PreviewAck { .. }
         | M::UnsubscribePreview => Gate::Allow,
-        M::Paint { .. } => Gate::Needs("draw"),
+        // Raw touch is touching the canvas, like drawing: same permission.
+        M::Paint { .. } | M::Touch { .. } => Gate::Needs("draw"),
         M::TriggerEffect { .. } => Gate::Needs("effects"),
         M::GameInput { .. } | M::GameCommand { .. } => Gate::Needs("games"),
         // Only games with a floor perk can be asked for; the operator's own

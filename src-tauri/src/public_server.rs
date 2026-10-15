@@ -422,6 +422,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, conn_id: u64, ip: IpAddr) {
     }
 
     state.public.lock().release(conn_id);
+    state.release_touches(public::touch_source(conn_id));
     let _ = ip;
 }
 
@@ -775,6 +776,25 @@ async fn handle(ctx: &Ctx, msg: ClientMsg, conn_id: u64, flow: &mut Flow<'_>, tx
             );
             state.public.lock().note_input(conn_id, "draw", now);
             state.paint(pen, &points, hue, saturation, brightness, size, intensity);
+        }
+        ClientMsg::Touch { points, color } => {
+            let points: Vec<empyrean_patch::touch::TouchInput> = points
+                .into_iter()
+                .take(public::MAX_TOUCH_POINTS)
+                .filter(|p| p.angle.is_finite() && p.radius.is_finite())
+                .collect();
+            if points.is_empty() {
+                return Ok(());
+            }
+            let finite = |v: f32, d: f32| if v.is_finite() { v } else { d };
+            let color = empyrean_patch::touch::TouchColor {
+                hue: finite(color.hue, -1.0),
+                saturation: finite(color.saturation, 0.85).clamp(0.0, 1.0),
+                brightness: finite(color.brightness, 1.0).clamp(0.0, 1.0)
+                    * cfg.input_level.clamp(0.0, 1.0),
+            };
+            state.public.lock().note_input(conn_id, "draw", now);
+            state.touch(public::touch_source(conn_id), &points, color, Some(public::MAX_PUBLIC_FINGERS));
         }
         ClientMsg::GameInput { species, points } => {
             let points: Vec<crate::layers::DabPoint> = points

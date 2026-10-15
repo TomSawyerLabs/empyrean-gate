@@ -48,6 +48,12 @@ struct Globals {
     hue_target: f32,
     hue_amount: f32,
     hue_loose: f32,
+    // Live records in TOUCH (binding 10); the pads keep the uniform a
+    // multiple of 16 bytes.
+    touch_count: u32,
+    _pad_touch0: u32,
+    _pad_touch1: u32,
+    _pad_touch2: u32,
 }
 
 struct AudioU {
@@ -106,6 +112,26 @@ struct Dab {
 @group(0) @binding(7) var<storage, read> VIDEO: array<u32>;
 /// Patch parameter slab: one f32 per (node, param) slot, laid out by codegen.
 @group(0) @binding(8) var<storage, read> P: array<f32>;
+
+/// One finger (see crate::touch / abi::GpuTouch). Composition frame.
+struct Touch {
+    angle: f32,
+    radius: f32,
+    age: f32,       // seconds since touchdown
+    released: f32,  // seconds since release; negative while held
+    hue: f32,       // < 0 = white
+    saturation: f32,
+    brightness: f32,
+    speed: f32,     // array radii per second
+    dir: f32,       // motion direction, composition cartesian
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
+}
+
+/// Raw touches, for the Touch mask / Touch glow nodes. Binding 9 is the
+/// layer stack's game grid, unused here.
+@group(0) @binding(10) var<storage, read> TOUCH: array<Touch>;
 
 const PI: f32 = 3.14159265359;
 const TAU: f32 = 6.28318530718;
@@ -686,6 +712,59 @@ fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
             return vec3f(0.0);
         }
     }
+}
+
+/// How strongly finger `T` covers `ctx`: a soft disc of `radius` (array
+/// radii) that grows by `grow` per second held, stretched back along the
+/// finger's motion by `trail`, fading over `fade` seconds after release.
+/// `soft` 0 is a hard edge, 1 a Gaussian-ish falloff.
+fn touch_cover(T: Touch, ctx: Ctx, radius: f32, soft: f32, fade: f32, grow: f32, trail: f32) -> f32 {
+    var life = 1.0;
+    var held = T.age;
+    if T.released >= 0.0 {
+        life = 1.0 - T.released / max(fade, 0.001);
+        if life <= 0.0 {
+            return 0.0;
+        }
+        life = life * life;
+        held = max(T.age - T.released, 0.0);
+    }
+    let size = max(radius * (1.0 + max(grow, 0.0) * held), 0.001);
+    let origin = T.radius * vec2f(cos(T.angle), sin(T.angle));
+    let d = ctx.pos - origin;
+    let u = vec2f(cos(T.dir), sin(T.dir));
+    var along = dot(d, u);
+    let perp = d - along * u;
+    if along < 0.0 {
+        along = along / (1.0 + max(trail, 0.0) * T.speed);
+    }
+    let dist = length(perp + along * u);
+    let edge = clamp(soft, 0.0, 1.0);
+    return (1.0 - smoothstep(size * (1.0 - edge), size * (1.0 + edge * 0.5), dist)) * life;
+}
+
+fn touch_mask(ctx: Ctx, radius: f32, soft: f32, fade: f32, grow: f32, trail: f32) -> f32 {
+    var acc = 0.0;
+    for (var t = 0u; t < G.touch_count; t++) {
+        acc = max(acc, touch_cover(TOUCH[t], ctx, radius, soft, fade, grow, trail));
+    }
+    return acc;
+}
+
+fn touch_glow(ctx: Ctx, radius: f32, soft: f32, fade: f32, grow: f32, trail: f32) -> vec4f {
+    var acc = vec3f(0.0);
+    var cover = 0.0;
+    for (var t = 0u; t < G.touch_count; t++) {
+        let T = TOUCH[t];
+        let v = touch_cover(T, ctx, radius, soft, fade, grow, trail);
+        var col = vec3f(1.0);
+        if T.hue >= 0.0 {
+            col = hsv2rgb(T.hue, T.saturation, T.brightness);
+        }
+        acc += col * v;
+        cover = max(cover, v);
+    }
+    return vec4f(acc, cover);
 }
 
 /// Shared epilogue: effects + dabs composite, master, soft-clip, pack.

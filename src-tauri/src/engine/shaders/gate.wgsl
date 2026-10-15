@@ -49,6 +49,12 @@ struct Globals {
     hue_target: f32,
     hue_amount: f32,
     hue_loose: f32,
+    // Patch-only (raw touches, binding 10); declared so both copies of the
+    // shared uniform stay the same size.
+    touch_count: u32,
+    _pad_touch0: u32,
+    _pad_touch1: u32,
+    _pad_touch2: u32,
 }
 
 struct AudioU {

@@ -13,13 +13,14 @@
 
 use crate::PatchDoc;
 use crate::abi::{
-    AudioUniform, Globals, GpuDab, GpuEffect, MAX_AUDIO_SOURCES, MAX_DABS, MAX_EFFECTS,
+    AudioUniform, Globals, GpuDab, GpuEffect, GpuTouch, MAX_AUDIO_SOURCES, MAX_DABS, MAX_EFFECTS,
     SCOPE_FLOATS,
 };
 use crate::audio::AudioChain;
 use crate::codegen::{self, Program};
 use crate::effects::{Dab, DabPoint, EffectCfg, EffectKind, PenKind, Spin};
 use crate::eval::{DJ_EVENT_COUNT, DjLinkInputs, EvalInputs, Runtime};
+use crate::touch::{TouchColor, TouchInput, Touches};
 
 /// The array being simulated. Defaults are the gate's (`config.rs`).
 #[derive(Debug, Clone, Copy)]
@@ -67,6 +68,8 @@ pub struct Sim {
     effects: Vec<(EffectCfg, f32)>,
     dabs: Vec<(Dab, f32)>,
     spin: Spin,
+    touches: Touches,
+    gpu_touches: Vec<GpuTouch>,
     time: f32,
     effect_seq: u64,
 
@@ -116,6 +119,8 @@ impl Sim {
             effects: Vec::new(),
             dabs: Vec::new(),
             spin: Spin::default(),
+            touches: Touches::new(),
+            gpu_touches: Vec::new(),
             time: 0.0,
             effect_seq: 0,
             audio: [AudioUniform::default(); MAX_AUDIO_SOURCES],
@@ -281,6 +286,17 @@ impl Sim {
         }
     }
 
+    /// One raw pointer event (physical frame). `source` tells fingers from
+    /// different devices apart; a single-surface host can pass 0.
+    pub fn touch(&mut self, source: u64, input: TouchInput, color: TouchColor) {
+        self.touches.apply(source, self.time, input, color);
+    }
+
+    /// Whether the running patch reads raw touch (and so owns the surface).
+    pub fn uses_touch(&self) -> bool {
+        codegen::uses_touch(&self.doc)
+    }
+
     /// Fire a PRO DJ LINK event output (`eval::DJ_EVENT_*`).
     pub fn fire_dj_event(&mut self, event: usize) {
         if event < DJ_EVENT_COUNT {
@@ -296,6 +312,8 @@ impl Sim {
             0.0
         };
         self.time += dt;
+        self.touches.expire(self.time);
+        let touch = self.touches.view(self.time, self.spin.angle);
 
         let slab = self.rt.eval(&EvalInputs {
             dt,
@@ -307,6 +325,7 @@ impl Sim {
             shake: self.shake,
             effect_seq: self.effect_seq,
             dj_link: self.dj_link,
+            touch: &touch,
         });
         self.slab.clear();
         self.slab.extend_from_slice(slab);
@@ -334,6 +353,7 @@ impl Sim {
         );
 
         let rotation = self.spin.step(dt);
+        self.gpu_touches = self.touches.gpu(self.time, rotation);
         self.pack_globals(dt);
         self.globals.rotation = rotation;
     }
@@ -353,6 +373,7 @@ impl Sim {
             shake: self.shake,
             yaw: self.yaw,
             dab_count: self.gpu_dabs.len() as u32,
+            touch_count: self.gpu_touches.len() as u32,
             video_width: self.video_width,
             video_height: self.video_height,
             video_active: u32::from(self.video_width > 0 && self.video_height > 0),
@@ -392,6 +413,10 @@ impl Sim {
     /// Binding 5; `globals().dab_count` records are live.
     pub fn dab_records(&self) -> &[GpuDab] {
         &self.gpu_dabs
+    }
+    /// Binding 10; `globals().touch_count` records are live.
+    pub fn touch_records(&self) -> &[GpuTouch] {
+        &self.gpu_touches
     }
     /// Binding 8: the parameter slab (`program().slab_len` floats).
     pub fn slab(&self) -> &[f32] {
@@ -487,6 +512,49 @@ mod tests {
             0,
             "Rotate never reaches the GPU"
         );
+    }
+
+    #[test]
+    fn touch_drives_the_touch_node_and_the_gpu_records() {
+        use crate::touch::TouchPhase;
+        let doc: PatchDoc = serde_json::from_value(serde_json::json!({
+            "nodes": [
+                { "id": "t", "kind": "touch" },
+                { "id": "fx", "kind": "event_effect", "params": { "effect": 1.0 } },
+                { "id": "g", "kind": "touch_glow" },
+                { "id": "o", "kind": "output" }
+            ],
+            "edges": [
+                { "from": { "node": "t", "port": "down" }, "to": { "node": "fx", "port": "trigger" } },
+                { "from": { "node": "t", "port": "angle" }, "to": { "node": "fx", "port": "angle" } },
+                { "from": { "node": "g", "port": "out" }, "to": { "node": "o", "port": "in" } }
+            ]
+        }))
+        .unwrap();
+        let mut sim = Sim::new(doc, Geometry::default()).expect("compiles");
+        assert!(sim.uses_touch());
+        sim.step(1.0 / 60.0);
+        let finger = |phase| TouchInput {
+            id: 3,
+            phase,
+            angle: 1.0,
+            radius: 0.6,
+        };
+        sim.touch(9, finger(TouchPhase::Down), TouchColor::default());
+        sim.step(1.0 / 60.0);
+        assert_eq!(sim.globals().touch_count, 1);
+        assert_eq!(sim.globals().effect_count, 1, "down -> Event effect fired");
+        assert!(
+            (sim.effect_records()[0].angle - 1.0).abs() < 1e-5,
+            "at the finger"
+        );
+        sim.touch(9, finger(TouchPhase::Up), TouchColor::default());
+        sim.step(1.0 / 60.0);
+        assert!(sim.touch_records()[0].released >= 0.0);
+        for _ in 0..200 {
+            sim.step(1.0 / 60.0);
+        }
+        assert_eq!(sim.globals().touch_count, 0, "released fingers expire");
     }
 
     #[test]

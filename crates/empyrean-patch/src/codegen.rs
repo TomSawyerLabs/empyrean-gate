@@ -77,7 +77,7 @@ pub struct SlabSlot {
 fn is_cpu_kind(kind: &str) -> bool {
     matches!(
         kind,
-        "time" | "slider" | "audio" | "imu" | "tap" | "dj_link" | "event_effect" | "scalar_math" | "lfo" | "smooth" | "envelope"
+        "time" | "slider" | "audio" | "imu" | "tap" | "touch" | "dj_link" | "event_effect" | "scalar_math" | "lfo" | "smooth" | "envelope"
     )
 }
 
@@ -94,6 +94,8 @@ fn is_gpu_kind(kind: &str) -> bool {
             | "plasma"
             | "spoke_chase"
             | "sparkle"
+            | "touch_mask"
+            | "touch_glow"
             | "beat_rings"
             | "breathe"
             | "rainbow"
@@ -118,6 +120,16 @@ fn is_gpu_kind(kind: &str) -> bool {
             | "texture_sample"
             | "output"
     )
+}
+
+/// Node kinds that read raw touch. A patch containing any of them owns the
+/// touch surface: hosts send it raw touches instead of applying a tap or pen
+/// tool (see crate::touch).
+pub const TOUCH_KINDS: &[&str] = &["touch", "touch_mask", "touch_glow"];
+
+/// Whether `doc` reads raw touch (and so owns the touch surface).
+pub fn uses_touch(doc: &PatchDoc) -> bool {
+    doc.nodes.iter().any(|n| TOUCH_KINDS.contains(&n.kind.as_str()))
 }
 
 /// Validate + transpile a patch. The single entry point the server (activation
@@ -546,6 +558,25 @@ impl Gen<'_> {
                     bright = self.p(i, "brightness"),
                 )
             }
+            "touch_mask" => format!(
+                "    return touch_mask(c, {radius}, {soft}, {fade}, {grow}, {trail}) * {intensity};",
+                radius = self.p(i, "radius"),
+                soft = self.p(i, "soft"),
+                fade = self.p(i, "fade"),
+                grow = self.p(i, "grow"),
+                trail = self.p(i, "trail"),
+                intensity = self.p(i, "intensity"),
+            ),
+            "touch_glow" => format!(
+                "    let g = touch_glow(c, {radius}, {soft}, {fade}, {grow}, {trail});
+                     return vec4f(g.rgb * {intensity}, g.a);",
+                radius = self.p(i, "radius"),
+                soft = self.p(i, "soft"),
+                fade = self.p(i, "fade"),
+                grow = self.p(i, "grow"),
+                trail = self.p(i, "trail"),
+                intensity = self.p(i, "intensity"),
+            ),
             "sparkle" => format!(
                 "    let idx = c.spoke * G.pixels + c.i;\n\
                  \x20   let tw_rate = 4.0 + {twinkle} * 20.0;\n\
@@ -921,7 +952,7 @@ impl Gen<'_> {
         };
 
         let ret = match self.doc.nodes[i].kind.as_str() {
-            "gradient" => "f32",
+            "gradient" | "touch_mask" => "f32",
             _ => "vec4f",
         };
         // Transform/texture_sample rename their ctx arg (they derive a

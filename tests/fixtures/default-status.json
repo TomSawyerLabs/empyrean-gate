@@ -75,6 +75,7 @@
   },
   "patch_active": false,
   "patch_error": null,
+  "patch_touch": false,
   "show": {
     "enabled": false,
     "playlist_id": "",

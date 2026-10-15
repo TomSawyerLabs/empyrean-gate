@@ -1226,6 +1226,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
     }
     state.connected_clients.lock().remove(&conn_id);
     state.game_controller_left(conn_id);
+    state.release_touches(conn_id);
     if state.stop_video(Some(conn_id)) {
         deactivate_video_audio(&ctx);
     }
@@ -1667,7 +1668,7 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
     // The roster's "last input" per device — same message set as the timeline.
     let roster_kind: Option<&'static str> = match msg {
         ClientMsg::TriggerEffect { .. } => Some("tap"),
-        ClientMsg::Paint { .. } => Some("draw"),
+        ClientMsg::Paint { .. } | ClientMsg::Touch { .. } => Some("draw"),
         ClientMsg::SetMaster { .. } | ClientMsg::SetMasterHue { .. } => Some("master"),
         ClientMsg::SetSacnEnabled { .. } => Some("output"),
         ClientMsg::AddLayer { .. }
@@ -2787,6 +2788,9 @@ async fn handle_msg(
             intensity,
         } => {
             state.paint(pen, &points, hue, saturation, brightness, size, intensity);
+        }
+        ClientMsg::Touch { points, color } => {
+            state.touch(conn_id, &points, color, None);
         }
         ClientMsg::SubscribePreview {
             fps,
