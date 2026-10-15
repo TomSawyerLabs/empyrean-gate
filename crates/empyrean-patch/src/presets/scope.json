@@ -1,18 +1,30 @@
 {
-  "format": 1,
+  "format": 2,
   "id": "builtin-scope",
   "name": "Scope",
   "description": "Circular oscilloscope ring over spoke-per-bin spectrum bars — raw audio, both scopes.",
   "nodes": [
-    { "id": "wf", "kind": "waveform", "name": "", "params": { "ring": 0.55, "depth": 0.6, "thickness": 0.4, "hue": 0.33, "brightness": 1.0 }, "pos": [260, 40] },
-    { "id": "spec", "kind": "spectrum", "name": "", "params": { "length": 0.6, "hue": 0.8, "hue_range": 0.3, "brightness": 0.8 }, "pos": [260, 240] },
+    { "id": "wf", "kind": "waveform", "name": "", "params": { "brightness": 1, "depth": 0.6, "hue": 0.33, "ring": 0.55, "thickness": 0.4 }, "pos": [260, 40] },
+    { "id": "spec", "kind": "spectrum", "name": "", "params": { "brightness": 0.8, "hue": 0.8, "hue_range": 0.3, "length": 0.6 }, "pos": [260, 240] },
     { "id": "mix", "kind": "blend", "name": "", "params": { "opacity": 0.9 }, "pos": [520, 130] },
-    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [760, 130] }
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [760, 130] },
+    { "id": "effects", "kind": "effects_in", "name": "", "params": {}, "pos": [500, 350] },
+    { "id": "effects_render", "kind": "render_effects", "name": "", "params": {}, "pos": [240, 350] },
+    { "id": "strokes", "kind": "touch_dabs", "name": "", "params": {}, "pos": [-20, 570] },
+    { "id": "strokes_render", "kind": "render_points", "name": "", "params": {}, "pos": [-280, 570] },
+    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [630, 250] },
+    { "id": "overlay2", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [630, 250] }
   ],
   "edges": [
     { "from": { "node": "spec", "port": "out" }, "to": { "node": "mix", "port": "base" } },
     { "from": { "node": "wf", "port": "out" }, "to": { "node": "mix", "port": "over" } },
-    { "from": { "node": "mix", "port": "out" }, "to": { "node": "out", "port": "in" } }
+    { "from": { "node": "effects", "port": "effects" }, "to": { "node": "effects_render", "port": "effects" } },
+    { "from": { "node": "strokes", "port": "points" }, "to": { "node": "strokes_render", "port": "points" } },
+    { "from": { "node": "mix", "port": "out" }, "to": { "node": "overlay", "port": "base" } },
+    { "from": { "node": "effects_render", "port": "out" }, "to": { "node": "overlay", "port": "over" } },
+    { "from": { "node": "overlay", "port": "out" }, "to": { "node": "overlay2", "port": "base" } },
+    { "from": { "node": "strokes_render", "port": "out" }, "to": { "node": "overlay2", "port": "over" } },
+    { "from": { "node": "overlay2", "port": "out" }, "to": { "node": "out", "port": "in" } }
   ],
   "exposed": [
     { "node": "wf", "param": "hue", "label": "Wave hue" },

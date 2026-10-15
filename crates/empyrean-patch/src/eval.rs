@@ -134,8 +134,9 @@ pub struct Runtime {
     outputs: Vec<HashMap<String, f32>>,
     /// Event ports that fired this frame.
     events: Vec<Vec<&'static str>>,
-    /// One-shot effects emitted by Event effect nodes during the latest eval.
-    emitted_effects: Vec<EffectCfg>,
+    /// One-shot effects emitted by Event effect nodes during the latest eval,
+    /// with each node's `effects::effect_source`.
+    emitted_effects: Vec<(EffectCfg, u32)>,
 }
 
 impl Runtime {
@@ -162,7 +163,7 @@ impl Runtime {
 
     /// Drain effects emitted by the most recent frame. Keeping this separate
     /// from `effect_seq` prevents an Event effect from recursively firing Tap.
-    pub fn take_emitted_effects(&mut self) -> Vec<EffectCfg> {
+    pub fn take_emitted_effects(&mut self) -> Vec<(EffectCfg, u32)> {
         std::mem::take(&mut self.emitted_effects)
     }
 
@@ -363,7 +364,8 @@ impl Runtime {
                             .and_then(|i| EffectKind::ALL.get(i))
                             .copied()
                         {
-                            self.emitted_effects.push(EffectCfg {
+                            let source = crate::effects::effect_source(&self.doc.nodes[node].id);
+                            self.emitted_effects.push((EffectCfg {
                                 kind,
                                 angle: self.input(node, "angle"),
                                 radius: self.input(node, "radius"),
@@ -377,7 +379,7 @@ impl Runtime {
                                 grow: self.input(node, "grow"),
                                 edge: self.input(node, "edge"),
                                 fill: self.input(node, "fill"),
-                            });
+                            }, source));
                         }
                     }
                 }
@@ -550,7 +552,7 @@ mod tests {
         for (follow, expect_second_down, expect_angle) in [(0.0, true, 2.0), (1.0, false, 1.0)] {
             let mut rt = runtime(doc(follow));
             let mut t = Touches::new();
-            let mut frame = |t: &Touches, rt: &mut Runtime| {
+            let frame = |t: &Touches, rt: &mut Runtime| {
                 let view = t.view(0.0, 0.0);
                 let mut inp = inputs(&audio);
                 inp.touch = &view;
@@ -866,9 +868,9 @@ mod tests {
         rt.eval(&inp);
         let emitted = rt.take_emitted_effects();
         assert_eq!(emitted.len(), 1);
-        assert_eq!(emitted[0].kind, EffectKind::Ring);
-        assert_eq!(emitted[0].angle, -1.0, "scalar DJ data can place effects");
-        assert_eq!(emitted[0].intensity, 1.7);
+        assert_eq!(emitted[0].0.kind, EffectKind::Ring);
+        assert_eq!(emitted[0].0.angle, -1.0, "scalar DJ data can place effects");
+        assert_eq!(emitted[0].0.intensity, 1.7);
 
         rt.eval(&inp);
         assert!(rt.take_emitted_effects().is_empty(), "event fires only once");

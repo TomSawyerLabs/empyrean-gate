@@ -450,7 +450,7 @@ mod tests {
     /// 56 = 14 f32: the 12 originals plus `edge` and `fill`.
     #[test]
     fn patch_transient_abi_keeps_full_color_records() {
-        assert_eq!(std::mem::size_of::<GpuEffect>(), 56);
+        assert_eq!(std::mem::size_of::<GpuEffect>(), 60);
         assert_eq!(std::mem::size_of::<GpuDab>(), 48);
 
         // Both shader copies declare the two shape controls, in the same order.

@@ -215,12 +215,15 @@ mod tests {
     fn patch_effects_remain_composition_relative() {
         let state = SharedState::new(AppConfig::default());
         state.rotation.lock().angle = 0.75;
-        state.trigger_effect_from_patch(EffectCfg {
-            kind: EffectKind::Heart,
-            angle: 1.25,
-            rotation: 0.25,
-            ..Default::default()
-        });
+        state.trigger_effect_from_patch(
+            EffectCfg {
+                kind: EffectKind::Heart,
+                angle: 1.25,
+                rotation: 0.25,
+                ..Default::default()
+            },
+            9,
+        );
 
         let effects = state.effects.lock();
         assert_eq!(effects[0].cfg.angle, 1.25);
@@ -280,6 +283,8 @@ pub struct ControlInputs {
 pub struct ActiveEffect {
     pub cfg: EffectCfg,
     pub born: Instant,
+    /// 0 = a client's; else the emitting patch node's `effect_source`.
+    pub source: u32,
 }
 
 /// Whole-composition rotation; shared with the browser playground.
@@ -1238,12 +1243,18 @@ impl SharedState {
             cfg.angle -= rotation;
             cfg.rotation -= rotation;
         }
-        self.trigger_effect_from_patch(cfg);
+        self.queue_effect(cfg, 0);
     }
 
-    /// Queue an effect emitted by the active patch without advancing the Tap
-    /// input sequence (otherwise Tap → Event effect would self-trigger forever).
-    pub fn trigger_effect_from_patch(&self, cfg: EffectCfg) {
+    /// Queue an effect emitted by a patch node (`source` is its
+    /// `effect_source`) without advancing the Tap input sequence (otherwise
+    /// Tap → Event effect would self-trigger forever). It shows only where the
+    /// patch wires that node's stream into a Render effects.
+    pub fn trigger_effect_from_patch(&self, cfg: EffectCfg, source: u32) {
+        self.queue_effect(cfg, source);
+    }
+
+    fn queue_effect(&self, cfg: EffectCfg, source: u32) {
         if cfg.kind == EffectKind::Rotate {
             self.rotation.lock().impulse(&cfg);
             return;
@@ -1256,6 +1267,7 @@ impl SharedState {
         effects.push(ActiveEffect {
             cfg,
             born: Instant::now(),
+            source,
         });
     }
 

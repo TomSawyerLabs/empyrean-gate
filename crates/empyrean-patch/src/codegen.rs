@@ -233,31 +233,6 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         wires: &wires,
         slot_of: &slot_of,
     };
-    // Reverse reachability from the output: explicit stream renderers wired
-    // into the result take ownership of their stream so the epilogue does not
-    // composite it a second time. Dangling nodes change nothing.
-    let mut reachable = vec![false; doc.nodes.len()];
-    let mut stack = vec![output];
-    reachable[output] = true;
-    while let Some(i) = stack.pop() {
-        for ((to, _), (from, _)) in &wires {
-            if *to == i && !reachable[*from] {
-                reachable[*from] = true;
-                stack.push(*from);
-            }
-        }
-    }
-    let auto_dabs = !doc
-        .nodes
-        .iter()
-        .enumerate()
-        .any(|(i, n)| n.kind == "render_points" && reachable[i]);
-    let auto_effects = !doc
-        .nodes
-        .iter()
-        .enumerate()
-        .any(|(i, n)| n.kind == "render_effects" && reachable[i]);
-
     let mut code = String::new();
     code.push_str(PATCH_LIB_WGSL);
     code.push_str("\n// ---- generated from the patch graph ----\n");
@@ -271,7 +246,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
     // functions (and therefore the same parameter-slab layout) with a per-node
     // thumbnail main instead of the composited one.
     let mut preview_code = code.clone();
-    g.main_fn(&mut code, output, auto_effects, auto_dabs)?;
+    g.main_fn(&mut code, output)?;
 
     let preview_nodes: Vec<usize> = gpu_order
         .iter()
@@ -324,6 +299,32 @@ struct Gen<'a> {
 }
 
 impl Gen<'_> {
+    /// The effect sources a stream wired into `node.port` carries, walking
+    /// back through chained Event effects: 0 for Triggered effects (clients),
+    /// each Event effect's `effect_source`. Sorted, unique.
+    fn effect_sources(&self, node: usize, port: &str) -> Vec<u32> {
+        let mut out = Vec::new();
+        let mut at = self.upstream(node, port).map(|(from, _)| *from);
+        // A chain is acyclic (validated) and at most every node long.
+        for _ in 0..=self.doc.nodes.len() {
+            let Some(i) = at else { break };
+            match self.doc.nodes[i].kind.as_str() {
+                "effects_in" => {
+                    out.push(0);
+                    break;
+                }
+                "event_effect" => {
+                    out.push(crate::effects::effect_source(&self.doc.nodes[i].id));
+                    at = self.upstream(i, "in").map(|(from, _)| *from);
+                }
+                _ => break,
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
     /// `P[..]` reference for a Number param of a GPU node.
     fn p(&self, node: usize, param: &str) -> String {
         let slot = self
@@ -931,13 +932,22 @@ impl Gen<'_> {
                 }
             }
             "render_effects" => {
-                if self.upstream(i, "effects").is_none() {
+                let sources = self.effect_sources(i, "effects");
+                if sources.is_empty() {
                     "    return vec4f(0.0);".to_string()
                 } else {
+                    let wanted = sources
+                        .iter()
+                        .map(|s| format!("E.source == {s}u"))
+                        .collect::<Vec<_>>()
+                        .join(" || ");
                     format!(
                         "    var acc = vec3f(0.0);\n\
                          \x20   for (var e = 0u; e < G.effect_count; e++) {{\n\
                          \x20       var E = FX[e];\n\
+                         \x20       if !({wanted}) {{\n\
+                         \x20           continue;\n\
+                         \x20       }}\n\
                          \x20       E.size = E.size * {size};\n\
                          \x20       E.intensity = E.intensity * {intensity};\n\
                          \x20       acc += effect_color(E, c);\n\
@@ -971,17 +981,9 @@ impl Gen<'_> {
         Ok(())
     }
 
-    fn main_fn(
-        &self,
-        code: &mut String,
-        output: usize,
-        auto_effects: bool,
-        auto_dabs: bool,
-    ) -> Result<(), String> {
+    fn main_fn(&self, code: &mut String, output: usize) -> Result<(), String> {
         let root = self.color_input(output, "in", "ctx");
         let master = self.p(output, "master");
-        let auto_effects = if auto_effects { "true" } else { "false" };
-        let auto_dabs = if auto_dabs { "true" } else { "false" };
         write!(
             code,
             "\n@compute @workgroup_size(256)\n\
@@ -1004,7 +1006,7 @@ impl Gen<'_> {
              \x20   ctx.rn = rn;\n\
              \x20   ctx.pos = rn * vec2f(cos(theta), sin(theta));\n\
              \x20   let root = {root};\n\
-             \x20   finish(ctx, idx, root.rgb * {master}, {auto_effects}, {auto_dabs});\n\
+             \x20   finish(ctx, idx, root.rgb * {master});\n\
              }}\n",
         )
         .unwrap();
@@ -1323,8 +1325,36 @@ mod tests {
         .expect("validates");
     }
 
+    fn validates(wgsl: &str) {
+        let module =
+            naga::front::wgsl::parse_str(wgsl).unwrap_or_else(|e| panic!("parse: {e}
+{wgsl}"));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .expect("validates");
+    }
+
+    /// Nothing reaches the output unless it is wired (plans/explicit-output.md):
+    /// the epilogue composites no effects and no dabs of its own.
     #[test]
-    fn render_points_takes_dab_ownership_and_validates() {
+    fn the_output_adds_nothing_that_is_not_wired() {
+        let d = PatchDoc {
+            nodes: vec![node("n", "noise_field"), node("o", "output")],
+            edges: vec![edge("n", "out", "o", "in")],
+            ..Default::default()
+        };
+        let prog = compile(&d).expect("compiles");
+        assert!(prog.wgsl.contains("finish(ctx, idx, root.rgb * P["));
+        let main = prog.wgsl.split("fn main(").nth(1).unwrap();
+        assert!(!main.contains("FX[") && !main.contains("DABS["));
+        validates(&prog.wgsl);
+    }
+
+    #[test]
+    fn render_points_draws_the_wired_strokes() {
         let d = PatchDoc {
             nodes: vec![
                 node("touch", "touch_dabs"),
@@ -1338,64 +1368,47 @@ mod tests {
             ..Default::default()
         };
         let prog = compile(&d).expect("compiles");
-        assert!(
-            prog.wgsl.contains(", true, false);"),
-            "wired render_points disables the epilogue's auto-dab pass"
-        );
-        let module = naga::front::wgsl::parse_str(&prog.wgsl)
-            .unwrap_or_else(|e| panic!("parse: {e}\n{}", prog.wgsl));
-        naga::valid::Validator::new(
-            naga::valid::ValidationFlags::all(),
-            naga::valid::Capabilities::default(),
-        )
-        .validate(&module)
-        .expect("validates");
-
-        // A DANGLING render_points changes nothing: dabs still auto-composite.
-        let mut dangling = d.clone();
-        dangling.edges.retain(|e| e.from.node != "rp");
-        let prog = compile(&dangling).expect("compiles");
-        assert!(
-            prog.wgsl.contains(", true, true);"),
-            "dangling node leaves auto-dabs on"
-        );
+        assert!(prog.wgsl.contains("dab_color(D, c, d)"));
+        validates(&prog.wgsl);
     }
 
+    /// A Render effects node draws exactly the sources its chain names:
+    /// Triggered effects (clients, source 0) and each chained Event effect.
     #[test]
-    fn render_effects_takes_effect_ownership_and_validates() {
+    fn render_effects_draws_the_sources_its_chain_names() {
         let d = PatchDoc {
             nodes: vec![
-                node("fx", "effects_in"),
+                node("clients", "effects_in"),
+                node("a", "event_effect"),
+                node("b", "event_effect"),
+                node("lone", "event_effect"),
                 node("render", "render_effects"),
                 node("o", "output"),
             ],
             edges: vec![
-                edge("fx", "effects", "render", "effects"),
+                edge("clients", "effects", "a", "in"),
+                edge("a", "effects", "b", "in"),
+                edge("b", "effects", "render", "effects"),
                 edge("render", "out", "o", "in"),
             ],
             ..Default::default()
         };
         let prog = compile(&d).expect("compiles");
+        let src = |id: &str| crate::effects::effect_source(id);
+        assert!(prog.wgsl.contains("E.source == 0u"), "clients at the head");
+        assert!(prog.wgsl.contains(&format!("E.source == {}u", src("a"))));
+        assert!(prog.wgsl.contains(&format!("E.source == {}u", src("b"))));
         assert!(
-            prog.wgsl.contains(", false, true);"),
-            "wired render_effects disables only the automatic effect pass"
+            !prog.wgsl.contains(&format!("E.source == {}u", src("lone"))),
+            "an unwired Event effect is drawn nowhere"
         );
-        let module = naga::front::wgsl::parse_str(&prog.wgsl)
-            .unwrap_or_else(|e| panic!("parse: {e}\n{}", prog.wgsl));
-        naga::valid::Validator::new(
-            naga::valid::ValidationFlags::all(),
-            naga::valid::Capabilities::default(),
-        )
-        .validate(&module)
-        .expect("validates");
+        validates(&prog.wgsl);
 
-        let mut dangling = d.clone();
-        dangling.edges.retain(|e| e.from.node != "render");
-        let prog = compile(&dangling).expect("compiles");
-        assert!(
-            prog.wgsl.contains(", true, true);"),
-            "a dangling renderer leaves automatic effects on"
-        );
+        // Without the head, client effects are not drawn.
+        let mut no_clients = d.clone();
+        no_clients.edges.retain(|e| e.from.node != "clients");
+        let prog = compile(&no_clients).expect("compiles");
+        assert!(!prog.wgsl.contains("E.source == 0u"));
     }
 
     #[test]

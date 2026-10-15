@@ -127,6 +127,10 @@ pub struct GpuEffect {
     pub grow: f32,
     pub edge: f32,
     pub fill: f32,
+    /// Who fired it: 0 = a client (pads, keys, taps), otherwise the emitting
+    /// node's `effects::effect_source`. Render effects draws the sources its
+    /// wired chain names; the layer stack draws only 0.
+    pub source: u32,
 }
 
 /// One finger in the TOUCH uniform array (binding 10, `MAX_TOUCHES` long),

@@ -398,11 +398,23 @@ pub const TYPES: &[NodeType] = &[
         id: "event_effect",
         label: "Event effect",
         category: Category::ScalarOp,
-        inputs: &[PortDef {
-            name: "trigger",
-            shape: Shape::Event,
+        // The effects it fires are a stream: they show only where `effects`
+        // is wired into a Render effects (through any further Event effects
+        // chained on `in`, which merges the upstream stream into this one).
+        inputs: &[
+            PortDef {
+                name: "trigger",
+                shape: Shape::Event,
+            },
+            PortDef {
+                name: "in",
+                shape: Shape::Effects,
+            },
+        ],
+        outputs: &[PortDef {
+            name: "effects",
+            shape: Shape::Effects,
         }],
-        outputs: &[],
         params: &[
             sel("effect", "Effect", EFFECT_KINDS),
             num("angle", "Angle (rad)", -3.142, 3.142, 0.0),

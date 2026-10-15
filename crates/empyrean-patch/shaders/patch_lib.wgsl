@@ -86,6 +86,7 @@ struct Effect {
     grow: f32,
     edge: f32,
     fill: f32,
+    source: u32,    // 0 = a client; else the emitting patch node (see abi.rs)
 }
 
 struct Dab {
@@ -769,23 +770,11 @@ fn touch_glow(ctx: Ctx, radius: f32, soft: f32, fade: f32, grow: f32, trail: f32
     return vec4f(acc, cover);
 }
 
-/// Shared epilogue: effects + dabs composite, master, soft-clip, pack.
-/// An explicitly wired stream renderer takes ownership of that stream and
-/// disables its automatic pass here, avoiding double rendering.
-fn finish(ctx: Ctx, idx: u32, patch_rgb: vec3f, auto_effects: bool, auto_dabs: bool) {
+/// Shared epilogue: hue pull, master, soft clip, pack.
+fn finish(ctx: Ctx, idx: u32, patch_rgb: vec3f) {
+    // Nothing is added here: effects and pen strokes reach the output only
+    // through Render effects / Render points wired into the graph.
     var acc = patch_rgb;
-
-    if auto_effects {
-        for (var e = 0u; e < G.effect_count; e++) {
-            acc += effect_color(FX[e], ctx);
-        }
-    }
-    if auto_dabs {
-        for (var d = 0u; d < G.dab_count; d++) {
-            acc += dab_color(DABS[d], ctx, d);
-        }
-    }
-
     acc = hue_pull(acc);
     acc = acc * G.master;
 

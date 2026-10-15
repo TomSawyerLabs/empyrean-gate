@@ -96,6 +96,7 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .route("/brc/camp/{uid}", post(brc_camp))
         .route("/patch/registry", get(patch_registry))
         .route("/patch/presets", get(patch_presets))
+        .route("/patch/migrate", post(patch_migrate))
         .route("/media/file/{id}", get(serve_media_file))
         .route("/version", get(running_version))
         .route("/focus", post(focus_window))
@@ -814,6 +815,14 @@ async fn patch_registry() -> Response {
 /// Built-in starter patches (immutable templates; the editor copies them).
 async fn patch_presets() -> Response {
     axum::Json(patch::presets::presets()).into_response()
+}
+
+/// Upgrade a patch document to the current format without storing it (the
+/// editor's Import uses it so it opens exactly what will be saved). Pure; no
+/// state is touched.
+async fn patch_migrate(axum::Json(mut doc): axum::Json<patch::PatchDoc>) -> Response {
+    patch::migrate::migrate(&mut doc);
+    axum::Json(doc).into_response()
 }
 
 // ---------------------------------------------------------------------------

@@ -65,7 +65,7 @@ pub struct Sim {
     rt: Runtime,
     /// Live effects and dabs with the sim time they were born at; age is
     /// `time - born`, as the engine reads `born.elapsed()` at pack time.
-    effects: Vec<(EffectCfg, f32)>,
+    effects: Vec<(EffectCfg, f32, u32)>,
     dabs: Vec<(Dab, f32)>,
     spin: Spin,
     touches: Touches,
@@ -213,11 +213,11 @@ impl Sim {
             cfg.angle -= self.spin.angle;
             cfg.rotation -= self.spin.angle;
         }
-        self.push_effect(cfg);
+        self.push_effect(cfg, 0);
     }
 
     /// An effect emitted by the patch itself (does not advance Tap).
-    fn push_effect(&mut self, cfg: EffectCfg) {
+    fn push_effect(&mut self, cfg: EffectCfg, source: u32) {
         if cfg.kind == EffectKind::Rotate {
             self.spin.impulse(&cfg);
             return;
@@ -225,7 +225,7 @@ impl Sim {
         if self.effects.len() >= MAX_EFFECTS {
             self.effects.remove(0);
         }
-        self.effects.push((cfg, self.time));
+        self.effects.push((cfg, self.time, source));
     }
 
     /// One live-draw stroke segment (points in physical space).
@@ -329,18 +329,18 @@ impl Sim {
         });
         self.slab.clear();
         self.slab.extend_from_slice(slab);
-        for cfg in self.rt.take_emitted_effects() {
-            self.push_effect(cfg);
+        for (cfg, source) in self.rt.take_emitted_effects() {
+            self.push_effect(cfg, source);
         }
 
         let now = self.time;
         self.effects
-            .retain(|(cfg, born)| now - born < cfg.lifetime());
+            .retain(|(cfg, born, _)| now - born < cfg.lifetime());
         self.fx.clear();
         self.fx.extend(
             self.effects
                 .iter()
-                .map(|(cfg, born)| cfg.to_gpu(now - born, 1.0)),
+                .map(|(cfg, born, source)| cfg.to_gpu(now - born, 1.0, *source)),
         );
 
         self.dabs

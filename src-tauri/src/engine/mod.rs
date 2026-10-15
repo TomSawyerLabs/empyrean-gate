@@ -2984,8 +2984,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     touch: &touch_view,
                 })
                 .to_vec();
-            for effect in rt.take_emitted_effects() {
-                state.trigger_effect_from_patch(effect);
+            for (effect, source) in rt.take_emitted_effects() {
+                state.trigger_effect_from_patch(effect, source);
             }
             params
         });
@@ -2996,7 +2996,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             let mut fx = state.effects.lock();
             fx.retain(|e| e.born.elapsed().as_secs_f32() < e.cfg.lifetime());
             fx.iter()
-                .map(|e| e.cfg.to_gpu(e.born.elapsed().as_secs_f32(), overlay_gain))
+                .map(|e| e.cfg.to_gpu(e.born.elapsed().as_secs_f32(), overlay_gain, e.source))
                 .collect()
         };
         let effects = if game_suppress { Vec::new() } else { effects };

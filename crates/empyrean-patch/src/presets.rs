@@ -29,7 +29,13 @@ pub fn presets() -> &'static [PatchDoc] {
     CACHE.get_or_init(|| {
         SOURCES
             .iter()
-            .map(|s| serde_json::from_str(s).expect("built-in preset parses"))
+            .map(|s| {
+                let mut doc: PatchDoc = serde_json::from_str(s).expect("built-in preset parses");
+                // The files are kept current (see the test below); this only
+                // guards against one that slipped through.
+                crate::migrate::migrate(&mut doc);
+                doc
+            })
             .collect()
     })
 }
@@ -37,6 +43,28 @@ pub fn presets() -> &'static [PatchDoc] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The preset files themselves are at the current format, so what the
+    /// editor shows is what is on disk. `EMPYREAN_UPDATE_PRESETS=1 cargo test
+    /// presets` rewrites stale ones through the migration.
+    #[test]
+    fn preset_files_are_at_the_current_format() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/presets");
+        let update = std::env::var_os("EMPYREAN_UPDATE_PRESETS").is_some();
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "json") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            let mut doc: PatchDoc = serde_json::from_str(&text).unwrap();
+            if crate::migrate::migrate(&mut doc) {
+                assert!(update, "{} is format < {}; rerun with EMPYREAN_UPDATE_PRESETS=1", path.display(), crate::PATCH_FORMAT);
+                std::fs::write(&path, serde_json::to_string_pretty(&doc).unwrap() + "
+").unwrap();
+            }
+        }
+    }
     use crate::abi::AudioUniform;
     use crate::abi::MAX_AUDIO_SOURCES;
     use crate::codegen;

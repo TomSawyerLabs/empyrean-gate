@@ -114,6 +114,7 @@ struct Effect {
     grow: f32,      // shapes: scale drift over the life, -1 .. 1
     edge: f32,      // shapes: outline thickness, 0 (hairline) .. 1 (fat)
     fill: f32,      // shapes: interior brightness, 0 (outline only) .. 1 (solid)
+    source: u32,    // 0 = a client; else the emitting patch node (see abi.rs)
 }
 
 struct Dab {
@@ -1639,7 +1640,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     }
 
     for (var e = 0u; e < G.effect_count; e++) {
-        acc += effect_color(FX[e], ctx);
+        // Effects a patch node fired belong to that patch's wiring only.
+        if FX[e].source == 0u {
+            acc += effect_color(FX[e], ctx);
+        }
     }
 
     for (var d = 0u; d < G.dab_count; d++) {

@@ -59,6 +59,9 @@ pub fn save(dir: &Path, doc: &mut PatchDoc) -> Result<PathBuf, String> {
             doc.format
         ));
     }
+    // An older document (an import, a follower syncing from an older leader)
+    // is upgraded before it is stamped current.
+    crate::patch::migrate::migrate(doc);
     doc.format = PATCH_FORMAT;
     if doc.id.is_empty() {
         doc.id = uuid::Uuid::new_v4().to_string();
@@ -117,7 +120,12 @@ fn read_all(dir: &Path) -> Vec<(PathBuf, PatchDoc)> {
             Ok(doc) if doc.id.is_empty() => {
                 log::warn!("skipping {} (missing patch id)", path.display());
             }
-            Ok(doc) => out.push((path, doc)),
+            Ok(mut doc) => {
+                // Older formats are upgraded as they are read; the file itself
+                // is rewritten on the next save.
+                crate::patch::migrate::migrate(&mut doc);
+                out.push((path, doc));
+            }
             Err(e) => log::warn!("skipping unreadable patch {}: {e}", path.display()),
         }
     }
@@ -168,6 +176,26 @@ mod tests {
             name: name.into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_format_1_file_loads_upgraded() {
+        let tmp = TempDir::new("migrate");
+        let dir = &tmp.0;
+        fs::create_dir_all(dir).unwrap();
+        fs::write(
+            dir.join("old-11111111.json"),
+            r#"{"format":1,"id":"11111111-old","name":"Old","nodes":[
+                {"id":"n","kind":"noise_field"},{"id":"o","kind":"output"}],
+               "edges":[{"from":{"node":"n","port":"out"},"to":{"node":"o","port":"in"}}]}"#,
+        )
+        .unwrap();
+        let doc = load(dir, "11111111-old").unwrap();
+        assert_eq!(doc.format, PATCH_FORMAT);
+        // The overlays format 1 drew implicitly are now wired in.
+        assert!(doc.nodes.iter().any(|n| n.kind == "render_effects"));
+        assert!(doc.nodes.iter().any(|n| n.kind == "render_points"));
+        crate::patch::codegen::compile(&doc).expect("compiles");
     }
 
     #[test]

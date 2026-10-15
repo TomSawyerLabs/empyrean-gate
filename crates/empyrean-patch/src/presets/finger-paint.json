@@ -1,20 +1,26 @@
 {
-  "format": 1,
+  "format": 2,
   "id": "builtin-finger-paint",
   "name": "Finger Paint",
   "description": "Draw on the Live tab — strokes glow over a dim noise bed, keeping each pen's own look.",
   "nodes": [
-    { "id": "noise", "kind": "noise_field", "name": "", "params": { "speed": 0.2, "hue": 0.65, "brightness": 0.25 }, "pos": [260, 40] },
+    { "id": "noise", "kind": "noise_field", "name": "", "params": { "brightness": 0.25, "hue": 0.65, "speed": 0.2 }, "pos": [260, 40] },
     { "id": "touch", "kind": "touch_dabs", "name": "", "params": {}, "pos": [40, 240] },
     { "id": "rp", "kind": "render_points", "name": "", "params": { "intensity": 1.2 }, "pos": [260, 240] },
     { "id": "mix", "kind": "blend", "name": "", "params": {}, "pos": [520, 130] },
-    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [760, 130] }
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [760, 130] },
+    { "id": "effects", "kind": "effects_in", "name": "", "params": {}, "pos": [500, 350] },
+    { "id": "effects_render", "kind": "render_effects", "name": "", "params": {}, "pos": [240, 350] },
+    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [630, 250] }
   ],
   "edges": [
     { "from": { "node": "touch", "port": "points" }, "to": { "node": "rp", "port": "points" } },
     { "from": { "node": "noise", "port": "out" }, "to": { "node": "mix", "port": "base" } },
     { "from": { "node": "rp", "port": "out" }, "to": { "node": "mix", "port": "over" } },
-    { "from": { "node": "mix", "port": "out" }, "to": { "node": "out", "port": "in" } }
+    { "from": { "node": "effects", "port": "effects" }, "to": { "node": "effects_render", "port": "effects" } },
+    { "from": { "node": "mix", "port": "out" }, "to": { "node": "overlay", "port": "base" } },
+    { "from": { "node": "effects_render", "port": "out" }, "to": { "node": "overlay", "port": "over" } },
+    { "from": { "node": "overlay", "port": "out" }, "to": { "node": "out", "port": "in" } }
   ],
   "exposed": [
     { "node": "rp", "param": "intensity", "label": "Stroke glow" },

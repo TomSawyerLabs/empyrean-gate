@@ -14,6 +14,7 @@ pub mod audio;
 pub mod codegen;
 pub mod effects;
 pub mod eval;
+pub mod migrate;
 pub mod presets;
 pub mod registry;
 pub mod sim;
@@ -25,7 +26,9 @@ use std::collections::BTreeMap;
 
 /// On-disk schema version. Bump on incompatible changes; loaders refuse newer
 /// formats (an older app must never silently mangle a newer patch file).
-pub const PATCH_FORMAT: u32 = 1;
+/// 2: the Output adds nothing that isn't wired (effects and pen strokes are
+/// streams); format-1 files are upgraded by [`migrate::migrate`].
+pub const PATCH_FORMAT: u32 = 2;
 
 pub const MAX_PATCH_NODES: usize = 256;
 pub const MAX_PATCH_EDGES: usize = 1024;

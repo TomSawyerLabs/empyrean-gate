@@ -253,8 +253,9 @@ impl EffectCfg {
     }
 
     /// The GPU record for this effect `age` seconds after it fired. `gain`
-    /// scales intensity (the engine's overlay gain; 1.0 elsewhere).
-    pub fn to_gpu(&self, age: f32, gain: f32) -> GpuEffect {
+    /// scales intensity (the engine's overlay gain; 1.0 elsewhere); `source`
+    /// is 0 for a client's effect or the emitting node's [`effect_source`].
+    pub fn to_gpu(&self, age: f32, gain: f32, source: u32) -> GpuEffect {
         GpuEffect {
             kind: self.kind.gpu_id(),
             size: self.size.clamp(0.1, 4.0),
@@ -270,8 +271,21 @@ impl EffectCfg {
             grow: self.grow.clamp(-1.0, 1.0),
             edge: self.edge.clamp(0.0, 1.0),
             fill: self.fill.clamp(0.0, 1.0),
+            source,
         }
     }
+}
+
+/// The GPU `source` of effects emitted by the node with this id: a stable,
+/// never-zero hash (FNV-1a), so a stream keeps its identity across edits and
+/// recompiles while effects it already fired are still fading.
+pub fn effect_source(node_id: &str) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in node_id.bytes() {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    h.max(1)
 }
 
 /// Whole-composition rotation: an angle that coasts on a decaying velocity.
@@ -408,7 +422,8 @@ mod tests {
         assert_eq!(cfg.lifetime(), EffectKind::Burst.default_duration());
         cfg.duration = 3.0;
         assert_eq!(cfg.lifetime(), 3.0);
-        assert_eq!(cfg.to_gpu(0.5, 1.0).duration, 3.0);
+        assert_eq!(cfg.to_gpu(0.5, 1.0, 0).duration, 3.0);
+        assert_eq!(cfg.to_gpu(0.5, 1.0, 7).source, 7);
     }
 
     #[test]
