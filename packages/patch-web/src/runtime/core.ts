@@ -35,6 +35,9 @@ export interface PatchCore {
   limits: Limits;
   /** Effect kinds by wire name, in GPU-id order. */
   effectKinds: string[];
+  /** Upgrade an older patch document to the current format (adds the wiring
+   * format 1's Output implied). Run it where documents come in. */
+  migrate(doc: PatchDoc): PatchDoc;
   /** The gate's own pre-flight check: `[]` when the patch can run. */
   validate(doc: PatchDoc): string[];
   /** Compile a patch for an array of `spokes` × `pixels`; throws the
@@ -51,6 +54,9 @@ export function loadPatchCore(): Promise<PatchCore> {
     presets: JSON.parse(wasm.presets()) as PatchDoc[],
     limits: JSON.parse(wasm.limits()) as Limits,
     effectKinds: JSON.parse(wasm.effect_kinds()) as string[],
+    migrate(doc: PatchDoc) {
+      return JSON.parse(wasm.migrate(JSON.stringify(doc))) as PatchDoc;
+    },
     validate(doc: PatchDoc) {
       const r = JSON.parse(wasm.validate(JSON.stringify(doc))) as {
         ok: boolean;

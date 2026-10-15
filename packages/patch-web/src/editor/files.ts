@@ -3,7 +3,7 @@
 // patch can run is the patch core's call (the gate re-validates on save, the
 // playground runs the same validation in wasm).
 
-import type { PatchDoc } from "../types";
+import { PATCH_FORMAT, type PatchDoc } from "../types";
 
 /** A file name for `doc`: its name as a slug, `.json`. */
 export function patchFileName(doc: PatchDoc): string {
@@ -37,7 +37,8 @@ export function parsePatchFile(text: string): PatchDoc {
     throw new Error("That file is not a patch (it has no nodes).");
   }
   return {
-    format: typeof r.format === "number" ? r.format : 1,
+    // Missing means current, as the Rust loader reads it.
+    format: typeof r.format === "number" ? r.format : PATCH_FORMAT,
     id: typeof r.id === "string" ? r.id : "",
     name: typeof r.name === "string" ? r.name : "",
     description: typeof r.description === "string" ? r.description : "",

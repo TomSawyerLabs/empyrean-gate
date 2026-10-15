@@ -16,8 +16,21 @@ use empyrean_patch::sim::{Geometry, Sim, Update};
 use serde_json::json;
 use wasm_bindgen::prelude::*;
 
+/// Parse a patch and upgrade it to the current format, as every host does
+/// where a document comes in.
 fn parse_doc(json: &str) -> Result<PatchDoc, JsError> {
-    serde_json::from_str(json).map_err(|e| JsError::new(&format!("not a patch: {e}")))
+    let mut doc: PatchDoc =
+        serde_json::from_str(json).map_err(|e| JsError::new(&format!("not a patch: {e}")))?;
+    empyrean_patch::migrate::migrate(&mut doc);
+    Ok(doc)
+}
+
+/// Upgrade a patch document to the current format (see
+/// `empyrean_patch::migrate`); returns the upgraded JSON. Hosts run it where
+/// a document comes in (storage, files) so the editor shows what renders.
+#[wasm_bindgen]
+pub fn migrate(doc: &str) -> Result<String, JsError> {
+    Ok(serde_json::to_string(&parse_doc(doc)?).expect("patch serializes"))
 }
 
 /// The node palette (`GET /patch/registry` on the gate), as JSON.
@@ -36,10 +49,10 @@ pub fn presets() -> String {
 /// `{"ok":true}` or `{"ok":false,"errors":["..."]}`.
 #[wasm_bindgen]
 pub fn validate(doc: &str) -> String {
-    let doc = match serde_json::from_str::<PatchDoc>(doc) {
+    let doc = match parse_doc(doc) {
         Ok(doc) => doc,
-        Err(e) => {
-            return json!({ "ok": false, "errors": [format!("not a patch: {e}")] }).to_string();
+        Err(_) => {
+            return json!({ "ok": false, "errors": ["not a patch"] }).to_string();
         }
     };
     if doc.format > empyrean_patch::PATCH_FORMAT {

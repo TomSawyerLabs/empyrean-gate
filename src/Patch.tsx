@@ -87,7 +87,18 @@ export default function Patch() {
               onClick={() => {
                 setImportError(null);
                 openPatchFromDisk()
-                  .then((d) => d && open(d, true))
+                  .then(async (d) => {
+                    if (!d) return;
+                    // Upgrade an older file first, so the editor shows exactly
+                    // what will be stored and rendered.
+                    const res = await fetch(`${client.httpBase}/patch/migrate`, {
+                      method: "POST",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify(d),
+                    });
+                    if (!res.ok) throw new Error(`The gate could not read that patch (${res.status}).`);
+                    open((await res.json()) as PatchDoc, true);
+                  })
                   .catch((e: unknown) => setImportError(e instanceof Error ? e.message : String(e)));
               }}
             >

@@ -37,6 +37,7 @@ import "@xyflow/react/dist/style.css";
 import "./editor.css";
 import { MiniMeter, MiniRing, type MiniSource } from "./minis";
 import {
+  PATCH_FORMAT,
   shapeAccepts,
   type PatchDoc,
   type PatchNode,
@@ -143,7 +144,7 @@ function portShape(def: PatchNodeType | undefined, port: string, dir: "in" | "ou
 
 function emptyPatch(): PatchDoc {
   return {
-    format: 1,
+    format: PATCH_FORMAT,
     id: "",
     name: "New patch",
     description: "",
