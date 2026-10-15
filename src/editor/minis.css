@@ -1,0 +1,55 @@
+/* --- Mini visualizers (per-layer / per-patch-node contribution previews) --- */
+
+.mini-ring {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.mini-meter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--pe-muted, #8a85a8);
+}
+
+.mini-meter svg {
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+
+.mini-meter-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 24px;
+}
+
+.mini-meter-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--pe-text, #e8e6f4);
+  min-width: 34px;
+  text-align: right;
+}
+
+.pnode-mini {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 2px;
+}
+
+.pnode-mini .mini-ring {
+  width: 72px;
+  height: 72px;
+}
+
+.pnode-meters {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 10px 0;
+}

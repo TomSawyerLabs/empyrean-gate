@@ -1,0 +1,235 @@
+/* tslint:disable */
+/* eslint-disable */
+
+/**
+ * One running patch.
+ */
+export class PatchSim {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Binding 1 bytes (every source).
+     */
+    audio(): Uint8Array;
+    /**
+     * Binding 5 bytes: the live dabs only.
+     */
+    dabs(): Uint8Array;
+    /**
+     * Draw a stroke: `pen` by name (`"glow"`, `"comet"`, ...) and `points`
+     * as flat `[angle, radius, dir, ...]` triples in physical space.
+     */
+    draw(pen: string, points: Float32Array, hue: number, saturation: number, brightness: number, size: number, intensity: number): void;
+    /**
+     * Binding 3 bytes: the live effects only.
+     */
+    effects(): Uint8Array;
+    /**
+     * Feed mono microphone samples into audio source `source`; the gate's own
+     * feature extraction and beat tracking run on them.
+     */
+    feedAudio(source: number, sample_rate: number, samples: Float32Array): void;
+    /**
+     * Fire PRO DJ LINK event output `index` (play, cue, cue_release,
+     * on_air_event, off_air_event, loop_start, loop_wrap, loop_end, jump,
+     * phrase_change, fill_in).
+     */
+    fireDjEvent(index: number): void;
+    /**
+     * Binding 0 bytes.
+     */
+    globals(): Uint8Array;
+    /**
+     * Compile `doc` (patch JSON) for an array of `spokes` × `pixels` LEDs.
+     * Throws with the validation/codegen message if it cannot run.
+     */
+    constructor(doc: string, spokes: number, pixels: number, inner_over_outer: number);
+    /**
+     * Binding 0 bytes for the mini-preview pass (`previewWgsl()`): spokes of
+     * `limits().miniPixels` samples.
+     */
+    previewGlobals(): Uint8Array;
+    /**
+     * Node ids rendered by each preview cell, in cell order.
+     */
+    previewNodes(): string[];
+    /**
+     * `[[nodeId, port], ...]` for each value in `scalarValues()`.
+     */
+    previewScalars(): string;
+    /**
+     * The thumbnail shader: `previewNodes().length` cells of
+     * `spokes × pixels`, same bindings. Empty when nothing is previewable.
+     */
+    previewWgsl(): string;
+    /**
+     * Current values for `previewScalars()`.
+     */
+    scalarValues(): Float32Array;
+    /**
+     * Binding 6: waveform + spectrum for every source.
+     */
+    scope(): Float32Array;
+    /**
+     * Audio features for one source, in `AudioUniform` field order:
+     * level, bass, mid, treble, onset, beat_phase, bpm, bpm_conf, bass_att,
+     * mid_att, treble_att.
+     */
+    setAudio(source: number, f: Float32Array): void;
+    /**
+     * PRO DJ LINK scalars in `DjLinkInputs` field order: active, energy,
+     * deck, deck_side, event_deck, event_side, playing, on_air,
+     * deck_1_on_air, deck_2_on_air, looping, mix, mix_activity, beat_in_bar,
+     * phrase_active, phrase_kind, phrase_progress, phrase_fill.
+     */
+    setDjLink(f: Float32Array): void;
+    /**
+     * Master hue pull (target in turns, amount 0..1, looseness 0..1).
+     */
+    setHuePull(target: number, amount: number, loose: number): void;
+    /**
+     * Master brightness 0..1 and speed multiplier.
+     */
+    setMaster(brightness: number, speed: number): void;
+    /**
+     * Phone motion: yaw/pitch/roll in radians, shake 0..1.
+     */
+    setMotion(yaw: number, pitch: number, roll: number, shake: number): void;
+    /**
+     * Live knob change; no recompile.
+     */
+    setParam(node: string, param: string, value: number): void;
+    /**
+     * Size of the RGBA8 frame the host keeps in the VIDEO buffer; 0 × 0
+     * for none.
+     */
+    setVideo(width: number, height: number): void;
+    /**
+     * Floats in the parameter slab (binding 8).
+     */
+    slabLen(): number;
+    /**
+     * Binding 8.
+     */
+    slab(): Float32Array;
+    /**
+     * Advance one frame.
+     */
+    step(dt: number): void;
+    /**
+     * Silence a sample-fed audio source.
+     */
+    stopAudio(source: number): void;
+    /**
+     * Fire an effect from its JSON (`EffectCfg`: `{"kind":"burst",...}`,
+     * missing fields take defaults), like a tap on the gate's preview.
+     */
+    triggerEffect(cfg: string): void;
+    /**
+     * Apply an edited document. Returns `"params"` (knobs only, applied in
+     * place), `"program"` (graph changed, same shader) or `"shader"` (rebuild
+     * the GPU pipelines from `wgsl()` / `previewWgsl()`). Throws, leaving the
+     * running patch untouched, if the new document cannot run.
+     */
+    update(doc: string): string;
+    /**
+     * The main compute shader: one invocation per LED, writes packed RGB to
+     * binding 4.
+     */
+    wgsl(): string;
+}
+
+/**
+ * Effect kinds in GPU-id order, by their serde (wire) names.
+ */
+export function effect_kinds(): string;
+
+/**
+ * Sizes the host needs to allocate its GPU buffers and build its UI.
+ */
+export function limits(): string;
+
+/**
+ * The built-in starter patches (`GET /patch/presets`), as a JSON array.
+ */
+export function presets(): string;
+
+/**
+ * The node palette (`GET /patch/registry` on the gate), as JSON.
+ */
+export function registry(): string;
+
+/**
+ * Check a patch exactly as the gate does before it will run it. Returns
+ * `{"ok":true}` or `{"ok":false,"errors":["..."]}`.
+ */
+export function validate(doc: string): string;
+
+export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
+
+export interface InitOutput {
+    readonly memory: WebAssembly.Memory;
+    readonly __wbg_patchsim_free: (a: number, b: number) => void;
+    readonly effect_kinds: () => [number, number];
+    readonly limits: () => [number, number];
+    readonly patchsim_audio: (a: number) => [number, number];
+    readonly patchsim_dabs: (a: number) => [number, number];
+    readonly patchsim_draw: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
+    readonly patchsim_effects: (a: number) => [number, number];
+    readonly patchsim_feedAudio: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly patchsim_fireDjEvent: (a: number, b: number) => void;
+    readonly patchsim_globals: (a: number) => [number, number];
+    readonly patchsim_new: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly patchsim_previewGlobals: (a: number) => [number, number];
+    readonly patchsim_previewNodes: (a: number) => [number, number];
+    readonly patchsim_previewScalars: (a: number) => [number, number];
+    readonly patchsim_previewWgsl: (a: number) => [number, number];
+    readonly patchsim_scalarValues: (a: number) => [number, number];
+    readonly patchsim_scope: (a: number) => [number, number];
+    readonly patchsim_setAudio: (a: number, b: number, c: number, d: number) => void;
+    readonly patchsim_setDjLink: (a: number, b: number, c: number) => void;
+    readonly patchsim_setHuePull: (a: number, b: number, c: number, d: number) => void;
+    readonly patchsim_setMaster: (a: number, b: number, c: number) => void;
+    readonly patchsim_setMotion: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly patchsim_setParam: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly patchsim_setVideo: (a: number, b: number, c: number) => void;
+    readonly patchsim_slab: (a: number) => [number, number];
+    readonly patchsim_slabLen: (a: number) => number;
+    readonly patchsim_step: (a: number, b: number) => void;
+    readonly patchsim_stopAudio: (a: number, b: number) => void;
+    readonly patchsim_triggerEffect: (a: number, b: number, c: number) => [number, number];
+    readonly patchsim_update: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly patchsim_wgsl: (a: number) => [number, number];
+    readonly presets: () => [number, number];
+    readonly registry: () => [number, number];
+    readonly validate: (a: number, b: number) => [number, number];
+    readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __externref_table_dealloc: (a: number) => void;
+    readonly __externref_drop_slice: (a: number, b: number) => void;
+    readonly __wbindgen_start: () => void;
+}
+
+export type SyncInitInput = BufferSource | WebAssembly.Module;
+
+/**
+ * Instantiates the given `module`, which can either be bytes or
+ * a precompiled `WebAssembly.Module`.
+ *
+ * @param {{ module: SyncInitInput }} module - Passing `SyncInitInput` directly is deprecated.
+ *
+ * @returns {InitOutput}
+ */
+export function initSync(module: { module: SyncInitInput } | SyncInitInput): InitOutput;
+
+/**
+ * If `module_or_path` is {RequestInfo} or {URL}, makes a request and
+ * for everything else, calls `WebAssembly.instantiate` directly.
+ *
+ * @param {{ module_or_path: InitInput | Promise<InitInput> }} module_or_path - Passing `InitInput` directly is deprecated.
+ *
+ * @returns {Promise<InitOutput>}
+ */
+export default function __wbg_init (module_or_path?: { module_or_path: InitInput | Promise<InitInput> } | InitInput | Promise<InitInput>): Promise<InitOutput>;

@@ -1,0 +1,29 @@
+{
+  "name": "@empyrean-gate/patch-web",
+  "version": "0.14.0",
+  "license": "MIT",
+  "description": "The Empyrean Gate's patch editor and a WebGPU runtime for its patches, for use outside the desktop app",
+  "type": "module",
+  "sideEffects": [
+    "*.css"
+  ],
+  "exports": {
+    "./editor": "./src/editor/index.ts",
+    "./editor.css": "./src/editor/editor.css",
+    "./files": "./src/editor/files.ts",
+    "./runtime": "./src/runtime/index.ts",
+    "./types": "./src/types.ts"
+  },
+  "dependencies": {
+    "@webgpu/types": "^0.1.66"
+  },
+  "peerDependencies": {
+    "@xyflow/react": "^12.11.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TomSawyerLabs/empyrean-gate"
+  }
+}
