@@ -155,6 +155,17 @@ CPU→uniform→GPU. We're generalizing "hardcoded uniforms + switch on kind" in
 - Uniform slab + node counts bounded (e.g. 256 nodes, 64 textures-worth of
   slab) — clear editor error past limits, not silent breakage.
 
+## Where the code lives now (2026-10-15)
+
+The patch core moved out of `src-tauri/src/patch/` into
+`crates/empyrean-patch` (and `engine/shaders/patch_lib.wgsl` into its
+`shaders/`), so the empyreangate.org playground can run the same code as wasm;
+`crate::patch::*` paths in the app are unchanged (re-exports). The editor
+moved from `src/Patch.tsx` into `packages/patch-web` (the Patch tab is now a
+thin adapter). Paths in the steps below are as they were when written. The
+playground's own plan is `plans/pattern-playground.md` in the
+empyreangate.org repo.
+
 ## Plan / steps
 
 - [x] 1. Rust core (committed): `src-tauri/src/patch/` — `Shape` type system
