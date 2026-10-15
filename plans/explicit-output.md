@@ -1,7 +1,7 @@
 # Nothing reaches the output unless it's wired
 
-Status: **built and tested; on the empyreangate.org `dev` Preview** (branch
-`patch-crate`, pushed, not merged). Follows `plans/touch-nodes.md`.
+Status: **built and tested; on the empyreangate.org `dev` Preview** (on gate
+`master` `3b5cc85`, not yet in a release). Follows `plans/touch-nodes.md`.
 
 ## Goal
 

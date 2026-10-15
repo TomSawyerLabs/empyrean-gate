@@ -1,7 +1,7 @@
 # Touch as patch nodes
 
-Status: **built and tested; on the empyreangate.org `dev` Preview** (branch
-`patch-crate`, pushed, not merged; worktree
+Status: **built and tested; on the empyreangate.org `dev` Preview** (on gate
+`master` `3b5cc85`, not yet in a release; worktree
 `C:\Users\camer\.t3\worktrees\Empyrean\playground`). Companion to
 `plans/node-graph.md`; the browser side is the empyreangate.org playground
 (`plans/pattern-playground.md` in that repo).
@@ -117,7 +117,8 @@ per connection.
 - [ ] Performance recordings don't capture raw touches yet (the recorder's
       action enum has no Touch); a recorded show replays a touch patch
       without its fingers. Follow-up.
-- [ ] Gate PR into `master` (Cameron's call; also starts CI web-dist)
+- [x] On gate `master` (`3b5cc85`); CI built web-dist `f3c3891`
+- [ ] In a release (a version tag; held, Decompression is 2026-10-17)
 
 ## Findings / gotchas
 
