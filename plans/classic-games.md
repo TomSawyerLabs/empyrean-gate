@@ -208,7 +208,12 @@ suggestions. do them all").
 - [x] 2026-10-14 explored the game plumbing; plan written.
 - [x] 2026-10-14 all five built, tested and committed, checks green:
       `cargo test --lib` 378, `bun run typecheck`, `test:unit`,
-      `test:layout` 128, `test:behavior` 114. Not pushed.
+      `test:layout` 128, `test:behavior` 114.
+- [x] 2026-10-15 shipped as **v0.14.0** (`8105008`, pushed as a fast-forward
+      of `origin/master`). Release run 38657843552 succeeded on all three
+      platforms; 18 assets published, every one signed: default and `-nodoom`
+      for Windows, macOS and Linux, plus the AppImages and
+      `THIRD-PARTY-LICENSES.md`.
 - [x] Rimfire, Echo, Spacewar, Trails built, unit-tested, tuned with the
       probe against the headless backend on :9540 (`$TEMP/EmpyreanClassics/
       start.sh`), and committed one per game. The `game-probe` helper's new
@@ -222,7 +227,7 @@ suggestions. do them all").
 
 1. Names (Rimfire, Echo, Spacewar, Trails, Rally): easy to change later; the
    wire names are the kinds above. Recommendation: keep.
-2. Push to `origin/master`? Not done: commits stay local until asked.
+2. ~~Push?~~ Answered: the user asked for a minor release; v0.14.0 is out.
 
 ## Things not to do
 
