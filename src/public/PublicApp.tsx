@@ -465,6 +465,13 @@ export default function PublicApp() {
               previewDecimate={stream ? snap.preview_decimate : undefined}
               onTap={onTap}
               drawPen={drawPen}
+              rawTouch={
+                // The patch on air decides what a touch does; games still
+                // take the canvas while they run.
+                snap.patch_touch && snap.caps.draw && !playing
+                  ? { hue: color.hue, saturation: color.saturation, brightness: color.brightness }
+                  : undefined
+              }
             />
           )}
           <Ripples events={ripples} />

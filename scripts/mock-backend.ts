@@ -182,6 +182,7 @@ const publicState = {
   preview_fps: 0,
   preview_decimate: 12,
   max_dab_size: 0.25,
+  patch_touch: false,
 };
 const publicOverrides = new Map<string, Record<string, unknown>>();
 const publicSockets = new WeakSet<object>();

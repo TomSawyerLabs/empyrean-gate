@@ -21,6 +21,7 @@ const SOURCES: &[&str] = &[
     include_str!("presets/scope.json"),
     include_str!("presets/finger-paint.json"),
     include_str!("presets/video-kaleido.json"),
+    include_str!("presets/touch-ripples.json"),
 ];
 
 pub fn presets() -> &'static [PatchDoc] {

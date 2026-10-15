@@ -23,6 +23,9 @@ const SHAKE_TAU = 0.3;
 export interface RuntimeStatus {
   /** A patch is compiled and rendering. */
   active: boolean;
+  /** The running patch reads raw touch (a Touch / Touch mask / Touch glow
+   * node), so it owns the touch surface: send `touch()` events, not taps. */
+  touch: boolean;
   /** Why the latest document is not running (the previous one keeps going). */
   error: string | null;
 }
@@ -55,7 +58,7 @@ export class PatchRuntime implements MiniSource {
   private pending = false;
   private raf = 0;
   private last = 0;
-  private status: RuntimeStatus = { active: false, error: null };
+  private status: RuntimeStatus = { active: false, touch: false, error: null };
   private statusListeners = new Set<(s: RuntimeStatus) => void>();
   private frameListeners = new Set<(dt: number) => void>();
 
@@ -81,7 +84,7 @@ export class PatchRuntime implements MiniSource {
     this.geometry = gpu.geometry;
     gpu.device.lost.then((info) => {
       this.stop();
-      this.setStatus({ active: false, error: `The GPU was lost: ${info.message || info.reason}` });
+      this.setStatus({ active: false, touch: false, error: `The GPU was lost: ${info.message || info.reason}` });
     });
   }
 
@@ -122,7 +125,7 @@ export class PatchRuntime implements MiniSource {
       this.sim?.free();
       this.sim = null;
       this.clearMinis();
-      this.setStatus({ active: false, error: null });
+      this.setStatus({ active: false, touch: false, error: null });
       return;
     }
     let shader = false;
@@ -135,7 +138,7 @@ export class PatchRuntime implements MiniSource {
         shader = true;
       }
     } catch (e) {
-      this.setStatus({ active: this.sim !== null, error: errorText(e) });
+      this.setStatus({ ...this.status, active: this.sim !== null, error: errorText(e) });
       return;
     }
     const sim = this.sim!;
@@ -146,7 +149,7 @@ export class PatchRuntime implements MiniSource {
       } catch (e) {
         if (gen !== this.generation) return;
         const detail = e instanceof ShaderError ? `${e.message}: ${e.details.join("; ")}` : errorText(e);
-        this.setStatus({ active: false, error: detail });
+        this.setStatus({ active: false, touch: false, error: detail });
         return;
       }
       if (gen !== this.generation) return;
@@ -155,7 +158,7 @@ export class PatchRuntime implements MiniSource {
     this.previewNodes = sim.previewNodes();
     this.previewScalars = JSON.parse(sim.previewScalars()) as [string, string][];
     if (shader) this.clearMinis();
-    this.setStatus({ active: true, error: null });
+    this.setStatus({ active: true, touch: sim.usesTouch(), error: null });
   }
 
   /** Show the array in `canvas` (sized by CSS; the backing store follows). */
@@ -214,6 +217,7 @@ export class PatchRuntime implements MiniSource {
       audio: sim.audio(),
       effects: sim.effects(),
       dabs: sim.dabs(),
+      touches: sim.touches(),
       slab: sim.slab(),
     });
     if (this.stopMic) this.gpu.writeScope(sim.scope());
@@ -230,6 +234,26 @@ export class PatchRuntime implements MiniSource {
   /** Fire an effect, as a tap on the gate's preview would. */
   trigger(effect: EffectTrigger) {
     this.sim?.triggerEffect(JSON.stringify(effect));
+  }
+
+  /** One raw pointer event for patches that own touch: `id` tells fingers
+   * apart, `angle`/`radius` from `screenToPolar`. */
+  touch(
+    id: number,
+    phase: "down" | "move" | "up",
+    point: { angle: number; radius: number },
+    color: { hue: number; saturation?: number; brightness?: number },
+  ) {
+    this.sim?.touch(
+      0,
+      id,
+      phase,
+      point.angle,
+      point.radius,
+      color.hue,
+      color.saturation ?? 0.85,
+      color.brightness ?? 1,
+    );
   }
 
   /** Draw a stroke: `points` are `{angle, radius, dir}` in physical space. */

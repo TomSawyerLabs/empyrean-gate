@@ -535,6 +535,7 @@ pub(crate) fn snapshot(state: &SharedState, conn_id: u64) -> PublicSnapshot {
         preview_fps,
         preview_decimate,
         max_dab_size,
+        patch_touch: state.status.lock().patch_touch,
     }
 }
 

@@ -316,6 +316,8 @@ export interface PublicSnapshot {
   preview_fps: number;
   preview_decimate: number;
   max_dab_size: number;
+  /** The patch on air owns touch (send raw touches; needs caps.draw). */
+  patch_touch: boolean;
 }
 
 /** Networked redundancy: follow a leader instance and optionally stand by as
@@ -744,6 +746,9 @@ export interface RuntimeStatus {
   patch_active: boolean;
   /** Why the active patch is NOT rendering (engine fell back to the stack). */
   patch_error: string | null;
+  /** The active patch reads raw touch: canvases send `touch` events instead
+   * of applying their tap or pen tool. */
+  patch_touch: boolean;
   show: ScheduledShowStatus;
   performance_recording: boolean;
   performance_recording_name: string;

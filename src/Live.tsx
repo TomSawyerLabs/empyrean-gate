@@ -730,6 +730,11 @@ export default function Live() {
   const canvas = (
     <div className="live-canvas-wrap">
       <GateCanvas
+        rawTouch={
+          status?.patch_touch
+            ? { hue: color.hue, saturation: color.saturation, brightness: color.brightness }
+            : undefined
+        }
         drawPen={penTool === null ? undefined : {
           pen: penTool,
           hue: color.hue,

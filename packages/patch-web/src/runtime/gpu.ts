@@ -22,6 +22,7 @@ export interface FrameData {
   audio: Uint8Array;
   effects: Uint8Array;
   dabs: Uint8Array;
+  touches: Uint8Array;
   slab: Float32Array;
 }
 
@@ -154,6 +155,7 @@ export class GateGpu {
   private scope: GPUBuffer;
   private video: GPUBuffer;
   private slab: GPUBuffer;
+  private touches: GPUBuffer;
   private previewOut: GPUBuffer | null = null;
   private previewRead: GPUBuffer | null = null;
   private previewBusy = false;
@@ -189,6 +191,9 @@ export class GateGpu {
     this.scope = buf(limits.scopeFloats * limits.audioSources * 4, U.STORAGE | U.COPY_DST);
     this.video = buf(4, U.STORAGE | U.COPY_DST);
     this.slab = buf(limits.maxSlabFloats * 4, U.STORAGE | U.COPY_DST);
+    // A fixed-length uniform array in the shader (storage buffers are at the
+    // default per-stage limit on the gate's shared layout).
+    this.touches = buf(limits.touchBytes * limits.maxTouches, U.UNIFORM | U.COPY_DST);
 
     const C = GPUShaderStage.COMPUTE;
     const ro = { type: "read-only-storage" } as const;
@@ -203,6 +208,7 @@ export class GateGpu {
         { binding: 6, visibility: C, buffer: ro },
         { binding: 7, visibility: C, buffer: ro },
         { binding: 8, visibility: C, buffer: ro },
+        { binding: 10, visibility: C, buffer: { type: "uniform" } },
       ],
     });
 
@@ -301,6 +307,7 @@ export class GateGpu {
         { binding: 6, resource: { buffer: this.scope } },
         { binding: 7, resource: { buffer: this.video } },
         { binding: 8, resource: { buffer: this.slab } },
+        { binding: 10, resource: { buffer: this.touches } },
       ],
     });
   }
@@ -314,6 +321,9 @@ export class GateGpu {
     if (frame.effects.byteLength) q.writeBuffer(this.fx, 0, frame.effects as GPUAllowSharedBufferSource);
     if (frame.dabs.byteLength) q.writeBuffer(this.dabs, 0, frame.dabs as GPUAllowSharedBufferSource);
     if (frame.slab.length) q.writeBuffer(this.slab, 0, frame.slab as GPUAllowSharedBufferSource);
+    if (frame.touches.byteLength) {
+      q.writeBuffer(this.touches, 0, frame.touches as GPUAllowSharedBufferSource);
+    }
   }
 
   /** Per-source waveform + spectrum, `limits.scopeFloats` floats per source. */
@@ -482,6 +492,7 @@ export class GateGpu {
       this.scope,
       this.video,
       this.slab,
+      this.touches,
       this.previewOut,
       this.previewRead,
     ]) {

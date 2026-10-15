@@ -931,6 +931,9 @@ pub struct PublicSnapshot {
     pub preview_decimate: u32,
     /// Stroke-size ceiling for this session (`big_brush` raises it).
     pub max_dab_size: f32,
+    /// The patch on air owns touch: the page sends raw touches (`touch`)
+    /// instead of its effect or pen tool. Needs `caps.draw`.
+    pub patch_touch: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

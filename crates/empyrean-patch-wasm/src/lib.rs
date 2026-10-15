@@ -85,6 +85,8 @@ pub fn limits() -> String {
         "effectBytes": std::mem::size_of::<empyrean_patch::abi::GpuEffect>(),
         "dabBytes": std::mem::size_of::<empyrean_patch::abi::GpuDab>(),
         "djEvents": DJ_EVENT_COUNT,
+        "maxTouches": empyrean_patch::touch::MAX_TOUCHES,
+        "touchBytes": std::mem::size_of::<empyrean_patch::abi::GpuTouch>(),
     })
     .to_string()
 }
@@ -217,6 +219,59 @@ impl PatchSim {
     /// Binding 5 bytes: the live dabs only.
     pub fn dabs(&self) -> Vec<u8> {
         bytemuck::cast_slice(self.sim.dab_records()).to_vec()
+    }
+
+    /// Binding 10 bytes: the live touch records only (the binding itself is a
+    /// fixed `limits().maxTouches`-long uniform array).
+    pub fn touches(&self) -> Vec<u8> {
+        bytemuck::cast_slice(self.sim.touch_records()).to_vec()
+    }
+
+    /// Whether the running patch reads raw touch, and so owns the touch
+    /// surface: send it `touch` events instead of applying a tap/pen tool.
+    #[wasm_bindgen(js_name = usesTouch)]
+    pub fn uses_touch(&self) -> bool {
+        self.sim.uses_touch()
+    }
+
+    /// One raw pointer event: `phase` is `"down"`, `"move"` or `"up"`;
+    /// `angle`/`radius` in the physical frame (as `screenToPolar` gives them);
+    /// the toucher's color (hue < 0 = white). `source` tells devices apart
+    /// (0 for a single surface).
+    #[allow(clippy::too_many_arguments)]
+    pub fn touch(
+        &mut self,
+        source: u32,
+        id: u32,
+        phase: &str,
+        angle: f32,
+        radius: f32,
+        hue: f32,
+        saturation: f32,
+        brightness: f32,
+    ) -> Result<(), JsError> {
+        use empyrean_patch::touch::{TouchColor, TouchInput, TouchPhase};
+        let phase = match phase {
+            "down" => TouchPhase::Down,
+            "move" => TouchPhase::Move,
+            "up" => TouchPhase::Up,
+            other => return Err(JsError::new(&format!("unknown touch phase \"{other}\""))),
+        };
+        self.sim.touch(
+            u64::from(source),
+            TouchInput {
+                id,
+                phase,
+                angle,
+                radius,
+            },
+            TouchColor {
+                hue,
+                saturation,
+                brightness,
+            },
+        );
+        Ok(())
     }
 
     /// Binding 8.

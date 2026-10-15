@@ -144,7 +144,15 @@ export interface DrawPen {
   intensity: number;
 }
 
+/** The toucher's color, sent with raw touches. */
+export interface TouchColor {
+  hue: number; // turns; -1 = white
+  saturation: number;
+  brightness: number;
+}
+
 export default function GateCanvas({
+  rawTouch,
   onTap,
   drawPen,
   previewSource,
@@ -152,6 +160,10 @@ export default function GateCanvas({
   previewFps,
   previewDecimate,
 }: {
+  /** When set, the patch on air owns touch: every pointer is sent as raw
+   *  `touch` events (down/up immediately, moves ~30x/s) with this color, and
+   *  `onTap` / `drawPen` are ignored. The patch decides what a touch does. */
+  rawTouch?: TouchColor;
   /** Called with (angle, radius01) on a click/tap (when not drawing). */
   onTap?: (angle: number, radius: number) => void;
   /** When set, pointer drags stream Paint messages with this pen. */
@@ -178,6 +190,10 @@ export default function GateCanvas({
   const pointers = useRef(new Map<number, { px: number; py: number; dir: number }>());
   const penRef = useRef(drawPen);
   penRef.current = drawPen;
+  const rawRef = useRef(rawTouch);
+  rawRef.current = rawTouch;
+  /** Raw touch: the latest position of each moving pointer since the last flush. */
+  const rawMoves = useRef(new Map<number, { angle: number; radius: number }>());
 
   // Subscribe to the preview stream while mounted (resubscribe on reconnect).
   // Phones use a moderate downsample: enough to protect venue WiFi while keeping
@@ -276,6 +292,18 @@ export default function GateCanvas({
     };
   }, [client, previewSource]);
 
+  // Flush raw-touch moves ~30x/s (downs and ups go out immediately).
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const color = rawRef.current;
+      if (!color || rawMoves.current.size === 0) return;
+      const points = [...rawMoves.current].map(([id, p]) => ({ id, phase: "move", ...p }));
+      rawMoves.current.clear();
+      client.send({ type: "touch", points, color });
+    }, 33);
+    return () => clearInterval(interval);
+  }, [client]);
+
   // Flush accumulated stroke points ~30x/s.
   useEffect(() => {
     const interval = setInterval(() => {
@@ -324,7 +352,24 @@ export default function GateCanvas({
   const DRAG_MIN_MS = 60;
   const tapTracks = useRef(new Map<number, { x: number; y: number; t: number }>());
 
+  const sendRaw = (id: number, phase: "down" | "up", p: { angle: number; radius: number }) => {
+    const color = rawRef.current;
+    if (!color) return;
+    // A pending move for this pointer goes first, so the up lands where the
+    // finger really left.
+    const moved = rawMoves.current.get(id);
+    rawMoves.current.delete(id);
+    const points = moved ? [{ id, phase: "move", ...moved }] : [];
+    points.push({ id, phase, ...p });
+    client.send({ type: "touch", points, color });
+  };
+
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (rawTouch) {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      sendRaw(e.pointerId, "down", toPolar(e));
+      return;
+    }
     if (onTap) {
       const p = toPolar(e);
       onTap(p.angle, Math.min(1, p.radius));
@@ -342,6 +387,11 @@ export default function GateCanvas({
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (rawTouch) {
+      if (e.buttons === 0 && e.pointerType === "mouse") return;
+      rawMoves.current.set(e.pointerId, toPolar(e));
+      return;
+    }
     if (!drawPen) {
       if (!onTap) return;
       const track = tapTracks.current.get(e.pointerId);
@@ -379,6 +429,7 @@ export default function GateCanvas({
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (rawTouch) sendRaw(e.pointerId, "up", toPolar(e));
     pointers.current.delete(e.pointerId);
     tapTracks.current.delete(e.pointerId);
   };
@@ -391,10 +442,14 @@ export default function GateCanvas({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={(e) => {
+        if (rawTouch) sendRaw(e.pointerId, "up", toPolar(e));
         pointers.current.delete(e.pointerId);
         tapTracks.current.delete(e.pointerId);
       }}
-      style={{ touchAction: "none", cursor: drawPen ? "crosshair" : onTap ? "pointer" : "default" }}
+      style={{
+        touchAction: "none",
+        cursor: rawTouch || drawPen ? "crosshair" : onTap ? "pointer" : "default",
+      }}
     />
   );
 }
