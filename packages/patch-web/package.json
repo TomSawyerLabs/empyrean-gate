@@ -19,12 +19,12 @@
     "typecheck": "tsc -p tsconfig.json",
     "demo": "vite --config demo/vite.config.ts"
   },
+  "dependencies": {
+    "@webgpu/types": "^0.1.66"
+  },
   "peerDependencies": {
     "@xyflow/react": "^12.11.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
-  },
-  "devDependencies": {
-    "@webgpu/types": "^0.1.66"
   }
 }

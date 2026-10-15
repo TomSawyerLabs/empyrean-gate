@@ -1,3 +1,4 @@
+/// <reference types="@webgpu/types" />
 // WebGPU host for a compiled patch: the same compute shader the gate's engine
 // dispatches (one invocation per LED, packed RGB out), plus a point renderer
 // that draws the LED buffer straight from the GPU — no readback on the main
@@ -25,6 +26,24 @@ export interface FrameData {
 }
 
 export class WebGpuUnavailable extends Error {}
+
+/** Fraction of the canvas's short side the array's outer edge reaches. */
+const VIEW_FILL = 0.96;
+
+/** A point on a canvas showing the array back to the polar position effects
+ * and strokes take (`angle` radians, `radius` 0 center .. 1 outer edge), the
+ * inverse of the view's layout. Matches the gate preview's `toPolar`. */
+export function screenToPolar(
+  canvas: HTMLElement,
+  clientX: number,
+  clientY: number,
+): { angle: number; radius: number } {
+  const rect = canvas.getBoundingClientRect();
+  const m = Math.min(rect.width, rect.height) * VIEW_FILL;
+  const x = ((clientX - rect.left - rect.width / 2) / m) * 2;
+  const y = -((clientY - rect.top - rect.height / 2) / m) * 2;
+  return { angle: Math.atan2(y, x) + Math.PI / 2, radius: Math.hypot(x, y) };
+}
 
 /** A shader that failed to compile or link, with the compiler's messages. */
 export class ShaderError extends Error {
@@ -69,6 +88,7 @@ struct VOut {
 }
 
 const TAU: f32 = ${TAU};
+const PI: f32 = ${Math.PI};
 
 @vertex
 fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VOut {
@@ -84,13 +104,14 @@ fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VOut 
     i = u32(round(f32(k) * f32(V.pixels - 1u) / f32(V.drawn - 1u)));
   }
   let rgb = unpack4x8unorm(LED[spoke * V.pixels + i]).rgb;
-  // Physical position: spoke 0 straight up, numbered clockwise; i = 0 is the
-  // outer end of the spoke.
-  let theta = f32(spoke) / f32(V.spokes) * TAU;
+  // Laid out as the gate's own preview draws it (src/GateCanvas.tsx), so a
+  // pattern looks the same here as on the operator's screen; i = 0 is the
+  // outer end of the spoke. See screenToPolar for the inverse.
+  let theta = f32(spoke) / f32(V.spokes) * TAU - PI / 2.0;
   let rn = mix(1.0, V.inner, f32(i) / f32(max(V.pixels - 1u, 1u)));
   let c = corners[vi];
   var out: VOut;
-  out.pos = vec4f(rn * vec2f(sin(theta), cos(theta)) * V.scale + c * V.dot, 0.0, 1.0);
+  out.pos = vec4f(rn * vec2f(cos(theta), sin(theta)) * V.scale + c * V.dot, 0.0, 1.0);
   out.uv = c;
   out.color = rgb;
   return out;
@@ -413,7 +434,7 @@ export class GateGpu {
     // Same decimation as the site's WebGL render: about one drawn dot per
     // 1.3 device pixels of spoke, each dot three spacings wide for the glow.
     const { spokes, pixels, innerOverOuter } = this.geometry;
-    const radiusPx = (Math.min(w, h) / 2) * 0.96;
+    const radiusPx = (Math.min(w, h) / 2) * VIEW_FILL;
     const span = radiusPx * (1 - innerOverOuter);
     const drawn = Math.max(Math.min(32, pixels), Math.min(pixels, Math.round(span / 1.3)));
     const spacing = span / Math.max(drawn - 1, 1);
@@ -426,8 +447,8 @@ export class GateGpu {
     u32[1] = pixels;
     u32[2] = drawn;
     f32[4] = innerOverOuter;
-    f32[6] = (0.96 * m) / w;
-    f32[7] = (0.96 * m) / h;
+    f32[6] = (VIEW_FILL * m) / w;
+    f32[7] = (VIEW_FILL * m) / h;
     f32[8] = dotPx / w;
     f32[9] = dotPx / h;
     this.device.queue.writeBuffer(view.uniform, 0, data);

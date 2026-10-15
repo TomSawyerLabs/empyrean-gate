@@ -9,7 +9,7 @@ import { GateGpu, requestGateDevice, ShaderError, WebGpuUnavailable, type Geomet
 import { MediaTexture, startMicrophone, startMotion, type Motion } from "./inputs";
 
 export { loadPatchCore, type Limits, type PatchCore } from "./core";
-export { ShaderError, WebGpuUnavailable, type Geometry } from "./gpu";
+export { screenToPolar, ShaderError, WebGpuUnavailable, type Geometry } from "./gpu";
 export { MediaTexture, VIDEO_SIZE } from "./inputs";
 
 /** The gate as built (`src-tauri/src/config.rs` defaults). */
@@ -57,6 +57,7 @@ export class PatchRuntime implements MiniSource {
   private last = 0;
   private status: RuntimeStatus = { active: false, error: null };
   private statusListeners = new Set<(s: RuntimeStatus) => void>();
+  private frameListeners = new Set<(dt: number) => void>();
 
   private stopMic: (() => void) | null = null;
   private motion: { read: () => Motion; stop: () => void } | null = null;
@@ -98,6 +99,13 @@ export class PatchRuntime implements MiniSource {
   onStatus(listener: (s: RuntimeStatus) => void): () => void {
     this.statusListeners.add(listener);
     return () => this.statusListeners.delete(listener);
+  }
+
+  /** Run `listener(dt)` every frame, just before the patch is evaluated:
+   * the place to feed inputs that change continuously (a synthetic beat). */
+  onFrame(listener: (dt: number) => void): () => void {
+    this.frameListeners.add(listener);
+    return () => this.frameListeners.delete(listener);
   }
 
   private setStatus(s: RuntimeStatus) {
@@ -198,6 +206,7 @@ export class PatchRuntime implements MiniSource {
       }
     }
 
+    this.frameListeners.forEach((l) => l(dt));
     sim.step(dt);
     this.gpu.write({
       globals: sim.globals(),

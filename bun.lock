@@ -24,7 +24,7 @@
     "packages/patch-web": {
       "name": "@empyrean-gate/patch-web",
       "version": "0.14.0",
-      "devDependencies": {
+      "dependencies": {
         "@webgpu/types": "^0.1.66",
       },
       "peerDependencies": {

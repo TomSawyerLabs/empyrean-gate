@@ -35,7 +35,7 @@ cpSync(join(here, "..", "..", "LICENSE"), join(out, "LICENSE"));
 const pkg = JSON.parse(readFileSync(join(here, "package.json"), "utf8"));
 delete pkg.private;
 delete pkg.scripts;
-delete pkg.devDependencies;
+delete pkg.devDependencies; // none today; kept so a future one never ships
 pkg.repository = { type: "git", url: "https://github.com/TomSawyerLabs/empyrean-gate" };
 writeFileSync(join(out, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
 console.log(`package assembled in ${out}`);
