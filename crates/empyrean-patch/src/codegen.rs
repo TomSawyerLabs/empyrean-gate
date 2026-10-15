@@ -57,6 +57,9 @@ pub struct Program {
     pub preview_nodes: Vec<usize>,
     /// CPU node scalar outputs (doc node index, port) for amplitude meters.
     pub preview_scalars: Vec<(usize, &'static str)>,
+    /// Still image nodes and their media cell (1..=MAX_PATCH_IMAGES), in
+    /// document order; the host uploads each node's image to its cell.
+    pub images: Vec<(usize, u32)>,
 }
 
 /// One f32 in the parameter slab, filled by the evaluator every frame.
@@ -228,8 +231,18 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
     }
 
     // -- Code generation ----------------------------------------------------
+    // Still image nodes own media cells 1.. in document order.
+    let images: Vec<(usize, u32)> = doc
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.kind == "image_in")
+        .zip(1u32..)
+        .map(|((i, _), slot)| (i, slot))
+        .collect();
     let g = Gen {
         doc,
+        images: &images,
         wires: &wires,
         slot_of: &slot_of,
     };
@@ -289,16 +302,35 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         preview_wgsl,
         preview_nodes,
         preview_scalars,
+        images,
     })
 }
 
 struct Gen<'a> {
     doc: &'a PatchDoc,
+    images: &'a [(usize, u32)],
     wires: &'a HashMap<(usize, String), (usize, String)>,
     slot_of: &'a HashMap<(usize, &'static str), usize>,
 }
 
 impl Gen<'_> {
+    /// What a texture input samples: the live video (cell 0) for Video in, or
+    /// the upstream Still image's own media cell.
+    fn texture_sample_expr(&self, node: usize) -> String {
+        match self.upstream(node, "tex") {
+            Some((from, _)) if self.doc.nodes[*from].kind == "image_in" => {
+                let slot = self
+                    .images
+                    .iter()
+                    .find(|(i, _)| i == from)
+                    .map(|(_, s)| *s)
+                    .unwrap_or(0);
+                format!("image_at({slot}u, uv)")
+            }
+            _ => "video_at(uv)".to_string(),
+        }
+    }
+
     /// The effect sources a stream wired into `node.port` carries, walking
     /// back through chained Event effects: 0 for Triggered effects (clients),
     /// each Event effect's `effect_source`. Sorted, unique.
@@ -889,7 +921,7 @@ impl Gen<'_> {
                     format!(
                         "    let c = ctx_transform(c0, {rot} * TAU, {zoom}, {kal}, 0.0);
                              let uv = vec2f(0.5 + c.pos.x * 0.5, 0.5 - c.pos.y * 0.5);
-                             let s = video_at(uv);
+                             let s = {sample};
                              if s.a == 0.0 {{
                                  return s;
                              }}
@@ -901,6 +933,7 @@ impl Gen<'_> {
                         kal = self.p(i, "kaleido"),
                         sat = self.p(i, "saturation"),
                         bright = self.p(i, "brightness"),
+                        sample = self.texture_sample_expr(i),
                     )
                 }
             }
@@ -1297,6 +1330,60 @@ mod tests {
         )
         .validate(&module)
         .expect("full-parity shader validates");
+    }
+
+    /// Each Still image node samples its own media cell; Video in samples the
+    /// live video (cell 0).
+    #[test]
+    fn still_images_get_their_own_slots() {
+        let d = PatchDoc {
+            nodes: vec![
+                node("a", "image_in"),
+                node("b", "image_in"),
+                node("v", "video_in"),
+                node("ta", "texture_sample"),
+                node("tb", "texture_sample"),
+                node("tv", "texture_sample"),
+                node("m1", "blend"),
+                node("m2", "blend"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("a", "tex", "ta", "tex"),
+                edge("b", "tex", "tb", "tex"),
+                edge("v", "tex", "tv", "tex"),
+                edge("ta", "out", "m1", "base"),
+                edge("tb", "out", "m1", "over"),
+                edge("m1", "out", "m2", "base"),
+                edge("tv", "out", "m2", "over"),
+                edge("m2", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let prog = compile(&d).expect("compiles");
+        assert_eq!(prog.images, vec![(0, 1), (1, 2)]);
+        assert!(prog.wgsl.contains("image_at(1u, uv)"));
+        assert!(prog.wgsl.contains("image_at(2u, uv)"));
+        assert!(prog.wgsl.contains("video_at(uv)"));
+        validates(&prog.wgsl);
+    }
+
+    #[test]
+    fn image_limits_are_validated() {
+        let mut d = PatchDoc {
+            nodes: (0..crate::MAX_PATCH_IMAGES + 1)
+                .map(|k| node(&format!("i{k}"), "image_in"))
+                .chain([node("o", "output")])
+                .collect(),
+            ..Default::default()
+        };
+        assert!(compile(&d).unwrap_err().contains("at most"));
+        d.nodes.truncate(1);
+        d.nodes.push(node("o", "output"));
+        d.nodes[0].media = Some("https://example.com/x.png".into());
+        assert!(compile(&d).unwrap_err().contains("data:image"));
+        d.nodes[0].media = Some("data:image/png;base64,AAAA".into());
+        compile(&d).expect("a data URL is fine");
     }
 
     #[test]

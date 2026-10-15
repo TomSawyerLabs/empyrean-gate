@@ -7,4 +7,5 @@
 
 pub use empyrean_patch::*;
 
+pub mod media;
 pub mod store;

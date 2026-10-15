@@ -98,6 +98,9 @@ pub struct Sim {
     /// width or height means no video.
     pub video_width: u32,
     pub video_height: u32,
+    /// Bit k: the host has uploaded Still image cell k (see
+    /// `program().images` and [`Sim::images`]).
+    pub image_mask: u32,
 
     globals: Globals,
     fx: Vec<GpuEffect>,
@@ -138,6 +141,7 @@ impl Sim {
             hue_loose: 0.0,
             video_width: 0,
             video_height: 0,
+            image_mask: 0,
             globals: Globals::default(),
             fx: Vec::new(),
             gpu_dabs: Vec::new(),
@@ -300,6 +304,20 @@ impl Sim {
         codegen::uses_touch(&self.doc)
     }
 
+    /// The running patch's Still images: (node id, media cell, image data URL
+    /// if the node has one). The host uploads each to its cell and marks it in
+    /// [`Sim::image_mask`].
+    pub fn images(&self) -> Vec<(String, u32, Option<String>)> {
+        self.prog
+            .images
+            .iter()
+            .map(|&(i, slot)| {
+                let n = &self.doc.nodes[i];
+                (n.id.clone(), slot, n.media.clone())
+            })
+            .collect()
+    }
+
     /// Fire a PRO DJ LINK event output (`eval::DJ_EVENT_*`).
     pub fn fire_dj_event(&mut self, event: usize) {
         if event < DJ_EVENT_COUNT {
@@ -377,6 +395,7 @@ impl Sim {
             yaw: self.yaw,
             dab_count: self.gpu_dabs.len() as u32,
             touch_count: self.gpu_touches.len() as u32,
+            image_mask: self.image_mask,
             video_width: self.video_width,
             video_height: self.video_height,
             video_active: u32::from(self.video_width > 0 && self.video_height > 0),

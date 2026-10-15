@@ -51,7 +51,7 @@ struct Globals {
     // Live records in TOUCH (binding 10); the pads keep the uniform a
     // multiple of 16 bytes.
     touch_count: u32,
-    _pad_touch0: u32,
+    image_mask: u32,  // bit k: media cell k holds a Still image (patch only)
     _pad_touch1: u32,
     _pad_touch2: u32,
 }
@@ -322,6 +322,29 @@ fn hash01(seed: u32) -> f32 {
 fn ang_dist(a: f32, b: f32) -> f32 {
     let d = (a - b) % TAU;
     return abs(((d + 3.0 * PI) % TAU) - PI);
+}
+
+/// A Still image node's picture: media cell `slot` (1..), IMAGE_SIZE² texels,
+/// bilinear, transparent outside 0..1 or when the slot isn't loaded.
+const IMAGE_SIZE: u32 = 256u;
+
+fn image_texel(slot: u32, x: u32, y: u32) -> vec4f {
+    let ix = min(x, IMAGE_SIZE - 1u);
+    let iy = min(y, IMAGE_SIZE - 1u);
+    return unpack4x8unorm(VIDEO[slot * IMAGE_SIZE * IMAGE_SIZE + iy * IMAGE_SIZE + ix]);
+}
+
+fn image_at(slot: u32, uv: vec2f) -> vec4f {
+    if (G.image_mask & (1u << slot)) == 0u || any(uv < vec2f(0.0)) || any(uv > vec2f(1.0)) {
+        return vec4f(0.0);
+    }
+    let p = uv * f32(IMAGE_SIZE - 1u);
+    let p0 = vec2u(floor(p));
+    let p1 = min(p0 + vec2u(1u), vec2u(IMAGE_SIZE - 1u));
+    let f = fract(p);
+    let a = mix(image_texel(slot, p0.x, p0.y), image_texel(slot, p1.x, p0.y), f.x);
+    let b = mix(image_texel(slot, p0.x, p1.y), image_texel(slot, p1.x, p1.y), f.x);
+    return mix(a, b, f.y);
 }
 
 // ---------------------------------------------------------------------------

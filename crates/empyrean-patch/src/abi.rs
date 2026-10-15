@@ -72,7 +72,10 @@ pub struct Globals {
     pub hue_loose: f32,
     /// Live records in the TOUCH buffer (binding 10); see `crate::touch`.
     pub touch_count: u32,
-    pub _pad_touch: [u32; 3],
+    /// Bit k set: image slot k of the media buffer holds a loaded image
+    /// (Still image nodes; slot 0 is the live video, see `video_active`).
+    pub image_mask: u32,
+    pub _pad_touch: [u32; 2],
 }
 
 #[repr(C)]
@@ -154,6 +157,13 @@ pub struct GpuTouch {
     pub dir: f32,
     pub _pad: [f32; 3],
 }
+
+/// The media buffer (binding 7, `VIDEO` in WGSL) holds the live video frame in
+/// cell 0 and one Still image per cell after it, each cell `IMAGE_SIZE`²
+/// packed RGBA texels. The live video uses its own width/height inside cell 0.
+pub const IMAGE_SIZE: usize = 256;
+pub const MEDIA_CELLS: usize = 1 + crate::MAX_PATCH_IMAGES;
+pub const MEDIA_BUFFER_BYTES: usize = MEDIA_CELLS * IMAGE_SIZE * IMAGE_SIZE * 4;
 
 /// Floats per audio source in the SCOPE buffer (binding 6): a waveform ring of
 /// `SCOPE_WAVE` samples, then `SCOPE_SPECTRUM` spectrum bins.

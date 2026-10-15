@@ -27,8 +27,14 @@ use std::collections::BTreeMap;
 /// On-disk schema version. Bump on incompatible changes; loaders refuse newer
 /// formats (an older app must never silently mangle a newer patch file).
 /// 2: the Output adds nothing that isn't wired (effects and pen strokes are
-/// streams); format-1 files are upgraded by [`migrate::migrate`].
-pub const PATCH_FORMAT: u32 = 2;
+/// streams). 3: Still image nodes carry their own image ([`NodeInst::media`]).
+/// Older files are upgraded by [`migrate::migrate`].
+pub const PATCH_FORMAT: u32 = 3;
+
+/// Images a patch may carry (Still image nodes), each its own GPU slot.
+pub const MAX_PATCH_IMAGES: usize = 4;
+/// Longest accepted image data URL (a 256×256 WebP is ~20–60 KB; PNG more).
+pub const MAX_MEDIA_BYTES: usize = 600_000;
 
 pub const MAX_PATCH_NODES: usize = 256;
 pub const MAX_PATCH_EDGES: usize = 1024;
@@ -117,6 +123,11 @@ pub struct NodeInst {
     pub params: BTreeMap<String, f32>,
     /// Editor canvas position (purely presentational).
     pub pos: [f32; 2],
+    /// A Still image node's own image: a `data:image/...;base64,` URL of a
+    /// 256×256 picture (editors resize before storing). Carried in the patch
+    /// so a file or a submission is self-contained.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media: Option<String>,
 }
 
 impl NodeInst {

@@ -281,6 +281,10 @@ fn patch_demo_doc() -> patch::PatchDoc {
             // uniform (binding 10) is read on the real pipeline.
             node("glow", "touch_glow"),
             node("mix3", "blend"),
+            // A Still image carrying its own picture (media cell 1).
+            node("img", "image_in"),
+            node("pic", "texture_sample"),
+            node("mix4", "blend"),
             node("out", "output"),
         ],
         edges: vec![
@@ -294,18 +298,48 @@ fn patch_demo_doc() -> patch::PatchDoc {
             edge("mix", "out", "mix2", "over"),
             edge("mix2", "out", "mix3", "base"),
             edge("glow", "out", "mix3", "over"),
-            edge("mix3", "out", "out", "in"),
+            edge("mix3", "out", "mix4", "base"),
+            edge("img", "tex", "pic", "tex"),
+            edge("pic", "out", "mix4", "over"),
+            edge("mix4", "out", "out", "in"),
         ],
         ..Default::default()
     }
 }
 
+/// A small solid-color PNG as a data URL, for the demo's Still image.
+fn demo_image() -> String {
+    use base64::Engine as _;
+    let mut png = Vec::new();
+    image::RgbaImage::from_pixel(64, 64, image::Rgba([255, 120, 0, 255]))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .expect("encode demo image");
+    format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png)
+    )
+}
+
 fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
-    let doc = patch_demo_doc();
+    let mut doc = patch_demo_doc();
+    if let Some(img) = doc.nodes.iter_mut().find(|n| n.id == "img") {
+        img.media = Some(demo_image());
+    }
     let prog = patch::codegen::compile(&doc).map_err(|e| anyhow::anyhow!(e))?;
     engine
         .set_patch_shader(Some(&prog.wgsl))
         .context("patch pipeline build")?;
+    let images: Vec<(u32, Vec<u8>)> = prog
+        .images
+        .iter()
+        .map(|&(n, slot)| {
+            let rgba = patch::media::decode(doc.nodes[n].media.as_deref().unwrap_or(""))
+                .map_err(|e| anyhow::anyhow!(e))?;
+            Ok((slot, rgba))
+        })
+        .collect::<Result<_>>()?;
+    let image_mask = engine.set_patch_images(&images);
+    anyhow::ensure!(image_mask == 0b10, "demo image loads into cell 1");
     let mut rt = patch::eval::Runtime::new(doc, prog);
 
     let pixels = 24_192;
@@ -331,6 +365,7 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
         ..Default::default()
     }];
     inputs.globals.touch_count = 1;
+    inputs.globals.image_mask = image_mask;
 
     let mut nonzero = 0usize;
     let mut checksum = 0u64;

@@ -99,6 +99,10 @@ pub fn limits() -> String {
         "dabBytes": std::mem::size_of::<empyrean_patch::abi::GpuDab>(),
         "djEvents": DJ_EVENT_COUNT,
         "maxTouches": empyrean_patch::touch::MAX_TOUCHES,
+        "maxImages": empyrean_patch::MAX_PATCH_IMAGES,
+        "imageSize": empyrean_patch::abi::IMAGE_SIZE,
+        "mediaBufferBytes": empyrean_patch::abi::MEDIA_BUFFER_BYTES,
+        "maxMediaBytes": empyrean_patch::MAX_MEDIA_BYTES,
         "touchBytes": std::mem::size_of::<empyrean_patch::abi::GpuTouch>(),
     })
     .to_string()
@@ -446,6 +450,32 @@ impl PatchSim {
         self.sim.hue_target = target;
         self.sim.hue_amount = amount;
         self.sim.hue_loose = loose;
+    }
+
+    /// The running patch's Still images as JSON
+    /// `[{"node": id, "slot": cell, "media": dataUrl | null}]`: upload each
+    /// node's picture (IMAGE_SIZE², RGBA) to its cell of the media buffer and
+    /// call `setImageLoaded`.
+    pub fn images(&self) -> String {
+        let list: Vec<serde_json::Value> = self
+            .sim
+            .images()
+            .into_iter()
+            .map(|(node, slot, media)| json!({ "node": node, "slot": slot, "media": media }))
+            .collect();
+        serde_json::to_string(&list).expect("images serialize")
+    }
+
+    /// Mark media cell `slot` as holding (or not) its Still image.
+    #[wasm_bindgen(js_name = setImageLoaded)]
+    pub fn set_image_loaded(&mut self, slot: u32, loaded: bool) {
+        if slot < 32 {
+            if loaded {
+                self.sim.image_mask |= 1 << slot;
+            } else {
+                self.sim.image_mask &= !(1 << slot);
+            }
+        }
     }
 
     /// Size of the RGBA8 frame the host keeps in the VIDEO buffer; 0 × 0

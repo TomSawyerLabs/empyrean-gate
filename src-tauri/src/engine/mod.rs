@@ -21,6 +21,10 @@ use std::time::{Duration, Instant};
 
 pub mod minis;
 
+// The live video frame lives in media cell 0 (Still images follow it), so it
+// must fit in one cell.
+const _: () = assert!(MAX_VIDEO_DIMENSION as usize <= empyrean_patch::abi::IMAGE_SIZE);
+
 /// A scene may use every operator-visible layer slot; a true crossfade needs room
 /// for one complete outgoing stack and one complete incoming stack at once.
 const MAX_RENDER_LAYERS: usize = MAX_LAYERS * 2;
@@ -61,6 +65,9 @@ struct RenderBusSnapshot {
     layer_phase_rates: Vec<f32>,
     patch_runtime: Option<crate::patch::eval::Runtime>,
     patch_wgsl: Option<String>,
+    /// The patch's decoded Still images (media cell, RGBA), shared, so the
+    /// crossfade bus can upload them into its own buffers.
+    patch_images: std::sync::Arc<Vec<(u32, Vec<u8>)>>,
     master_speed: f32,
 }
 
@@ -180,7 +187,9 @@ impl Engine {
         });
         let video_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("video-rgba"),
-            size: MAX_VIDEO_DIMENSION as u64 * MAX_VIDEO_DIMENSION as u64 * 4,
+            // Cell 0: the live video frame (≤ MAX_VIDEO_DIMENSION²); cells
+            // 1..: patch Still images (see empyrean_patch::abi).
+            size: empyrean_patch::abi::MEDIA_BUFFER_BYTES as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -320,6 +329,24 @@ impl Engine {
     /// Install (or clear) the compiled patch pipeline from generated WGSL.
     /// Failure leaves the previous patch pipeline untouched, so a bad edit
     /// keeps the last good patch rendering — same contract as hot-reload.
+    /// Upload a patch's decoded Still images into their media cells and return
+    /// the mask of loaded cells (for `Globals::image_mask`).
+    pub fn set_patch_images(&mut self, images: &[(u32, Vec<u8>)]) -> u32 {
+        use empyrean_patch::abi::{IMAGE_SIZE, MEDIA_CELLS};
+        let cell = IMAGE_SIZE * IMAGE_SIZE * 4;
+        let mut mask = 0u32;
+        for (slot, rgba) in images {
+            let slot = *slot as usize;
+            if slot == 0 || slot >= MEDIA_CELLS || rgba.len() != cell {
+                continue;
+            }
+            self.queue
+                .write_buffer(&self.video_buf, (slot * cell) as u64, rgba);
+            mask |= 1 << slot;
+        }
+        mask
+    }
+
     pub fn set_patch_shader(&mut self, source: Option<&str>) -> Result<()> {
         match source {
             None => {
@@ -1628,6 +1655,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut patch_rt: Option<crate::patch::eval::Runtime> = None;
     let mut patch_key: Option<(String, u32)> = None;
     let mut patch_wgsl: Option<String> = None;
+    // The active patch's Still images, decoded, and which cells hold one.
+    let mut patch_images: std::sync::Arc<Vec<(u32, Vec<u8>)>> = Default::default();
+    let mut patch_image_mask: u32 = 0;
     let mut live_patch_id: Option<String> = None;
     // Companion preview program for the mini bus (per-node thumbnails).
     let mut patch_preview: Option<minis::PatchPreviewInfo> = None;
@@ -1729,6 +1759,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                         log::warn!("outgoing patch bus could not compile: {error:#}");
                         setup_failed = true;
                     } else {
+                        // Same Still images, in the outgoing engine's own buffer.
+                        outgoing.set_patch_images(&bus.patch_images);
                         // Prime ping-pong readback so the first mixed frame can
                         // use moving output rather than a one-tick-old hold.
                         let _ = outgoing.render(&bus.inputs);
@@ -1814,6 +1846,25 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     match result {
                         Ok((doc, prog)) => match engine.set_patch_shader(Some(&prog.wgsl)) {
                             Ok(()) => {
+                                let decoded: Vec<(u32, Vec<u8>)> = prog
+                                    .images
+                                    .iter()
+                                    .filter_map(|&(n, slot)| {
+                                        let media = doc.nodes[n].media.as_deref()?;
+                                        match crate::patch::media::decode(media) {
+                                            Ok(rgba) => Some((slot, rgba)),
+                                            Err(e) => {
+                                                log::warn!(
+                                                    "patch image on node {} not loaded: {e}",
+                                                    doc.nodes[n].id
+                                                );
+                                                None
+                                            }
+                                        }
+                                    })
+                                    .collect();
+                                patch_image_mask = engine.set_patch_images(&decoded);
+                                patch_images = std::sync::Arc::new(decoded);
                                 patch_wgsl = Some(prog.wgsl.clone());
                                 patch_preview = Some(minis::PatchPreviewInfo {
                                     key: format!("{id}:{patch_epoch}"),
@@ -3056,7 +3107,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 yaw: control.yaw,
                 dab_count: dabs.len() as u32,
                 touch_count: touches.len() as u32,
-                _pad_touch: [0; 3],
+                image_mask: if patch_rt.is_some() { patch_image_mask } else { 0 },
+                _pad_touch: [0; 2],
                 video_width,
                 video_height,
                 video_active: u32::from(video_active),
@@ -3318,6 +3370,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             layer_phase_rates: bus_layer_phase_rates,
             patch_runtime: patch_rt.clone(),
             patch_wgsl: patch_wgsl.clone(),
+            patch_images: patch_images.clone(),
             master_speed: render_master_speed,
         });
 

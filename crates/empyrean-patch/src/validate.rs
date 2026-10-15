@@ -3,7 +3,7 @@
 //! the engine re-checks on activation — the backend never trusts a client.
 
 use super::registry::{self, NodeType};
-use super::{MAX_PATCH_EDGES, MAX_PATCH_NODES, PATCH_FORMAT, PatchDoc};
+use super::{MAX_MEDIA_BYTES, MAX_PATCH_EDGES, MAX_PATCH_IMAGES, MAX_PATCH_NODES, PATCH_FORMAT, PatchDoc};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -65,6 +65,13 @@ pub enum PatchError {
         node: String,
         param: String,
     },
+    TooManyImages {
+        count: usize,
+    },
+    BadMedia {
+        node: String,
+        detail: String,
+    },
 }
 
 impl fmt::Display for PatchError {
@@ -97,6 +104,11 @@ impl fmt::Display for PatchError {
                 write!(f, "input \"{port}\" of node \"{node}\" already has a wire")
             }
             Self::MultipleOutputNodes => write!(f, "a patch may have only one Output node"),
+            Self::TooManyImages { count } => write!(
+                f,
+                "a patch may carry at most {MAX_PATCH_IMAGES} Still images ({count} here)"
+            ),
+            Self::BadMedia { node, detail } => write!(f, "node \"{node}\": {detail}"),
             Self::Cycle { nodes } => write!(f, "dependency cycle through: {}", nodes.join(", ")),
             Self::ExposedUnknown { node, param } => {
                 write!(f, "exposed param \"{param}\" not found on node \"{node}\"")
@@ -119,6 +131,27 @@ pub fn validate(doc: &PatchDoc) -> Result<Validated, Vec<PatchError>> {
             nodes: doc.nodes.len(),
             edges: doc.edges.len(),
         }]);
+    }
+
+    let images = doc.nodes.iter().filter(|n| n.kind == "image_in").count();
+    if images > MAX_PATCH_IMAGES {
+        errors.push(PatchError::TooManyImages { count: images });
+    }
+    for n in &doc.nodes {
+        if let Some(media) = &n.media {
+            let detail = if n.kind != "image_in" {
+                Some("only Still image nodes carry an image".to_string())
+            } else if media.len() > MAX_MEDIA_BYTES {
+                Some(format!("its image is too large ({} bytes; limit {MAX_MEDIA_BYTES})", media.len()))
+            } else if !media.starts_with("data:image/") || !media.contains(";base64,") {
+                Some("its image must be a data:image/...;base64, URL".to_string())
+            } else {
+                None
+            };
+            if let Some(detail) = detail {
+                errors.push(PatchError::BadMedia { node: n.id.clone(), detail });
+            }
+        }
     }
 
     // Node ids -> index, kinds resolved.

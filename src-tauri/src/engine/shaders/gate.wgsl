@@ -52,7 +52,7 @@ struct Globals {
     // Patch-only (raw touches, binding 10); declared so both copies of the
     // shared uniform stay the same size.
     touch_count: u32,
-    _pad_touch0: u32,
+    image_mask: u32,  // bit k: media cell k holds a Still image (patch only)
     _pad_touch1: u32,
     _pad_touch2: u32,
 }

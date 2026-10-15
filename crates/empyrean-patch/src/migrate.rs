@@ -31,8 +31,22 @@ pub fn migrate(doc: &mut PatchDoc) -> bool {
     if doc.format <= 1 {
         v1_to_v2(doc);
     }
+    if doc.format <= 2 {
+        v2_to_v3(doc);
+    }
     doc.format = PATCH_FORMAT;
     true
+}
+
+/// **2 → 3**: a Still image node used to show whatever the host's live
+/// video/image feed was (the same buffer as Video in). Nodes now carry their
+/// own image, so one without becomes the Video in it effectively was.
+fn v2_to_v3(doc: &mut PatchDoc) {
+    for n in &mut doc.nodes {
+        if n.kind == "image_in" && n.media.is_none() {
+            n.kind = "video_in".to_string();
+        }
+    }
 }
 
 fn port(node: &str, port: &str) -> PortRef {
@@ -77,6 +91,7 @@ fn add_node(doc: &mut PatchDoc, base: &str, kind: &str, pos: [f32; 2], params: &
             .map(|(k, v)| (k.to_string(), *v))
             .collect::<BTreeMap<_, _>>(),
         pos,
+        media: None,
     });
     id
 }
@@ -249,6 +264,26 @@ mod tests {
         let prog = compile(&doc).expect("compiles");
         assert!(prog.wgsl.contains(&format!("E.source == {}u", effect_source("ev"))));
         assert!(prog.wgsl.contains("E.source == 0u"));
+    }
+
+    #[test]
+    fn a_v2_still_image_without_its_own_image_becomes_video_in() {
+        let mut doc: PatchDoc = serde_json::from_value(serde_json::json!({
+            "format": 2,
+            "nodes": [
+                { "id": "img", "kind": "image_in" },
+                { "id": "ts", "kind": "texture_sample" },
+                { "id": "o", "kind": "output" }
+            ],
+            "edges": [
+                { "from": { "node": "img", "port": "tex" }, "to": { "node": "ts", "port": "tex" } },
+                { "from": { "node": "ts", "port": "out" }, "to": { "node": "o", "port": "in" } }
+            ]
+        }))
+        .unwrap();
+        migrate(&mut doc);
+        assert_eq!(doc.nodes[0].kind, "video_in");
+        assert!(compile(&doc).unwrap().wgsl.contains("video_at(uv)"));
     }
 
     #[test]
