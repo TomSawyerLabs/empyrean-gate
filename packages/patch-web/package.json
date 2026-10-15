@@ -11,6 +11,7 @@
   "exports": {
     "./editor": "./src/editor/index.ts",
     "./editor.css": "./src/editor/editor.css",
+    "./files": "./src/editor/files.ts",
     "./runtime": "./src/runtime/index.ts",
     "./types": "./src/types.ts"
   },
