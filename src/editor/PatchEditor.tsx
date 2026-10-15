@@ -479,7 +479,12 @@ function Editor({
           openDoc(msg.patch);
         } else if (docRef.current && docRef.current.id === "") {
           // Save echo for a brand-new patch: adopt the assigned id, keep edits.
-          setDoc((d) => (d && d.id === "" ? { ...d, id: msg.patch.id } : d));
+          // The nodes on the canvas learn it too: their live thumbnails and
+          // meters key on it (a preset copy otherwise showed none until it
+          // was reopened).
+          const id = msg.patch.id;
+          setDoc((d) => (d && d.id === "" ? { ...d, id } : d));
+          setNodes((nds) => nds.map((n) => ({ ...n, data: { ...n.data, docId: id } })));
         }
       } else if (msg.type === "param") {
         // Someone played an exposed param (Control tab, possibly on a phone):
