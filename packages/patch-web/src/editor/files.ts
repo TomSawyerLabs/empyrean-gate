@@ -1,0 +1,130 @@
+// Patch files: the exact JSON the gate keeps in its patches/ folder, so a file
+// saved anywhere opens anywhere. Parsing here only checks the shape; whether a
+// patch can run is the patch core's call (the gate re-validates on save, the
+// playground runs the same validation in wasm).
+
+import type { PatchDoc } from "../types";
+
+/** A file name for `doc`: its name as a slug, `.json`. */
+export function patchFileName(doc: PatchDoc): string {
+  const slug = doc.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return `${slug || "patch"}.json`;
+}
+
+/** Serialize as the gate's store writes it (pretty JSON). */
+export function exportPatch(doc: PatchDoc): string {
+  return JSON.stringify(doc, null, 2) + "\n";
+}
+
+/** Parse a patch file. Throws a readable message when it is not one. Missing
+ * optional fields take the same defaults the Rust loader gives them. */
+export function parsePatchFile(text: string): PatchDoc {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new Error("That file is not JSON.");
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error("That file is not a patch.");
+  }
+  const r = raw as Partial<PatchDoc>;
+  if (!Array.isArray(r.nodes) || !Array.isArray(r.edges ?? [])) {
+    throw new Error("That file is not a patch (it has no nodes).");
+  }
+  return {
+    format: typeof r.format === "number" ? r.format : 1,
+    id: typeof r.id === "string" ? r.id : "",
+    name: typeof r.name === "string" ? r.name : "",
+    description: typeof r.description === "string" ? r.description : "",
+    nodes: r.nodes.map((n) => ({
+      id: String(n.id ?? ""),
+      kind: String(n.kind ?? ""),
+      name: typeof n.name === "string" ? n.name : "",
+      params: n.params && typeof n.params === "object" ? { ...n.params } : {},
+      pos: Array.isArray(n.pos) && n.pos.length === 2 ? [Number(n.pos[0]), Number(n.pos[1])] : [0, 0],
+    })),
+    edges: (r.edges ?? []).map((e) => ({
+      from: { node: String(e.from?.node ?? ""), port: String(e.from?.port ?? "") },
+      to: { node: String(e.to?.node ?? ""), port: String(e.to?.port ?? "") },
+    })),
+    exposed: Array.isArray(r.exposed)
+      ? r.exposed.map((x) => ({
+          node: String(x.node ?? ""),
+          param: String(x.param ?? ""),
+          label: String(x.label ?? ""),
+        }))
+      : [],
+  };
+}
+
+type SaveFilePicker = (options: {
+  suggestedName?: string;
+  types?: { description: string; accept: Record<string, string[]> }[];
+}) => Promise<{
+  createWritable(): Promise<{ write(data: string): Promise<void>; close(): Promise<void> }>;
+}>;
+
+type OpenFilePicker = (options: {
+  types?: { description: string; accept: Record<string, string[]> }[];
+  multiple?: boolean;
+}) => Promise<{ getFile(): Promise<File> }[]>;
+
+const PATCH_TYPES = [{ description: "Empyrean Gate patch", accept: { "application/json": [".json"] } }];
+
+/** Save to a file the user picks (File System Access API), or download it
+ * where the browser has no save picker. Resolves false if they cancelled. */
+export async function savePatchToDisk(doc: PatchDoc): Promise<boolean> {
+  const name = patchFileName(doc);
+  const text = exportPatch(doc);
+  const picker = (globalThis as { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker;
+  if (picker) {
+    try {
+      const handle = await picker({ suggestedName: name, types: PATCH_TYPES });
+      const w = await handle.createWritable();
+      await w.write(text);
+      await w.close();
+      return true;
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return false;
+      throw e;
+    }
+  }
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return true;
+}
+
+/** Let the user pick a patch file and parse it. Resolves null if they
+ * cancelled; throws if the file is not a patch. */
+export async function openPatchFromDisk(): Promise<PatchDoc | null> {
+  const picker = (globalThis as { showOpenFilePicker?: OpenFilePicker }).showOpenFilePicker;
+  let file: File | null = null;
+  if (picker) {
+    try {
+      const [handle] = await picker({ types: PATCH_TYPES, multiple: false });
+      file = await handle.getFile();
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return null;
+      throw e;
+    }
+  } else {
+    file = await new Promise<File | null>((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".json,application/json";
+      input.onchange = () => resolve(input.files?.[0] ?? null);
+      input.oncancel = () => resolve(null);
+      input.click();
+    });
+  }
+  return file ? parsePatchFile(await file.text()) : null;
+}
