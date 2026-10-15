@@ -432,6 +432,34 @@ export function limits() {
 }
 
 /**
+ * Upgrade a patch document to the current format (see
+ * `empyrean_patch::migrate`); returns the upgraded JSON. Hosts run it where
+ * a document comes in (storage, files) so the editor shows what renders.
+ * @param {string} doc
+ * @returns {string}
+ */
+export function migrate(doc) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(doc, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.migrate(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * The built-in starter patches (`GET /patch/presets`), as a JSON array.
  * @returns {string}
  */

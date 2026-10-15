@@ -2,6 +2,10 @@
 // crates/empyrean-patch (PatchDoc in lib.rs, palette_json in registry.rs);
 // the desktop app re-exports these from src/types.ts.
 
+/** The patch document format this package writes (crate::PATCH_FORMAT).
+ * Older documents are upgraded with the patch core's `migrate`. */
+export const PATCH_FORMAT = 2;
+
 export type PatchShape =
   | "scalar"
   | "event"

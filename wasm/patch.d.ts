@@ -167,6 +167,13 @@ export function effect_kinds(): string;
 export function limits(): string;
 
 /**
+ * Upgrade a patch document to the current format (see
+ * `empyrean_patch::migrate`); returns the upgraded JSON. Hosts run it where
+ * a document comes in (storage, files) so the editor shows what renders.
+ */
+export function migrate(doc: string): string;
+
+/**
  * The built-in starter patches (`GET /patch/presets`), as a JSON array.
  */
 export function presets(): string;
@@ -189,6 +196,7 @@ export interface InitOutput {
     readonly __wbg_patchsim_free: (a: number, b: number) => void;
     readonly effect_kinds: () => [number, number];
     readonly limits: () => [number, number];
+    readonly migrate: (a: number, b: number) => [number, number, number, number];
     readonly patchsim_audio: (a: number) => [number, number];
     readonly patchsim_dabs: (a: number) => [number, number];
     readonly patchsim_draw: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
