@@ -52,7 +52,8 @@ Cameron, from people using the playground:
 
 - [x] Steps 1–4 (2026-10-15). Tests: crate 74, app 336 (incl. image
       decode), engine-smoke `--patch` renders a Still image on Vulkan, gate
-      behaviour suite incl. tests/patch-image.spec.ts, site 156. In Chrome:
+      behaviour suite incl. tests/patch-image.spec.ts, site playground spec
+      (12, 3 skipped without WebGPU) + unit 23. In Chrome:
       two Still images (red, blue) each render their own picture (mask 6);
       the side-panel picker stores a 256×256 WebP; the Preview shows the new
       Time controls and the picker.
