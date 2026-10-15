@@ -129,8 +129,9 @@ pub struct GpuEffect {
     pub fill: f32,
 }
 
-/// One finger in the TOUCH storage buffer (binding 10), read only by the
-/// patch shader's touch nodes. Composition frame, like dabs.
+/// One finger in the TOUCH uniform array (binding 10, `MAX_TOUCHES` long),
+/// read only by the patch shader's touch nodes. Composition frame, like dabs.
+/// 48 bytes: a multiple of 16, as a uniform array stride must be.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuTouch {
@@ -197,6 +198,15 @@ mod tests {
         }
         assert_eq!(wgsl_fields("Globals")[0], "spokes");
         assert_eq!(wgsl_fields("Globals").last().unwrap(), "_pad_touch2");
+    }
+
+    #[test]
+    fn touch_uniform_matches_the_tracker() {
+        assert_eq!(std::mem::size_of::<GpuTouch>() % 16, 0, "uniform array stride");
+        assert!(PATCH_LIB_WGSL.contains(&format!(
+            "var<uniform> TOUCH: array<Touch, {}>;",
+            crate::touch::MAX_TOUCHES
+        )));
     }
 
     #[test]

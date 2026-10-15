@@ -196,7 +196,7 @@ impl Engine {
             label: Some("touches"),
             size: (std::mem::size_of::<empyrean_patch::abi::GpuTouch>()
                 * empyrean_patch::touch::MAX_TOUCHES) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let game_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -221,7 +221,9 @@ impl Engine {
                 storage_entry(7, true),
                 storage_entry(8, true),
                 storage_entry(9, true),
-                storage_entry(10, true),
+                // Touches are a uniform: storage buffers are at the
+                // default per-stage limit of 8 already.
+                uniform_entry(10),
             ],
         });
 

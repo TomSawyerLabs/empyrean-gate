@@ -277,6 +277,10 @@ fn patch_demo_doc() -> patch::PatchDoc {
             node("spin", "transform"),
             node("mix", "blend"),
             node("mix2", "blend"),
+            // Raw touch: one synthetic finger is fed below, so the TOUCH
+            // uniform (binding 10) is read on the real pipeline.
+            node("glow", "touch_glow"),
+            node("mix3", "blend"),
             node("out", "output"),
         ],
         edges: vec![
@@ -288,7 +292,9 @@ fn patch_demo_doc() -> patch::PatchDoc {
             edge("spin", "out", "mix", "over"),
             edge("aud", "bass", "mix", "opacity"),
             edge("mix", "out", "mix2", "over"),
-            edge("mix2", "out", "out", "in"),
+            edge("mix2", "out", "mix3", "base"),
+            edge("glow", "out", "mix3", "over"),
+            edge("mix3", "out", "out", "in"),
         ],
         ..Default::default()
     }
@@ -314,6 +320,17 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
         video_only: false,
     };
     let mut inputs = make_inputs(&scenario, spokes, pixels_per_spoke);
+    inputs.touches = vec![empyrean_patch::abi::GpuTouch {
+        angle: 1.0,
+        radius: 0.6,
+        age: 0.5,
+        released: -1.0,
+        hue: 0.6,
+        saturation: 0.9,
+        brightness: 1.0,
+        ..Default::default()
+    }];
+    inputs.globals.touch_count = 1;
 
     let mut nonzero = 0usize;
     let mut checksum = 0u64;

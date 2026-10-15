@@ -129,9 +129,11 @@ struct Touch {
     _pad2: f32,
 }
 
-/// Raw touches, for the Touch mask / Touch glow nodes. Binding 9 is the
-/// layer stack's game grid, unused here.
-@group(0) @binding(10) var<storage, read> TOUCH: array<Touch>;
+/// Raw touches, for the Touch mask / Touch glow nodes (`G.touch_count` live).
+/// A uniform, not storage: the shared bind group already uses the 8 storage
+/// buffers per stage that wgpu and WebGPU allow by default. Binding 9 is the
+/// layer stack's game grid, unused here. 32 = crate::touch::MAX_TOUCHES.
+@group(0) @binding(10) var<uniform> TOUCH: array<Touch, 32>;
 
 const PI: f32 = 3.14159265359;
 const TAU: f32 = 6.28318530718;

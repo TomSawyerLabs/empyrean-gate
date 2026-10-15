@@ -15,7 +15,7 @@ use crate::abi::GpuTouch;
 use serde::{Deserialize, Serialize};
 
 /// Fingers tracked at once, held or fading. Oldest released go first, then
-/// the oldest held.
+/// the oldest held. Also the length of the shader's TOUCH uniform array.
 pub const MAX_TOUCHES: usize = 32;
 /// Seconds a released finger stays in the GPU records, so fields can fade it.
 pub const TOUCH_LINGER: f32 = 2.0;
