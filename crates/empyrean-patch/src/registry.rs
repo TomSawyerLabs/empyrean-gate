@@ -234,12 +234,38 @@ const TOUCH_FIELD_PARAMS: &[ParamDef] = &[
 pub const TYPES: &[NodeType] = &[
     // -- Inputs -------------------------------------------------------------
     NodeType {
+        // A clock. Forever (the default) counts up from Start at Rate per
+        // second, exactly as Time always did; Loop wraps Start→End, Ping-pong
+        // bounces between them, Once stops at End. `phase` is the 0..1 position
+        // through Start→End and `wrap` fires at each loop, bounce or arrival.
         id: "time",
         label: "Time",
         category: Category::Input,
-        inputs: &[],
-        outputs: SCALAR_OUT,
-        params: &[num("rate", "Rate", 0.0, 8.0, 1.0)],
+        inputs: &[PortDef {
+            name: "reset",
+            shape: Shape::Event,
+        }],
+        outputs: &[
+            PortDef {
+                name: "out",
+                shape: Shape::Scalar,
+            },
+            PortDef {
+                name: "phase",
+                shape: Shape::Scalar,
+            },
+            PortDef {
+                name: "wrap",
+                shape: Shape::Event,
+            },
+        ],
+        params: &[
+            num("rate", "Rate (per second)", -8.0, 8.0, 1.0),
+            sel("mode", "Mode", &["forever", "loop", "ping-pong", "once"]),
+            num("start", "Start", -100.0, 100.0, 0.0),
+            num("end", "End", -100.0, 100.0, 1.0),
+            num("running", "Running (0 pauses)", 0.0, 1.0, 1.0),
+        ],
     },
     NodeType {
         id: "slider",

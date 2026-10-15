@@ -97,6 +97,8 @@ struct NodeState {
     prev_seq: u64,
     /// Last seen sequence for every PRO DJ LINK event output.
     prev_dj_seq: [u64; DJ_EVENT_COUNT],
+    /// Completed cycles through Start→End (time), for its `wrap` event.
+    cycle: i64,
     /// Last seen touchdown / release counts and held-finger count (touch);
     /// MAX = not yet initialized, so touches already under way never fire.
     prev_downs: u64,
@@ -113,6 +115,7 @@ impl Default for NodeState {
             prev_beat: 0.0,
             prev_seq: u64::MAX,
             prev_dj_seq: [u64::MAX; DJ_EVENT_COUNT],
+            cycle: 0,
             prev_downs: u64::MAX,
             prev_ups: u64::MAX,
             prev_held: 0,
@@ -277,9 +280,58 @@ impl Runtime {
             match kind.as_str() {
                 "time" => {
                     let rate = self.input(node, "rate");
-                    self.state[node].acc += (rate * ms * dt) as f64;
-                    let v = self.state[node].acc as f32;
-                    self.outputs[node].insert("out".into(), v);
+                    let running = self.input(node, "running") > 0.5;
+                    let start = self.input(node, "start") as f64;
+                    let span = self.input(node, "end") as f64 - start;
+                    let mode = self.param(node, "mode").round() as u32;
+                    let reset = self.event_fired(node, "reset");
+                    let st = &mut self.state[node];
+                    if reset {
+                        st.acc = 0.0;
+                        st.cycle = 0;
+                    }
+                    if running {
+                        st.acc += (rate * ms * dt) as f64;
+                    }
+                    // Elapsed in units of the Start→End span.
+                    let k = if span != 0.0 { st.acc / span } else { 0.0 };
+                    let cycle = k.floor() as i64;
+                    let f = k - k.floor();
+                    let (value, phase) = match mode {
+                        // loop
+                        1 => (start + span * f, f),
+                        // ping-pong
+                        2 => {
+                            let p = if cycle.rem_euclid(2) == 0 { f } else { 1.0 - f };
+                            (start + span * p, p)
+                        }
+                        // once
+                        3 => {
+                            let p = k.clamp(0.0, 1.0);
+                            (start + span * p, p)
+                        }
+                        // forever (the original Time)
+                        _ => (start + st.acc, f),
+                    };
+                    let wrapped = if span == 0.0 {
+                        false
+                    } else if mode == 3 {
+                        // Arrived at End (or back at Start, running backwards).
+                        let done = k >= 1.0 || k < 0.0;
+                        let was = st.cycle != 0;
+                        st.cycle = i64::from(done);
+                        done && !was
+                    } else {
+                        let w = cycle != st.cycle && !reset;
+                        st.cycle = cycle;
+                        w
+                    };
+                    if wrapped {
+                        self.events[node].push("wrap");
+                    }
+                    let o = &mut self.outputs[node];
+                    o.insert("out".into(), value as f32);
+                    o.insert("phase".into(), phase as f32);
                 }
                 "slider" => {
                     let v = self.input(node, "value");
@@ -747,6 +799,39 @@ mod tests {
         assert!((rebuilt.scalar_value(t, "out") - (time_before + 0.5)).abs() < 1e-4, "time carries on");
         let k = rebuilt.prog.slots.iter().position(|s| s.param.as_deref() == Some("speed")).unwrap();
         assert!(rebuilt.slot_acc[k] > phase_before, "the noise phase carries on");
+    }
+
+    #[test]
+    fn time_modes() {
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let run = |params: serde_json::Value, steps: usize| {
+            let doc: PatchDoc = serde_json::from_value(serde_json::json!({
+                "nodes": [ { "id": "t", "kind": "time", "params": params }, { "id": "o", "kind": "output" } ]
+            }))
+            .unwrap();
+            let mut rt = runtime(doc);
+            let mut inp = inputs(&audio);
+            inp.dt = 0.25;
+            let mut wraps = 0;
+            for _ in 0..steps {
+                rt.eval(&inp);
+                wraps += rt.events[0].iter().filter(|e| **e == "wrap").count();
+            }
+            (rt.scalar_value(0, "out"), rt.scalar_value(0, "phase"), wraps)
+        };
+        // 2.5 s at rate 1.
+        let (v, _, _) = run(serde_json::json!({}), 10);
+        assert!((v - 2.5).abs() < 1e-5, "default is the old Time: {v}");
+        let (v, p, w) = run(serde_json::json!({ "mode": 1, "start": 0, "end": 1 }), 10);
+        assert!((v - 0.5).abs() < 1e-5 && (p - 0.5).abs() < 1e-5 && w == 2, "loop {v} {p} {w}");
+        let (v, _, w) = run(serde_json::json!({ "mode": 2, "start": 10, "end": 12 }), 10);
+        assert!((v - 11.5).abs() < 1e-5 && w == 1, "ping-pong at 1.25 of 2: {v} {w}");
+        let (v, _, w) = run(serde_json::json!({ "mode": 2, "start": 0, "end": 1 }), 6);
+        assert!((v - 0.5).abs() < 1e-5 && w == 1, "ping-pong coming back: {v} {w}");
+        let (v, p, w) = run(serde_json::json!({ "mode": 3, "start": 0, "end": 2 }), 12);
+        assert!(v == 2.0 && p == 1.0 && w == 1, "once stops at End and fires once: {v} {p} {w}");
+        let (v, _, _) = run(serde_json::json!({ "running": 0 }), 10);
+        assert_eq!(v, 0.0, "paused");
     }
 
     fn runtime(doc: PatchDoc) -> Runtime {
