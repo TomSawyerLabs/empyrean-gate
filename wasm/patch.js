@@ -295,6 +295,39 @@ export class PatchSim {
         wasm.patchsim_stopAudio(this.__wbg_ptr, source);
     }
     /**
+     * One raw pointer event: `phase` is `"down"`, `"move"` or `"up"`;
+     * `angle`/`radius` in the physical frame (as `screenToPolar` gives them);
+     * the toucher's color (hue < 0 = white). `source` tells devices apart
+     * (0 for a single surface).
+     * @param {number} source
+     * @param {number} id
+     * @param {string} phase
+     * @param {number} angle
+     * @param {number} radius
+     * @param {number} hue
+     * @param {number} saturation
+     * @param {number} brightness
+     */
+    touch(source, id, phase, angle, radius, hue, saturation, brightness) {
+        const ptr0 = passStringToWasm0(phase, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.patchsim_touch(this.__wbg_ptr, source, id, ptr0, len0, angle, radius, hue, saturation, brightness);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Binding 10 bytes: the live touch records only (the binding itself is a
+     * fixed `limits().maxTouches`-long uniform array).
+     * @returns {Uint8Array}
+     */
+    touches() {
+        const ret = wasm.patchsim_touches(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * Fire an effect from its JSON (`EffectCfg`: `{"kind":"burst",...}`,
      * missing fields take defaults), like a tap on the gate's preview.
      * @param {string} cfg
@@ -334,6 +367,15 @@ export class PatchSim {
         } finally {
             wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
         }
+    }
+    /**
+     * Whether the running patch reads raw touch, and so owns the touch
+     * surface: send it `touch` events instead of applying a tap/pen tool.
+     * @returns {boolean}
+     */
+    usesTouch() {
+        const ret = wasm.patchsim_usesTouch(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * The main compute shader: one invocation per LED, writes packed RGB to

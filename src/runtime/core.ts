@@ -25,6 +25,8 @@ export interface Limits {
   effectBytes: number;
   dabBytes: number;
   djEvents: number;
+  maxTouches: number;
+  touchBytes: number;
 }
 
 export interface PatchCore {

@@ -121,6 +121,18 @@ export class PatchSim {
      */
     stopAudio(source: number): void;
     /**
+     * One raw pointer event: `phase` is `"down"`, `"move"` or `"up"`;
+     * `angle`/`radius` in the physical frame (as `screenToPolar` gives them);
+     * the toucher's color (hue < 0 = white). `source` tells devices apart
+     * (0 for a single surface).
+     */
+    touch(source: number, id: number, phase: string, angle: number, radius: number, hue: number, saturation: number, brightness: number): void;
+    /**
+     * Binding 10 bytes: the live touch records only (the binding itself is a
+     * fixed `limits().maxTouches`-long uniform array).
+     */
+    touches(): Uint8Array;
+    /**
      * Fire an effect from its JSON (`EffectCfg`: `{"kind":"burst",...}`,
      * missing fields take defaults), like a tap on the gate's preview.
      */
@@ -132,6 +144,11 @@ export class PatchSim {
      * running patch untouched, if the new document cannot run.
      */
     update(doc: string): string;
+    /**
+     * Whether the running patch reads raw touch, and so owns the touch
+     * surface: send it `touch` events instead of applying a tap/pen tool.
+     */
+    usesTouch(): boolean;
     /**
      * The main compute shader: one invocation per LED, writes packed RGB to
      * binding 4.
@@ -197,8 +214,11 @@ export interface InitOutput {
     readonly patchsim_slabLen: (a: number) => number;
     readonly patchsim_step: (a: number, b: number) => void;
     readonly patchsim_stopAudio: (a: number, b: number) => void;
+    readonly patchsim_touch: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
+    readonly patchsim_touches: (a: number) => [number, number];
     readonly patchsim_triggerEffect: (a: number, b: number, c: number) => [number, number];
     readonly patchsim_update: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly patchsim_usesTouch: (a: number) => number;
     readonly patchsim_wgsl: (a: number) => [number, number];
     readonly presets: () => [number, number];
     readonly registry: () => [number, number];
