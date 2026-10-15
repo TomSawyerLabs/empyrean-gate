@@ -189,7 +189,10 @@ impl Sim {
         }
         let shader_changed =
             prog.wgsl != self.prog.wgsl || prog.preview_wgsl != self.prog.preview_wgsl;
-        self.rt = Runtime::new(doc.clone(), prog.clone());
+        let mut rt = Runtime::new(doc.clone(), prog.clone());
+        // Phases, timers and smoothing carry over: an edit never jumps.
+        rt.adopt_state(&self.rt);
+        self.rt = rt;
         self.slab = vec![0.0; prog.slab_len];
         self.prog = prog;
         self.doc = doc;

@@ -156,6 +156,48 @@ impl Runtime {
         }
     }
 
+    /// Carry `old`'s running state into this (rebuilt) runtime, so an edit
+    /// never makes the pattern jump: every node that still exists (same id
+    /// and kind) keeps its CPU state (Time/LFO phases, smoothing, envelopes,
+    /// event counters) and last outputs, and every integrated slab slot whose
+    /// node and param still exist keeps its accumulated phase. New nodes start
+    /// fresh; removed ones are dropped.
+    pub fn adopt_state(&mut self, old: &Runtime) {
+        let old_index: HashMap<(&str, &str), usize> = old
+            .doc
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| ((n.id.as_str(), n.kind.as_str()), i))
+            .collect();
+        let map: Vec<Option<usize>> = self
+            .doc
+            .nodes
+            .iter()
+            .map(|n| old_index.get(&(n.id.as_str(), n.kind.as_str())).copied())
+            .collect();
+        for (i, j) in map.iter().enumerate() {
+            if let Some(j) = *j {
+                self.state[i] = old.state[j].clone();
+                self.outputs[i] = old.outputs[j].clone();
+            }
+        }
+        for (k, slot) in self.prog.slots.iter().enumerate() {
+            if !slot.integrate {
+                continue;
+            }
+            let Some(j) = map[slot.node] else { continue };
+            if let Some(ok) = old
+                .prog
+                .slots
+                .iter()
+                .position(|s| s.integrate && s.node == j && s.param == slot.param)
+            {
+                self.slot_acc[k] = old.slot_acc[ok];
+            }
+        }
+    }
+
     /// The document this runtime evaluates.
     pub fn doc(&self) -> &PatchDoc {
         &self.doc
@@ -666,6 +708,45 @@ mod tests {
         assert_eq!(eval_op(11.0, -2.5, 0.0), -3.0);
         assert!((eval_op(12.0, 0.25, 0.0) - 1.0).abs() < 1e-6, "sine takes turns");
         assert!((eval_op(13.0, 0.5, 0.0) + 1.0).abs() < 1e-6, "cosine takes turns");
+    }
+
+    /// Reported 2026-10-15: any edit reset the timer and the pattern jumped.
+    #[test]
+    fn a_rebuilt_runtime_keeps_running_state() {
+        let doc: PatchDoc = serde_json::from_value(serde_json::json!({
+            "nodes": [
+                { "id": "t", "kind": "time" },
+                { "id": "n", "kind": "noise_field" },
+                { "id": "o", "kind": "output" }
+            ],
+            "edges": [
+                { "from": { "node": "t", "port": "out" }, "to": { "node": "n", "port": "threshold" } },
+                { "from": { "node": "n", "port": "out" }, "to": { "node": "o", "port": "in" } }
+            ]
+        }))
+        .unwrap();
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let mut inp = inputs(&audio);
+        inp.dt = 0.5;
+        let mut old = runtime(doc.clone());
+        for _ in 0..10 {
+            old.eval(&inp);
+        }
+        let time_before = old.scalar_value(0, "out");
+        let speed_slot = old.prog.slots.iter().position(|s| s.param.as_deref() == Some("speed")).unwrap();
+        let phase_before = old.slot_acc[speed_slot];
+        assert!(time_before > 4.0 && phase_before > 1.0);
+
+        // A structural edit: a new node is added in front.
+        let mut edited = doc;
+        edited.nodes.insert(0, NodeInst { id: "new".into(), kind: "lfo".into(), ..Default::default() });
+        let mut rebuilt = runtime(edited);
+        rebuilt.adopt_state(&old);
+        rebuilt.eval(&inp);
+        let t = rebuilt.doc.nodes.iter().position(|n| n.id == "t").unwrap();
+        assert!((rebuilt.scalar_value(t, "out") - (time_before + 0.5)).abs() < 1e-4, "time carries on");
+        let k = rebuilt.prog.slots.iter().position(|s| s.param.as_deref() == Some("speed")).unwrap();
+        assert!(rebuilt.slot_acc[k] > phase_before, "the noise phase carries on");
     }
 
     fn runtime(doc: PatchDoc) -> Runtime {

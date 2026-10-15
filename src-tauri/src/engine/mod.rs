@@ -1832,7 +1832,16 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                                         .collect(),
                                     scalar_nodes: prog.preview_scalars.clone(),
                                 });
-                                patch_rt = Some(crate::patch::eval::Runtime::new(doc, prog));
+                                let mut rt = crate::patch::eval::Runtime::new(doc, prog);
+                                // Re-saving the patch on air (a knob turn, a new
+                                // node) must not restart its timers and phases:
+                                // the rebuilt runtime inherits them.
+                                if retain_last_good
+                                    && let Some(old) = patch_rt.as_ref()
+                                {
+                                    rt.adopt_state(old);
+                                }
+                                patch_rt = Some(rt);
                                 live_patch_id = Some(id.clone());
                             }
                             Err(e) => {
