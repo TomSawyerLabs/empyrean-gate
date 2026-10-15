@@ -1,6 +1,7 @@
 # Touch as patch nodes
 
-Status: **in progress** (branch `patch-crate`, worktree
+Status: **built and tested; on the empyreangate.org `dev` Preview** (branch
+`patch-crate`, pushed, not merged; worktree
 `C:\Users\camer\.t3\worktrees\Empyrean\playground`). Companion to
 `plans/node-graph.md`; the browser side is the empyreangate.org playground
 (`plans/pattern-playground.md` in that repo).
@@ -91,26 +92,45 @@ per connection.
 
 ## Plan / steps
 
-1. **[current]** Crate: `touch` module (Touches tracker, GpuTouch,
+1. **Done** (`df12172`, `9314c7e`). Crate: `touch` module (Touches tracker, GpuTouch,
    limits), Globals `touch_count`, registry nodes, evaluator for `touch`,
    codegen for `touch_mask` / `touch_glow`, patch_lib.wgsl Touch struct +
    binding 10, `uses_touch(doc)`, Sim integration, tests.
-2. wasm + patch-web: `touch()` input, binding 10, `usesTouch`.
-3. Engine: buffer + binding 10 in the shared layout, gate.wgsl Globals field,
+2. **Done** (`baf9396`). wasm + patch-web: `touch()` input, binding 10, `usesTouch`.
+3. **Done** (`df12172`, `9314c7e`). Engine: buffer + binding 10 in the shared layout, gate.wgsl Globals field,
    SharedState touches, protocol `Touch`, LAN server, public server
    (allowlist, clamps), status `patch_touch`.
-4. UI: GateCanvas raw-touch mode (ids, down/move/up); Live and public floor
+4. **Done** (`baf9396`, tests/patch-touch.spec.ts). UI: GateCanvas raw-touch mode (ids, down/move/up); Live and public floor
    switch to it when `patch_touch`.
-5. Preset "Touch ripples" that rebuilds today's tap-burst in-graph plus a
+5. **Done** (`baf9396`). Preset "Touch ripples" that rebuilds today's tap-burst in-graph plus a
    finger-glow layer.
-6. Playground: raw touch when the patch uses touch nodes; rebuild web-dist;
+6. **Done** (site `b8afb20`, web-dist `23e0ea7`). Playground: raw touch when the patch uses touch nodes; rebuild web-dist;
    site dependency bump; push `dev` (never `master`).
-7. Docs (README, node-graph plan), tests across the board.
+7. **Done**. Docs (README), tests: crate 62, app lib 333, behaviour suite
+   incl. patch-touch, engine-smoke `--patch` (Touch glow on real Vulkan),
+   site 156 + unit 23, and by hand in Chrome on the playground.
 
 ## Progress log
 
 - [x] Survey of today's touch flow (2026-10-15)
-- [ ] Steps 1–7
+- [x] Steps 1–7 (2026-10-15)
+- [ ] Performance recordings don't capture raw touches yet (the recorder's
+      action enum has no Touch); a recorded show replays a touch patch
+      without its fingers. Follow-up.
+- [ ] Gate PR into `master` (Cameron's call; also starts CI web-dist)
+
+## Findings / gotchas
+
+- **The shared bind group was already at 8 storage buffers per stage**
+  (wgpu's and WebGPU's default limit). A ninth failed device creation;
+  engine-smoke caught it. Touches are a fixed 32-long *uniform* array instead
+  (`var<uniform> TOUCH: array<Touch, 32>`), and `Globals` grew by
+  `touch_count` + 3 pads to stay a multiple of 16 bytes (both WGSL copies).
+- **`setPointerCapture` throws for a synthetic PointerEvent** (no such live
+  pointer), which silently swallowed the playground's touch in a scripted
+  test; the handler now captures best-effort and tracks held pointers itself.
+- Ids: the server namespaces pointer ids per connection, and public-floor
+  connections get their own namespace (`public::touch_source`).
 
 ## Things not to do
 

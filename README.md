@@ -243,6 +243,12 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   While a patch is on air a **◆ chip in the top bar names it on every tab** (red
   with "fallback" if it failed to build and the stack is covering) — tap it to
   jump to the editor.
+  **Touch is a node too**: a patch with a Touch, Touch mask or Touch glow node
+  owns the touch surface. Every finger on the Live tab, a phone or the public
+  floor reaches it raw (down / move / up, position, hold time, speed, the
+  toucher's color) and the patch decides what it does; no tap effect or pen
+  is applied on top. The built-in **Touch Ripples** preset rebuilds the
+  classic tap burst that way (`plans/touch-nodes.md`).
   Editing works on the Gate machine only; remote clients get a read-only view.
   **Import / Export** move patches as files — including ones made in the
   [empyreangate.org pattern playground](https://empyreangate.org/playground),
