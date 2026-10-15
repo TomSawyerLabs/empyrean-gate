@@ -36,10 +36,10 @@ pub fn presets() -> &'static [PatchDoc] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::AudioUniform;
-    use crate::layers::MAX_AUDIO_SOURCES;
-    use crate::patch::codegen;
-    use crate::patch::eval::{DjLinkInputs, EvalInputs, Runtime};
+    use crate::abi::AudioUniform;
+    use crate::abi::MAX_AUDIO_SOURCES;
+    use crate::codegen;
+    use crate::eval::{DjLinkInputs, EvalInputs, Runtime};
 
     /// Every shipped preset must parse, compile, and be activatable — a preset
     /// that errors in a fresh install would be the worst first impression.

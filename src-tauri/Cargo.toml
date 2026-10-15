@@ -39,6 +39,8 @@ dirs = "6.0.0"
 # `updater::verify_release_signature`. Verify-only: no `rand_core`, since nothing
 # here ever generates a key — signing happens in CI with openssl.
 ed25519-dalek = { version = "2.2.0", default-features = false, features = ["std", "fast"] }
+# Patch core shared with the browser playground (see crates/empyrean-patch).
+empyrean-patch = { path = "../crates/empyrean-patch" }
 env_logger = "0.11.11"
 futures-util = { version = "0.3.34", features = ["sink"] }
 fs2 = "0.4.3"

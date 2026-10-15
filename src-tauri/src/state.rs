@@ -12,18 +12,11 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::time::Instant;
 use tokio::sync::broadcast;
 
-pub const DJ_EVENT_PLAY: usize = 0;
-pub const DJ_EVENT_CUE: usize = 1;
-pub const DJ_EVENT_CUE_RELEASE: usize = 2;
-pub const DJ_EVENT_ON_AIR: usize = 3;
-pub const DJ_EVENT_OFF_AIR: usize = 4;
-pub const DJ_EVENT_LOOP_START: usize = 5;
-pub const DJ_EVENT_LOOP_WRAP: usize = 6;
-pub const DJ_EVENT_LOOP_END: usize = 7;
-pub const DJ_EVENT_JUMP: usize = 8;
-pub const DJ_EVENT_PHRASE: usize = 9;
-pub const DJ_EVENT_FILL: usize = 10;
-pub const DJ_EVENT_COUNT: usize = 11;
+pub use empyrean_patch::eval::{
+    DJ_EVENT_COUNT, DJ_EVENT_CUE, DJ_EVENT_CUE_RELEASE, DJ_EVENT_FILL, DJ_EVENT_JUMP,
+    DJ_EVENT_LOOP_END, DJ_EVENT_LOOP_START, DJ_EVENT_LOOP_WRAP, DJ_EVENT_OFF_AIR, DJ_EVENT_ON_AIR,
+    DJ_EVENT_PHRASE, DJ_EVENT_PLAY,
+};
 
 /// Monotonic PRO DJ LINK event counters consumed by patch runtimes. Counters
 /// preserve short deck events until the next render frame instead of relying on
@@ -182,7 +175,7 @@ mod tests {
 
         let dabs = state.dabs.lock();
         assert_eq!(dabs.len(), crate::layers::MAX_DABS);
-        assert_eq!(dabs[0].angle, 100.0);
+        assert_eq!(dabs[0].dab.angle, 100.0);
     }
 
     #[test]
@@ -204,8 +197,8 @@ mod tests {
             1.0,
         );
         let dab = &state.dabs.lock()[0];
-        assert_eq!(dab.angle, 0.5);
-        assert_eq!(dab.dir, -0.5);
+        assert_eq!(dab.dab.angle, 0.5);
+        assert_eq!(dab.dab.dir, -0.5);
 
         state.trigger_effect(EffectCfg {
             kind: EffectKind::Heart,
@@ -289,22 +282,11 @@ pub struct ActiveEffect {
     pub born: Instant,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct RotationState {
-    pub angle: f32,
-    pub velocity: f32,
-}
+/// Whole-composition rotation; shared with the browser playground.
+pub use empyrean_patch::effects::Spin as RotationState;
 
 pub struct ActiveDab {
-    pub kind: crate::layers::PenKind,
-    pub angle: f32,
-    pub radius: f32,
-    pub hue: f32,
-    pub saturation: f32,
-    pub brightness: f32,
-    pub size: f32,
-    pub intensity: f32,
-    pub dir: f32,
+    pub dab: empyrean_patch::effects::Dab,
     pub born: Instant,
 }
 
@@ -1203,15 +1185,9 @@ impl SharedState {
         }
         for p in points {
             dabs.push(ActiveDab {
-                kind,
-                angle: p.angle - rotation,
-                radius: p.radius.clamp(0.0, 1.2),
-                hue,
-                saturation: saturation.clamp(0.0, 1.0),
-                brightness: brightness.clamp(0.0, 1.0),
-                size: size.clamp(0.01, 1.0),
-                intensity: intensity.clamp(0.0, 2.0),
-                dir: p.dir - rotation,
+                dab: empyrean_patch::effects::Dab::new(
+                    kind, *p, rotation, hue, saturation, brightness, size, intensity,
+                ),
                 born: Instant::now(),
             });
         }
@@ -1236,11 +1212,7 @@ impl SharedState {
     /// input sequence (otherwise Tap → Event effect would self-trigger forever).
     pub fn trigger_effect_from_patch(&self, cfg: EffectCfg) {
         if cfg.kind == EffectKind::Rotate {
-            let direction = if cfg.angle < 0.0 { -1.0 } else { 1.0 };
-            let mut rotation = self.rotation.lock();
-            rotation.velocity = (rotation.velocity
-                + direction * cfg.intensity.clamp(0.05, 3.0) * 0.42)
-                .clamp(-12.0, 12.0);
+            self.rotation.lock().impulse(&cfg);
             return;
         }
         let mut effects = self.effects.lock();

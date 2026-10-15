@@ -25,86 +25,9 @@ pub mod minis;
 /// for one complete outgoing stack and one complete incoming stack at once.
 const MAX_RENDER_LAYERS: usize = MAX_LAYERS * 2;
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Globals {
-    pub spokes: u32,
-    pub pixels: u32,
-    pub layer_count: u32,
-    pub effect_count: u32,
-    pub time: f32,
-    pub dt: f32,
-    pub master: f32,
-    pub inner_over_outer: f32,
-    pub tilt_x: f32,
-    pub tilt_y: f32,
-    pub shake: f32,
-    pub yaw: f32,
-    pub dab_count: u32,
-    pub video_width: u32,
-    pub video_height: u32,
-    pub video_active: u32,
-    /// Number of leading GPU layers that belong to the outgoing scene.
-    pub transition_split: u32,
-    /// Non-zero while the shader should compose two independent scene stacks.
-    pub transition_active: u32,
-    /// Smoothed 0..1 mix from the outgoing scene to the incoming scene.
-    pub transition_progress: f32,
-    /// 0..1 fade-in of the Video layer's contribution, smoothstepped here so
-    /// the shader's opacity scale stays a plain multiply.
-    pub video_mix: f32,
-    /// PRO DJ LINK transport visuals. These only add overlays to the base scene.
-    pub dj_link_visual_active: u32,
-    pub dj_fade_position: f32,
-    pub dj_fade_activity: f32,
-    pub dj_looping: f32,
-    /// Game mode (plans/game-mode.md). Non-zero while a game world should be
-    /// composited over the scene; `game_mix` is the smoothed crossfade.
-    pub game_active: u32,
-    pub game_mix: f32,
-    /// Game grid dimensions: θ cells (1:1 with spokes, clamped) × radial cells.
-    pub game_theta: u32,
-    pub game_rings: u32,
-    /// 0..1 progress from the previous sim tick's grid to the current one; the
-    /// shader interpolates so cells glide instead of strobing per generation.
-    pub game_alpha: f32,
-    /// Beat envelope (1 on the beat, decaying) for the game's brightness pulse.
-    pub game_beat: f32,
-    /// Raster games (DOOM, plans/doom.md): 1 = a planar frame of
-    /// `game_theta` × `game_rings` pixels mapped across the disc, 2 = the same
-    /// mirrored left-right; 0 = the polar cell grid.
-    pub game_style: u32,
-    /// Raster orientation: radians of the screen's "down" direction.
-    pub game_turn: f32,
-    /// Whole-composition rotation, integrated on the CPU so it remains
-    /// continuous as transient button pulses expire.
-    pub rotation: f32,
-    /// Master hue pull (operator "warm colors now"). Target in turns; amount
-    /// 0 disables. `hue_loose` 0..1 fades the pull out for hues far from the
-    /// target so flourishes survive — 0 is a strict pull. These occupy what
-    /// was `_pad_rotation`, so the GPU struct layout is unchanged.
-    pub hue_target: f32,
-    pub hue_amount: f32,
-    pub hue_loose: f32,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct AudioUniform {
-    pub level: f32,
-    pub bass: f32,
-    pub mid: f32,
-    pub treble: f32,
-    pub onset: f32,
-    pub beat_phase: f32,
-    pub bpm: f32,
-    /// 0..1 confidence in `bpm`; shaders and automation gate on it.
-    pub bpm_conf: f32,
-    pub bass_att: f32,
-    pub mid_att: f32,
-    pub treble_att: f32,
-    pub _pad2: f32,
-}
+// The uniform records shared by `gate.wgsl` and the patch shader live with
+// the patch runtime so its browser build packs exactly the same bytes.
+pub use empyrean_patch::abi::{AudioUniform, Globals};
 
 /// Floats per source in the scope storage buffer (256 waveform + 64 spectrum).
 pub const SCOPE_FLOATS: usize = 256 + crate::audio::analysis::SPECTRUM_BINS;
@@ -2876,22 +2799,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let requested_low_latency = state.low_latency_render_seq.load(Ordering::Acquire);
         let dabs: Vec<GpuDab> = {
             let mut dabs = state.dabs.lock();
-            dabs.retain(|d| d.born.elapsed().as_secs_f32() < d.kind.lifetime());
+            dabs.retain(|d| d.born.elapsed().as_secs_f32() < d.dab.kind.lifetime());
             dabs.iter()
                 .take(MAX_DABS)
-                .map(|d| GpuDab {
-                    kind: d.kind.gpu_id(),
-                    age: d.born.elapsed().as_secs_f32() / d.kind.lifetime(),
-                    angle: d.angle,
-                    radius: d.radius,
-                    hue: d.hue,
-                    size: d.size,
-                    intensity: d.intensity * overlay_gain,
-                    dir: d.dir,
-                    saturation: d.saturation,
-                    brightness: d.brightness,
-                    _pad: [0.0; 2],
-                })
+                .map(|d| d.dab.to_gpu(d.born.elapsed().as_secs_f32(), overlay_gain))
                 .collect()
         };
         let dabs = if game_suppress { Vec::new() } else { dabs };
@@ -3051,48 +2962,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // same low-latency frame as the DJ LINK event that emitted it.
         let effects: Vec<GpuEffect> = {
             let mut fx = state.effects.lock();
-            fx.retain(|e| {
-                let dur = if e.cfg.duration > 0.0 {
-                    e.cfg.duration
-                } else {
-                    e.cfg.kind.default_duration()
-                };
-                e.born.elapsed().as_secs_f32() < dur
-            });
+            fx.retain(|e| e.born.elapsed().as_secs_f32() < e.cfg.lifetime());
             fx.iter()
-                .map(|e| GpuEffect {
-                    kind: e.cfg.kind.gpu_id(),
-                    size: e.cfg.size.clamp(0.1, 4.0),
-                    age: e.born.elapsed().as_secs_f32(),
-                    duration: if e.cfg.duration > 0.0 {
-                        e.cfg.duration
-                    } else {
-                        e.cfg.kind.default_duration()
-                    },
-                    angle: e.cfg.angle,
-                    radius: e.cfg.radius,
-                    intensity: e.cfg.intensity * overlay_gain,
-                    hue: e.cfg.hue,
-                    saturation: e.cfg.saturation.clamp(0.0, 1.0),
-                    brightness: e.cfg.brightness.clamp(0.0, 1.0),
-                    rotation: e.cfg.rotation,
-                    grow: e.cfg.grow.clamp(-1.0, 1.0),
-                    edge: e.cfg.edge.clamp(0.0, 1.0),
-                    fill: e.cfg.fill.clamp(0.0, 1.0),
-                })
+                .map(|e| e.cfg.to_gpu(e.born.elapsed().as_secs_f32(), overlay_gain))
                 .collect()
         };
         let effects = if game_suppress { Vec::new() } else { effects };
 
         let rotation_angle = {
-            let mut rotation = state.rotation.lock();
-            rotation.angle =
-                (rotation.angle + rotation.velocity * dt).rem_euclid(std::f32::consts::TAU);
-            rotation.velocity *= (-1.15 * dt).exp();
-            if rotation.velocity.abs() < 0.0005 {
-                rotation.velocity = 0.0;
-            }
-            rotation.angle
+            state.rotation.lock().step(dt)
         };
 
         // Master brightness never steps: the Blackout quick-setting and slider

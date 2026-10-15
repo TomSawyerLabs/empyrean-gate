@@ -8,11 +8,25 @@
 use super::PatchDoc;
 use super::codegen::Program;
 use super::registry::{self, ParamKind};
-use crate::engine::AudioUniform;
-use crate::layers::{EffectCfg, EffectKind, MAX_AUDIO_SOURCES};
-use crate::state::DJ_EVENT_COUNT;
+use crate::abi::{AudioUniform, MAX_AUDIO_SOURCES};
+use crate::effects::{EffectCfg, EffectKind};
 use std::collections::HashMap;
 use std::f32::consts::TAU;
+
+/// PRO DJ LINK event indices into [`DjLinkInputs::event_seq`]; the order
+/// matches the Dj Link node's event outputs.
+pub const DJ_EVENT_PLAY: usize = 0;
+pub const DJ_EVENT_CUE: usize = 1;
+pub const DJ_EVENT_CUE_RELEASE: usize = 2;
+pub const DJ_EVENT_ON_AIR: usize = 3;
+pub const DJ_EVENT_OFF_AIR: usize = 4;
+pub const DJ_EVENT_LOOP_START: usize = 5;
+pub const DJ_EVENT_LOOP_WRAP: usize = 6;
+pub const DJ_EVENT_LOOP_END: usize = 7;
+pub const DJ_EVENT_JUMP: usize = 8;
+pub const DJ_EVENT_PHRASE: usize = 9;
+pub const DJ_EVENT_FILL: usize = 10;
+pub const DJ_EVENT_COUNT: usize = 11;
 
 pub struct EvalInputs<'a> {
     pub dt: f32,
@@ -405,8 +419,8 @@ fn sanitize_param(def: &registry::ParamDef, value: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::patch::codegen::compile;
-    use crate::patch::{Edge, NodeInst, PatchDoc, PortRef};
+    use crate::codegen::compile;
+    use crate::{Edge, NodeInst, PatchDoc, PortRef};
 
     fn node(id: &str, kind: &str) -> NodeInst {
         NodeInst {
@@ -694,13 +708,13 @@ mod tests {
 
         let mut inp = inputs(&audio);
         inp.dj_link.mix = 0.75;
-        inp.dj_link.event_seq[crate::state::DJ_EVENT_JUMP] = 4;
+        inp.dj_link.event_seq[DJ_EVENT_JUMP] = 4;
         rt.eval(&inp);
         rt.eval(&inp);
         assert_eq!(rt.slab[brightness_slot], 0.0, "no startup event");
         assert_eq!(rt.slab[front_slot], 0.75, "continuous LINK state reaches GPU");
 
-        inp.dj_link.event_seq[crate::state::DJ_EVENT_JUMP] += 1;
+        inp.dj_link.event_seq[DJ_EVENT_JUMP] += 1;
         rt.eval(&inp);
         rt.eval(&inp);
         assert!(rt.slab[brightness_slot] > 0.0, "jump fired the envelope");
@@ -730,11 +744,11 @@ mod tests {
         let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
         let mut inp = inputs(&audio);
         inp.dj_link.event_side = -1.0;
-        inp.dj_link.event_seq[crate::state::DJ_EVENT_LOOP_WRAP] = 7;
+        inp.dj_link.event_seq[DJ_EVENT_LOOP_WRAP] = 7;
 
         rt.eval(&inp);
         assert!(rt.take_emitted_effects().is_empty(), "no startup event");
-        inp.dj_link.event_seq[crate::state::DJ_EVENT_LOOP_WRAP] += 1;
+        inp.dj_link.event_seq[DJ_EVENT_LOOP_WRAP] += 1;
         rt.eval(&inp);
         let emitted = rt.take_emitted_effects();
         assert_eq!(emitted.len(), 1);
@@ -799,16 +813,16 @@ mod tests {
             .slot;
 
         let mut inp = inputs(&audio);
-        inp.dj_link.event_seq[crate::state::DJ_EVENT_CUE] = 20;
-        inp.dj_link.event_seq[crate::state::DJ_EVENT_LOOP_WRAP] = 30;
+        inp.dj_link.event_seq[DJ_EVENT_CUE] = 20;
+        inp.dj_link.event_seq[DJ_EVENT_LOOP_WRAP] = 30;
         rt.eval(&inp);
         rt.eval(&inp);
         assert_eq!(rt.slab[cue_slot], 0.0, "no startup cue event");
         assert_eq!(rt.slab[wrap_slot], 0.0, "no startup wrap event");
 
         for event_number in 1..=3 {
-            inp.dj_link.event_seq[crate::state::DJ_EVENT_CUE] += 1;
-            inp.dj_link.event_seq[crate::state::DJ_EVENT_LOOP_WRAP] += 1;
+            inp.dj_link.event_seq[DJ_EVENT_CUE] += 1;
+            inp.dj_link.event_seq[DJ_EVENT_LOOP_WRAP] += 1;
             rt.eval(&inp);
             assert!(
                 rt.slab[cue_slot] > 0.99,

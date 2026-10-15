@@ -1,0 +1,6 @@
+# The host-independent crates: the patch core and its browser build. The app
+# (src-tauri) depends on empyrean-patch by path and keeps its own workspace, so
+# its lockfile and target directory are untouched by anything here.
+[workspace]
+members = ["empyrean-patch"]
+resolver = "3"

@@ -30,7 +30,9 @@ pub const MAX_PREVIEW_NODES: usize = 32;
 /// the meta list and the UI both want a bound).
 pub const MAX_PREVIEW_SCALARS: usize = 64;
 
-const PRELUDE: &str = include_str!("../engine/shaders/patch_lib.wgsl");
+/// The runtime library every generated shader starts with: bindings, the
+/// per-pixel `Ctx`, noise/colour helpers, and the effect/dab renderers.
+pub const PATCH_LIB_WGSL: &str = include_str!("../shaders/patch_lib.wgsl");
 
 /// Everything the engine + evaluator need to run one compiled patch.
 #[derive(Debug, Clone)]
@@ -241,7 +243,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         .any(|(i, n)| n.kind == "render_effects" && reachable[i]);
 
     let mut code = String::new();
-    code.push_str(PRELUDE);
+    code.push_str(PATCH_LIB_WGSL);
     code.push_str("\n// ---- generated from the patch graph ----\n");
     for &i in &gpu_order {
         if i == output {
@@ -1063,7 +1065,7 @@ fn leak(s: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::patch::{Edge, NodeInst, PortRef};
+    use crate::{Edge, NodeInst, PortRef};
 
     fn node(id: &str, kind: &str) -> NodeInst {
         NodeInst {
@@ -1217,7 +1219,7 @@ mod tests {
 
     #[test]
     fn every_generator_kind_compiles_into_one_validated_shader() {
-        use crate::patch::registry::{Category, TYPES};
+        use crate::registry::{Category, TYPES};
         // One node of every Generator kind, folded through a blend chain.
         let gens: Vec<&str> = TYPES
             .iter()

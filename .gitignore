@@ -9,3 +9,4 @@ demo-data/
 # Playwright (layout gate) output
 test-results/
 playwright-report/
+crates/target/

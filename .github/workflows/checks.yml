@@ -80,7 +80,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            crates
           cache-on-failure: true
 
       # sACN wire format, report bundle timestamps/decimation, and the guard that
@@ -90,6 +92,13 @@ jobs:
       - name: Library tests
         working-directory: src-tauri
         run: cargo test --lib
+
+      # The patch core (document model, codegen, evaluator) lives in its own
+      # crate so the browser playground runs the same code; its tests, including
+      # naga validation of every generated shader, run here.
+      - name: Patch core tests
+        working-directory: crates
+        run: cargo test
 
       # The DOOM-free release variant must keep compiling: everything behind
       # the `doom` feature is cfg-gated, and this is the only place a missing

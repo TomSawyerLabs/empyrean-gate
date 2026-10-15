@@ -260,7 +260,7 @@ pub fn errors_to_string(errors: &[PatchError]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::patch::{Edge, ExposedParam, NodeInst, PortRef};
+    use crate::{Edge, ExposedParam, NodeInst, PortRef};
 
     fn node(id: &str, kind: &str) -> NodeInst {
         NodeInst {

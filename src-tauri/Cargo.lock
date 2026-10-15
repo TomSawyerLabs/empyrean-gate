@@ -1360,6 +1360,7 @@ dependencies = [
  "crossbeam-channel",
  "dirs",
  "ed25519-dalek",
+ "empyrean-patch",
  "env_logger",
  "fs2",
  "futures-util",
@@ -1394,6 +1395,15 @@ dependencies = [
  "webview2-com",
  "wgpu",
  "windows 0.61.3",
+]
+
+[[package]]
+name = "empyrean-patch"
+version = "0.14.0"
+dependencies = [
+ "bytemuck",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

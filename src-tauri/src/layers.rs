@@ -3,12 +3,12 @@
 
 use serde::{Deserialize, Serialize};
 
+// The effect/dab types and their GPU records are shared with the patch
+// runtime (and its browser build), so they live in `empyrean-patch`.
+pub use empyrean_patch::abi::{GpuDab, GpuEffect, MAX_AUDIO_SOURCES, MAX_DABS, MAX_EFFECTS};
+pub use empyrean_patch::effects::{DabPoint, EffectCfg, EffectKind, PenKind};
+
 pub const MAX_LAYERS: usize = 24;
-pub const MAX_EFFECTS: usize = 32;
-pub const MAX_AUDIO_SOURCES: usize = 4;
-/// Live-draw dabs (see `PenKind`). 512 supports several fingers drawing at once
-/// across multiple clients with ~2 s trails.
-pub const MAX_DABS: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -259,242 +259,6 @@ impl Default for LayerCfg {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EffectKind {
-    /// Expanding circular shockwave from a point (click/tap position).
-    Burst,
-    /// Full-array white strobe flash.
-    Strobe,
-    /// A bright arm sweeping one full revolution.
-    Swoosh,
-    /// Wave collapsing from the outer edge to the center.
-    Collapse,
-    /// Iris opening from the center outward, petal-modulated, with a trailing glow.
-    Bloom,
-    /// Spiral arms that whip up to speed and fade.
-    Pinwheel,
-    /// Glitter storm over the whole array, swelling then decaying.
-    Twinkle,
-    /// A straight bar sweeping across the disc, lit wake behind it.
-    Wipe,
-    // --- Shapes: recognizable figures stamped center-array. `angle` is the
-    // shape's rotation rather than an origin, and `radius` is unused. ---
-    /// Five-pointed star, slowly spinning.
-    Star,
-    /// Heart, pulsing twice as it fades.
-    Heart,
-    /// Six-petal rosette that opens from a circle as it lands.
-    Flower,
-    /// Rhombus.
-    Diamond,
-    /// Equilateral triangle, point up.
-    Triangle,
-    /// Crescent moon.
-    Moon,
-    /// Clean radial ring expanding from the center of the array.
-    Ring,
-    /// Spin the entire rendered Gate composition around its center.
-    Rotate,
-    /// An orange traffic cone with white bands, tip toward the rim. Always
-    /// orange whatever color was picked (that is the joke); on the public
-    /// floor it needs the `cone` perk. See plans/hidden-modes.md.
-    Cone,
-}
-
-impl EffectKind {
-    /// Order is the GPU id — the `case` arms in `gate.wgsl` are literal numbers.
-    /// Append only.
-    pub const ALL: [EffectKind; 17] = [
-        EffectKind::Burst,
-        EffectKind::Strobe,
-        EffectKind::Swoosh,
-        EffectKind::Collapse,
-        EffectKind::Bloom,
-        EffectKind::Pinwheel,
-        EffectKind::Twinkle,
-        EffectKind::Wipe,
-        EffectKind::Star,
-        EffectKind::Heart,
-        EffectKind::Flower,
-        EffectKind::Diamond,
-        EffectKind::Triangle,
-        EffectKind::Moon,
-        EffectKind::Ring,
-        EffectKind::Rotate,
-        EffectKind::Cone,
-    ];
-
-    /// The figures — stamped center-array, `angle` is their rotation. Everything
-    /// else is a motion effect that travels across the array.
-    pub const SHAPES: [EffectKind; 7] = [
-        EffectKind::Star,
-        EffectKind::Heart,
-        EffectKind::Flower,
-        EffectKind::Diamond,
-        EffectKind::Triangle,
-        EffectKind::Moon,
-        EffectKind::Cone,
-    ];
-
-    pub fn gpu_id(self) -> u32 {
-        Self::ALL.iter().position(|k| *k == self).unwrap() as u32
-    }
-
-    pub fn is_shape(self) -> bool {
-        Self::SHAPES.contains(&self)
-    }
-
-    pub fn default_duration(self) -> f32 {
-        match self {
-            EffectKind::Burst => 1.2,
-            EffectKind::Strobe => 0.25,
-            EffectKind::Swoosh => 1.0,
-            EffectKind::Collapse => 1.5,
-            EffectKind::Bloom => 1.4,
-            EffectKind::Pinwheel => 1.6,
-            EffectKind::Twinkle => 1.1,
-            EffectKind::Wipe => 1.0,
-            EffectKind::Ring => 1.0,
-            // Rotate is consumed by the CPU before it reaches the transient
-            // effect buffer; keep a nominal duration for the stable effect ABI.
-            EffectKind::Rotate => 0.1,
-            // Stamps hold long enough to be read across a dance floor.
-            EffectKind::Star
-            | EffectKind::Heart
-            | EffectKind::Flower
-            | EffectKind::Diamond
-            | EffectKind::Triangle
-            | EffectKind::Moon
-            | EffectKind::Cone => 1.8,
-        }
-    }
-}
-
-/// An effect trigger as sent by a client (keyboard, click/tap on the preview, remote phone).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct EffectCfg {
-    pub kind: EffectKind,
-    /// Origin angle in radians (e.g. from a preview click or phone yaw).
-    pub angle: f32,
-    /// Origin radius, normalized 0 (center) .. 1 (outer edge).
-    pub radius: f32,
-    pub intensity: f32,
-    /// Width multiplier for effects with a spatial footprint (1 = default).
-    pub size: f32,
-    /// Hue in turns; negative = white.
-    pub hue: f32,
-    /// HSV saturation and value. Kept separate so custom RGB colors round-trip.
-    pub saturation: f32,
-    pub brightness: f32,
-    /// Seconds; 0 = use the kind's default.
-    pub duration: f32,
-    /// Shapes only: the figure's own rotation in radians. Separate from `angle`,
-    /// which is where the figure is stamped — a tapped heart wants the tap's
-    /// position and its own upright.
-    pub rotation: f32,
-    /// Shapes only: how the stamp's scale moves over its life — it is multiplied
-    /// by `1 + grow * age/duration`. 0 holds the size it was tapped at, +1
-    /// doubles it by the end, -1 collapses it to nothing. Clamped to ±1.
-    pub grow: f32,
-    /// Shapes only: how thick the figure's outline is, 0 (hairline) .. 1 (fat).
-    /// 0.5 is the width figures had before this was adjustable. Below about 0.3
-    /// the outline is thinner than the gap between spokes and will read as a
-    /// dotted line where the boundary runs tangentially — that is a real limit of
-    /// a 64-spoke array, and the control exposes it rather than hiding it.
-    pub edge: f32,
-    /// Shapes only: how brightly the figure's interior is lit, 0 (outline only)
-    /// .. 1 (solid). Low values are what make a figure read as a figure rather
-    /// than a blob; 0.35 is what they were fixed at before.
-    pub fill: f32,
-}
-
-impl Default for EffectCfg {
-    fn default() -> Self {
-        Self {
-            kind: EffectKind::Burst,
-            angle: 0.0,
-            radius: 1.0,
-            intensity: 1.0,
-            size: 1.0,
-            hue: -1.0,
-            saturation: 0.85,
-            brightness: 1.0,
-            duration: 0.0,
-            rotation: 0.0,
-            grow: 0.0,
-            // Not the old look (0.5 / 0.35): that is the one being complained
-            // about — a 0.11-wide outline plus a lit interior is most of a disc,
-            // and the figures read as blobs. 0.3 puts the outline at ~0.077 of
-            // the array radius, just inside the 0.078 gap between spokes at the
-            // rim — the thinnest line 64 spokes can draw without it breaking up
-            // — and 0.15 leaves the interior as a hint rather than a wash.
-            // Verified with `bun scripts/shape-probe.ts`, not by eye over code.
-            edge: 0.3,
-            fill: 0.15,
-        }
-    }
-}
-
-/// Live drawing "pens" — each pointer-move dab from a client renders as one of these.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PenKind {
-    /// Soft glowing blob that fades out.
-    Glow,
-    /// Small expanding ring from each dab.
-    Ripple,
-    /// Glitter spray around the dab.
-    Sparkle,
-    /// Teardrop streak elongated along the stroke's motion direction.
-    Comet,
-    /// A full hoop around the array at the dab's radius.
-    Ring,
-    /// Lights the whole spoke ray at the dab's angle.
-    Beam,
-    /// Glitter that drifts inward toward the center as it fades.
-    Ember,
-}
-
-impl PenKind {
-    pub fn gpu_id(self) -> u32 {
-        match self {
-            PenKind::Glow => 0,
-            PenKind::Ripple => 1,
-            PenKind::Sparkle => 2,
-            PenKind::Comet => 3,
-            PenKind::Ring => 4,
-            PenKind::Beam => 5,
-            PenKind::Ember => 6,
-        }
-    }
-
-    pub fn lifetime(self) -> f32 {
-        match self {
-            PenKind::Glow => 1.5,
-            PenKind::Ripple => 1.2,
-            PenKind::Sparkle => 2.0,
-            PenKind::Comet => 1.2,
-            PenKind::Ring => 1.8,
-            PenKind::Beam => 0.9,
-            PenKind::Ember => 2.5,
-        }
-    }
-}
-
-/// One point of a live-draw stroke, as sent by a client.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct DabPoint {
-    /// Radians.
-    pub angle: f32,
-    /// 0 (center) .. 1 (outer edge).
-    pub radius: f32,
-    /// Direction of stroke motion in the array's cartesian frame, radians.
-    /// Used by directional pens (Comet); 0 when unknown.
-    #[serde(default)]
-    pub dir: f32,
-}
 
 // ---------------------------------------------------------------------------
 // GPU-side packed structs. Layouts must match `engine/shaders/gate.wgsl`.
@@ -526,41 +290,6 @@ pub struct GpuLayer {
     pub _pad2: [f32; 2],
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct GpuDab {
-    pub kind: u32,
-    pub age: f32,
-    pub angle: f32,
-    pub radius: f32,
-    pub hue: f32,
-    pub size: f32,
-    pub intensity: f32,
-    /// Stroke motion direction (radians) for directional pens.
-    pub dir: f32,
-    pub saturation: f32,
-    pub brightness: f32,
-    pub _pad: [f32; 2],
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct GpuEffect {
-    pub kind: u32,
-    pub size: f32,
-    pub age: f32,
-    pub duration: f32,
-    pub angle: f32,
-    pub radius: f32,
-    pub intensity: f32,
-    pub hue: f32,
-    pub saturation: f32,
-    pub brightness: f32,
-    pub rotation: f32,
-    pub grow: f32,
-    pub edge: f32,
-    pub fill: f32,
-}
 
 impl LayerCfg {
     /// Rate factor the engine folds into this layer's phase integration.
@@ -680,19 +409,8 @@ impl LayerCfg {
 mod patch_transient_abi_tests {
     use super::*;
 
-    /// The position in `ALL` is the GPU id, and `gate.wgsl` matches on it as a
-    /// literal. Reordering would silently repaint every effect as another one.
-    #[test]
-    fn effect_gpu_ids_are_stable_and_dense() {
-        assert_eq!(EffectKind::Burst.gpu_id(), 0);
-        assert_eq!(EffectKind::Strobe.gpu_id(), 1);
-        assert_eq!(EffectKind::Swoosh.gpu_id(), 2);
-        assert_eq!(EffectKind::Collapse.gpu_id(), 3);
-        for (i, kind) in EffectKind::ALL.iter().enumerate() {
-            assert_eq!(kind.gpu_id(), i as u32, "{kind:?} moved in ALL");
-            assert!(kind.default_duration() > 0.0, "{kind:?} has no duration");
-        }
-    }
+    // Stable ids, shape membership and serde names are tested with the types
+    // in `empyrean-patch`; what needs this crate is the gate.wgsl side.
 
     /// A kind with no shader arm is a silent no-op on the rig — the switch just
     /// falls through to `default`. Catch it here instead of at the show.
@@ -700,7 +418,7 @@ mod patch_transient_abi_tests {
     fn every_effect_kind_has_a_shader_case() {
         for (name, src) in [
             ("gate", include_str!("engine/shaders/gate.wgsl")),
-            ("patch", include_str!("engine/shaders/patch_lib.wgsl")),
+            ("patch", crate::patch::codegen::PATCH_LIB_WGSL),
         ] {
             let after = src
                 .split_once("fn effect_color(")
@@ -717,24 +435,7 @@ mod patch_transient_abi_tests {
         }
     }
 
-    #[test]
-    fn shapes_are_a_subset_of_all_kinds() {
-        for kind in EffectKind::SHAPES {
-            assert!(EffectKind::ALL.contains(&kind), "{kind:?} missing from ALL");
-            assert!(kind.is_shape());
-        }
-        assert!(!EffectKind::Burst.is_shape());
-    }
 
-    /// Serde names are what reports, the WebSocket protocol and the UI all speak.
-    #[test]
-    fn effect_kinds_round_trip_through_snake_case_json() {
-        for kind in EffectKind::ALL {
-            let json = serde_json::to_string(&kind).unwrap();
-            assert_eq!(json, json.to_lowercase(), "{kind:?} is not snake_case");
-            assert_eq!(serde_json::from_str::<EffectKind>(&json).unwrap(), kind);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -755,7 +456,7 @@ mod tests {
         // Both shader copies declare the two shape controls, in the same order.
         for shader in [
             include_str!("engine/shaders/gate.wgsl"),
-            include_str!("engine/shaders/patch_lib.wgsl"),
+            crate::patch::codegen::PATCH_LIB_WGSL,
         ] {
             let effect = shader
                 .split_once("struct Effect {")
@@ -771,7 +472,7 @@ mod tests {
             assert!(rotation < grow && grow < edge && edge < fill, "field order");
         }
 
-        let patch_shader = include_str!("engine/shaders/patch_lib.wgsl");
+        let patch_shader = crate::patch::codegen::PATCH_LIB_WGSL;
         assert!(patch_shader.contains("col = hsv2rgb(E.hue, E.saturation, E.brightness);"));
         assert!(patch_shader.contains("col = hsv2rgb(D.hue, D.saturation, D.brightness);"));
     }
