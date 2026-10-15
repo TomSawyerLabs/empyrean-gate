@@ -2,5 +2,11 @@
 # (src-tauri) depends on empyrean-patch by path and keeps its own workspace, so
 # its lockfile and target directory are untouched by anything here.
 [workspace]
-members = ["empyrean-patch"]
+members = ["empyrean-patch", "empyrean-patch-wasm"]
 resolver = "3"
+
+# The wasm build ships to every playground visitor: optimize for size.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1

@@ -125,3 +125,58 @@ pub struct GpuEffect {
     pub edge: f32,
     pub fill: f32,
 }
+
+/// Floats per audio source in the SCOPE buffer (binding 6): a waveform ring of
+/// `SCOPE_WAVE` samples, then `SCOPE_SPECTRUM` spectrum bins.
+pub const SCOPE_WAVE: usize = 256;
+pub const SCOPE_SPECTRUM: usize = 64;
+pub const SCOPE_FLOATS: usize = SCOPE_WAVE + SCOPE_SPECTRUM;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codegen::PATCH_LIB_WGSL;
+
+    /// Field names of a WGSL struct, in order.
+    fn wgsl_fields(name: &str) -> Vec<String> {
+        let body = PATCH_LIB_WGSL
+            .split_once(&format!("struct {name} {{"))
+            .unwrap_or_else(|| panic!("struct {name}"))
+            .1
+            .split_once('}')
+            .unwrap()
+            .0;
+        body.lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty() && !l.starts_with("//"))
+            .map(|l| l.split(':').next().unwrap().trim().to_string())
+            .collect()
+    }
+
+    /// Every record here is uploaded byte-for-byte, and every field is 4
+    /// bytes, so a struct matches its WGSL twin exactly when the field counts
+    /// agree. The browser runtime depends on this as much as the engine does.
+    #[test]
+    fn records_match_their_wgsl_structs() {
+        for (name, size) in [
+            ("Globals", std::mem::size_of::<Globals>()),
+            ("AudioU", std::mem::size_of::<AudioUniform>()),
+            ("Effect", std::mem::size_of::<GpuEffect>()),
+            ("Dab", std::mem::size_of::<GpuDab>()),
+        ] {
+            assert_eq!(
+                wgsl_fields(name).len() * 4,
+                size,
+                "{name} drifted from patch_lib.wgsl"
+            );
+        }
+        assert_eq!(wgsl_fields("Globals")[0], "spokes");
+        assert_eq!(wgsl_fields("Globals").last().unwrap(), "hue_loose");
+    }
+
+    #[test]
+    fn scope_layout_matches_the_shader() {
+        assert!(PATCH_LIB_WGSL.contains(&format!("const WAVE_N: u32 = {SCOPE_WAVE}u;")));
+        assert!(PATCH_LIB_WGSL.contains(&format!("const SPEC_N: u32 = {SCOPE_SPECTRUM}u;")));
+    }
+}

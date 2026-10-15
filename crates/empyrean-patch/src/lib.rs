@@ -15,6 +15,7 @@ pub mod effects;
 pub mod eval;
 pub mod presets;
 pub mod registry;
+pub mod sim;
 pub mod validate;
 
 use serde::{Deserialize, Serialize};

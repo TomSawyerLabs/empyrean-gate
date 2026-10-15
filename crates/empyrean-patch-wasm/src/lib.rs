@@ -1,0 +1,364 @@
+//! JavaScript bindings for the patch core: the same registry, validation,
+//! codegen and evaluator the gate runs, for the browser playground.
+//!
+//! Documents cross the boundary as JSON strings (the exact on-disk patch
+//! format). GPU records cross as bytes laid out by `empyrean_patch::abi`, so JS
+//! uploads them as-is and never needs to know a struct layout.
+
+use empyrean_patch::PatchDoc;
+use empyrean_patch::abi::{
+    AudioUniform, MAX_AUDIO_SOURCES, MAX_DABS, MAX_EFFECTS, SCOPE_FLOATS, SCOPE_SPECTRUM,
+    SCOPE_WAVE,
+};
+use empyrean_patch::effects::{DabPoint, EffectCfg, EffectKind, PenKind};
+use empyrean_patch::eval::{DJ_EVENT_COUNT, DjLinkInputs};
+use empyrean_patch::sim::{Geometry, Sim, Update};
+use serde_json::json;
+use wasm_bindgen::prelude::*;
+
+fn parse_doc(json: &str) -> Result<PatchDoc, JsError> {
+    serde_json::from_str(json).map_err(|e| JsError::new(&format!("not a patch: {e}")))
+}
+
+/// The node palette (`GET /patch/registry` on the gate), as JSON.
+#[wasm_bindgen]
+pub fn registry() -> String {
+    empyrean_patch::registry::palette_json().to_string()
+}
+
+/// The built-in starter patches (`GET /patch/presets`), as a JSON array.
+#[wasm_bindgen]
+pub fn presets() -> String {
+    serde_json::to_string(empyrean_patch::presets::presets()).expect("presets serialize")
+}
+
+/// Check a patch exactly as the gate does before it will run it. Returns
+/// `{"ok":true}` or `{"ok":false,"errors":["..."]}`.
+#[wasm_bindgen]
+pub fn validate(doc: &str) -> String {
+    let doc = match serde_json::from_str::<PatchDoc>(doc) {
+        Ok(doc) => doc,
+        Err(e) => {
+            return json!({ "ok": false, "errors": [format!("not a patch: {e}")] }).to_string();
+        }
+    };
+    if doc.format > empyrean_patch::PATCH_FORMAT {
+        return json!({
+            "ok": false,
+            "errors": [format!("patch format {} is newer than this build understands", doc.format)],
+        })
+        .to_string();
+    }
+    match empyrean_patch::validate::validate(&doc) {
+        Err(errors) => json!({
+            "ok": false,
+            "errors": errors.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
+        })
+        .to_string(),
+        // Validation passing is not the whole story: codegen has its own
+        // limits (parameter slab size, not-yet-renderable kinds).
+        Ok(_) => match empyrean_patch::codegen::compile(&doc) {
+            Ok(_) => json!({ "ok": true }).to_string(),
+            Err(e) => json!({ "ok": false, "errors": [e] }).to_string(),
+        },
+    }
+}
+
+/// Sizes the host needs to allocate its GPU buffers and build its UI.
+#[wasm_bindgen]
+pub fn limits() -> String {
+    json!({
+        "patchFormat": empyrean_patch::PATCH_FORMAT,
+        "maxNodes": empyrean_patch::MAX_PATCH_NODES,
+        "maxEdges": empyrean_patch::MAX_PATCH_EDGES,
+        "maxEffects": MAX_EFFECTS,
+        "maxDabs": MAX_DABS,
+        "audioSources": MAX_AUDIO_SOURCES,
+        "scopeWave": SCOPE_WAVE,
+        "scopeSpectrum": SCOPE_SPECTRUM,
+        "scopeFloats": SCOPE_FLOATS,
+        "maxSlabFloats": empyrean_patch::codegen::MAX_SLAB_FLOATS,
+        "maxPreviewNodes": empyrean_patch::codegen::MAX_PREVIEW_NODES,
+        "globalsBytes": std::mem::size_of::<empyrean_patch::abi::Globals>(),
+        "audioBytes": std::mem::size_of::<AudioUniform>() * MAX_AUDIO_SOURCES,
+        "effectBytes": std::mem::size_of::<empyrean_patch::abi::GpuEffect>(),
+        "dabBytes": std::mem::size_of::<empyrean_patch::abi::GpuDab>(),
+        "djEvents": DJ_EVENT_COUNT,
+    })
+    .to_string()
+}
+
+/// Effect kinds in GPU-id order, by their serde (wire) names.
+#[wasm_bindgen]
+pub fn effect_kinds() -> String {
+    serde_json::to_string(&EffectKind::ALL).expect("kinds serialize")
+}
+
+/// One running patch.
+#[wasm_bindgen]
+pub struct PatchSim {
+    sim: Sim,
+}
+
+#[wasm_bindgen]
+impl PatchSim {
+    /// Compile `doc` (patch JSON) for an array of `spokes` × `pixels` LEDs.
+    /// Throws with the validation/codegen message if it cannot run.
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        doc: &str,
+        spokes: u32,
+        pixels: u32,
+        inner_over_outer: f32,
+    ) -> Result<PatchSim, JsError> {
+        let geometry = Geometry {
+            spokes: spokes.max(1),
+            pixels: pixels.max(1),
+            inner_over_outer,
+        };
+        let sim = Sim::new(parse_doc(doc)?, geometry).map_err(|e| JsError::new(&e))?;
+        Ok(PatchSim { sim })
+    }
+
+    /// Apply an edited document. Returns `"params"` (knobs only, applied in
+    /// place), `"program"` (graph changed, same shader) or `"shader"` (rebuild
+    /// the GPU pipelines from `wgsl()` / `previewWgsl()`). Throws, leaving the
+    /// running patch untouched, if the new document cannot run.
+    pub fn update(&mut self, doc: &str) -> Result<String, JsError> {
+        let update = self
+            .sim
+            .update(parse_doc(doc)?)
+            .map_err(|e| JsError::new(&e))?;
+        Ok(match update {
+            Update::Params => "params",
+            Update::Program {
+                shader_changed: false,
+            } => "program",
+            Update::Program {
+                shader_changed: true,
+            } => "shader",
+        }
+        .into())
+    }
+
+    /// The main compute shader: one invocation per LED, writes packed RGB to
+    /// binding 4.
+    pub fn wgsl(&self) -> String {
+        self.sim.program().wgsl.clone()
+    }
+
+    /// The thumbnail shader: `previewNodes().length` cells of
+    /// `spokes × pixels`, same bindings. Empty when nothing is previewable.
+    #[wasm_bindgen(js_name = previewWgsl)]
+    pub fn preview_wgsl(&self) -> String {
+        self.sim.program().preview_wgsl.clone()
+    }
+
+    /// Node ids rendered by each preview cell, in cell order.
+    #[wasm_bindgen(js_name = previewNodes)]
+    pub fn preview_nodes(&self) -> Vec<String> {
+        let doc = self.sim.doc();
+        self.sim
+            .program()
+            .preview_nodes
+            .iter()
+            .map(|&i| doc.nodes[i].id.clone())
+            .collect()
+    }
+
+    /// `[[nodeId, port], ...]` for each value in `scalarValues()`.
+    #[wasm_bindgen(js_name = previewScalars)]
+    pub fn preview_scalars(&self) -> String {
+        let doc = self.sim.doc();
+        let list: Vec<(&str, &str)> = self
+            .sim
+            .program()
+            .preview_scalars
+            .iter()
+            .map(|(i, port)| (doc.nodes[*i].id.as_str(), *port))
+            .collect();
+        serde_json::to_string(&list).expect("scalars serialize")
+    }
+
+    /// Floats in the parameter slab (binding 8).
+    #[wasm_bindgen(js_name = slabLen)]
+    pub fn slab_len(&self) -> usize {
+        self.sim.program().slab_len
+    }
+
+    /// Advance one frame.
+    pub fn step(&mut self, dt: f32) {
+        self.sim.step(dt);
+    }
+
+    /// Binding 0 bytes.
+    pub fn globals(&self) -> Vec<u8> {
+        bytemuck::bytes_of(self.sim.globals()).to_vec()
+    }
+
+    /// Binding 1 bytes (every source).
+    pub fn audio(&self) -> Vec<u8> {
+        bytemuck::cast_slice(self.sim.audio_records()).to_vec()
+    }
+
+    /// Binding 3 bytes: the live effects only.
+    pub fn effects(&self) -> Vec<u8> {
+        bytemuck::cast_slice(self.sim.effect_records()).to_vec()
+    }
+
+    /// Binding 5 bytes: the live dabs only.
+    pub fn dabs(&self) -> Vec<u8> {
+        bytemuck::cast_slice(self.sim.dab_records()).to_vec()
+    }
+
+    /// Binding 8.
+    pub fn slab(&self) -> Vec<f32> {
+        self.sim.slab().to_vec()
+    }
+
+    /// Current values for `previewScalars()`.
+    #[wasm_bindgen(js_name = scalarValues)]
+    pub fn scalar_values(&self) -> Vec<f32> {
+        self.sim.scalar_values()
+    }
+
+    /// Live knob change; no recompile.
+    #[wasm_bindgen(js_name = setParam)]
+    pub fn set_param(&mut self, node: &str, param: &str, value: f32) {
+        self.sim.set_param(node, param, value);
+    }
+
+    /// Fire an effect from its JSON (`EffectCfg`: `{"kind":"burst",...}`,
+    /// missing fields take defaults), like a tap on the gate's preview.
+    #[wasm_bindgen(js_name = triggerEffect)]
+    pub fn trigger_effect(&mut self, cfg: &str) -> Result<(), JsError> {
+        let cfg: EffectCfg =
+            serde_json::from_str(cfg).map_err(|e| JsError::new(&format!("bad effect: {e}")))?;
+        self.sim.trigger_effect(cfg);
+        Ok(())
+    }
+
+    /// Draw a stroke: `pen` by name (`"glow"`, `"comet"`, ...) and `points`
+    /// as flat `[angle, radius, dir, ...]` triples in physical space.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw(
+        &mut self,
+        pen: &str,
+        points: &[f32],
+        hue: f32,
+        saturation: f32,
+        brightness: f32,
+        size: f32,
+        intensity: f32,
+    ) -> Result<(), JsError> {
+        let pen: PenKind = serde_json::from_value(json!(pen))
+            .map_err(|_| JsError::new(&format!("unknown pen \"{pen}\"")))?;
+        let points: Vec<DabPoint> = points
+            .chunks_exact(3)
+            .map(|p| DabPoint {
+                angle: p[0],
+                radius: p[1],
+                dir: p[2],
+            })
+            .collect();
+        self.sim
+            .draw(pen, &points, hue, saturation, brightness, size, intensity);
+        Ok(())
+    }
+
+    /// Audio features for one source, in `AudioUniform` field order:
+    /// level, bass, mid, treble, onset, beat_phase, bpm, bpm_conf, bass_att,
+    /// mid_att, treble_att.
+    #[wasm_bindgen(js_name = setAudio)]
+    pub fn set_audio(&mut self, source: usize, f: &[f32]) {
+        let Some(a) = self.sim.audio.get_mut(source) else {
+            return;
+        };
+        let at = |i: usize| f.get(i).copied().unwrap_or(0.0);
+        *a = AudioUniform {
+            level: at(0),
+            bass: at(1),
+            mid: at(2),
+            treble: at(3),
+            onset: at(4),
+            beat_phase: at(5),
+            bpm: at(6),
+            bpm_conf: at(7),
+            bass_att: at(8),
+            mid_att: at(9),
+            treble_att: at(10),
+            _pad2: 0.0,
+        };
+    }
+
+    /// Phone motion: yaw/pitch/roll in radians, shake 0..1.
+    #[wasm_bindgen(js_name = setMotion)]
+    pub fn set_motion(&mut self, yaw: f32, pitch: f32, roll: f32, shake: f32) {
+        self.sim.yaw = yaw;
+        self.sim.pitch = pitch;
+        self.sim.roll = roll;
+        self.sim.shake = shake;
+    }
+
+    /// PRO DJ LINK scalars in `DjLinkInputs` field order: active, energy,
+    /// deck, deck_side, event_deck, event_side, playing, on_air,
+    /// deck_1_on_air, deck_2_on_air, looping, mix, mix_activity, beat_in_bar,
+    /// phrase_active, phrase_kind, phrase_progress, phrase_fill.
+    #[wasm_bindgen(js_name = setDjLink)]
+    pub fn set_dj_link(&mut self, f: &[f32]) {
+        let at = |i: usize| f.get(i).copied().unwrap_or(0.0);
+        let seq = self.sim.dj_link.event_seq;
+        self.sim.dj_link = DjLinkInputs {
+            active: at(0),
+            energy: at(1),
+            deck: at(2),
+            deck_side: at(3),
+            event_deck: at(4),
+            event_side: at(5),
+            playing: at(6),
+            on_air: at(7),
+            deck_1_on_air: at(8),
+            deck_2_on_air: at(9),
+            looping: at(10),
+            mix: at(11),
+            mix_activity: at(12),
+            beat_in_bar: at(13),
+            phrase_active: at(14),
+            phrase_kind: at(15),
+            phrase_progress: at(16),
+            phrase_fill: at(17),
+            event_seq: seq,
+        };
+    }
+
+    /// Fire PRO DJ LINK event output `index` (play, cue, cue_release,
+    /// on_air_event, off_air_event, loop_start, loop_wrap, loop_end, jump,
+    /// phrase_change, fill_in).
+    #[wasm_bindgen(js_name = fireDjEvent)]
+    pub fn fire_dj_event(&mut self, index: usize) {
+        self.sim.fire_dj_event(index);
+    }
+
+    /// Master brightness 0..1 and speed multiplier.
+    #[wasm_bindgen(js_name = setMaster)]
+    pub fn set_master(&mut self, brightness: f32, speed: f32) {
+        self.sim.master = brightness;
+        self.sim.master_speed = speed;
+    }
+
+    /// Master hue pull (target in turns, amount 0..1, looseness 0..1).
+    #[wasm_bindgen(js_name = setHuePull)]
+    pub fn set_hue_pull(&mut self, target: f32, amount: f32, loose: f32) {
+        self.sim.hue_target = target;
+        self.sim.hue_amount = amount;
+        self.sim.hue_loose = loose;
+    }
+
+    /// Size of the RGBA8 frame the host keeps in the VIDEO buffer; 0 × 0
+    /// for none.
+    #[wasm_bindgen(js_name = setVideo)]
+    pub fn set_video(&mut self, width: u32, height: u32) {
+        self.sim.video_width = width;
+        self.sim.video_height = height;
+    }
+}
