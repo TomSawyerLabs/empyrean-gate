@@ -79,6 +79,7 @@ pub fn limits() -> String {
         "scopeFloats": SCOPE_FLOATS,
         "maxSlabFloats": empyrean_patch::codegen::MAX_SLAB_FLOATS,
         "maxPreviewNodes": empyrean_patch::codegen::MAX_PREVIEW_NODES,
+        "miniPixels": empyrean_patch::codegen::MINI_PIXELS,
         "globalsBytes": std::mem::size_of::<empyrean_patch::abi::Globals>(),
         "audioBytes": std::mem::size_of::<AudioUniform>() * MAX_AUDIO_SOURCES,
         "effectBytes": std::mem::size_of::<empyrean_patch::abi::GpuEffect>(),
@@ -196,6 +197,13 @@ impl PatchSim {
         bytemuck::bytes_of(self.sim.globals()).to_vec()
     }
 
+    /// Binding 0 bytes for the mini-preview pass (`previewWgsl()`): spokes of
+    /// `limits().miniPixels` samples.
+    #[wasm_bindgen(js_name = previewGlobals)]
+    pub fn preview_globals(&self) -> Vec<u8> {
+        bytemuck::bytes_of(&self.sim.preview_globals()).to_vec()
+    }
+
     /// Binding 1 bytes (every source).
     pub fn audio(&self) -> Vec<u8> {
         bytemuck::cast_slice(self.sim.audio_records()).to_vec()
@@ -289,6 +297,24 @@ impl PatchSim {
             treble_att: at(10),
             _pad2: 0.0,
         };
+    }
+
+    /// Feed mono microphone samples into audio source `source`; the gate's own
+    /// feature extraction and beat tracking run on them.
+    #[wasm_bindgen(js_name = feedAudio)]
+    pub fn feed_audio(&mut self, source: usize, sample_rate: f32, samples: &[f32]) {
+        self.sim.feed_audio(source, sample_rate, samples);
+    }
+
+    /// Silence a sample-fed audio source.
+    #[wasm_bindgen(js_name = stopAudio)]
+    pub fn stop_audio(&mut self, source: usize) {
+        self.sim.stop_audio(source);
+    }
+
+    /// Binding 6: waveform + spectrum for every source.
+    pub fn scope(&self) -> Vec<f32> {
+        self.sim.scope().to_vec()
     }
 
     /// Phone motion: yaw/pitch/roll in radians, shake 0..1.

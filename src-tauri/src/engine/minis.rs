@@ -20,10 +20,8 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-/// Radial samples per spoke in a mini cell. The polar math is fully normalized
-/// (`r01 = i / (pixels - 1)`), so a shorter spoke renders the same pattern —
-/// 16 samples is plenty for a thumbnail under ~120 px.
-pub const MINI_PIXELS: u32 = 16;
+/// Radial samples per spoke in a mini cell (shared with the browser playground).
+pub use crate::patch::codegen::MINI_PIXELS;
 
 /// Publish cadence cap. Layer sweeps naturally refresh slower than this on
 /// real stacks; single-layer stacks and patch renders are held to it.

@@ -338,8 +338,8 @@ impl BeatTracker {
                 acc += (env[i] - mean) * (env[i - lag] - mean);
             }
             // Slight preference for faster tempos (shorter lags) to avoid half-time locks.
-            let score = (acc / (n - lag) as f32 * (1.0 + 0.1 * (lag_min as f32 / lag as f32)))
-                .max(0.0);
+            let score =
+                (acc / (n - lag) as f32 * (1.0 + 0.1 * (lag_min as f32 / lag as f32))).max(0.0);
             scores[lag] = score;
             score_sum += score;
             if score > best {
@@ -364,8 +364,8 @@ impl BeatTracker {
             .map(|(_, s)| *s)
             .fold(0.0f32, f32::max);
         let dominance = (1.0 - second / best).clamp(0.0, 1.0);
-        let clarity = (best / (score_sum / (lag_max - lag_min + 1) as f32).max(1e-6) / 6.0)
-            .clamp(0.0, 1.0);
+        let clarity =
+            (best / (score_sum / (lag_max - lag_min + 1) as f32).max(1e-6) / 6.0).clamp(0.0, 1.0);
 
         // Hysteresis: if the current tempo's lag still scores close to the best,
         // keep it — this kills octave flip-flopping and jitter between re-estimates.
@@ -401,7 +401,11 @@ impl BeatTracker {
         self.recent_bpms.push_back(new_bpm);
         let stability = if self.recent_bpms.len() >= 4 {
             let m = self.recent_bpms.iter().sum::<f32>() / self.recent_bpms.len() as f32;
-            let sd = (self.recent_bpms.iter().map(|b| (b - m) * (b - m)).sum::<f32>()
+            let sd = (self
+                .recent_bpms
+                .iter()
+                .map(|b| (b - m) * (b - m))
+                .sum::<f32>()
                 / self.recent_bpms.len() as f32)
                 .sqrt();
             (1.0 - (sd / m.max(1.0)) * 8.0).clamp(0.0, 1.0)

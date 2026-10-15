@@ -10,6 +10,7 @@
 //! Design doc: `plans/node-graph.md`.
 
 pub mod abi;
+pub mod audio;
 pub mod codegen;
 pub mod effects;
 pub mod eval;

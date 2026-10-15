@@ -26,6 +26,10 @@ pub const MAX_SLAB_FLOATS: usize = 2048;
 /// invocations) and the batch bandwidth. Patches past the cap preview their
 /// first N field nodes in graph order.
 pub const MAX_PREVIEW_NODES: usize = 32;
+/// Radial samples per spoke in a mini-preview cell. The polar math is fully
+/// normalized (`r01 = i / (pixels - 1)`), so a shorter spoke renders the same
+/// pattern — 16 samples is plenty for a thumbnail under ~120 px.
+pub const MINI_PIXELS: u32 = 16;
 /// Scalar-meter cap for the same reason (each is only 8 bytes per batch, but
 /// the meta list and the UI both want a bound).
 pub const MAX_PREVIEW_SCALARS: usize = 64;

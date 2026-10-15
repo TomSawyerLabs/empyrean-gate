@@ -14,7 +14,9 @@
 use crate::PatchDoc;
 use crate::abi::{
     AudioUniform, Globals, GpuDab, GpuEffect, MAX_AUDIO_SOURCES, MAX_DABS, MAX_EFFECTS,
+    SCOPE_FLOATS,
 };
+use crate::audio::AudioChain;
 use crate::codegen::{self, Program};
 use crate::effects::{Dab, DabPoint, EffectCfg, EffectKind, PenKind, Spin};
 use crate::eval::{DJ_EVENT_COUNT, DjLinkInputs, EvalInputs, Runtime};
@@ -69,7 +71,12 @@ pub struct Sim {
     effect_seq: u64,
 
     /// Per-source audio features (source 0 is what the Audio node defaults to).
+    /// Set directly, or let [`Sim::feed_audio`] fill a source from samples.
     pub audio: [AudioUniform; MAX_AUDIO_SOURCES],
+    /// Sample-fed sources: their analysis chain and sample rate.
+    chains: [Option<(AudioChain, f32)>; MAX_AUDIO_SOURCES],
+    /// Binding 6: per-source waveform ring + spectrum.
+    scope: Vec<f32>,
     /// Phone motion, radians (yaw/pitch/roll) and a 0..1 decaying shake.
     pub yaw: f32,
     pub pitch: f32,
@@ -112,6 +119,8 @@ impl Sim {
             time: 0.0,
             effect_seq: 0,
             audio: [AudioUniform::default(); MAX_AUDIO_SOURCES],
+            chains: Default::default(),
+            scope: vec![0.0; SCOPE_FLOATS * MAX_AUDIO_SOURCES],
             yaw: 0.0,
             pitch: 0.0,
             roll: 0.0,
@@ -246,6 +255,32 @@ impl Sim {
         }
     }
 
+    /// Feed mono samples into audio source `source`, analyzed exactly as the
+    /// gate analyzes a local audio device. Fills that source's features and
+    /// its slice of the SCOPE buffer.
+    pub fn feed_audio(&mut self, source: usize, sample_rate: f32, mono: &[f32]) {
+        let Some(slot) = self.chains.get_mut(source) else {
+            return;
+        };
+        if slot.as_ref().is_none_or(|(_, rate)| *rate != sample_rate) {
+            *slot = Some((AudioChain::new(sample_rate), sample_rate));
+        }
+        let (chain, _) = slot.as_mut().expect("chain just ensured");
+        chain.feed(mono);
+        self.audio[source] = chain.features();
+        self.scope[source * SCOPE_FLOATS..(source + 1) * SCOPE_FLOATS]
+            .copy_from_slice(&chain.scope());
+    }
+
+    /// Stop a sample-fed source: its features and scope go silent.
+    pub fn stop_audio(&mut self, source: usize) {
+        if let Some(slot) = self.chains.get_mut(source) {
+            *slot = None;
+            self.audio[source] = AudioUniform::default();
+            self.scope[source * SCOPE_FLOATS..(source + 1) * SCOPE_FLOATS].fill(0.0);
+        }
+    }
+
     /// Fire a PRO DJ LINK event output (`eval::DJ_EVENT_*`).
     pub fn fire_dj_event(&mut self, event: usize) {
         if event < DJ_EVENT_COUNT {
@@ -334,9 +369,21 @@ impl Sim {
     pub fn globals(&self) -> &Globals {
         &self.globals
     }
+    /// Binding 0 for the mini-preview pass: the same globals on a spoke of
+    /// [`codegen::MINI_PIXELS`] samples, as the engine renders thumbnails.
+    pub fn preview_globals(&self) -> Globals {
+        Globals {
+            pixels: codegen::MINI_PIXELS.min(self.geometry.pixels),
+            ..self.globals
+        }
+    }
     /// Binding 1 (always all sources).
     pub fn audio_records(&self) -> &[AudioUniform; MAX_AUDIO_SOURCES] {
         &self.audio
+    }
+    /// Binding 6.
+    pub fn scope(&self) -> &[f32] {
+        &self.scope
     }
     /// Binding 3; `globals().effect_count` records are live.
     pub fn effect_records(&self) -> &[GpuEffect] {

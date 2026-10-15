@@ -5,7 +5,9 @@
 //! cpal streams are !Send on some platforms, so a dedicated thread owns all local
 //! streams; it tears everything down and rebuilds when the config epoch changes.
 
-pub mod analysis;
+// Feature extraction and beat tracking are pure DSP, shared with the browser
+// playground through the patch crate.
+pub use empyrean_patch::audio::analysis;
 
 use crate::config::AudioSourceKind;
 use crate::layers::MAX_AUDIO_SOURCES;

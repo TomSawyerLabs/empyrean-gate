@@ -1402,6 +1402,7 @@ name = "empyrean-patch"
 version = "0.14.0"
 dependencies = [
  "bytemuck",
+ "rustfft",
  "serde",
  "serde_json",
 ]
