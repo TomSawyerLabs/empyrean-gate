@@ -76,6 +76,8 @@ export class PatchRuntime implements MiniSource {
   private miniListeners = new Set<() => void>();
   private lastPreview = 0;
   private previewNodes: string[] = [];
+  /** The picture currently uploaded to each media cell (by data URL). */
+  private uploadedImages = new Map<number, string>();
   private previewScalars: [string, string][] = [];
 
   private constructor(core: PatchCore, gpu: GateGpu) {
@@ -135,6 +137,8 @@ export class PatchRuntime implements MiniSource {
       } else {
         const g = this.geometry;
         this.sim = this.core.createSim(doc, g.spokes, g.pixels, g.innerOverOuter);
+        // A fresh sim has no cells marked loaded: upload its images anew.
+        this.uploadedImages.clear();
         shader = true;
       }
     } catch (e) {
@@ -155,10 +159,38 @@ export class PatchRuntime implements MiniSource {
       if (gen !== this.generation) return;
       this.pending = false;
     }
+    this.syncImages(sim);
     this.previewNodes = sim.previewNodes();
     this.previewScalars = JSON.parse(sim.previewScalars()) as [string, string][];
     if (shader) this.clearMinis();
     this.setStatus({ active: true, touch: sim.usesTouch(), error: null });
+  }
+
+  /** Upload each Still image node's picture to its media cell (only what
+   * changed) and tell the sim which cells hold one. */
+  private syncImages(sim: PatchSim) {
+    const wanted = JSON.parse(sim.images()) as { slot: number; media: string | null }[];
+    const size = this.core.limits.imageSize;
+    for (let slot = 1; slot <= this.core.limits.maxImages; slot++) {
+      const media = wanted.find((w) => w.slot === slot)?.media ?? null;
+      if ((this.uploadedImages.get(slot) ?? null) === media) continue;
+      if (!media) {
+        this.uploadedImages.delete(slot);
+        sim.setImageLoaded(slot, false);
+        continue;
+      }
+      this.uploadedImages.set(slot, media);
+      void decodeImage(media, size)
+        .then((rgba) => {
+          // Still the picture this cell should hold?
+          if (this.uploadedImages.get(slot) !== media || this.sim !== sim) return;
+          this.gpu.writeImage(slot, rgba);
+          sim.setImageLoaded(slot, true);
+        })
+        .catch(() => {
+          if (this.uploadedImages.get(slot) === media) sim.setImageLoaded(slot, false);
+        });
+    }
   }
 
   /** Show the array in `canvas` (sized by CSS; the backing store follows). */
@@ -395,6 +427,20 @@ export class PatchRuntime implements MiniSource {
     this.gpu.destroy();
     this.gpu.device.destroy();
   }
+}
+
+/** A data URL picture as `size`² RGBA (center-cropped square, like the gate). */
+async function decodeImage(dataUrl: string, size: number): Promise<Uint8Array> {
+  const blob = await (await fetch(dataUrl)).blob();
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  const side = Math.min(bitmap.width, bitmap.height);
+  ctx.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, size, size);
+  bitmap.close();
+  const data = ctx.getImageData(0, 0, size, size).data;
+  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 }
 
 function errorText(e: unknown): string {

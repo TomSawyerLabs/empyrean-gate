@@ -48,6 +48,7 @@ export function parsePatchFile(text: string): PatchDoc {
       name: typeof n.name === "string" ? n.name : "",
       params: n.params && typeof n.params === "object" ? { ...n.params } : {},
       pos: Array.isArray(n.pos) && n.pos.length === 2 ? [Number(n.pos[0]), Number(n.pos[1])] : [0, 0],
+      ...(typeof n.media === "string" ? { media: n.media } : {}),
     })),
     edges: (r.edges ?? []).map((e) => ({
       from: { node: String(e.from?.node ?? ""), port: String(e.from?.port ?? "") },
@@ -61,6 +62,43 @@ export function parsePatchFile(text: string): PatchDoc {
         }))
       : [],
   };
+}
+
+/** Side of the square picture a Still image node stores (abi::IMAGE_SIZE). */
+export const IMAGE_SIZE = 256;
+/** Longest picture data URL the gate accepts (crate::MAX_MEDIA_BYTES). */
+export const MAX_MEDIA_BYTES = 600_000;
+
+/** Turn an image file into what a Still image node stores: center-cropped to
+ * a square, scaled to IMAGE_SIZE², as a WebP data URL (PNG or JPEG where the
+ * browser can't encode WebP or the result is too big). */
+export async function imageFileToMedia(file: Blob): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = IMAGE_SIZE;
+  const ctx = canvas.getContext("2d")!;
+  const side = Math.min(bitmap.width, bitmap.height);
+  ctx.drawImage(
+    bitmap,
+    (bitmap.width - side) / 2,
+    (bitmap.height - side) / 2,
+    side,
+    side,
+    0,
+    0,
+    IMAGE_SIZE,
+    IMAGE_SIZE,
+  );
+  bitmap.close();
+  for (const [type, quality] of [
+    ["image/webp", 0.85],
+    ["image/png", undefined],
+    ["image/jpeg", 0.85],
+  ] as const) {
+    const url = canvas.toDataURL(type, quality);
+    if (url.startsWith(`data:${type};`) && url.length <= MAX_MEDIA_BYTES) return url;
+  }
+  throw new Error("That image is too large to store in a patch.");
 }
 
 type SaveFilePicker = (options: {

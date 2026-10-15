@@ -4,7 +4,7 @@
 
 /** The patch document format this package writes (crate::PATCH_FORMAT).
  * Older documents are upgraded with the patch core's `migrate`. */
-export const PATCH_FORMAT = 2;
+export const PATCH_FORMAT = 3;
 
 export type PatchShape =
   | "scalar"
@@ -48,6 +48,8 @@ export interface PatchNode {
   name: string;
   params: Record<string, number>;
   pos: [number, number];
+  /** A Still image node's own picture: a 256×256 `data:image/...` URL. */
+  media?: string;
 }
 
 export interface PatchPortRef {

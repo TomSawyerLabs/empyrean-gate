@@ -238,6 +238,14 @@ const server = Bun.serve({
           params: [],
         },
         {
+          id: "image_in",
+          label: "Still image in",
+          category: "input",
+          inputs: [],
+          outputs: [{ name: "tex", shape: "texture" }],
+          params: [],
+        },
+        {
           id: "output",
           label: "Output",
           category: "sink",

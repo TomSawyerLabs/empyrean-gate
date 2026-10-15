@@ -19,6 +19,7 @@ export {
 export * from "../types";
 export {
   exportPatch,
+  imageFileToMedia,
   openPatchFromDisk,
   parsePatchFile,
   patchFileName,

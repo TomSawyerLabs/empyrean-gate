@@ -27,6 +27,10 @@ export interface Limits {
   djEvents: number;
   maxTouches: number;
   touchBytes: number;
+  maxImages: number;
+  imageSize: number;
+  mediaBufferBytes: number;
+  maxMediaBytes: number;
 }
 
 export interface PatchCore {

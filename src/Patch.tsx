@@ -79,6 +79,14 @@ export default function Patch() {
       canEdit={canEdit}
       readOnlyHint="read-only — edit on the Gate machine"
       minis={getMiniHub(client)}
+      nodeExtras={(node) =>
+        node.kind === "video_in" ? (
+          <p className="hint">
+            Shows the gate's live video: whatever the Media tab is playing. For a fixed
+            picture, use a Still image node, which carries its own image.
+          </p>
+        ) : null
+      }
       toolbarExtra={({ doc, open }) => (
         <>
           {canEdit && (
