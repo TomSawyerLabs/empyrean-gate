@@ -55,6 +55,44 @@ jobs:
           path: test-results
           if-no-files-found: ignore
 
+  patch-web:
+    name: Patch web package (wasm build + typecheck)
+    # The browser build of the patch core and the shared editor/runtime
+    # package (packages/patch-web), which empyreangate.org consumes from the
+    # web-dist branch. Catches a core change that breaks the wasm build or the
+    # TypeScript that hosts it before it reaches master.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates
+          cache-on-failure: true
+
+      # Must match the wasm-bindgen version pinned in
+      # crates/empyrean-patch-wasm/Cargo.toml.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.129
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build the wasm patch core
+        working-directory: packages/patch-web
+        run: bun run build:wasm
+
+      - name: Typecheck the package
+        working-directory: packages/patch-web
+        run: bun run typecheck
+
   rust:
     name: Rust unit tests (${{ matrix.os }})
     # Windows as well as Linux: the show machine is Windows, and the difference

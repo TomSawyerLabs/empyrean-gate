@@ -1,0 +1,77 @@
+name: Web dist
+
+# Publishes packages/patch-web, with its wasm built, to the `web-dist` branch:
+# what empyreangate.org (and anything else) installs as
+#   "@empyrean-gate/patch-web": "github:TomSawyerLabs/empyrean-gate#web-dist"
+# One commit per master commit that changes the package or the crates it
+# builds from. Append-only: the branch is never force-pushed, so every pinned
+# commit in a consumer's lockfile stays fetchable.
+on:
+  push:
+    branches: [master]
+    paths:
+      - crates/**
+      - packages/patch-web/**
+      - .github/workflows/web-dist.yml
+  workflow_dispatch:
+
+concurrency:
+  group: web-dist
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.129
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+
+      - name: Build and typecheck
+        working-directory: packages/patch-web
+        run: |
+          bun run build:wasm
+          bun run typecheck
+
+      - name: Check out web-dist (or start it)
+        run: |
+          if git ls-remote --exit-code --heads origin web-dist >/dev/null; then
+            git fetch --depth=1 origin web-dist
+            git worktree add dist-branch FETCH_HEAD
+            git -C dist-branch switch -c web-dist
+          else
+            git worktree add --detach dist-branch
+            git -C dist-branch switch --orphan web-dist
+          fi
+
+      - name: Assemble the package
+        working-directory: packages/patch-web
+        run: bun scripts/assemble-dist.ts ../../dist-branch
+
+      - name: Commit and push
+        working-directory: dist-branch
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "web-dist already matches ${GITHUB_SHA}"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]"               -c user.email="41898282+github-actions[bot]@users.noreply.github.com"               commit -m "web-dist from ${GITHUB_SHA}"
+          git push origin web-dist
