@@ -368,3 +368,95 @@
   height: 1px;
   opacity: 0;
 }
+
+/* --- Compact layout --------------------------------------------------------
+   The editor's own box narrower than 640px (a phone, or a narrow host column):
+   the palette and the node panel stop being columns and become sheets over
+   the canvas, opened on purpose (＋ Add node; a double-tap or the pill on a
+   selected node) and closed with Done or Escape. */
+
+.patch-main {
+  position: relative;
+}
+
+.patch-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.patch-panel-head h3 {
+  margin: 0 0 10px;
+}
+
+.patch-tab.compact .patch-toolbar .patch-name {
+  min-width: 0;
+  flex: 1 1 8rem;
+}
+
+.patch-sheet {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  z-index: 20;
+  border: none;
+  padding: 0 12px 16px;
+  background: var(--pe-bg2, #141024);
+  outline: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.patch-sheet .patch-panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 -12px 10px;
+  padding: 10px 12px;
+  background: inherit;
+  border-bottom: 1px solid #2a2445;
+}
+
+.patch-sheet .patch-panel-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.patch-sheet-done {
+  font-weight: 600;
+}
+
+.patch-sheet .palette-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px;
+}
+
+.patch-sheet .palette-item {
+  margin: 0;
+  padding: 10px;
+  font-size: 14px;
+}
+
+.patch-sheet .patch-field,
+.patch-sheet .patch-param {
+  font-size: 13px;
+}
+
+.patch-node-pill {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 5;
+  max-width: calc(100% - 24px);
+  padding: 8px 16px;
+  border-radius: 999px;
+  border-color: var(--pe-accent, #7c5cff);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}

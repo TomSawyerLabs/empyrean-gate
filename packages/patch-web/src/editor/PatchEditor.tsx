@@ -354,6 +354,59 @@ function ImagePicker({
   );
 }
 
+/** Below this width the editor is "compact": the palette and the node panel
+ * become full-size sheets over the canvas instead of columns beside it. */
+const COMPACT_MAX_WIDTH = 640;
+
+/** Whether the editor's own box is narrower than COMPACT_MAX_WIDTH. Measured,
+ * not a media query: the gate app and the playground give the editor very
+ * different shares of the window. */
+function useCompact(ref: React.RefObject<HTMLElement | null>): boolean {
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => setCompact(el.clientWidth < COMPACT_MAX_WIDTH);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return compact;
+}
+
+/** Heading of a side panel; as a sheet it also carries the Done button. */
+function PanelHead({ title, onClose }: { title: ReactNode; onClose?: () => void }) {
+  return (
+    <div className="patch-panel-head">
+      <h3>{title}</h3>
+      {onClose && (
+        <button type="button" className="patch-sheet-done" onClick={onClose}>
+          Done
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** A sheet closes on Escape and takes focus when it opens, so a keyboard
+ * user lands inside it. */
+function useSheet(onClose: (() => void) | undefined) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (onClose) ref.current?.focus({ preventScroll: true });
+  }, [onClose]);
+  const onKeyDown = onClose
+    ? (e: React.KeyboardEvent) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onClose();
+        }
+      }
+    : undefined;
+  return { ref, onKeyDown, tabIndex: onClose ? -1 : undefined };
+}
+
 function ParamPanel({
   doc,
   nodeId,
@@ -361,6 +414,7 @@ function ParamPanel({
   canEdit,
   onChange,
   extras,
+  onClose,
 }: {
   doc: PatchDoc;
   nodeId: string;
@@ -368,7 +422,10 @@ function ParamPanel({
   canEdit: boolean;
   onChange: (mutate: (d: PatchDoc) => void) => void;
   extras?: (node: PatchNode) => ReactNode;
+  /** Set when the panel is a sheet (compact layout): shows Done. */
+  onClose?: () => void;
 }) {
+  const sheet = useSheet(onClose);
   const node = doc.nodes.find((n) => n.id === nodeId);
   const def = node && registry.get(node.kind);
   if (!node || !def) return null;
@@ -379,8 +436,14 @@ function ParamPanel({
     doc.exposed.some((x) => x.node === node.id && x.param === param);
 
   return (
-    <aside className="patch-side">
-      <h3>{def.label}</h3>
+    <aside
+      className={`patch-side ${onClose ? "patch-sheet" : ""}`}
+      aria-label={`${def.label} settings`}
+      ref={sheet.ref}
+      tabIndex={sheet.tabIndex}
+      onKeyDown={sheet.onKeyDown}
+    >
+      <PanelHead title={def.label} onClose={onClose} />
       <label className="patch-field">
         <span>Name</span>
         <input
@@ -488,6 +551,51 @@ function ParamPanel({
   );
 }
 
+// --- palette ---------------------------------------------------------------
+
+type PaletteGroup = { category: string; label: string; types: PatchNodeType[] };
+
+function Palette({
+  grouped,
+  onPick,
+  onClose,
+}: {
+  grouped: PaletteGroup[];
+  onPick: (kind: string) => void;
+  /** Set when the palette is a sheet (compact layout): shows Done. */
+  onClose?: () => void;
+}) {
+  const sheet = useSheet(onClose);
+  return (
+    <aside
+      className={`patch-palette ${onClose ? "patch-sheet" : ""}`}
+      aria-label="Add a node"
+      ref={sheet.ref}
+      tabIndex={sheet.tabIndex}
+      onKeyDown={sheet.onKeyDown}
+    >
+      {onClose && <PanelHead title="Add a node" onClose={onClose} />}
+      {grouped.map((g) => (
+        <div key={g.category} className="palette-group">
+          <h4>{g.label}</h4>
+          <div className="palette-items">
+            {g.types.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={`palette-item cat-${t.category}`}
+                onClick={() => onPick(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </aside>
+  );
+}
+
 // --- editor ---------------------------------------------------------------
 
 function Editor({
@@ -516,6 +624,13 @@ function Editor({
   const [edges, setEdges] = useState<FlowEdge[]>([]);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Compact layout (a phone, or a narrow host column): the palette and the
+  // node panel are sheets, opened on purpose and closed with Done.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const compact = useCompact(rootRef);
+  const [sheet, setSheet] = useState<"palette" | "node" | null>(null);
+  const lastTap = useRef<{ id: string; at: number } | null>(null);
   const docRef = useRef(doc);
   docRef.current = doc;
   const registryRef = useRef(registry);
@@ -528,6 +643,42 @@ function Editor({
   useEffect(() => {
     onDocChangeRef.current?.(doc);
   }, [doc]);
+
+  // A sheet has nothing to show once the layout widens, the node it was for
+  // is gone (deleted, or another patch opened), or nothing is selected.
+  useEffect(() => {
+    if (!compact) setSheet(null);
+  }, [compact]);
+  useEffect(() => {
+    if (sheet === "node" && !(selectedNode && doc?.nodes.some((n) => n.id === selectedNode))) {
+      setSheet(null);
+    }
+  }, [sheet, selectedNode, doc]);
+
+  /** Compact layout: a second tap on the selected node (or a double-click)
+   * opens its settings; a single tap only selects, as on a desktop. */
+  const onNodeTap = useCallback(
+    (_: unknown, node: PatchFlowNode) => {
+      if (!compact) return;
+      const now = performance.now();
+      const last = lastTap.current;
+      lastTap.current = { id: node.id, at: now };
+      if (last && last.id === node.id && now - last.at < 400) {
+        lastTap.current = null;
+        setSelectedNode(node.id);
+        setSheet("node");
+      }
+    },
+    [compact],
+  );
+  const onNodeOpen = useCallback(
+    (_: unknown, node: PatchFlowNode) => {
+      if (!compact) return;
+      setSelectedNode(node.id);
+      setSheet("node");
+    },
+    [compact],
+  );
 
   // The patch list, once the store is reachable.
   useEffect(() => {
@@ -716,10 +867,14 @@ function Editor({
 
   const addNode = useCallback(
     (kind: string) => {
-      const center = flow.screenToFlowPosition({
-        x: window.innerWidth / 2,
-        y: window.innerHeight / 2,
-      });
+      // In the middle of the canvas as shown, not of the window: a host may
+      // give the editor one corner of the page.
+      const rect = canvasRef.current?.getBoundingClientRect();
+      const center = flow.screenToFlowPosition(
+        rect
+          ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+          : { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+      );
       mutateDoc((d) => {
         let i = d.nodes.length + 1;
         while (d.nodes.some((n) => n.id === `n${i}`)) i++;
@@ -765,9 +920,19 @@ function Editor({
     }));
   }, [registry]);
 
+  const selectedDef =
+    selectedNode && doc && registry
+      ? registry.get(doc.nodes.find((n) => n.id === selectedNode)?.kind ?? "")
+      : undefined;
+
   return (
-    <div className="patch-tab">
+    <div className={`patch-tab ${compact ? "compact" : ""}`} ref={rootRef}>
       <div className="patch-toolbar">
+        {compact && canEdit && doc && registry && (
+          <button type="button" className="patch-add-node" onClick={() => setSheet("palette")}>
+            ＋ Add node
+          </button>
+        )}
         <select
           value={doc?.id ?? ""}
           onChange={(e) => {
@@ -859,22 +1024,18 @@ function Editor({
 
       <NodeContext.Provider value={{ activeId, minis }}>
       <div className="patch-main">
-        {canEdit && doc && registry && (
-          <aside className="patch-palette">
-            {grouped.map((g) => (
-              <div key={g.category} className="palette-group">
-                <h4>{g.label}</h4>
-                {g.types.map((t) => (
-                  <button key={t.id} className={`palette-item cat-${t.category}`} onClick={() => addNode(t.id)}>
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            ))}
-          </aside>
+        {canEdit && doc && registry && (!compact || sheet === "palette") && (
+          <Palette
+            grouped={grouped}
+            onPick={(kind) => {
+              addNode(kind);
+              if (compact) setSheet(null);
+            }}
+            onClose={compact ? () => setSheet(null) : undefined}
+          />
         )}
 
-        <div className="patch-canvas">
+        <div className="patch-canvas" ref={canvasRef}>
           {doc && registry ? (
             <ReactFlow
               nodes={nodes}
@@ -883,6 +1044,8 @@ function Editor({
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onNodeDragStop={onNodeDragStop}
+              onNodeClick={onNodeTap}
+              onNodeDoubleClick={onNodeOpen}
               onConnect={onConnect}
               onNodesDelete={onNodesDelete}
               onEdgesDelete={onEdgesDelete}
@@ -893,6 +1056,7 @@ function Editor({
               deleteKeyCode={canEdit ? ["Backspace", "Delete"] : []}
               zoomOnScroll
               zoomOnPinch
+              zoomOnDoubleClick={!compact}
               fitView
               proOptions={{ hideAttribution: true }}
               colorMode="dark"
@@ -911,9 +1075,19 @@ function Editor({
                     : "No patches yet. Create one on the Gate machine."}
             </div>
           )}
+          {compact && sheet === null && selectedDef && (
+            <button
+              type="button"
+              className="patch-node-pill"
+              onClick={() => setSheet("node")}
+              title="Or double-tap the node"
+            >
+              {selectedDef.label} settings…
+            </button>
+          )}
         </div>
 
-        {doc && registry && selectedNode && (
+        {doc && registry && selectedNode && (!compact || sheet === "node") && (
           <ParamPanel
             doc={doc}
             nodeId={selectedNode}
@@ -921,6 +1095,7 @@ function Editor({
             canEdit={canEdit}
             onChange={mutateDoc}
             extras={nodeExtras}
+            onClose={compact ? () => setSheet(null) : undefined}
           />
         )}
       </div>
