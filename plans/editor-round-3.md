@@ -1,6 +1,6 @@
 # Patch editor, round 3: the missing nodes (2026-10-16)
 
-Status: **in progress** (gate worktree `C:\Users\camer\.t3\worktrees\Empyrean\playground`,
+Status: **done; on gate `master` and the site's `dev` Preview** (gate worktree `C:\Users\camer\.t3\worktrees\Empyrean\playground`,
 branch `patch-crate`, kept fast-forwarded to gate `master`). Site follows via
 CI web-dist and the site's `dev` branch (never the site's `master`).
 
@@ -64,15 +64,23 @@ Answered in chat; see "Open questions".
    through hues, its wrap triggers a glided Random (scale) and a Toggle →
    Smooth (spiral fade); Envelope → Map range drives brightness. Mock backend
    unchanged (its registry is a two-node stub).
-3. **Now.** README (gate) paragraph done; push gate `master`; wait for CI
-   web-dist; bump the site's `bun.lock`; push site `dev`; check the Preview.
+3. **Done.** README paragraph; gate `master` `ff86e0f` → CI web-dist
+   `2c3f88b` → site `dev` `60ba775`; verified on dev.empyreangate.org.
 
 ## Progress log
 
 - [x] Steps 1–2 (2026-10-16). Tests: crate 81 (ten new eval cases incl.
       determinism and glide of Random, hysteresis of Threshold, Delay echoes,
       Merge gating), app 336.
-- [ ] Step 3: gate `master` → web-dist → site `dev` → Preview check.
+- [x] Step 3 (2026-10-16). Site: typecheck, unit 23, playground spec 12
+      (3 skipped without WebGPU). On the Preview in Chrome: "Step and
+      Sample" loads and renders, the hue steps and the spiral toggles, and
+      the palette's Scalar ops list all ten new nodes. (The Preview's HTML
+      asset hashes did not change for this deploy, so polling them is not a
+      deploy signal; checking the page's content is.)
+- [x] Gate CI "Checks" on `ff86e0f` failed only in the other agent's new
+      tests/patch-compact.spec.ts (as on their own `64ccf3a`); they fixed it
+      in `159dc55` (Checks green there).
 
 ## Open questions for the user
 
