@@ -177,7 +177,7 @@ impl PatchSim {
     /// Node ids rendered by each preview cell, in cell order.
     #[wasm_bindgen(js_name = previewNodes)]
     pub fn preview_nodes(&self) -> Vec<String> {
-        let doc = self.sim.doc();
+        let doc = self.sim.flat_doc();
         self.sim
             .program()
             .preview_nodes
@@ -189,7 +189,7 @@ impl PatchSim {
     /// `[[nodeId, port], ...]` for each value in `scalarValues()`.
     #[wasm_bindgen(js_name = previewScalars)]
     pub fn preview_scalars(&self) -> String {
-        let doc = self.sim.doc();
+        let doc = self.sim.flat_doc();
         let list: Vec<(&str, &str)> = self
             .sim
             .program()

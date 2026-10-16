@@ -155,8 +155,15 @@ impl Sim {
         self.geometry
     }
 
+    /// The document as given (sub-patches intact): what the editor edits.
     pub fn doc(&self) -> &PatchDoc {
         &self.doc
+    }
+
+    /// The document the program was compiled from, sub-patches inlined:
+    /// every node index in `program()` refers to this one.
+    pub fn flat_doc(&self) -> &PatchDoc {
+        &self.prog.doc
     }
 
     /// The compiled program: `wgsl` (main), `preview_wgsl` (per-node
@@ -301,7 +308,7 @@ impl Sim {
 
     /// Whether the running patch reads raw touch (and so owns the surface).
     pub fn uses_touch(&self) -> bool {
-        codegen::uses_touch(&self.doc)
+        codegen::uses_touch(&self.prog.doc)
     }
 
     /// The running patch's Still images: (node id, media cell, image data URL
@@ -458,6 +465,41 @@ impl Sim {
 
 #[cfg(test)]
 mod tests {
+    /// Found on the dev Preview (2026-10-16): inserting a preset as a
+    /// Sub-patch trapped the wasm, because the preview node and scalar
+    /// indices (which count inlined nodes) were looked up in the original
+    /// document. Every index of the program must resolve in `flat_doc`.
+    #[test]
+    fn program_indices_resolve_in_the_flattened_document() {
+        let inner = crate::presets::presets()
+            .iter()
+            .find(|p| p.name == "Step and Sample")
+            .unwrap()
+            .clone();
+        let doc: PatchDoc = serde_json::from_value(serde_json::json!({
+            "nodes": [
+                { "id": "s", "kind": "subpatch", "sub": serde_json::to_value(&inner).unwrap() },
+                { "id": "t", "kind": "touch" },
+                { "id": "o", "kind": "output" }
+            ],
+            "edges": [ { "from": { "node": "s", "port": "out" }, "to": { "node": "o", "port": "in" } } ]
+        }))
+        .unwrap();
+        let sim = Sim::new(doc.clone(), Geometry { spokes: 8, pixels: 4, inner_over_outer: 0.3 }).unwrap();
+        assert_eq!(sim.doc().nodes.len(), 3);
+        assert!(sim.flat_doc().nodes.len() > 3);
+        let prog = sim.program();
+        for &i in &prog.preview_nodes {
+            let _ = &sim.flat_doc().nodes[i];
+        }
+        for (i, _) in &prog.preview_scalars {
+            let _ = &sim.flat_doc().nodes[*i];
+        }
+        assert!(prog.preview_nodes.len() > 1, "the inner field nodes get thumbnails");
+        assert!(sim.uses_touch(), "touch nodes count wherever they are");
+        assert!(sim.images().is_empty());
+    }
+
     use super::*;
     use crate::presets::presets;
 
