@@ -235,11 +235,15 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   `--no-default-features --features shader-hot-reload` builds without it.
   Design notes: `plans/doom.md`.
 - **Patches (early)**: a node-graph alternative to the layer stack — wire
-  generators, transforms, blends, and inputs (audio features, beats, LFOs,
-  envelopes, IMU) into a typed dataflow whose sink is the array. Graphs compile
-  to a single WGSL dispatch; knob tweaks and scalar wires never recompile.
+  generators, transforms, blends, inputs (audio features, beats, touch, IMU,
+  PRO DJ LINK, video, still images) and control-rate tools (Time, LFO, Math,
+  Map range, Mix, Clamp, Smooth, Envelope, Random, and the event tools Counter,
+  Toggle, Threshold, Delay, Merge, Step sequencer) into a typed dataflow whose
+  sink is the array. Graphs compile to a single WGSL dispatch; knob tweaks and
+  scalar wires never recompile, and edits carry every timer and phase over.
   Patches save as JSON files under the config dir and activate live (the layer
-  stack renders when no patch is active); six built-in presets seed the palette.
+  stack renders when no patch is active); sixteen built-in presets seed the
+  palette.
   While a patch is on air a **◆ chip in the top bar names it on every tab** (red
   with "fallback" if it failed to build and the stack is covering) — tap it to
   jump to the editor.

@@ -80,7 +80,28 @@ pub struct SlabSlot {
 fn is_cpu_kind(kind: &str) -> bool {
     matches!(
         kind,
-        "time" | "slider" | "audio" | "imu" | "tap" | "touch" | "dj_link" | "event_effect" | "scalar_math" | "lfo" | "smooth" | "envelope"
+        "time"
+            | "slider"
+            | "audio"
+            | "imu"
+            | "tap"
+            | "touch"
+            | "dj_link"
+            | "event_effect"
+            | "scalar_math"
+            | "lfo"
+            | "smooth"
+            | "envelope"
+            | "map_range"
+            | "mix"
+            | "clamp"
+            | "random"
+            | "counter"
+            | "toggle"
+            | "threshold"
+            | "delay"
+            | "event_merge"
+            | "sequence"
     )
 }
 
@@ -1285,6 +1306,22 @@ mod tests {
         )
         .validate(&module)
         .expect("preview WGSL validates");
+    }
+
+    /// A registry kind that neither kind list knows compiles to "not
+    /// renderable yet"; every palette entry must be live.
+    #[test]
+    fn every_registry_kind_compiles() {
+        for ty in registry::TYPES {
+            if ty.id == "output" {
+                continue;
+            }
+            let doc = PatchDoc {
+                nodes: vec![node("n", ty.id), node("o", "output")],
+                ..Default::default()
+            };
+            compile(&doc).unwrap_or_else(|e| panic!("{}: {e}", ty.id));
+        }
     }
 
     #[test]

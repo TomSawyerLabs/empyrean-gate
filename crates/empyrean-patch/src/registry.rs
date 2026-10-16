@@ -573,6 +573,262 @@ pub const TYPES: &[NodeType] = &[
             num("peak", "Peak", 0.0, 2.0, 1.0),
         ],
     },
+    NodeType {
+        // out = out_min + (in - in_min) / (in_max - in_min) * (out_max - out_min);
+        // an inverted range (in_min > in_max, or out) flips the mapping.
+        id: "map_range",
+        label: "Map range",
+        category: Category::ScalarOp,
+        inputs: &[],
+        outputs: SCALAR_OUT,
+        params: &[
+            num("in", "In", -8.0, 8.0, 0.0),
+            num("in_min", "In min", -8.0, 8.0, 0.0),
+            num("in_max", "In max", -8.0, 8.0, 1.0),
+            num("out_min", "Out min", -8.0, 8.0, 0.0),
+            num("out_max", "Out max", -8.0, 8.0, 1.0),
+            sel("clamp", "Clamp to the out range", &["off", "on"]),
+        ],
+    },
+    NodeType {
+        id: "mix",
+        label: "Mix",
+        category: Category::ScalarOp,
+        inputs: &[],
+        outputs: SCALAR_OUT,
+        params: &[
+            num("a", "A", -8.0, 8.0, 0.0),
+            num("b", "B", -8.0, 8.0, 1.0),
+            num("t", "Mix (0 = A, 1 = B)", 0.0, 1.0, 0.5),
+        ],
+    },
+    NodeType {
+        id: "clamp",
+        label: "Clamp",
+        category: Category::ScalarOp,
+        inputs: &[],
+        outputs: SCALAR_OUT,
+        params: &[
+            num("in", "In", -8.0, 8.0, 0.0),
+            num("min", "Min", -8.0, 8.0, 0.0),
+            num("max", "Max", -8.0, 8.0, 1.0),
+        ],
+    },
+    NodeType {
+        // A new value in Min..Max on every `trigger`, and on its own clock
+        // when Rate > 0; Glide eases towards it. The sequence is seeded from
+        // the node id, so a saved patch replays the same values.
+        id: "random",
+        label: "Random",
+        category: Category::ScalarOp,
+        inputs: &[PortDef {
+            name: "trigger",
+            shape: Shape::Event,
+        }],
+        outputs: &[
+            PortDef {
+                name: "out",
+                shape: Shape::Scalar,
+            },
+            PortDef {
+                name: "changed",
+                shape: Shape::Event,
+            },
+        ],
+        params: &[
+            num("rate", "Rate (Hz, 0 = trigger only)", 0.0, 20.0, 0.0),
+            num("min", "Min", -8.0, 8.0, 0.0),
+            num("max", "Max", -8.0, 8.0, 1.0),
+            num("glide", "Glide (s)", 0.0, 5.0, 0.0),
+        ],
+    },
+    NodeType {
+        // Counts `count` events; wraps back to 0 at Steps, firing `wrap`
+        // (which is also "every Nth event"). `phase` is count / Steps.
+        id: "counter",
+        label: "Counter",
+        category: Category::ScalarOp,
+        inputs: &[
+            PortDef {
+                name: "count",
+                shape: Shape::Event,
+            },
+            PortDef {
+                name: "reset",
+                shape: Shape::Event,
+            },
+        ],
+        outputs: &[
+            PortDef {
+                name: "out",
+                shape: Shape::Scalar,
+            },
+            PortDef {
+                name: "phase",
+                shape: Shape::Scalar,
+            },
+            PortDef {
+                name: "wrap",
+                shape: Shape::Event,
+            },
+        ],
+        params: &[num("steps", "Wrap at (0 = never)", 0.0, 64.0, 8.0)],
+    },
+    NodeType {
+        // A latch: `toggle` flips it, `set`/`clear` force it; `on`/`off`
+        // fire on each change.
+        id: "toggle",
+        label: "Toggle",
+        category: Category::ScalarOp,
+        inputs: &[
+            PortDef {
+                name: "toggle",
+                shape: Shape::Event,
+            },
+            PortDef {
+                name: "set",
+                shape: Shape::Event,
+            },
+            PortDef {
+                name: "clear",
+                shape: Shape::Event,
+            },
+        ],
+        outputs: &[
+            PortDef {
+                name: "out",
+                shape: Shape::Scalar,
+            },
+            PortDef {
+                name: "on",
+                shape: Shape::Event,
+            },
+            PortDef {
+                name: "off",
+                shape: Shape::Event,
+            },
+        ],
+        params: &[sel("initial", "Starts", &["off", "on"])],
+    },
+    NodeType {
+        // Scalar → events: `rise` when In climbs past Level (+ half the
+        // hysteresis), `fall` when it drops below (− half); `out` is 1 while
+        // above.
+        id: "threshold",
+        label: "Threshold",
+        category: Category::ScalarOp,
+        inputs: &[],
+        outputs: &[
+            PortDef {
+                name: "out",
+                shape: Shape::Scalar,
+            },
+            PortDef {
+                name: "rise",
+                shape: Shape::Event,
+            },
+            PortDef {
+                name: "fall",
+                shape: Shape::Event,
+            },
+        ],
+        params: &[
+            num("in", "In", -8.0, 8.0, 0.0),
+            num("level", "Level", -8.0, 8.0, 0.5),
+            num("hysteresis", "Hysteresis", 0.0, 2.0, 0.05),
+        ],
+    },
+    NodeType {
+        // Each `in` event comes out Seconds later, then again every Seconds
+        // for Echoes more times. Real seconds (master speed does not apply).
+        id: "delay",
+        label: "Delay",
+        category: Category::ScalarOp,
+        inputs: &[PortDef {
+            name: "in",
+            shape: Shape::Event,
+        }],
+        outputs: &[PortDef {
+            name: "out",
+            shape: Shape::Event,
+        }],
+        params: &[
+            num("seconds", "Seconds", 0.0, 10.0, 0.5),
+            num("echoes", "Echoes", 0.0, 16.0, 0.0),
+        ],
+    },
+    NodeType {
+        // Any of a..d fires `out`, while Open is on (wire a Toggle in to
+        // gate a stream of events).
+        id: "event_merge",
+        label: "Merge events",
+        category: Category::ScalarOp,
+        inputs: &[
+            PortDef {
+                name: "a",
+                shape: Shape::Event,
+            },
+            PortDef {
+                name: "b",
+                shape: Shape::Event,
+            },
+            PortDef {
+                name: "c",
+                shape: Shape::Event,
+            },
+            PortDef {
+                name: "d",
+                shape: Shape::Event,
+            },
+        ],
+        outputs: &[PortDef {
+            name: "out",
+            shape: Shape::Event,
+        }],
+        params: &[num("open", "Open (0 blocks)", 0.0, 1.0, 1.0)],
+    },
+    NodeType {
+        // `step` advances through the first Steps values and wraps (firing
+        // `wrap`); `out` is the current value, `index` its 0-based position.
+        id: "sequence",
+        label: "Step sequencer",
+        category: Category::ScalarOp,
+        inputs: &[
+            PortDef {
+                name: "step",
+                shape: Shape::Event,
+            },
+            PortDef {
+                name: "reset",
+                shape: Shape::Event,
+            },
+        ],
+        outputs: &[
+            PortDef {
+                name: "out",
+                shape: Shape::Scalar,
+            },
+            PortDef {
+                name: "index",
+                shape: Shape::Scalar,
+            },
+            PortDef {
+                name: "wrap",
+                shape: Shape::Event,
+            },
+        ],
+        params: &[
+            num("steps", "Steps", 1.0, 8.0, 4.0),
+            num("v1", "Step 1", -8.0, 8.0, 0.0),
+            num("v2", "Step 2", -8.0, 8.0, 0.25),
+            num("v3", "Step 3", -8.0, 8.0, 0.5),
+            num("v4", "Step 4", -8.0, 8.0, 0.75),
+            num("v5", "Step 5", -8.0, 8.0, 1.0),
+            num("v6", "Step 6", -8.0, 8.0, 0.75),
+            num("v7", "Step 7", -8.0, 8.0, 0.5),
+            num("v8", "Step 8", -8.0, 8.0, 0.25),
+        ],
+    },
     // -- Generators ---------------------------------------------------------
     NodeType {
         id: "solid",

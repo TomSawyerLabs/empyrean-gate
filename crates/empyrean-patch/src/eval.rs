@@ -104,6 +104,19 @@ struct NodeState {
     prev_downs: u64,
     prev_ups: u64,
     prev_held: usize,
+    /// Event count (counter) or step position (sequence).
+    count: i64,
+    /// xorshift state (random); 0 = not seeded yet.
+    rng: u64,
+    /// Random: the value being glided from, the one glided to, and seconds
+    /// into the glide.
+    from: f32,
+    target: f32,
+    glide_t: f32,
+    /// Latched booleans (toggle, threshold); None = first frame not seen.
+    latch: Option<bool>,
+    /// Seconds until each pending delayed event fires (delay).
+    pending: Vec<f32>,
 }
 
 impl Default for NodeState {
@@ -119,6 +132,13 @@ impl Default for NodeState {
             prev_downs: u64::MAX,
             prev_ups: u64::MAX,
             prev_held: 0,
+            count: 0,
+            rng: 0,
+            from: 0.0,
+            target: 0.0,
+            glide_t: 0.0,
+            latch: None,
+            pending: Vec::new(),
         }
     }
 }
@@ -557,6 +577,199 @@ impl Runtime {
                     };
                     self.outputs[node].insert("out".into(), v);
                 }
+                "map_range" => {
+                    let x = self.input(node, "in");
+                    let a = self.input(node, "in_min");
+                    let b = self.input(node, "in_max");
+                    let c = self.input(node, "out_min");
+                    let d = self.input(node, "out_max");
+                    let t = if (b - a).abs() < 1e-9 { 0.0 } else { (x - a) / (b - a) };
+                    let mut v = c + (d - c) * t;
+                    if self.param(node, "clamp").round() as u32 == 1 {
+                        v = v.clamp(c.min(d), c.max(d));
+                    }
+                    self.outputs[node].insert("out".into(), finite_or(v, 0.0));
+                }
+                "mix" => {
+                    let a = self.input(node, "a");
+                    let b = self.input(node, "b");
+                    let t = self.input(node, "t");
+                    self.outputs[node].insert("out".into(), finite_or(a + (b - a) * t, 0.0));
+                }
+                "clamp" => {
+                    let x = self.input(node, "in");
+                    let lo = self.input(node, "min");
+                    let hi = self.input(node, "max");
+                    self.outputs[node].insert("out".into(), x.clamp(lo.min(hi), lo.max(hi)));
+                }
+                "random" => {
+                    let rate = self.input(node, "rate").max(0.0);
+                    let lo = self.input(node, "min");
+                    let hi = self.input(node, "max");
+                    let glide = self.input(node, "glide").max(0.0);
+                    let trigger = self.event_fired(node, "trigger");
+                    let seed = seed_from_id(&self.doc.nodes[node].id);
+                    let st = &mut self.state[node];
+                    // The value as of the previous frame, to glide from.
+                    let current = |st: &NodeState| {
+                        if glide <= 1e-4 || st.glide_t >= glide {
+                            st.target
+                        } else {
+                            st.from + (st.target - st.from) * (st.glide_t / glide)
+                        }
+                    };
+                    let mut fire = trigger;
+                    if st.rng == 0 {
+                        // First frame: start on a value, silently.
+                        st.rng = seed;
+                        st.target = lo + (hi - lo) * next_unit(&mut st.rng);
+                        st.from = st.target;
+                        st.glide_t = glide;
+                    }
+                    if rate > 0.0 {
+                        st.acc += (rate * ms * dt) as f64;
+                        if st.acc >= 1.0 {
+                            st.acc = st.acc.fract();
+                            fire = true;
+                        }
+                    }
+                    if fire {
+                        st.from = current(st);
+                        st.target = lo + (hi - lo) * next_unit(&mut st.rng);
+                        st.glide_t = 0.0;
+                        self.events[node].push("changed");
+                    } else {
+                        st.glide_t += dt;
+                    }
+                    let v = current(st);
+                    self.outputs[node].insert("out".into(), finite_or(v, 0.0));
+                }
+                "counter" => {
+                    let steps = self.input(node, "steps").round().max(0.0) as i64;
+                    let reset = self.event_fired(node, "reset");
+                    let count = self.event_fired(node, "count");
+                    let st = &mut self.state[node];
+                    if reset {
+                        st.count = 0;
+                    }
+                    if count {
+                        st.count += 1;
+                    }
+                    if steps > 0 && st.count >= steps {
+                        // Also covers Steps turned down below the count.
+                        st.count = 0;
+                        if count {
+                            self.events[node].push("wrap");
+                        }
+                    }
+                    let n = st.count;
+                    let o = &mut self.outputs[node];
+                    o.insert("out".into(), n as f32);
+                    o.insert(
+                        "phase".into(),
+                        if steps > 0 { n as f32 / steps as f32 } else { 0.0 },
+                    );
+                }
+                "toggle" => {
+                    let initial = self.param(node, "initial").round() as u32 == 1;
+                    let flip = self.event_fired(node, "toggle");
+                    let set = self.event_fired(node, "set");
+                    let clear = self.event_fired(node, "clear");
+                    let st = &mut self.state[node];
+                    let was = *st.latch.get_or_insert(initial);
+                    let mut now = was;
+                    if flip {
+                        now = !now;
+                    }
+                    if set {
+                        now = true;
+                    }
+                    if clear {
+                        now = false;
+                    }
+                    if now != was {
+                        self.events[node].push(if now { "on" } else { "off" });
+                    }
+                    st.latch = Some(now);
+                    self.outputs[node].insert("out".into(), f32::from(now));
+                }
+                "threshold" => {
+                    let x = self.input(node, "in");
+                    let level = self.input(node, "level");
+                    let half = self.input(node, "hysteresis").max(0.0) * 0.5;
+                    let st = &mut self.state[node];
+                    let now = match st.latch {
+                        Some(true) => x >= level - half,
+                        Some(false) => x > level + half,
+                        None => x > level,
+                    };
+                    if let Some(was) = st.latch
+                        && was != now
+                    {
+                        self.events[node].push(if now { "rise" } else { "fall" });
+                    }
+                    st.latch = Some(now);
+                    self.outputs[node].insert("out".into(), f32::from(now));
+                }
+                "delay" => {
+                    let seconds = self.input(node, "seconds").max(0.0);
+                    let echoes = self.input(node, "echoes").round().clamp(0.0, 16.0) as usize;
+                    let arrived = self.event_fired(node, "in");
+                    let st = &mut self.state[node];
+                    let mut fire = false;
+                    for t in &mut st.pending {
+                        *t -= dt;
+                    }
+                    st.pending.retain(|t| {
+                        let due = *t <= 0.0;
+                        fire |= due;
+                        !due
+                    });
+                    if arrived {
+                        for k in 1..=(echoes + 1) {
+                            let at = seconds * k as f32;
+                            if at <= 1e-4 {
+                                fire = true;
+                            } else if st.pending.len() < MAX_PENDING_EVENTS {
+                                st.pending.push(at);
+                            }
+                        }
+                    }
+                    if fire {
+                        self.events[node].push("out");
+                    }
+                }
+                "event_merge" => {
+                    let open = self.input(node, "open") > 0.5;
+                    if open && ["a", "b", "c", "d"].iter().any(|p| self.event_fired(node, p)) {
+                        self.events[node].push("out");
+                    }
+                }
+                "sequence" => {
+                    let steps = (self.input(node, "steps").round() as i64).clamp(1, 8);
+                    let reset = self.event_fired(node, "reset");
+                    let step = self.event_fired(node, "step");
+                    let index = {
+                        let st = &mut self.state[node];
+                        if reset {
+                            st.count = 0;
+                        }
+                        if step {
+                            st.count += 1;
+                        }
+                        if st.count >= steps {
+                            st.count = 0;
+                            if step {
+                                self.events[node].push("wrap");
+                            }
+                        }
+                        st.count
+                    };
+                    let v = self.input(node, &format!("v{}", index + 1));
+                    let o = &mut self.outputs[node];
+                    o.insert("out".into(), v);
+                    o.insert("index".into(), index as f32);
+                }
                 _ => {}
             }
         }
@@ -589,6 +802,29 @@ impl Runtime {
         }
         &self.slab
     }
+}
+
+/// Delayed events a Delay node holds at once (echoes included).
+const MAX_PENDING_EVENTS: usize = 64;
+
+/// FNV-1a of a node id, never zero: the Random node's seed.
+fn seed_from_id(id: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in id.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    h.max(1)
+}
+
+/// xorshift64*: the next value in [0, 1).
+fn next_unit(rng: &mut u64) -> f32 {
+    let mut x = *rng;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    *rng = x;
+    (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 40) as f32 / (1u64 << 24) as f32
 }
 
 fn finite_or(value: f32, fallback: f32) -> f32 {
@@ -832,6 +1068,283 @@ mod tests {
         assert!(v == 2.0 && p == 1.0 && w == 1, "once stops at End and fires once: {v} {p} {w}");
         let (v, _, _) = run(serde_json::json!({ "running": 0 }), 10);
         assert_eq!(v, 0.0, "paused");
+    }
+
+    /// A doc whose `clock` Time node loops 0→1 at rate 1, so with dt 0.25 its
+    /// `wrap` fires every fourth frame: the event source for the tests below.
+    fn clocked(extra_nodes: serde_json::Value, extra_edges: serde_json::Value) -> PatchDoc {
+        let mut nodes = vec![
+            serde_json::json!({ "id": "clock", "kind": "time", "params": { "mode": 1 } }),
+            serde_json::json!({ "id": "o", "kind": "output" }),
+        ];
+        nodes.extend(extra_nodes.as_array().unwrap().iter().cloned());
+        serde_json::from_value(serde_json::json!({ "nodes": nodes, "edges": extra_edges })).unwrap()
+    }
+
+    fn step(rt: &mut Runtime, audio: &[AudioUniform; MAX_AUDIO_SOURCES]) {
+        let mut inp = inputs(audio);
+        inp.dt = 0.25;
+        rt.eval(&inp);
+    }
+
+    fn fired(rt: &Runtime, id: &str, port: &str) -> bool {
+        let i = rt.doc.nodes.iter().position(|n| n.id == id).unwrap();
+        rt.events[i].contains(&port)
+    }
+
+    fn value(rt: &Runtime, id: &str, port: &str) -> f32 {
+        let i = rt.doc.nodes.iter().position(|n| n.id == id).unwrap();
+        rt.scalar_value(i, port)
+    }
+
+    #[test]
+    fn map_mix_and_clamp() {
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let one = |kind: &str, params: serde_json::Value| {
+            let doc: PatchDoc = serde_json::from_value(serde_json::json!({
+                "nodes": [ { "id": "n", "kind": kind, "params": params }, { "id": "o", "kind": "output" } ]
+            }))
+            .unwrap();
+            let mut rt = runtime(doc);
+            rt.eval(&inputs(&audio));
+            rt.scalar_value(0, "out")
+        };
+        // 0..1 → 1..3: 0.25 lands at 1.5; past the range it keeps going
+        // unless clamped; an inverted out range flips it.
+        let map = |x: f32, clamp: f32| {
+            one("map_range", serde_json::json!({ "in": x, "out_min": 1, "out_max": 3, "clamp": clamp }))
+        };
+        assert_eq!(map(0.25, 0.0), 1.5);
+        assert_eq!(map(1.5, 0.0), 4.0);
+        assert_eq!(map(1.5, 1.0), 3.0);
+        assert_eq!(map(-1.0, 1.0), 1.0);
+        assert_eq!(
+            one("map_range", serde_json::json!({ "in": 0.25, "out_min": 1, "out_max": 0 })),
+            0.75
+        );
+        assert_eq!(
+            one("map_range", serde_json::json!({ "in": 3, "in_min": 2, "in_max": 2 })),
+            0.0,
+            "an empty in range maps to out_min, not inf"
+        );
+        assert_eq!(one("mix", serde_json::json!({ "a": 2, "b": 4, "t": 0.25 })), 2.5);
+        assert_eq!(one("clamp", serde_json::json!({ "in": 1.5 })), 1.0);
+        assert_eq!(one("clamp", serde_json::json!({ "in": -1.5 })), 0.0);
+        assert_eq!(one("clamp", serde_json::json!({ "in": 0.5, "min": 1, "max": 0 })), 0.5, "swapped bounds still work");
+    }
+
+    #[test]
+    fn random_samples_on_trigger_deterministically_and_glides() {
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let doc = clocked(
+            serde_json::json!([{ "id": "r", "kind": "random", "params": { "min": 2, "max": 4 } }]),
+            serde_json::json!([{ "from": { "node": "clock", "port": "wrap" }, "to": { "node": "r", "port": "trigger" } }]),
+        );
+        let run = |n: usize| {
+            let mut rt = runtime(doc.clone());
+            let mut seen = Vec::new();
+            for _ in 0..n {
+                step(&mut rt, &audio);
+                if fired(&rt, "r", "changed") {
+                    seen.push(value(&rt, "r", "out"));
+                }
+            }
+            (rt, seen)
+        };
+        let (rt, seen) = run(12);
+        assert_eq!(seen.len(), 3, "one new value per clock wrap: {seen:?}");
+        assert!(seen.iter().all(|v| (2.0..=4.0).contains(v)), "{seen:?}");
+        assert!(seen.windows(2).any(|w| w[0] != w[1]), "values vary: {seen:?}");
+        assert!(value(&rt, "r", "out") >= 2.0, "starts on a value, not 0");
+        assert_eq!(run(12).1, seen, "same patch, same sequence");
+
+        // With glide, the output eases to the new value over Glide seconds.
+        let doc: PatchDoc = serde_json::from_value(serde_json::json!({
+            "nodes": [
+                { "id": "once", "kind": "time", "params": { "mode": 3 } },
+                { "id": "r", "kind": "random", "params": { "glide": 1.0 } },
+                { "id": "o", "kind": "output" }
+            ],
+            "edges": [ { "from": { "node": "once", "port": "wrap" }, "to": { "node": "r", "port": "trigger" } } ]
+        }))
+        .unwrap();
+        let mut rt = runtime(doc);
+        let mut trace = Vec::new();
+        for _ in 0..9 {
+            step(&mut rt, &audio);
+            trace.push(value(&rt, "r", "out"));
+        }
+        // Frames 1-3 hold the start value; the trigger lands on frame 4 and
+        // the value eases over frames 5-8, then holds.
+        let (start, end) = (trace[0], trace[7]);
+        assert_eq!(trace[3], start, "a glide starts where it was: {trace:?}");
+        assert!(end != start, "{trace:?}");
+        for w in trace[3..8].windows(2) {
+            assert!((w[1] - start).abs() > (w[0] - start).abs(), "eases monotonically: {trace:?}");
+        }
+        assert_eq!(trace[8], end, "holds at the target: {trace:?}");
+        // Self-clocked: rate 2 Hz with dt 0.25 fires every other frame.
+        let doc = clocked(
+            serde_json::json!([{ "id": "r", "kind": "random", "params": { "rate": 2 } }]),
+            serde_json::json!([]),
+        );
+        let mut rt = runtime(doc);
+        let mut changes = 0;
+        for _ in 0..8 {
+            step(&mut rt, &audio);
+            changes += usize::from(fired(&rt, "r", "changed"));
+        }
+        assert_eq!(changes, 4);
+    }
+
+    #[test]
+    fn counter_counts_wraps_and_resets() {
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let doc = clocked(
+            serde_json::json!([
+                { "id": "c", "kind": "counter", "params": { "steps": 3 } },
+                { "id": "every3", "kind": "counter", "params": { "steps": 0 } }
+            ]),
+            serde_json::json!([
+                { "from": { "node": "clock", "port": "wrap" }, "to": { "node": "c", "port": "count" } },
+                { "from": { "node": "c", "port": "wrap" }, "to": { "node": "every3", "port": "count" } }
+            ]),
+        );
+        let mut rt = runtime(doc);
+        let mut counts = Vec::new();
+        for _ in 0..28 {
+            step(&mut rt, &audio);
+            if fired(&rt, "clock", "wrap") {
+                counts.push((value(&rt, "c", "out"), value(&rt, "c", "phase"), fired(&rt, "c", "wrap")));
+            }
+        }
+        assert_eq!(
+            counts,
+            vec![
+                (1.0, 1.0 / 3.0, false),
+                (2.0, 2.0 / 3.0, false),
+                (0.0, 0.0, true),
+                (1.0, 1.0 / 3.0, false),
+                (2.0, 2.0 / 3.0, false),
+                (0.0, 0.0, true),
+                (1.0, 1.0 / 3.0, false),
+            ]
+        );
+        assert_eq!(value(&rt, "every3", "out"), 2.0, "wrap is every Nth; never wraps itself");
+
+        let mut with_reset = rt.doc.clone();
+        with_reset.edges.push(edge("clock", "wrap", "c", "reset"));
+        let mut rt = runtime(with_reset);
+        for _ in 0..8 {
+            step(&mut rt, &audio);
+        }
+        assert_eq!(value(&rt, "c", "out"), 1.0, "reset then count in the same frame");
+    }
+
+    #[test]
+    fn toggle_latches_and_threshold_fires_edges() {
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let doc = clocked(
+            serde_json::json!([
+                { "id": "t", "kind": "toggle", "params": { "initial": 1 } },
+                // The clock itself ramps 0→1: rises past 0.5 then falls back.
+                { "id": "th", "kind": "threshold", "params": { "hysteresis": 0.2 } }
+            ]),
+            serde_json::json!([
+                { "from": { "node": "clock", "port": "wrap" }, "to": { "node": "t", "port": "toggle" } },
+                { "from": { "node": "clock", "port": "out" }, "to": { "node": "th", "port": "in" } }
+            ]),
+        );
+        let mut rt = runtime(doc);
+        let mut log = Vec::new();
+        for _ in 0..8 {
+            step(&mut rt, &audio);
+            log.push((
+                value(&rt, "t", "out"),
+                fired(&rt, "t", "on"),
+                fired(&rt, "t", "off"),
+                value(&rt, "th", "out"),
+                fired(&rt, "th", "rise"),
+                fired(&rt, "th", "fall"),
+            ));
+        }
+        // Clock values per frame: .25 .5 .75 0(wrap) .25 .5 .75 0(wrap).
+        // Threshold 0.5 ± 0.1: above once > 0.6, below once < 0.4.
+        assert_eq!(
+            log,
+            vec![
+                (1.0, false, false, 0.0, false, false),
+                (1.0, false, false, 0.0, false, false),
+                (1.0, false, false, 1.0, true, false),
+                (0.0, false, true, 0.0, false, true),
+                (0.0, false, false, 0.0, false, false),
+                (0.0, false, false, 0.0, false, false),
+                (0.0, false, false, 1.0, true, false),
+                (1.0, true, false, 0.0, false, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn delay_echoes_and_merge_gates() {
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let doc = clocked(
+            serde_json::json!([
+                { "id": "d", "kind": "delay", "params": { "seconds": 0.5, "echoes": 1 } },
+                { "id": "m", "kind": "event_merge" },
+                { "id": "shut", "kind": "event_merge", "params": { "open": 0 } }
+            ]),
+            serde_json::json!([
+                { "from": { "node": "clock", "port": "wrap" }, "to": { "node": "d", "port": "in" } },
+                { "from": { "node": "clock", "port": "wrap" }, "to": { "node": "m", "port": "a" } },
+                { "from": { "node": "d", "port": "out" }, "to": { "node": "m", "port": "c" } },
+                { "from": { "node": "d", "port": "out" }, "to": { "node": "shut", "port": "b" } }
+            ]),
+        );
+        let mut rt = runtime(doc);
+        let mut log = Vec::new();
+        for _ in 0..8 {
+            step(&mut rt, &audio);
+            log.push((fired(&rt, "clock", "wrap"), fired(&rt, "d", "out"), fired(&rt, "m", "out"), fired(&rt, "shut", "out")));
+        }
+        // Wrap on frame 4 (t = 1.0); delayed 0.5 s → frame 6; echo → frame 8.
+        assert_eq!(
+            log,
+            vec![
+                (false, false, false, false),
+                (false, false, false, false),
+                (false, false, false, false),
+                (true, false, true, false),
+                (false, false, false, false),
+                (false, true, true, false),
+                (false, false, false, false),
+                (true, true, true, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn sequencer_steps_through_its_values() {
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let doc = clocked(
+            serde_json::json!([
+                { "id": "s", "kind": "sequence", "params": { "steps": 3, "v1": 5, "v2": 6, "v3": 7, "v4": 8 } }
+            ]),
+            serde_json::json!([
+                { "from": { "node": "clock", "port": "wrap" }, "to": { "node": "s", "port": "step" } }
+            ]),
+        );
+        let mut rt = runtime(doc);
+        let mut seen = Vec::new();
+        step(&mut rt, &audio);
+        assert_eq!((value(&rt, "s", "out"), value(&rt, "s", "index")), (5.0, 0.0), "starts on step 1");
+        for _ in 0..16 {
+            step(&mut rt, &audio);
+            if fired(&rt, "clock", "wrap") {
+                seen.push((value(&rt, "s", "out"), fired(&rt, "s", "wrap")));
+            }
+        }
+        assert_eq!(seen, vec![(6.0, false), (7.0, false), (5.0, true), (6.0, false)], "step 4 is never reached");
     }
 
     fn runtime(doc: PatchDoc) -> Runtime {

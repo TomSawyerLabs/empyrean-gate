@@ -1,0 +1,39 @@
+{
+  "format": 3,
+  "id": "builtin-step-and-sample",
+  "name": "Step and Sample",
+  "description": "A clock steps a sequencer through hues; every bar a random scale and a toggled spiral. Shows the event tools.",
+  "nodes": [
+    { "id": "clock", "kind": "time", "name": "2 steps / s", "params": { "mode": 1, "rate": 2 }, "pos": [-320, 60] },
+    { "id": "seq", "kind": "sequence", "name": "hues", "params": { "steps": 4, "v1": 0, "v2": 0.3, "v3": 0.6, "v4": 0.85 }, "pos": [-60, 20] },
+    { "id": "env", "kind": "envelope", "name": "", "params": { "attack": 0.01, "decay": 0.4, "peak": 1 }, "pos": [-60, 300] },
+    { "id": "map", "kind": "map_range", "name": "pulse → brightness", "params": { "out_min": 0.5, "out_max": 1.4 }, "pos": [200, 300] },
+    { "id": "rand", "kind": "random", "name": "every bar", "params": { "glide": 1.5, "max": 2, "min": 0.6 }, "pos": [200, 20] },
+    { "id": "tog", "kind": "toggle", "name": "spiral on/off", "params": {}, "pos": [200, 520] },
+    { "id": "sm", "kind": "smooth", "name": "", "params": { "seconds": 0.5 }, "pos": [460, 520] },
+    { "id": "waves", "kind": "radial_waves", "name": "", "params": { "hue_range": 0.1, "saturation": 0.95, "sharpness": 0.6, "waves": 4 }, "pos": [460, 120] },
+    { "id": "spiral", "kind": "spiral", "name": "", "params": { "arms": 5, "brightness": 0.9, "hue": 0.12, "speed": 0.6 }, "pos": [460, 340] },
+    { "id": "mix", "kind": "blend", "name": "", "params": { "mode": 0 }, "pos": [720, 230] },
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [960, 230] }
+  ],
+  "edges": [
+    { "from": { "node": "clock", "port": "wrap" }, "to": { "node": "seq", "port": "step" } },
+    { "from": { "node": "clock", "port": "wrap" }, "to": { "node": "env", "port": "trigger" } },
+    { "from": { "node": "seq", "port": "out" }, "to": { "node": "waves", "port": "hue" } },
+    { "from": { "node": "seq", "port": "wrap" }, "to": { "node": "rand", "port": "trigger" } },
+    { "from": { "node": "seq", "port": "wrap" }, "to": { "node": "tog", "port": "toggle" } },
+    { "from": { "node": "env", "port": "out" }, "to": { "node": "map", "port": "in" } },
+    { "from": { "node": "map", "port": "out" }, "to": { "node": "waves", "port": "brightness" } },
+    { "from": { "node": "rand", "port": "out" }, "to": { "node": "waves", "port": "scale" } },
+    { "from": { "node": "tog", "port": "out" }, "to": { "node": "sm", "port": "in" } },
+    { "from": { "node": "sm", "port": "out" }, "to": { "node": "mix", "port": "opacity" } },
+    { "from": { "node": "waves", "port": "out" }, "to": { "node": "mix", "port": "base" } },
+    { "from": { "node": "spiral", "port": "out" }, "to": { "node": "mix", "port": "over" } },
+    { "from": { "node": "mix", "port": "out" }, "to": { "node": "out", "port": "in" } }
+  ],
+  "exposed": [
+    { "node": "clock", "param": "rate", "label": "Tempo (steps / s)" },
+    { "node": "spiral", "param": "hue", "label": "Spiral hue" },
+    { "node": "out", "param": "master", "label": "Master" }
+  ]
+}
