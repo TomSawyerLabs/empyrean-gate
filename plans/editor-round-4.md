@@ -1,6 +1,6 @@
 # Patch editor, round 4: clips, fields, sub-patches, undo, admin push (2026-10-16)
 
-Status: **in progress** (gate worktree `C:\Users\camer\.t3\worktrees\Empyrean\playground`,
+Status: **done; on gate `master` (`c15a8cb`) and the site's `dev` Preview (`a5ebddf`), apart from the three secrets below** (gate worktree `C:\Users\camer\.t3\worktrees\Empyrean\playground`,
 branch `patch-crate`, kept fast-forwarded to gate `master`; site via CI
 web-dist and the site's `dev`, never its `master`). Another agent
 ("playground-mobile") shares both trees; see the uncommitted `.agents.txt`.
@@ -130,6 +130,12 @@ Cameron (2026-10-16), on the round-3 report:
       Transform and a Clip on Vulkan; patch-web typecheck + 4 history unit
       tests; gate behaviour specs patch-* (13) green on chromium.
 - [x] Step 4 (2026-10-16): site `dev` pinned to web-dist `11c28a5`.
+- [x] Preview check after the fix (2026-10-16): `/admin` renders, says
+      notifications aren't set up (key endpoint 503), serves sw.js, the
+      manifest and PNG icons, noindex; the playground lists all new nodes
+      and a Sub-patches group, a two-frame GIF becomes a Clip that renders,
+      and inserting "Step and Sample" as a Sub-patch keeps "patch rendering".
+      `bun run test:gpu` (real WebGPU): 62 passed.
 - [x] Step 5 (2026-10-16): site unit tests 35 (incl. 4 webpush, 3 notify
       endpoint cases), typecheck, admin spec (3) + playground specs on
       chromium. The other agent's `playground-mobile.spec.ts:114` fails on
