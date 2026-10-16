@@ -96,22 +96,35 @@ Cameron (2026-10-16), on the round-3 report:
 
 ## Plan / steps
 
-1. **Now.** Crate: coordinate, field_math, luminance, color_adjust, palette,
-   feedback, clip (+ WGSL, validate, abi, engine/runtime OUT size). Tests,
-   engine-smoke on real Vulkan.
-2. Crate + TS: sub-patches (flatten, format 4, wasm, types/files, editor).
-3. Editor: undo/redo/duplicate; ClipPicker; thumbnails. Gate behaviour tests.
-4. Gate `master` → CI web-dist → site `bun.lock` → `dev` → Preview check.
+1. **Done** (`5a7e20c`). Crate: coordinate, field_math, luminance,
+   color_adjust, palette, feedback, clip (+ WGSL, validate, engine/runtime
+   OUT size). Tests, engine-smoke on real Vulkan.
+2. **Done.** Crate + TS: sub-patches (flatten, format 4, wasm, types/files,
+   editor).
+3. **Done.** Editor: undo/redo/duplicate; ClipPicker; thumbnails. Gate
+   behaviour tests (patch-subpatch, patch-history, patch-clip).
+4. **Now.** Gate `master` → CI web-dist → site `bun.lock` → `dev` → Preview
+   check.
 5. Site: PWA notifications (worker, webpush, admin page, sw, manifest,
    tests, README, staged secrets). Push `dev`; check the Preview.
 
+## Findings / gotchas
+
+- The palette's Sub-patches entries must not carry `.palette-item`: tests
+  (and anything else) locating "the Noise item" would match "Mock Noise"
+  too. They are `.palette-sub`, styled the same.
+- Headless Chromium's `ImageDecoder` decodes an animated GIF, so the Clip
+  picker test uses a two-frame GIF; browsers without it get a still.
+
 ## Progress log
 
-- [ ] Step 1
-- [ ] Step 2
-- [ ] Step 3
+- [x] Steps 1–3 (2026-10-16). Crate 85 tests; app 336; engine-smoke
+      `--patch` renders Coordinate → Palette, Feedback through a spinning
+      Transform and a Clip on Vulkan; patch-web typecheck + 4 history unit
+      tests; gate behaviour specs patch-* (13) green on chromium.
 - [ ] Step 4
-- [ ] Step 5
+- [ ] Step 5 (webpush.ts + 4 unit tests written; endpoints, admin page,
+      service worker, manifest still to do)
 
 ## Open questions for the user
 

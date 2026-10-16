@@ -15,5 +15,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "wasm"]
+  "include": ["src", "wasm"],
+  "exclude": ["src/**/*.test.ts"]
 }

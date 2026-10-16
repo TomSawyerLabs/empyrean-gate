@@ -24,7 +24,11 @@ mkdirSync(out, { recursive: true });
 for (const entry of ["src", "wasm", "package.json", "README.md", "LICENSE"]) {
   rmSync(join(out, entry), { recursive: true, force: true });
 }
-cpSync(join(here, "src"), join(out, "src"), { recursive: true });
+cpSync(join(here, "src"), join(out, "src"), {
+  recursive: true,
+  // Unit tests stay here; they are not part of the package.
+  filter: (src) => !src.endsWith(".test.ts"),
+});
 cpSync(join(here, "wasm"), join(out, "wasm"), {
   recursive: true,
   filter: (p) => !p.endsWith(".gitignore"),

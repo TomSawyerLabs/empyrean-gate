@@ -35,14 +35,19 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./editor.css";
+import { ClipPicker } from "./ClipPicker";
 import { imageFileToMedia } from "./files";
+import { History } from "./history";
 import { MiniMeter, MiniRing, type MiniSource } from "./minis";
 import {
   PATCH_FORMAT,
+  SUBPATCH_KIND,
   shapeAccepts,
+  subpatchPorts,
   type PatchDoc,
   type PatchNode,
   type PatchNodeType,
+  type PatchParamDef,
   type PatchShape,
   type PatchSummary,
 } from "../types";
@@ -130,8 +135,12 @@ const CATEGORY_ORDER: PatchNodeType["category"][] = [
 type Registry = Map<string, PatchNodeType>;
 
 /** All connectable input ports of a node type: shaped inputs, then every
- * `number` param (knob doubles as a Scalar port). */
-function inputPorts(def: PatchNodeType): { name: string; shape: PatchShape }[] {
+ * `number` param (knob doubles as a Scalar port). A Sub-patch's ports come
+ * from the instance: one per exposed knob of its document. */
+function inputPorts(def: PatchNodeType, node?: PatchNode): { name: string; shape: PatchShape }[] {
+  if (def.id === SUBPATCH_KIND) {
+    return subpatchPorts(node).map((p) => ({ name: p.name, shape: "scalar" as PatchShape }));
+  }
   return [
     ...def.inputs,
     ...def.params
@@ -140,10 +149,42 @@ function inputPorts(def: PatchNodeType): { name: string; shape: PatchShape }[] {
   ];
 }
 
-function portShape(def: PatchNodeType | undefined, port: string, dir: "in" | "out"): PatchShape | null {
+/** The knobs a node's side panel shows: the type's params, or for a
+ * Sub-patch one per exposed inner knob (its range from the inner node's
+ * type, its default the inner node's current value). */
+function panelParams(def: PatchNodeType, node: PatchNode, registry: Registry): PatchParamDef[] {
+  if (def.id !== SUBPATCH_KIND) return def.params;
+  return subpatchPorts(node).map((port) => {
+    const inner = node.sub?.nodes.find((n) => n.id === port.node);
+    const innerDef = inner && registry.get(inner.kind)?.params.find((p) => p.name === port.param);
+    return {
+      name: port.name,
+      label: port.label,
+      min: innerDef?.min ?? 0,
+      max: innerDef?.max ?? 1,
+      default: inner?.params[port.param] ?? innerDef?.default ?? 0,
+      integrate: innerDef?.integrate ?? false,
+      kind: "number",
+    };
+  });
+}
+
+function portShape(
+  def: PatchNodeType | undefined,
+  port: string,
+  dir: "in" | "out",
+  node?: PatchNode,
+): PatchShape | null {
   if (!def) return null;
   if (dir === "out") return def.outputs.find((p) => p.name === port)?.shape ?? null;
-  return inputPorts(def).find((p) => p.name === port)?.shape ?? null;
+  return inputPorts(def, node).find((p) => p.name === port)?.shape ?? null;
+}
+
+/** A new, unused node id in `d`. */
+function freshId(d: PatchDoc, taken?: Set<string>): string {
+  let i = d.nodes.length + 1;
+  while (d.nodes.some((n) => n.id === `n${i}`) || taken?.has(`n${i}`)) i++;
+  return `n${i}`;
 }
 
 function emptyPatch(): PatchDoc {
@@ -181,7 +222,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
   if (!def) {
     return <div className="pnode pnode-unknown">unknown: {node.kind}</div>;
   }
-  const ins = inputPorts(def);
+  const ins = inputPorts(def, node);
   // Mini visualizers, per output style: field outputs get a thumbnail laid out
   // like the hardware; scalar outputs get amplitude meters. Only for the patch
   // that is actually on air — that is the graph the backend is evaluating.
@@ -216,13 +257,20 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
           ))}
         </div>
       )}
-      {node.kind === "image_in" && (
+      {(node.kind === "image_in" || node.kind === "clip") && (
         <div className="pnode-image">
           {node.media ? (
             <img src={node.media} alt="" />
           ) : (
-            <span className="hint">no image — pick one on the right</span>
+            <span className="hint">
+              {node.kind === "clip" ? "no clip — pick one on the right" : "no image — pick one on the right"}
+            </span>
           )}
+        </div>
+      )}
+      {node.kind === SUBPATCH_KIND && (
+        <div className="pnode-sub hint">
+          {node.sub ? `${node.sub.name || "patch"} · ${node.sub.nodes.length} nodes` : "empty"}
         </div>
       )}
       <div className="pnode-body">
@@ -281,8 +329,9 @@ function edgeId(e: PatchDoc["edges"][number]): string {
 
 function toFlowEdges(doc: PatchDoc, registry: Registry): FlowEdge[] {
   return doc.edges.map((e) => {
-    const def = registry.get(doc.nodes.find((n) => n.id === e.from.node)?.kind ?? "");
-    const shape = portShape(def, e.from.port, "out") ?? "scalar";
+    const from = doc.nodes.find((n) => n.id === e.from.node);
+    const def = registry.get(from?.kind ?? "");
+    const shape = portShape(def, e.from.port, "out", from) ?? "scalar";
     return {
       id: edgeId(e),
       source: e.from.node,
@@ -413,6 +462,7 @@ function ParamPanel({
   registry,
   canEdit,
   onChange,
+  onDuplicate,
   extras,
   onClose,
 }: {
@@ -420,7 +470,9 @@ function ParamPanel({
   nodeId: string;
   registry: Registry;
   canEdit: boolean;
-  onChange: (mutate: (d: PatchDoc) => void) => void;
+  /** `key` names the control for undo coalescing (a slider drag is one step). */
+  onChange: (mutate: (d: PatchDoc) => void, key?: string) => void;
+  onDuplicate?: () => void;
   extras?: (node: PatchNode) => ReactNode;
   /** Set when the panel is a sheet (compact layout): shows Done. */
   onClose?: () => void;
@@ -429,6 +481,7 @@ function ParamPanel({
   const node = doc.nodes.find((n) => n.id === nodeId);
   const def = node && registry.get(node.kind);
   if (!node || !def) return null;
+  const params = panelParams(def, node, registry);
 
   const wiredInto = (param: string) =>
     doc.edges.find((e) => e.to.node === node.id && e.to.port === param);
@@ -458,14 +511,21 @@ function ParamPanel({
           }
         />
       </label>
-      {def.params.map((p) => {
+      {node.kind === SUBPATCH_KIND && (
+        <p className="hint">
+          {node.sub
+            ? `A copy of "${node.sub.name || "patch"}" (${node.sub.nodes.length} nodes). Its exposed knobs are this node's inputs; to change the inside, edit that patch and insert it again.`
+            : "An empty sub-patch renders black. Insert a saved patch or a preset from the palette's Sub-patches group instead."}
+        </p>
+      )}
+      {params.map((p) => {
         const value = node.params[p.name] ?? p.default;
         const wire = wiredInto(p.name);
         const set = (v: number) =>
           onChange((d) => {
             const n = d.nodes.find((x) => x.id === nodeId);
             if (n) n.params[p.name] = v;
-          });
+          }, `${nodeId}.${p.name}`);
         return (
           <div key={p.name} className="patch-param">
             <div className="patch-param-head">
@@ -530,7 +590,15 @@ function ParamPanel({
       {node.kind === "image_in" && (
         <ImagePicker node={node} canEdit={canEdit} onChange={onChange} />
       )}
+      {node.kind === "clip" && (
+        <ClipPicker node={node} def={def} canEdit={canEdit} onChange={onChange} />
+      )}
       {extras?.(node)}
+      {canEdit && node.kind !== "output" && onDuplicate && (
+        <button type="button" onClick={onDuplicate} title="Ctrl+D">
+          Duplicate
+        </button>
+      )}
       {canEdit && node.kind !== "output" && (
         <button
           className="danger"
@@ -555,13 +623,20 @@ function ParamPanel({
 
 type PaletteGroup = { category: string; label: string; types: PatchNodeType[] };
 
+/** A saved patch or a preset the palette offers as a Sub-patch. */
+type SubpatchChoice = { id: string; name: string; nodes: number; preset: boolean };
+
 function Palette({
   grouped,
+  subpatches,
   onPick,
+  onPickSubpatch,
   onClose,
 }: {
   grouped: PaletteGroup[];
+  subpatches: SubpatchChoice[];
   onPick: (kind: string) => void;
+  onPickSubpatch: (choice: SubpatchChoice) => void;
   /** Set when the palette is a sheet (compact layout): shows Done. */
   onClose?: () => void;
 }) {
@@ -592,6 +667,25 @@ function Palette({
           </div>
         </div>
       ))}
+      {subpatches.length > 0 && (
+        <div className="palette-group palette-subpatches">
+          <h4>Sub-patches</h4>
+          <div className="palette-items">
+            {subpatches.map((s) => (
+              <button
+                key={(s.preset ? "preset:" : "patch:") + s.id}
+                type="button"
+                className="palette-sub cat-combine"
+                title={`Insert a copy of ${s.name} as one node (${s.nodes} nodes inside)`}
+                onClick={() => onPickSubpatch(s)}
+              >
+                {s.name}
+                {s.preset && <span className="hint"> · preset</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
@@ -636,7 +730,12 @@ function Editor({
   const registryRef = useRef(registry);
   registryRef.current = registry;
   const requestedId = useRef<string | null>(null);
+  /** A saved patch asked for to be inserted as a Sub-patch, not opened. */
+  const insertRequestedId = useRef<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const history = useRef(new History<PatchDoc>());
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
 
   const onDocChangeRef = useRef(onDocChange);
   onDocChangeRef.current = onDocChange;
@@ -692,6 +791,7 @@ function Editor({
 
   // Stable (ref-based) so the long-lived message subscription never goes stale.
   const openDoc = useCallback((d: PatchDoc) => {
+    history.current.clear();
     setDoc(d);
     setSelectedNode(null);
     setConfirmDelete(false);
@@ -708,7 +808,10 @@ function Editor({
       if (msg.type === "patches") {
         setPatches(msg.patches);
       } else if (msg.type === "patch") {
-        if (requestedId.current === msg.patch.id) {
+        if (insertRequestedId.current === msg.patch.id) {
+          insertRequestedId.current = null;
+          insertSubpatchRef.current?.(msg.patch);
+        } else if (requestedId.current === msg.patch.id) {
           requestedId.current = null;
           openDoc(msg.patch);
         } else if (docRef.current && docRef.current.id === "") {
@@ -763,11 +866,14 @@ function Editor({
     [canEdit, store],
   );
 
-  /** All document mutations funnel through here: clone, mutate, sync, save. */
+  /** All document mutations funnel through here: clone, mutate, sync, save.
+   * `key` names the control being changed so a run of edits on one knob is
+   * a single undo step. */
   const mutateDoc = useCallback(
-    (mutate: (d: PatchDoc) => void, resync = true) => {
+    (mutate: (d: PatchDoc) => void, resync = true, key?: string) => {
       setDoc((prev) => {
         if (!prev) return prev;
+        history.current.push(prev, key);
         const next: PatchDoc = structuredClone(prev);
         mutate(next);
         scheduleSave(next);
@@ -780,6 +886,95 @@ function Editor({
     },
     [registry, scheduleSave],
   );
+
+  /** Show another snapshot of the open document (undo/redo). */
+  const restoreDoc = useCallback(
+    (d: PatchDoc) => {
+      setDoc(d);
+      scheduleSave(d);
+      if (registry) {
+        setNodes(toFlowNodes(d, registry));
+        setEdges(toFlowEdges(d, registry));
+      }
+      setSelectedNode((sel) => (sel && d.nodes.some((n) => n.id === sel) ? sel : null));
+    },
+    [registry, scheduleSave],
+  );
+  const undo = useCallback(() => {
+    const cur = docRef.current;
+    if (!cur || !canEdit) return;
+    const prev = history.current.undo(cur);
+    if (prev) restoreDoc(prev);
+  }, [canEdit, restoreDoc]);
+  const redo = useCallback(() => {
+    const cur = docRef.current;
+    if (!cur || !canEdit) return;
+    const next = history.current.redo(cur);
+    if (next) restoreDoc(next);
+  }, [canEdit, restoreDoc]);
+
+  /** Copy the selected nodes (or `ids`) with the wires between them, offset
+   * a little, and select the copies. */
+  const duplicateNodes = useCallback(
+    (ids?: string[]) => {
+      if (!canEdit) return;
+      const chosen = ids ?? nodesRef.current.filter((n) => n.selected).map((n) => n.id);
+      if (chosen.length === 0) return;
+      const copies = new Map<string, string>();
+      mutateDoc((d) => {
+        const taken = new Set<string>();
+        for (const id of chosen) {
+          const n = d.nodes.find((x) => x.id === id);
+          if (!n || n.kind === "output") continue;
+          const copy = structuredClone(n);
+          copy.id = freshId(d, taken);
+          taken.add(copy.id);
+          copy.pos = [n.pos[0] + 40, n.pos[1] + 40];
+          copies.set(id, copy.id);
+          d.nodes.push(copy);
+        }
+        for (const e of [...d.edges]) {
+          const from = copies.get(e.from.node);
+          const to = copies.get(e.to.node);
+          if (from && to) {
+            d.edges.push({ from: { node: from, port: e.from.port }, to: { node: to, port: e.to.port } });
+          }
+        }
+      });
+      const fresh = new Set(copies.values());
+      if (fresh.size > 0) {
+        setNodes((nds) => nds.map((n) => ({ ...n, selected: fresh.has(n.id) })));
+        setSelectedNode(fresh.size === 1 ? [...fresh][0] : null);
+      }
+    },
+    [canEdit, mutateDoc],
+  );
+
+  // Keyboard: undo/redo/duplicate, anywhere in the page except text fields.
+  useEffect(() => {
+    if (!canEdit) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || !docRef.current) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) {
+        return;
+      }
+      const k = e.key.toLowerCase();
+      if (k === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (k === "y") {
+        e.preventDefault();
+        redo();
+      } else if (k === "d") {
+        e.preventDefault();
+        duplicateNodes();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canEdit, undo, redo, duplicateNodes]);
 
   // --- flow event handlers ---
 
@@ -814,16 +1009,10 @@ function Editor({
       const d = docRef.current;
       if (!d || !registry || !conn.source || !conn.target) return false;
       if (!conn.sourceHandle || !conn.targetHandle) return false;
-      const from = portShape(
-        registry.get(d.nodes.find((n) => n.id === conn.source)?.kind ?? ""),
-        conn.sourceHandle,
-        "out",
-      );
-      const into = portShape(
-        registry.get(d.nodes.find((n) => n.id === conn.target)?.kind ?? ""),
-        conn.targetHandle,
-        "in",
-      );
+      const source = d.nodes.find((n) => n.id === conn.source);
+      const target = d.nodes.find((n) => n.id === conn.target);
+      const from = portShape(registry.get(source?.kind ?? ""), conn.sourceHandle, "out", source);
+      const into = portShape(registry.get(target?.kind ?? ""), conn.targetHandle, "in", target);
       if (!from || !into || !shapeAccepts(into, from)) return false;
       // One wire per input.
       return !d.edges.some(
@@ -870,30 +1059,52 @@ function Editor({
     [canEdit, mutateDoc],
   );
 
+  /** Where a new node lands: the middle of the canvas as shown, not of the
+   * window (a host may give the editor one corner of the page). */
+  const canvasCenter = useCallback((): [number, number] => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const center = flow.screenToFlowPosition(
+      rect
+        ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+        : { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+    );
+    return [Math.round(center.x), Math.round(center.y)];
+  }, [flow]);
+
   const addNode = useCallback(
     (kind: string) => {
-      // In the middle of the canvas as shown, not of the window: a host may
-      // give the editor one corner of the page.
-      const rect = canvasRef.current?.getBoundingClientRect();
-      const center = flow.screenToFlowPosition(
-        rect
-          ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
-          : { x: window.innerWidth / 2, y: window.innerHeight / 2 },
-      );
+      const pos = canvasCenter();
       mutateDoc((d) => {
-        let i = d.nodes.length + 1;
-        while (d.nodes.some((n) => n.id === `n${i}`)) i++;
-        d.nodes.push({
-          id: `n${i}`,
-          kind,
-          name: "",
-          params: {},
-          pos: [Math.round(center.x), Math.round(center.y)],
-        });
+        d.nodes.push({ id: freshId(d), kind, name: "", params: {}, pos });
       });
     },
-    [flow, mutateDoc],
+    [canvasCenter, mutateDoc],
   );
+
+  /** Add a Sub-patch node holding a copy of `inner`. */
+  const insertSubpatch = useCallback(
+    (inner: PatchDoc) => {
+      const pos = canvasCenter();
+      const sub = structuredClone(inner);
+      sub.id = "";
+      mutateDoc((d) => {
+        d.nodes.push({ id: freshId(d), kind: SUBPATCH_KIND, name: "", params: {}, pos, sub });
+      });
+    },
+    [canvasCenter, mutateDoc],
+  );
+  const insertSubpatchRef = useRef(insertSubpatch);
+  insertSubpatchRef.current = insertSubpatch;
+
+  const subpatchChoices = useMemo<SubpatchChoice[]>(() => {
+    if (!registry?.has(SUBPATCH_KIND)) return [];
+    return [
+      ...patches
+        .filter((p) => p.id !== doc?.id)
+        .map((p) => ({ id: p.id, name: p.name, nodes: p.nodes, preset: false })),
+      ...presets.map((p) => ({ id: p.id, name: p.name, nodes: p.nodes.length, preset: true })),
+    ];
+  }, [registry, patches, presets, doc?.id]);
 
   // --- toolbar actions ---
 
@@ -957,6 +1168,16 @@ function Editor({
           ))}
         </select>
         {canEdit && <button onClick={() => openDoc(emptyPatch())}>＋ New</button>}
+        {canEdit && doc && (
+          <>
+            <button type="button" onClick={undo} disabled={!history.current.canUndo} title="Undo (Ctrl+Z)">
+              ↶ Undo
+            </button>
+            <button type="button" onClick={redo} disabled={!history.current.canRedo} title="Redo (Ctrl+Shift+Z)">
+              ↷ Redo
+            </button>
+          </>
+        )}
         {canEdit && presets.length > 0 && (
           <select
             value=""
@@ -1032,8 +1253,19 @@ function Editor({
         {canEdit && doc && registry && (!compact || sheet === "palette") && (
           <Palette
             grouped={grouped}
+            subpatches={subpatchChoices}
             onPick={(kind) => {
               addNode(kind);
+              if (compact) setSheet(null);
+            }}
+            onPickSubpatch={(choice) => {
+              if (choice.preset) {
+                const preset = presets.find((p) => p.id === choice.id);
+                if (preset) insertSubpatch(preset);
+              } else {
+                insertRequestedId.current = choice.id;
+                store.get(choice.id);
+              }
               if (compact) setSheet(null);
             }}
             onClose={compact ? () => setSheet(null) : undefined}
@@ -1098,7 +1330,8 @@ function Editor({
             nodeId={selectedNode}
             registry={registry}
             canEdit={canEdit}
-            onChange={mutateDoc}
+            onChange={(mutate, key) => mutateDoc(mutate, true, key)}
+            onDuplicate={() => duplicateNodes([selectedNode])}
             extras={nodeExtras}
             onClose={compact ? () => setSheet(null) : undefined}
           />

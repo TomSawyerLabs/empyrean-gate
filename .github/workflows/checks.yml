@@ -93,6 +93,10 @@ jobs:
         working-directory: packages/patch-web
         run: bun run typecheck
 
+      - name: Unit tests (editor history)
+        working-directory: packages/patch-web
+        run: bun run test
+
   rust:
     name: Rust unit tests (${{ matrix.os }})
     # Windows as well as Linux: the show machine is Windows, and the difference

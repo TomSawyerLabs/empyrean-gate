@@ -176,7 +176,8 @@ const MOCK_PRESET: MockPatch = {
     { id: "n2", kind: "output", name: "", params: {}, pos: [420, 120] },
   ],
   edges: [{ from: { node: "n1", port: "out" }, to: { node: "n2", port: "in" } }],
-  exposed: [],
+  // Exposed so the preset offers a port when inserted as a Sub-patch.
+  exposed: [{ node: "n1", param: "scale", label: "Scale" }],
 };
 const patchLibraries = new WeakMap<object, Map<string, MockPatch>>();
 const activePatch = new WeakMap<object, string | null>();
@@ -243,6 +244,33 @@ const server = Bun.serve({
           category: "input",
           inputs: [],
           outputs: [{ name: "tex", shape: "texture" }],
+          params: [],
+        },
+        {
+          id: "clip",
+          label: "Clip",
+          category: "input",
+          inputs: [],
+          outputs: [{ name: "tex", shape: "texture" }],
+          params: [
+            { name: "frames", label: "Frames used", min: 1, max: 64, default: 16, integrate: false, kind: "number" },
+            {
+              name: "grid",
+              label: "Sheet",
+              min: 0,
+              max: 2,
+              default: 0,
+              integrate: false,
+              kind: { select: ["4×4 (16 frames of 64 px)", "8×8 (64 frames of 32 px)", "2×2 (4 frames of 128 px)"] },
+            },
+          ],
+        },
+        {
+          id: "subpatch",
+          label: "Sub-patch",
+          category: "combine",
+          inputs: [],
+          outputs: [{ name: "out", shape: "field_color" }],
           params: [],
         },
         {

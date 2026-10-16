@@ -17,6 +17,8 @@ export {
   type MiniSource,
 } from "./minis";
 export * from "../types";
+export { CLIP_GRIDS, fileToClip, type ClipSheet } from "./clip";
+export { History } from "./history";
 export {
   exportPatch,
   imageFileToMedia,
