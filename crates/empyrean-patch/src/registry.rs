@@ -501,6 +501,32 @@ pub const TYPES: &[NodeType] = &[
         }],
         params: &[],
     },
+    NodeType {
+        // A short loop stored in the patch: `media` is a 256² sprite sheet of
+        // grid×grid frames (see `clip_at`); `fps` integrates into a frame
+        // phase, so speed changes never jump. Scrub mode follows `scrub`
+        // (wire Touch or Time into it).
+        id: "clip",
+        label: "Clip",
+        category: Category::Input,
+        inputs: &[],
+        outputs: &[PortDef {
+            name: "tex",
+            shape: Shape::Texture,
+        }],
+        params: &[
+            rate("fps", "Frames per second", -30.0, 30.0, 10.0),
+            sel("mode", "Mode", &["loop", "ping-pong", "scrub"]),
+            num("scrub", "Scrub (scrub mode)", 0.0, 1.0, 0.0),
+            num("frames", "Frames used", 1.0, 64.0, 16.0),
+            // The sheet's layout; the picker sets it. Append only.
+            sel(
+                "grid",
+                "Sheet",
+                &["4×4 (16 frames of 64 px)", "8×8 (64 frames of 32 px)", "2×2 (4 frames of 128 px)"],
+            ),
+        ],
+    },
     // -- Scalar ops ---------------------------------------------------------
     NodeType {
         id: "scalar_math",
@@ -1197,6 +1223,33 @@ pub const TYPES: &[NodeType] = &[
             BRIGHTNESS,
         ],
     },
+    NodeType {
+        // The pixel's own position as a field: radius 0 (inner) → 1 (outer),
+        // angle in turns, x/y 0..1, spoke and pixel index as fractions.
+        // After a Transform it reports the transformed position.
+        id: "coordinate",
+        label: "Coordinate",
+        category: Category::Generator,
+        inputs: &[],
+        outputs: &out(Shape::FieldScalar),
+        params: &[
+            sel("which", "Which", &["radius", "angle", "x", "y", "spoke", "pixel"]),
+            num("scale", "Scale", -8.0, 8.0, 1.0),
+            num("offset", "Offset", -2.0, 2.0, 0.0),
+            sel("wrap", "Wrap into 0..1", &["off", "on"]),
+        ],
+    },
+    NodeType {
+        // What the array showed last frame, at this pixel (after a Transform:
+        // at the transformed position, so zoom/rotate trails work), times
+        // Decay. Blend it under a new source for trails and echoes.
+        id: "feedback",
+        label: "Feedback",
+        category: Category::Generator,
+        inputs: &[],
+        outputs: COLOR_OUT,
+        params: &[num("decay", "Decay", 0.0, 1.0, 0.9)],
+    },
     // -- Field ops ----------------------------------------------------------
     NodeType {
         id: "transform",
@@ -1225,6 +1278,92 @@ pub const TYPES: &[NodeType] = &[
         }],
         outputs: COLOR_OUT,
         params: &[HUE, HUE_RANGE, SATURATION, BRIGHTNESS],
+    },
+    NodeType {
+        id: "field_math",
+        label: "Field math",
+        category: Category::FieldOp,
+        inputs: &[
+            PortDef {
+                name: "a",
+                shape: Shape::FieldScalar,
+            },
+            PortDef {
+                name: "b",
+                shape: Shape::FieldScalar,
+            },
+        ],
+        outputs: &out(Shape::FieldScalar),
+        params: &[
+            // Append only. Unary ops use A.
+            sel(
+                "op",
+                "Op",
+                &[
+                    "add",
+                    "subtract",
+                    "multiply",
+                    "min",
+                    "max",
+                    "difference",
+                    "greater than (1/0)",
+                    "step (A around B)",
+                    "invert (1 − A)",
+                    "power",
+                ],
+            ),
+            num("gain", "Gain", -4.0, 4.0, 1.0),
+            num("offset", "Offset", -2.0, 2.0, 0.0),
+        ],
+    },
+    NodeType {
+        id: "luminance",
+        label: "Brightness of",
+        category: Category::FieldOp,
+        inputs: &[PortDef {
+            name: "in",
+            shape: Shape::FieldColor,
+        }],
+        outputs: &out(Shape::FieldScalar),
+        params: &[sel("measure", "Measure", &["luminance", "brightest channel", "alpha"])],
+    },
+    NodeType {
+        id: "color_adjust",
+        label: "Color adjust",
+        category: Category::FieldOp,
+        inputs: &[PortDef {
+            name: "in",
+            shape: Shape::FieldColor,
+        }],
+        outputs: COLOR_OUT,
+        params: &[
+            num("hue", "Hue shift (turns)", -1.0, 1.0, 0.0),
+            num("saturation", "Saturation ×", 0.0, 3.0, 1.0),
+            num("brightness", "Brightness ×", 0.0, 3.0, 1.0),
+            num("contrast", "Contrast", 0.0, 3.0, 1.0),
+            sel("invert", "Invert", &["off", "on"]),
+        ],
+    },
+    NodeType {
+        // A scalar field through a colour ramp (cosine palettes).
+        id: "palette",
+        label: "Palette",
+        category: Category::FieldOp,
+        inputs: &[PortDef {
+            name: "in",
+            shape: Shape::FieldScalar,
+        }],
+        outputs: COLOR_OUT,
+        params: &[
+            sel(
+                "palette",
+                "Palette",
+                &["rainbow", "fire", "ocean", "neon", "pastel", "mono", "sunset", "forest"],
+            ),
+            num("cycles", "Cycles", 0.1, 8.0, 1.0),
+            num("offset", "Offset", -1.0, 1.0, 0.0),
+            BRIGHTNESS,
+        ],
     },
     // -- Combine ------------------------------------------------------------
     NodeType {

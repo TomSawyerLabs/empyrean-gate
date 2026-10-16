@@ -31,7 +31,8 @@ use std::collections::BTreeMap;
 /// Older files are upgraded by [`migrate::migrate`].
 pub const PATCH_FORMAT: u32 = 3;
 
-/// Images a patch may carry (Still image nodes), each its own GPU slot.
+/// Pictures a patch may carry (Still image and Clip nodes), each its own
+/// media cell on the GPU.
 pub const MAX_PATCH_IMAGES: usize = 4;
 /// Longest accepted image data URL (a 256×256 WebP is ~20–60 KB; PNG more).
 pub const MAX_MEDIA_BYTES: usize = 600_000;

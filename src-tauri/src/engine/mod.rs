@@ -366,7 +366,10 @@ impl Engine {
         let size = (npix as u64) * 4;
         let out = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("out"),
-            size,
+            // Two frames: a patch's `finish` keeps frame N-1 in the second
+            // half for its Feedback node (patch_lib.wgsl); readback copies
+            // only the first.
+            size: size * 2,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });

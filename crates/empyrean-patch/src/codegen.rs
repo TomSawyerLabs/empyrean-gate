@@ -141,6 +141,13 @@ fn is_gpu_kind(kind: &str) -> bool {
             | "render_points"
             | "video_in"
             | "image_in"
+            | "clip"
+            | "coordinate"
+            | "feedback"
+            | "field_math"
+            | "luminance"
+            | "color_adjust"
+            | "palette"
             | "texture_sample"
             | "output"
     )
@@ -252,12 +259,12 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
     }
 
     // -- Code generation ----------------------------------------------------
-    // Still image nodes own media cells 1.. in document order.
+    // Still image and Clip nodes own media cells 1.. in document order.
     let images: Vec<(usize, u32)> = doc
         .nodes
         .iter()
         .enumerate()
-        .filter(|(_, n)| n.kind == "image_in")
+        .filter(|(_, n)| validate::owns_media_cell(&n.kind))
         .zip(1u32..)
         .map(|((i, _), slot)| (i, slot))
         .collect();
@@ -335,18 +342,31 @@ struct Gen<'a> {
 }
 
 impl Gen<'_> {
-    /// What a texture input samples: the live video (cell 0) for Video in, or
-    /// the upstream Still image's own media cell.
+    /// What a texture input samples: the live video (cell 0) for Video in,
+    /// the upstream Still image's own media cell, or the current frame of the
+    /// upstream Clip's sheet.
     fn texture_sample_expr(&self, node: usize) -> String {
-        match self.upstream(node, "tex") {
-            Some((from, _)) if self.doc.nodes[*from].kind == "image_in" => {
-                let slot = self
-                    .images
-                    .iter()
-                    .find(|(i, _)| i == from)
-                    .map(|(_, s)| *s)
-                    .unwrap_or(0);
-                format!("image_at({slot}u, uv)")
+        let Some((from, _)) = self.upstream(node, "tex") else {
+            return "video_at(uv)".to_string();
+        };
+        let from = *from;
+        let slot = self
+            .images
+            .iter()
+            .find(|(i, _)| *i == from)
+            .map(|(_, s)| *s)
+            .unwrap_or(0);
+        match self.doc.nodes[from].kind.as_str() {
+            "image_in" => format!("image_at({slot}u, uv)"),
+            "clip" => {
+                let grid = [4u32, 8, 2][self.select(from, "grid").min(2) as usize];
+                format!(
+                    "clip_at({slot}u, uv, clip_frame({phase}, {frames}, {mode}u, {scrub}), {grid}u)",
+                    phase = self.p(from, "fps"),
+                    frames = self.p(from, "frames"),
+                    mode = self.select(from, "mode"),
+                    scrub = self.p(from, "scrub"),
+                )
             }
             _ => "video_at(uv)".to_string(),
         }
@@ -935,6 +955,94 @@ impl Gen<'_> {
             // Still images use that same browser-decoded RGBA texture, but a
             // separate source node makes the patch's media contract explicit.
             "image_in" => return Ok(()),
+            // A Clip is a Still image whose sheet holds frames; sampled by
+            // Texture sample through `clip_at`.
+            "clip" => return Ok(()),
+            "coordinate" => {
+                let which = match self.select(i, "which") {
+                    // rn runs inner_over_outer..1; after a Transform it is the
+                    // transformed radius, which is what a field should see.
+                    0 => "clamp((c.rn - G.inner_over_outer) / max(1.0 - G.inner_over_outer, 0.001), 0.0, 1.0)",
+                    1 => "fract(c.theta / TAU + 1.0)",
+                    2 => "c.pos.x * 0.5 + 0.5",
+                    3 => "c.pos.y * 0.5 + 0.5",
+                    4 => "f32(c.spoke) / f32(max(G.spokes, 1u))",
+                    _ => "c.r01",
+                };
+                let wrap = if self.select(i, "wrap") == 1 { "fract(t)" } else { "t" };
+                format!(
+                    "    let t = ({which}) * {scale} + {offset};\n\
+                     \x20   return {wrap};",
+                    scale = self.p(i, "scale"),
+                    offset = self.p(i, "offset"),
+                )
+            }
+            "feedback" => format!(
+                "    let fb = feedback_at(c) * clamp({decay}, 0.0, 1.0);\n\
+                 \x20   return vec4f(fb, clamp(max(fb.r, max(fb.g, fb.b)), 0.0, 1.0));",
+                decay = self.p(i, "decay"),
+            ),
+            "field_math" => {
+                let op = match self.select(i, "op") {
+                    0 => "a + b",
+                    1 => "a - b",
+                    2 => "a * b",
+                    3 => "min(a, b)",
+                    4 => "max(a, b)",
+                    5 => "abs(a - b)",
+                    6 => "select(0.0, 1.0, a > b)",
+                    7 => "smoothstep(b - 0.1, b + 0.1, a)",
+                    8 => "1.0 - a",
+                    _ => "pow(max(a, 0.0), b)",
+                };
+                format!(
+                    "    let a = {a};\n\
+                     \x20   let b = {b};\n\
+                     \x20   return ({op}) * {gain} + {offset};",
+                    a = self.scalar_field_input(i, "a", "c"),
+                    b = self.scalar_field_input(i, "b", "c"),
+                    gain = self.p(i, "gain"),
+                    offset = self.p(i, "offset"),
+                )
+            }
+            "luminance" => {
+                let measure = match self.select(i, "measure") {
+                    0 => "dot(s.rgb, vec3f(0.2126, 0.7152, 0.0722))",
+                    1 => "max(s.r, max(s.g, s.b))",
+                    _ => "s.a",
+                };
+                format!(
+                    "    let s = {input};\n\
+                     \x20   return {measure};",
+                    input = self.color_input(i, "in", "c"),
+                )
+            }
+            "color_adjust" => {
+                let invert = if self.select(i, "invert") == 1 { "1.0 - rgb" } else { "rgb" };
+                format!(
+                    "    let s = {input};\n\
+                     \x20   let hsv = rgb2hsv(max(s.rgb, vec3f(0.0)));\n\
+                     \x20   var rgb = hsv2rgb(hsv.x + {hue}, clamp(hsv.y * {sat}, 0.0, 1.0), hsv.z * max({bright}, 0.0));\n\
+                     \x20   rgb = (rgb - vec3f(0.5)) * max({contrast}, 0.0) + vec3f(0.5);\n\
+                     \x20   rgb = clamp(rgb, vec3f(0.0), vec3f(4.0));\n\
+                     \x20   return vec4f({invert}, s.a);",
+                    input = self.color_input(i, "in", "c"),
+                    hue = self.p(i, "hue"),
+                    sat = self.p(i, "saturation"),
+                    bright = self.p(i, "brightness"),
+                    contrast = self.p(i, "contrast"),
+                )
+            }
+            "palette" => format!(
+                "    let v = {input};\n\
+                 \x20   let col = cosine_palette(v * {cycles} + {offset}, {which}u) * max({bright}, 0.0);\n\
+                 \x20   return vec4f(col, clamp(v, 0.0, 1.0));",
+                input = self.scalar_field_input(i, "in", "c"),
+                cycles = self.p(i, "cycles"),
+                offset = self.p(i, "offset"),
+                which = self.select(i, "palette"),
+                bright = self.p(i, "brightness"),
+            ),
             "texture_sample" => {
                 if self.upstream(i, "tex").is_none() {
                     "    return vec4f(0.0);".to_string()
@@ -1015,8 +1123,9 @@ impl Gen<'_> {
             other => return Err(format!("no GPU codegen for node kind \"{other}\"")),
         };
 
-        let ret = match self.doc.nodes[i].kind.as_str() {
-            "gradient" | "touch_mask" => "f32",
+        // Scalar fields are `f32`, colour fields `vec4f` (rgb, coverage).
+        let ret = match registry::lookup(kind).and_then(|t| t.output_shape("out")) {
+            Some(Shape::FieldScalar) => "f32",
             _ => "vec4f",
         };
         // Transform/texture_sample rename their ctx arg (they derive a
@@ -1098,6 +1207,7 @@ impl Gen<'_> {
              \x20   if idx >= total * {slots}u {{\n\
              \x20       return;\n\
              \x20   }}\n\
+             \x20   PREVIEW = true;\n\
              \x20   let slot = idx / total;\n\
              \x20   let pix = idx % total;\n\
              \x20   let spoke = pix / G.pixels;\n\
@@ -1306,6 +1416,62 @@ mod tests {
         )
         .validate(&module)
         .expect("preview WGSL validates");
+    }
+
+    /// The round-4 field nodes, chained, make one shader naga accepts, and
+    /// Clip / Feedback reach the helpers they rely on.
+    #[test]
+    fn field_nodes_clip_and_feedback_validate() {
+        let mut clip = node("clip", "clip");
+        clip.media = Some("data:image/png;base64,AAAA".into());
+        clip.params.insert("grid".into(), 1.0);
+        clip.params.insert("mode".into(), 1.0);
+        let mut math = node("fm", "field_math");
+        math.params.insert("op".into(), 7.0);
+        let d = PatchDoc {
+            nodes: vec![
+                node("co", "coordinate"),
+                node("lfo", "lfo"),
+                math,
+                node("pal", "palette"),
+                node("adj", "color_adjust"),
+                node("lum", "luminance"),
+                node("fb", "feedback"),
+                node("spin", "transform"),
+                node("mix", "blend"),
+                clip,
+                node("ts", "texture_sample"),
+                node("mix2", "blend"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("co", "out", "fm", "a"),
+                edge("lfo", "out", "fm", "b"),
+                edge("fm", "out", "pal", "in"),
+                edge("pal", "out", "adj", "in"),
+                edge("adj", "out", "lum", "in"),
+                edge("fb", "out", "spin", "in"),
+                edge("spin", "out", "mix", "base"),
+                edge("lum", "out", "mix", "over"),
+                edge("clip", "tex", "ts", "tex"),
+                edge("mix", "out", "mix2", "base"),
+                edge("ts", "out", "mix2", "over"),
+                edge("mix2", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let prog = compile(&d).expect("compiles");
+        validates(&prog.wgsl);
+        validates(&prog.preview_wgsl);
+        assert_eq!(prog.images, vec![(9, 1)], "the clip owns media cell 1");
+        assert!(prog.wgsl.contains("clip_at(1u, uv, clip_frame("), "{}", prog.wgsl);
+        assert!(prog.wgsl.contains(", 1u, "), "ping-pong mode is baked in");
+        assert!(prog.wgsl.contains("), 8u)"), "an 8×8 sheet");
+        assert!(prog.wgsl.contains("feedback_at(c)"));
+        assert!(prog.wgsl.contains("smoothstep(b - 0.1, b + 0.1, a)"));
+        assert!(prog.preview_wgsl.contains("PREVIEW = true;"));
+        // The clip's fps is integrated into a frame phase.
+        assert!(prog.slots.iter().any(|s| s.node == 9 && s.param.as_deref() == Some("fps") && s.integrate));
     }
 
     /// A registry kind that neither kind list knows compiles to "not

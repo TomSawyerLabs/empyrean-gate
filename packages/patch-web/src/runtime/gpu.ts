@@ -186,7 +186,9 @@ export class GateGpu {
     this.audio = buf(limits.audioBytes, U.UNIFORM | U.COPY_DST);
     this.fx = buf(limits.effectBytes * limits.maxEffects, U.STORAGE | U.COPY_DST);
     // COPY_SRC so tests (and a future capture/export) can read the frame back.
-    this.out = buf(leds * 4, U.STORAGE | U.COPY_SRC);
+    // Two frames: the patch's `finish` keeps frame N-1 in the second half
+    // for its Feedback node (patch_lib.wgsl); the view draws the first.
+    this.out = buf(leds * 8, U.STORAGE | U.COPY_SRC);
     this.dabs = buf(limits.dabBytes * limits.maxDabs, U.STORAGE | U.COPY_DST);
     this.scope = buf(limits.scopeFloats * limits.audioSources * 4, U.STORAGE | U.COPY_DST);
     // Cell 0: the live video frame; cells 1..: the patch's Still images.

@@ -117,6 +117,12 @@ impl fmt::Display for PatchError {
     }
 }
 
+/// Node kinds whose `media` lives in a media cell of the VIDEO buffer
+/// (`abi::MEDIA_CELLS`): Still images and Clips.
+pub fn owns_media_cell(kind: &str) -> bool {
+    matches!(kind, "image_in" | "clip")
+}
+
 /// Collects ALL problems (the editor shows every red wire at once) rather than
 /// failing on the first.
 pub fn validate(doc: &PatchDoc) -> Result<Validated, Vec<PatchError>> {
@@ -133,14 +139,14 @@ pub fn validate(doc: &PatchDoc) -> Result<Validated, Vec<PatchError>> {
         }]);
     }
 
-    let images = doc.nodes.iter().filter(|n| n.kind == "image_in").count();
+    let images = doc.nodes.iter().filter(|n| owns_media_cell(&n.kind)).count();
     if images > MAX_PATCH_IMAGES {
         errors.push(PatchError::TooManyImages { count: images });
     }
     for n in &doc.nodes {
         if let Some(media) = &n.media {
-            let detail = if n.kind != "image_in" {
-                Some("only Still image nodes carry an image".to_string())
+            let detail = if !owns_media_cell(&n.kind) {
+                Some("only Still image and Clip nodes carry an image".to_string())
             } else if media.len() > MAX_MEDIA_BYTES {
                 Some(format!("its image is too large ({} bytes; limit {MAX_MEDIA_BYTES})", media.len()))
             } else if !media.starts_with("data:image/") || !media.contains(";base64,") {

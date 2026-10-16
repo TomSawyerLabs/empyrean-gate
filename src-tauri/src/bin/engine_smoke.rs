@@ -285,6 +285,18 @@ fn patch_demo_doc() -> patch::PatchDoc {
             node("img", "image_in"),
             node("pic", "texture_sample"),
             node("mix4", "blend"),
+            // Round 4: a coordinate through a palette, last frame fed back
+            // through the spinning Transform, and a Clip (media cell 2) whose
+            // sheet is the same solid picture.
+            node("co", "coordinate"),
+            node("pal", "palette"),
+            node("fb", "feedback"),
+            node("fbspin", "transform"),
+            node("mix5", "blend"),
+            node("mix6", "blend"),
+            node("clip", "clip"),
+            node("frame", "texture_sample"),
+            node("mix7", "blend"),
             node("out", "output"),
         ],
         edges: vec![
@@ -301,7 +313,16 @@ fn patch_demo_doc() -> patch::PatchDoc {
             edge("mix3", "out", "mix4", "base"),
             edge("img", "tex", "pic", "tex"),
             edge("pic", "out", "mix4", "over"),
-            edge("mix4", "out", "out", "in"),
+            edge("co", "out", "pal", "in"),
+            edge("fb", "out", "fbspin", "in"),
+            edge("fbspin", "out", "mix5", "base"),
+            edge("mix4", "out", "mix5", "over"),
+            edge("mix5", "out", "mix6", "base"),
+            edge("pal", "out", "mix6", "over"),
+            edge("clip", "tex", "frame", "tex"),
+            edge("mix6", "out", "mix7", "base"),
+            edge("frame", "out", "mix7", "over"),
+            edge("mix7", "out", "out", "in"),
         ],
         ..Default::default()
     }
@@ -322,8 +343,10 @@ fn demo_image() -> String {
 
 fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
     let mut doc = patch_demo_doc();
-    if let Some(img) = doc.nodes.iter_mut().find(|n| n.id == "img") {
-        img.media = Some(demo_image());
+    for id in ["img", "clip"] {
+        if let Some(n) = doc.nodes.iter_mut().find(|n| n.id == id) {
+            n.media = Some(demo_image());
+        }
     }
     let prog = patch::codegen::compile(&doc).map_err(|e| anyhow::anyhow!(e))?;
     engine
@@ -339,7 +362,7 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
         })
         .collect::<Result<_>>()?;
     let image_mask = engine.set_patch_images(&images);
-    anyhow::ensure!(image_mask == 0b10, "demo image loads into cell 1");
+    anyhow::ensure!(image_mask == 0b110, "demo image and clip load into cells 1 and 2");
     let mut rt = patch::eval::Runtime::new(doc, prog);
 
     let pixels = 24_192;

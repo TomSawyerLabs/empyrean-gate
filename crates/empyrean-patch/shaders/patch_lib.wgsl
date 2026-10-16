@@ -347,6 +347,86 @@ fn image_at(slot: u32, uv: vec2f) -> vec4f {
     return mix(a, b, f.y);
 }
 
+
+// Previews render node functions alone into their own buffer: nothing that
+// reads the last frame may do so there. Set by the preview entry point.
+var<private> PREVIEW: bool = false;
+
+/// Which frame of a Clip to show: `phase` counts frames (fps integrated),
+/// `frames` is how many cells of its sheet are in use.
+fn clip_frame(phase: f32, frames: f32, mode: u32, scrub: f32) -> u32 {
+    let n = i32(clamp(frames + 0.5, 1.0, 64.0));
+    if mode == 2u {
+        return u32(clamp(scrub, 0.0, 1.0) * f32(n - 1) + 0.5);
+    }
+    let k = i32(floor(clamp(phase, -1.0e6, 1.0e6)));
+    if mode == 1u && n > 1 {
+        let p = 2 * n - 2;
+        let m = ((k % p) + p) % p;
+        return u32(select(p - m, m, m < n));
+    }
+    return u32(((k % n) + n) % n);
+}
+
+/// Frame `frame` of the Clip in media cell `slot`, whose sheet is grid×grid
+/// frames; bilinear inside the frame, transparent outside 0..1 or unloaded.
+fn clip_at(slot: u32, uv: vec2f, frame: u32, grid: u32) -> vec4f {
+    if (G.image_mask & (1u << slot)) == 0u || any(uv < vec2f(0.0)) || any(uv > vec2f(1.0)) {
+        return vec4f(0.0);
+    }
+    let g = clamp(grid, 1u, 16u);
+    let cell = IMAGE_SIZE / g;
+    let f = frame % (g * g);
+    let origin = vec2u(f % g, f / g) * cell;
+    let p = uv * f32(cell - 1u);
+    let p0 = vec2u(floor(p));
+    let p1 = min(p0 + vec2u(1u), vec2u(cell - 1u));
+    let fr = fract(p);
+    let a = mix(
+        image_texel(slot, origin.x + p0.x, origin.y + p0.y),
+        image_texel(slot, origin.x + p1.x, origin.y + p0.y),
+        fr.x,
+    );
+    let b = mix(
+        image_texel(slot, origin.x + p0.x, origin.y + p1.y),
+        image_texel(slot, origin.x + p1.x, origin.y + p1.y),
+        fr.x,
+    );
+    return mix(a, b, fr.y);
+}
+
+/// Cosine colour ramps (after Inigo Quilez): `t` in turns, wraps.
+fn cosine_palette(t: f32, which: u32) -> vec3f {
+    var a = vec3f(0.5);
+    var b = vec3f(0.5);
+    var c = vec3f(1.0);
+    var d = vec3f(0.0, 0.33, 0.67);
+    switch which {
+        case 1u: { a = vec3f(0.55, 0.2, 0.05); b = vec3f(0.45, 0.35, 0.15); d = vec3f(0.0, 0.15, 0.3); }
+        case 2u: { a = vec3f(0.1, 0.35, 0.5); b = vec3f(0.1, 0.3, 0.4); d = vec3f(0.0, 0.1, 0.2); }
+        case 3u: { c = vec3f(2.0, 1.0, 0.0); d = vec3f(0.5, 0.2, 0.25); }
+        case 4u: { a = vec3f(0.8, 0.5, 0.4); b = vec3f(0.2, 0.4, 0.2); c = vec3f(2.0, 1.0, 1.0); d = vec3f(0.0, 0.25, 0.25); }
+        case 5u: { d = vec3f(0.0); }
+        case 6u: { d = vec3f(0.0, 0.1, 0.2); }
+        case 7u: { a = vec3f(0.25, 0.4, 0.2); b = vec3f(0.25, 0.4, 0.2); d = vec3f(0.1, 0.3, 0.1); }
+        default: {}
+    }
+    return max(a + b * cos(TAU * (c * t + d)), vec3f(0.0));
+}
+
+/// What the array showed last frame at ctx's position, 0..1 RGB. `finish`
+/// keeps frame N-1 in the second half of OUT. Black in previews.
+fn feedback_at(c: Ctx) -> vec3f {
+    if PREVIEW {
+        return vec3f(0.0);
+    }
+    let total = G.spokes * G.pixels;
+    let spoke = u32(fract((c.theta + G.rotation) / TAU + 1.0) * f32(G.spokes) + 0.5) % max(G.spokes, 1u);
+    let r01 = clamp((1.0 - c.rn) / max(1.0 - G.inner_over_outer, 0.001), 0.0, 1.0);
+    let i = u32(r01 * f32(max(G.pixels - 1u, 1u)) + 0.5);
+    return unpack4x8unorm(OUT[total + spoke * G.pixels + i]).rgb;
+}
+
 // ---------------------------------------------------------------------------
 // Per-pixel context — identical meaning to gate.wgsl's Ctx.
 // ---------------------------------------------------------------------------
@@ -809,5 +889,8 @@ fn finish(ctx: Ctx, idx: u32, patch_rgb: vec3f) {
     let r = u32(acc.r * 255.0 + 0.5);
     let g = u32(acc.g * 255.0 + 0.5);
     let b = u32(acc.b * 255.0 + 0.5);
+    // Keep last frame's value for Feedback (OUT is twice the array; see
+    // feedback_at), then write this one.
+    OUT[G.spokes * G.pixels + idx] = OUT[idx];
     OUT[idx] = r | (g << 8u) | (b << 16u);
 }
