@@ -444,10 +444,12 @@
   font-size: 13px;
 }
 
+/* At the top: the bottom of a phone screen is where hosts put toasts and
+   where React Flow keeps its zoom controls. */
 .patch-node-pill {
   position: absolute;
   left: 50%;
-  bottom: 14px;
+  top: 12px;
   transform: translateX(-50%);
   z-index: 5;
   max-width: calc(100% - 24px);
