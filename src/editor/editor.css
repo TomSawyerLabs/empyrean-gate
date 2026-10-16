@@ -106,7 +106,8 @@
   color: var(--pe-muted, #8a85a8);
 }
 
-.palette-item {
+.palette-item,
+.palette-sub {
   display: block;
   width: 100%;
   text-align: left;
@@ -264,7 +265,8 @@
 .palette-item.cat-scalar { border-left: 3px solid #7cc0ff; }
 .palette-item.cat-generator { border-left: 3px solid #7c5cff; }
 .palette-item.cat-field { border-left: 3px solid #c05cff; }
-.palette-item.cat-combine { border-left: 3px solid #ffb84d; }
+.palette-item.cat-combine,
+.palette-sub.cat-combine { border-left: 3px solid #ffb84d; }
 .palette-item.cat-texture { border-left: 3px solid #ff5cab; }
 .palette-item.cat-sink { border-left: 3px solid #4ade80; }
 
@@ -433,7 +435,8 @@
   gap: 6px;
 }
 
-.patch-sheet .palette-item {
+.patch-sheet .palette-item,
+.patch-sheet .palette-sub {
   margin: 0;
   padding: 10px;
   font-size: 14px;
@@ -461,4 +464,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+/* Sub-patch nodes and the palette's Sub-patches group. */
+.pnode-sub {
+  padding: 4px 10px 0;
+  font-size: 11px;
+}
+
+.palette-sub .hint {
+  font-size: 10px;
+}
+
+.patch-clip .patch-image-preview {
+  image-rendering: pixelated;
 }
