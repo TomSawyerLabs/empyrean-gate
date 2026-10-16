@@ -42,7 +42,8 @@ test("a node's settings open on a second tap or from the pill, and Done closes t
   await sheet.getByRole("button", { name: "Done" }).click();
   await expect(sheet).toHaveCount(0);
 
-  // The double-tap route.
+  // The double-tap route, after a pause so it cannot pair with the tap above.
+  await page.waitForTimeout(500);
   await node.click();
   await node.click();
   await expect(page.locator(".patch-side.patch-sheet")).toBeVisible();
