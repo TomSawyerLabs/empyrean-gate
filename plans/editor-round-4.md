@@ -103,10 +103,11 @@ Cameron (2026-10-16), on the round-3 report:
    editor).
 3. **Done.** Editor: undo/redo/duplicate; ClipPicker; thumbnails. Gate
    behaviour tests (patch-subpatch, patch-history, patch-clip).
-4. **Now.** Gate `master` → CI web-dist → site `bun.lock` → `dev` → Preview
-   check.
-5. Site: PWA notifications (worker, webpush, admin page, sw, manifest,
-   tests, README, staged secrets). Push `dev`; check the Preview.
+4. **Done.** Gate `master` `19cc12d` (Checks green) → CI web-dist
+   `11c28a5` → site `bun.lock` → `dev` → Preview check.
+5. **Done (code).** Site: PWA notifications (worker `/api/notify/*`,
+   `worker/webpush.ts` + tests, `/admin`, `public/sw.js`, manifest + icons,
+   README). Secrets staged for Cameron's yes (below).
 
 ## Findings / gotchas
 
@@ -122,14 +123,29 @@ Cameron (2026-10-16), on the round-3 report:
       `--patch` renders Coordinate → Palette, Feedback through a spinning
       Transform and a Clip on Vulkan; patch-web typecheck + 4 history unit
       tests; gate behaviour specs patch-* (13) green on chromium.
-- [ ] Step 4
-- [ ] Step 5 (webpush.ts + 4 unit tests written; endpoints, admin page,
-      service worker, manifest still to do)
+- [x] Step 4 (2026-10-16): site `dev` pinned to web-dist `11c28a5`.
+- [x] Step 5 (2026-10-16): site unit tests 35 (incl. 4 webpush, 3 notify
+      endpoint cases), typecheck, admin spec (3) + playground specs on
+      chromium. The other agent's `playground-mobile.spec.ts:114` fails on
+      current `dev` (toast intercepts the pill click); noted for them.
 
 ## Open questions for the user
 
-1. The three notification secrets (and the bucket, already pending) need
-   your yes; commands are listed under step 5 once written.
+1. **Secrets for crew notifications** (your yes needed, each a Cloudflare
+   change). From the site checkout:
+   ```sh
+   bun run vapid                      # prints VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, ADMIN_TOKEN
+   wrangler secret put VAPID_PUBLIC_KEY
+   wrangler secret put VAPID_PRIVATE_KEY
+   wrangler secret put ADMIN_TOKEN
+   # and for the dev Preview, the same three with:
+   wrangler preview secret put <NAME> --name dev
+   ```
+   Plus the submissions bucket (already staged in ops): subscriptions are
+   stored in it under `notify/`. Until all are set, `/admin` says
+   notifications aren't set up and the endpoints answer 503.
+2. Where the notification should take you when tapped: `/admin` for now
+   (there is no web view of the queue; `bun run submissions` pulls it).
 
 ## Things not to do
 
