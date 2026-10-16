@@ -163,7 +163,10 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub fn new(doc: PatchDoc, prog: Program) -> Self {
+    /// A runtime for `prog`, evaluating the (flattened) document it was
+    /// compiled from.
+    pub fn new(prog: Program) -> Self {
+        let doc = prog.doc.clone();
         let n = doc.nodes.len();
         let slab = vec![0.0; prog.slab_len];
         let slot_acc = vec![0.0; prog.slots.len()];
@@ -247,6 +250,15 @@ impl Runtime {
     /// Apply a live param change (exposed-param play surface) without any
     /// recompile — the next `eval` picks the value up from the doc.
     pub fn set_param(&mut self, node_id: &str, param: &str, value: f32) {
+        // A knob of a sub-patch node lives on an inlined inner node.
+        let (node_id, param) = match self
+            .prog
+            .aliases
+            .get(&(node_id.to_string(), param.to_string()))
+        {
+            Some((n, p)) => (n.as_str(), p.as_str()),
+            None => (node_id, param),
+        };
         if let Some(n) = self.doc.nodes.iter_mut().find(|n| n.id == node_id) {
             if let Some(def) = registry::lookup(&n.kind).and_then(|ty| ty.param(param)) {
                 n.params
@@ -1348,8 +1360,7 @@ mod tests {
     }
 
     fn runtime(doc: PatchDoc) -> Runtime {
-        let prog = compile(&doc).expect("compiles");
-        Runtime::new(doc, prog)
+        Runtime::new(compile(&doc).expect("compiles"))
     }
 
     #[test]

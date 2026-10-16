@@ -165,7 +165,7 @@ mod tests {
             })
             .expect("wired tunnel speed")
             .slot;
-        let mut runtime = Runtime::new(doc, program);
+        let mut runtime = Runtime::new(program);
         let mut silent_audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
         silent_audio[0].bpm = 60.0;
         let mut quiet_audio = silent_audio;

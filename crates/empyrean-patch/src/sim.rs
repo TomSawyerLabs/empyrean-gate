@@ -112,7 +112,7 @@ impl Sim {
     /// Validate and compile `doc` for `geometry`.
     pub fn new(doc: PatchDoc, geometry: Geometry) -> Result<Self, String> {
         let prog = codegen::compile(&doc)?;
-        let rt = Runtime::new(doc.clone(), prog.clone());
+        let rt = Runtime::new(prog.clone());
         let slab = vec![0.0; prog.slab_len];
         let mut sim = Self {
             geometry,
@@ -193,7 +193,7 @@ impl Sim {
         }
         let shader_changed =
             prog.wgsl != self.prog.wgsl || prog.preview_wgsl != self.prog.preview_wgsl;
-        let mut rt = Runtime::new(doc.clone(), prog.clone());
+        let mut rt = Runtime::new(prog.clone());
         // Phases, timers and smoothing carry over: an edit never jumps.
         rt.adopt_state(&self.rt);
         self.rt = rt;
@@ -312,7 +312,7 @@ impl Sim {
             .images
             .iter()
             .map(|&(i, slot)| {
-                let n = &self.doc.nodes[i];
+                let n = &self.prog.doc.nodes[i];
                 (n.id.clone(), slot, n.media.clone())
             })
             .collect()

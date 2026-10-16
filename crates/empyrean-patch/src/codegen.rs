@@ -60,6 +60,12 @@ pub struct Program {
     /// Still image nodes and their media cell (1..=MAX_PATCH_IMAGES), in
     /// document order; the host uploads each node's image to its cell.
     pub images: Vec<(usize, u32)>,
+    /// The document this program was generated from, with every sub-patch
+    /// inlined: every node index above refers to it.
+    pub doc: PatchDoc,
+    /// Live param changes addressed to a sub-patch node, mapped to the
+    /// inlined node (see `flatten::Flat::aliases`).
+    pub aliases: HashMap<(String, String), (String, String)>,
 }
 
 /// One f32 in the parameter slab, filled by the evaluator every frame.
@@ -166,8 +172,15 @@ pub fn uses_touch(doc: &PatchDoc) -> bool {
 /// Validate + transpile a patch. The single entry point the server (activation
 /// check) and the engine (pipeline build) both use.
 pub fn compile(doc: &PatchDoc) -> Result<Program, String> {
-    let validated = validate::validate(doc).map_err(|errs| validate::errors_to_string(&errs))?;
-    compile_validated(doc, &validated)
+    // Sub-patches are inlined first; everything below sees plain nodes, and
+    // the evaluator holds the same flattened document (`Program::doc`).
+    let flat = crate::flatten::flatten(doc)?;
+    let validated =
+        validate::validate(&flat.doc).map_err(|errs| validate::errors_to_string(&errs))?;
+    let mut prog = compile_validated(&flat.doc, &validated)?;
+    prog.doc = flat.doc;
+    prog.aliases = flat.aliases;
+    Ok(prog)
 }
 
 fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, String> {
@@ -331,6 +344,8 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         preview_nodes,
         preview_scalars,
         images,
+        doc: PatchDoc::default(),
+        aliases: HashMap::new(),
     })
 }
 

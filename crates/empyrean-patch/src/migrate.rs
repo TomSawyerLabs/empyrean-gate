@@ -25,8 +25,15 @@ use std::collections::BTreeMap;
 /// Upgrade `doc` to [`PATCH_FORMAT`] in place. Returns whether it changed.
 /// Newer formats are left alone (validation refuses them).
 pub fn migrate(doc: &mut PatchDoc) -> bool {
+    // Sub-patches carry whole documents of their own (format 4).
+    let mut changed = false;
+    for n in &mut doc.nodes {
+        if let Some(sub) = n.sub.as_deref_mut() {
+            changed |= migrate(sub);
+        }
+    }
     if doc.format >= PATCH_FORMAT {
-        return false;
+        return changed;
     }
     if doc.format <= 1 {
         v1_to_v2(doc);
@@ -34,6 +41,7 @@ pub fn migrate(doc: &mut PatchDoc) -> bool {
     if doc.format <= 2 {
         v2_to_v3(doc);
     }
+    // 3 → 4 adds fields (`sub`, Clip nodes) and changes nothing that exists.
     doc.format = PATCH_FORMAT;
     true
 }
@@ -92,6 +100,7 @@ fn add_node(doc: &mut PatchDoc, base: &str, kind: &str, pos: [f32; 2], params: &
             .collect::<BTreeMap<_, _>>(),
         pos,
         media: None,
+        sub: None,
     });
     id
 }

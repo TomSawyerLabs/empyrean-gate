@@ -1843,23 +1843,23 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     state.patch_params.lock().clear();
                     let retain_last_good = live_patch_id.as_deref() == Some(id.as_str());
                     let result = crate::patch::store::load(&crate::patch::store::patches_dir(), id)
-                        .and_then(|doc| {
-                            crate::patch::codegen::compile(&doc).map(|prog| (doc, prog))
-                        });
+                        .and_then(|doc| crate::patch::codegen::compile(&doc));
                     match result {
-                        Ok((doc, prog)) => match engine.set_patch_shader(Some(&prog.wgsl)) {
+                        // `prog.doc` is the patch with sub-patches inlined:
+                        // what every node index below refers to.
+                        Ok(prog) => match engine.set_patch_shader(Some(&prog.wgsl)) {
                             Ok(()) => {
                                 let decoded: Vec<(u32, Vec<u8>)> = prog
                                     .images
                                     .iter()
                                     .filter_map(|&(n, slot)| {
-                                        let media = doc.nodes[n].media.as_deref()?;
+                                        let media = prog.doc.nodes[n].media.as_deref()?;
                                         match crate::patch::media::decode(media) {
                                             Ok(rgba) => Some((slot, rgba)),
                                             Err(e) => {
                                                 log::warn!(
                                                     "patch image on node {} not loaded: {e}",
-                                                    doc.nodes[n].id
+                                                    prog.doc.nodes[n].id
                                                 );
                                                 None
                                             }
@@ -1875,18 +1875,18 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                                     node_ids: prog
                                         .preview_nodes
                                         .iter()
-                                        .map(|&n| doc.nodes[n].id.clone())
+                                        .map(|&n| prog.doc.nodes[n].id.clone())
                                         .collect(),
                                     scalar_refs: prog
                                         .preview_scalars
                                         .iter()
                                         .map(|(n, port)| {
-                                            (doc.nodes[*n].id.clone(), port.to_string())
+                                            (prog.doc.nodes[*n].id.clone(), port.to_string())
                                         })
                                         .collect(),
                                     scalar_nodes: prog.preview_scalars.clone(),
                                 });
-                                let mut rt = crate::patch::eval::Runtime::new(doc, prog);
+                                let mut rt = crate::patch::eval::Runtime::new(prog);
                                 // Re-saving the patch on air (a knob turn, a new
                                 // node) must not restart its timers and phases:
                                 // the rebuilt runtime inherits them.

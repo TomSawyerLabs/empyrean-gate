@@ -29,6 +29,14 @@ export function parsePatchFile(text: string): PatchDoc {
   } catch {
     throw new Error("That file is not JSON.");
   }
+  return parsePatchValue(raw, 0);
+}
+
+/** Sub-patches inside sub-patches, at most this deep (crate
+ * `flatten::MAX_SUBPATCH_DEPTH`). */
+const MAX_SUBPATCH_DEPTH = 4;
+
+function parsePatchValue(raw: unknown, depth: number): PatchDoc {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw new Error("That file is not a patch.");
   }
@@ -49,6 +57,13 @@ export function parsePatchFile(text: string): PatchDoc {
       params: n.params && typeof n.params === "object" ? { ...n.params } : {},
       pos: Array.isArray(n.pos) && n.pos.length === 2 ? [Number(n.pos[0]), Number(n.pos[1])] : [0, 0],
       ...(typeof n.media === "string" ? { media: n.media } : {}),
+      ...(n.sub && typeof n.sub === "object"
+        ? depth < MAX_SUBPATCH_DEPTH
+          ? { sub: parsePatchValue(n.sub, depth + 1) }
+          : (() => {
+              throw new Error("That patch nests sub-patches too deep.");
+            })()
+        : {}),
     })),
     edges: (r.edges ?? []).map((e) => ({
       from: { node: String(e.from?.node ?? ""), port: String(e.from?.port ?? "") },

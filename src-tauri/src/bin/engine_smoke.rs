@@ -356,14 +356,14 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
         .images
         .iter()
         .map(|&(n, slot)| {
-            let rgba = patch::media::decode(doc.nodes[n].media.as_deref().unwrap_or(""))
+            let rgba = patch::media::decode(prog.doc.nodes[n].media.as_deref().unwrap_or(""))
                 .map_err(|e| anyhow::anyhow!(e))?;
             Ok((slot, rgba))
         })
         .collect::<Result<_>>()?;
     let image_mask = engine.set_patch_images(&images);
     anyhow::ensure!(image_mask == 0b110, "demo image and clip load into cells 1 and 2");
-    let mut rt = patch::eval::Runtime::new(doc, prog);
+    let mut rt = patch::eval::Runtime::new(prog);
 
     let pixels = 24_192;
     let (spokes, pixels_per_spoke) = geometry_for(pixels);

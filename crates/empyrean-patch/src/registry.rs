@@ -1367,6 +1367,18 @@ pub const TYPES: &[NodeType] = &[
     },
     // -- Combine ------------------------------------------------------------
     NodeType {
+        // Another patch as one node (`NodeInst::sub`): its exposed knobs are
+        // this node's inputs ("{node}.{param}"), its Output is `out`. Inlined
+        // by `flatten` before validation and codegen; nothing downstream sees
+        // it, so it has no static ports or params.
+        id: "subpatch",
+        label: "Sub-patch",
+        category: Category::Combine,
+        inputs: &[],
+        outputs: COLOR_OUT,
+        params: &[],
+    },
+    NodeType {
         id: "blend",
         label: "Blend",
         category: Category::Combine,

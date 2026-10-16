@@ -14,6 +14,7 @@ pub mod audio;
 pub mod codegen;
 pub mod effects;
 pub mod eval;
+pub mod flatten;
 pub mod migrate;
 pub mod presets;
 pub mod registry;
@@ -28,8 +29,10 @@ use std::collections::BTreeMap;
 /// formats (an older app must never silently mangle a newer patch file).
 /// 2: the Output adds nothing that isn't wired (effects and pen strokes are
 /// streams). 3: Still image nodes carry their own image ([`NodeInst::media`]).
-/// Older files are upgraded by [`migrate::migrate`].
-pub const PATCH_FORMAT: u32 = 3;
+/// 4: Sub-patch nodes carry another document ([`NodeInst::sub`]; Clips carry
+/// a sprite sheet in `media`). Older files are upgraded by
+/// [`migrate::migrate`].
+pub const PATCH_FORMAT: u32 = 4;
 
 /// Pictures a patch may carry (Still image and Clip nodes), each its own
 /// media cell on the GPU.
@@ -129,6 +132,10 @@ pub struct NodeInst {
     /// so a file or a submission is self-contained.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media: Option<String>,
+    /// A Sub-patch node's own document (see [`flatten`]): its exposed knobs
+    /// are this node's inputs, its Output this node's `out`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sub: Option<Box<PatchDoc>>,
 }
 
 impl NodeInst {

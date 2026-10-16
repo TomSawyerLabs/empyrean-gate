@@ -68,6 +68,10 @@ pub enum PatchError {
     TooManyImages {
         count: usize,
     },
+    /// A sub-patch could not be inlined (see `flatten`).
+    Subpatch {
+        detail: String,
+    },
     BadMedia {
         node: String,
         detail: String,
@@ -109,6 +113,7 @@ impl fmt::Display for PatchError {
                 "a patch may carry at most {MAX_PATCH_IMAGES} Still images ({count} here)"
             ),
             Self::BadMedia { node, detail } => write!(f, "node \"{node}\": {detail}"),
+            Self::Subpatch { detail } => f.write_str(detail),
             Self::Cycle { nodes } => write!(f, "dependency cycle through: {}", nodes.join(", ")),
             Self::ExposedUnknown { node, param } => {
                 write!(f, "exposed param \"{param}\" not found on node \"{node}\"")
@@ -137,6 +142,12 @@ pub fn validate(doc: &PatchDoc) -> Result<Validated, Vec<PatchError>> {
             nodes: doc.nodes.len(),
             edges: doc.edges.len(),
         }]);
+    }
+    // Sub-patches are judged inlined: the same checks, on what will render.
+    if crate::flatten::has_subpatches(doc) {
+        let flat = crate::flatten::flatten(doc)
+            .map_err(|detail| vec![PatchError::Subpatch { detail }])?;
+        return validate(&flat.doc);
     }
 
     let images = doc.nodes.iter().filter(|n| owns_media_cell(&n.kind)).count();

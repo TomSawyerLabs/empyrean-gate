@@ -1,5 +1,5 @@
 {
-  "format": 3,
+  "format": 4,
   "id": "builtin-step-and-sample",
   "name": "Step and Sample",
   "description": "A clock steps a sequencer through hues; every bar a random scale and a toggled spiral. Shows the event tools.",
@@ -7,7 +7,7 @@
     { "id": "clock", "kind": "time", "name": "2 steps / s", "params": { "mode": 1, "rate": 2 }, "pos": [-320, 60] },
     { "id": "seq", "kind": "sequence", "name": "hues", "params": { "steps": 4, "v1": 0, "v2": 0.3, "v3": 0.6, "v4": 0.85 }, "pos": [-60, 20] },
     { "id": "env", "kind": "envelope", "name": "", "params": { "attack": 0.01, "decay": 0.4, "peak": 1 }, "pos": [-60, 300] },
-    { "id": "map", "kind": "map_range", "name": "pulse → brightness", "params": { "out_min": 0.5, "out_max": 1.4 }, "pos": [200, 300] },
+    { "id": "map", "kind": "map_range", "name": "pulse → brightness", "params": { "out_max": 1.4, "out_min": 0.5 }, "pos": [200, 300] },
     { "id": "rand", "kind": "random", "name": "every bar", "params": { "glide": 1.5, "max": 2, "min": 0.6 }, "pos": [200, 20] },
     { "id": "tog", "kind": "toggle", "name": "spiral on/off", "params": {}, "pos": [200, 520] },
     { "id": "sm", "kind": "smooth", "name": "", "params": { "seconds": 0.5 }, "pos": [460, 520] },

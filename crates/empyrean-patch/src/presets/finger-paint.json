@@ -1,5 +1,5 @@
 {
-  "format": 3,
+  "format": 4,
   "id": "builtin-finger-paint",
   "name": "Finger Paint",
   "description": "Draw on the Live tab — strokes glow over a dim noise bed, keeping each pen's own look.",

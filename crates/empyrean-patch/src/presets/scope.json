@@ -1,5 +1,5 @@
 {
-  "format": 3,
+  "format": 4,
   "id": "builtin-scope",
   "name": "Scope",
   "description": "Circular oscilloscope ring over spoke-per-bin spectrum bars — raw audio, both scopes.",
