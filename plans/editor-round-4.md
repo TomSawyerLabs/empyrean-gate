@@ -143,19 +143,12 @@ Cameron (2026-10-16), on the round-3 report:
 
 ## Open questions for the user
 
-1. **Secrets for crew notifications** (your yes needed, each a Cloudflare
-   change). From the site checkout:
-   ```sh
-   bun run vapid                      # prints VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, ADMIN_TOKEN
-   wrangler secret put VAPID_PUBLIC_KEY
-   wrangler secret put VAPID_PRIVATE_KEY
-   wrangler secret put ADMIN_TOKEN
-   # and for the dev Preview, the same three with:
-   wrangler preview secret put <NAME> --name dev
-   ```
-   Plus the submissions bucket (already staged in ops): subscriptions are
-   stored in it under `notify/`. Until all are set, `/admin` says
-   notifications aren't set up and the endpoints answer 503.
+1. **Secrets** (Cameron said yes to all of it, 2026-10-16). The bucket and
+   the Turnstile widget are created (ops `0a37785`, `c5140e6`). The four
+   Worker secrets need one interactive step that an agent may not do: from
+   the site checkout, `bunx wrangler login` (approve in the browser), then
+   `bun run secrets:setup`. Until then `/admin` says notifications aren't
+   set up and the endpoints answer 503.
 2. Where the notification should take you when tapped: `/admin` for now
    (there is no web view of the queue; `bun run submissions` pulls it).
 
