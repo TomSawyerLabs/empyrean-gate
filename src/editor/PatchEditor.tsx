@@ -649,6 +649,11 @@ function Editor({
   useEffect(() => {
     if (!compact) setSheet(null);
   }, [compact]);
+  // A sheet opening or closing ends any tap sequence: the tap that selected
+  // a node before its sheet opened must not pair with the next one.
+  useEffect(() => {
+    lastTap.current = null;
+  }, [sheet]);
   useEffect(() => {
     if (sheet === "node" && !(selectedNode && doc?.nodes.some((n) => n.id === selectedNode))) {
       setSheet(null);
