@@ -114,6 +114,12 @@ Cameron (2026-10-16), on the round-3 report:
 - The palette's Sub-patches entries must not carry `.palette-item`: tests
   (and anything else) locating "the Noise item" would match "Mock Noise"
   too. They are `.palette-sub`, styled the same.
+- **Program indices count inlined nodes.** Anything that maps a
+  `Program` index to a node must use the flattened document
+  (`Sim::flat_doc`, `Program::doc`), never the document as edited: the wasm's
+  previewNodes did, and inserting a sub-patch on the Preview trapped with
+  "unreachable" (fixed in `d7c534b`, regression test in sim.rs). Checked on
+  the real deploy, not just in tests: worth keeping as a habit.
 - Headless Chromium's `ImageDecoder` decodes an animated GIF, so the Clip
   picker test uses a two-frame GIF; browsers without it get a still.
 
