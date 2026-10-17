@@ -30,6 +30,7 @@ import {
   type Node as FlowNode,
   type NodeChange,
   type NodeProps,
+  Panel,
   useReactFlow,
   ReactFlowProvider,
 } from "@xyflow/react";
@@ -104,6 +105,84 @@ export interface PatchEditorProps {
   /** Host-specific settings shown in a node's side panel (e.g. where a
    * Video in's picture comes from on this host). */
   nodeExtras?: (node: PatchNode) => ReactNode;
+  /** The gate's controls that act on the whole patch from outside it (master
+   * brightness and speed). Shown as a card pinned in the canvas, so the graph
+   * never hides what else shapes the picture. */
+  globals?: GlobalControl[];
+  /** One line under the globals, saying where they come from on this host. */
+  globalsNote?: ReactNode;
+}
+
+/** One global the host exposes in the editor's canvas. */
+export interface GlobalControl {
+  name: string;
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  /** The value as shown ("80%", "1.5×"); defaults to two decimals. */
+  format?: (value: number) => string;
+  /** Omit on a host that can only read it: the row is then a readout. */
+  onChange?: (value: number) => void;
+}
+
+function formatGlobal(c: GlobalControl): string {
+  return c.format ? c.format(c.value) : c.value.toFixed(2);
+}
+
+/** The globals card: a head that toggles it, then one slider per global. It
+ * sits inside React Flow as a Panel, so it keeps its corner while the graph
+ * pans and zooms; `nodrag nopan nowheel` keep the sliders' own gestures. */
+function GlobalsCard({
+  controls,
+  note,
+  open,
+  onToggle,
+}: {
+  controls: GlobalControl[];
+  note?: ReactNode;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const summary = controls.map((c) => `${c.label} ${formatGlobal(c)}`).join(" · ");
+  return (
+    <Panel position="bottom-right" className={`patch-globals nodrag nopan nowheel ${open ? "open" : ""}`}>
+      <button
+        type="button"
+        className="patch-globals-head"
+        aria-expanded={open}
+        aria-label={open ? "Hide the gate's globals" : `Gate globals: ${summary}. Show them`}
+        onClick={onToggle}
+      >
+        <span className="patch-globals-title">Gate globals</span>
+        {!open && <span className="patch-globals-summary">{summary}</span>}
+        <span className="patch-globals-caret" aria-hidden="true">
+          {open ? "▾" : "▸"}
+        </span>
+      </button>
+      {open && (
+        <div className="patch-globals-body">
+          {controls.map((c) => (
+            <label key={c.name} className="patch-global">
+              <span className="patch-global-label">{c.label}</span>
+              <input
+                type="range"
+                min={c.min}
+                max={c.max}
+                step={c.step ?? 0.01}
+                value={c.value}
+                disabled={!c.onChange}
+                onChange={(e) => c.onChange?.(Number(e.target.value))}
+              />
+              <output className="patch-param-value">{formatGlobal(c)}</output>
+            </label>
+          ))}
+          {note && <p className="hint patch-globals-note">{note}</p>}
+        </div>
+      )}
+    </Panel>
+  );
 }
 
 /** What node views need from the editor without threading it through data. */
@@ -724,6 +803,8 @@ function Editor({
   onDocChange,
   toolbarExtra,
   nodeExtras,
+  globals,
+  globalsNote,
 }: PatchEditorProps) {
   const flow = useReactFlow();
   const registry = useMemo<Registry | null>(
@@ -745,6 +826,9 @@ function Editor({
   // delete and the host's extras, behind the patch-name chip on the canvas.
   const [sheet, setSheet] = useState<"palette" | "node" | "menu" | null>(null);
   const lastTap = useRef<{ id: string; at: number } | null>(null);
+  // The globals card is open on a wide canvas and a one-line chip on a phone,
+  // until the user toggles it.
+  const [globalsOpen, setGlobalsOpen] = useState<boolean | null>(null);
   const docRef = useRef(doc);
   docRef.current = doc;
   const registryRef = useRef(registry);
@@ -1329,6 +1413,14 @@ function Editor({
             >
               <Background gap={24} />
               <Controls showInteractive={false} />
+              {globals && globals.length > 0 && (
+                <GlobalsCard
+                  controls={globals}
+                  note={globalsNote}
+                  open={globalsOpen ?? !compact}
+                  onToggle={() => setGlobalsOpen(!(globalsOpen ?? !compact))}
+                />
+              )}
             </ReactFlow>
           ) : (
             <div className="patch-empty">

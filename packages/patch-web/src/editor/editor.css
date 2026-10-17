@@ -544,6 +544,96 @@
   top: 58px;
 }
 
+/* The gate's globals (master brightness, speed): a card pinned bottom-right
+   in the canvas, the input colour on its head because that is what they are
+   to the graph. Collapsed, it is one line with the values. */
+.patch-canvas .react-flow__panel.patch-globals {
+  margin: 10px;
+  max-width: calc(100% - 20px);
+  border: 1px solid #2a2445;
+  border-radius: 8px;
+  background: var(--pe-panel, #1a1530);
+  background-image: var(--pe-surface-grad, none);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  color: var(--pe-text, #e8e6f4);
+  font-size: 12px;
+}
+
+.patch-canvas .react-flow__panel.patch-globals.open {
+  width: 240px;
+}
+
+.patch-globals-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 7px 10px;
+  border: none;
+  border-left: 3px solid #38d1c2;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.patch-globals.open .patch-globals-head {
+  border-radius: 8px 8px 0 0;
+  border-bottom: 1px solid #2a2445;
+}
+
+.patch-globals-title {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.patch-globals-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--pe-muted, #8a85a8);
+  font-variant-numeric: tabular-nums;
+}
+
+.patch-globals-caret {
+  margin-left: auto;
+  color: var(--pe-muted, #8a85a8);
+}
+
+.patch-globals-body {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.patch-global {
+  display: grid;
+  grid-template-columns: 5.5em 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.patch-global input[type="range"] {
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+}
+
+.patch-global .patch-param-value {
+  width: 5ch;
+}
+
+.patch-globals-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .patch-menu h4 {
   margin: 16px 0 6px;
   font-size: 11px;

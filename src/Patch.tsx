@@ -3,17 +3,18 @@
 // refuses mutations from non-loopback connections — so remote clients get a
 // read-only view of the graph.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   openPatchFromDisk,
   PatchEditor,
   savePatchToDisk,
+  type GlobalControl,
   type PatchDoc,
   type PatchNodeType,
   type PatchStore,
 } from "@empyrean-gate/patch-web/editor";
 import { getMiniHub } from "./miniPreview";
-import { useGate } from "./state";
+import { useGate, useThrottled } from "./state";
 import type { GateClient } from "./ws";
 
 /** The gate's patch store, over the WebSocket protocol. */
@@ -68,6 +69,53 @@ export default function Patch() {
     };
   }, [connected, client]);
 
+  // The gate's master brightness and speed, as a card in the editor's canvas.
+  // They are the Live tab's sliders, so any client may move them (the graph
+  // itself stays read-only off the Gate machine). Local state keeps a drag
+  // smooth; the echoed config is taken back once the hand is still.
+  const [brightness, setBrightness] = useState(1);
+  const [speed, setSpeed] = useState(1);
+  const lastSet = useRef(0);
+  const remoteBrightness = config?.render.master_brightness ?? 1;
+  const remoteSpeed = config?.render.master_speed ?? 1;
+  useEffect(() => {
+    if (Date.now() - lastSet.current < 400) return;
+    setBrightness(remoteBrightness);
+    setSpeed(remoteSpeed);
+  }, [remoteBrightness, remoteSpeed]);
+  const sendMaster = useThrottled((v: { brightness?: number; speed?: number }) =>
+    client.setMaster(v),
+  );
+  const globals: GlobalControl[] = [
+    {
+      name: "brightness",
+      label: "Brightness",
+      value: brightness,
+      min: 0,
+      max: 1,
+      format: (v) => `${Math.round(v * 100)}%`,
+      onChange: (v) => {
+        lastSet.current = Date.now();
+        setBrightness(v);
+        sendMaster({ brightness: v });
+      },
+    },
+    {
+      name: "speed",
+      label: "Speed",
+      value: speed,
+      min: 0,
+      max: 4,
+      step: 0.05,
+      format: (v) => `${v.toFixed(2)}×`,
+      onChange: (v) => {
+        lastSet.current = Date.now();
+        setSpeed(v);
+        sendMaster({ speed: v });
+      },
+    },
+  ];
+
   return (
     <PatchEditor
       store={store}
@@ -79,6 +127,8 @@ export default function Patch() {
       canEdit={canEdit}
       readOnlyHint="read-only — edit on the Gate machine"
       minis={getMiniHub(client)}
+      globals={globals}
+      globalsNote="The Live tab's master brightness and speed, outside the patch: speed scales every Time node and phase, brightness scales the Output."
       nodeExtras={(node) =>
         node.kind === "video_in" ? (
           <p className="hint">

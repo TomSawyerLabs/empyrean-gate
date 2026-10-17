@@ -430,6 +430,16 @@ const server = Bun.serve({
           // other fully-parallel pages sharing this mock process.
           ws.send(JSON.stringify({ type: "state", config: msg.config, status }));
           break;
+        case "set_master":
+          // The real backend clamps the same way (engine SetMaster).
+          if (typeof msg.brightness === "number") {
+            config.render.master_brightness = Math.min(1, Math.max(0, msg.brightness));
+          }
+          if (typeof msg.speed === "number") {
+            config.render.master_speed = Math.min(8, Math.max(0, msg.speed));
+          }
+          ws.send(JSON.stringify({ type: "state", config, status }));
+          break;
         case "take_ready": {
           if (!config.ready_stack || config.ready_stack.id !== msg.ready_id) break;
           const previous = {
