@@ -346,6 +346,9 @@ impl Sim {
         let slab = self.rt.eval(&EvalInputs {
             dt,
             master_speed: self.master_speed,
+            master_brightness: self.master,
+            master_hue: self.hue_target,
+            master_hue_amount: self.hue_amount,
             audio: &self.audio,
             yaw: self.yaw,
             pitch: self.pitch,

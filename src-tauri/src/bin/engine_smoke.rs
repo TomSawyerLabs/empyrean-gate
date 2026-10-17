@@ -397,6 +397,9 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
         let slab = rt.eval(&patch::eval::EvalInputs {
             dt: 1.0 / 60.0,
             master_speed: 1.0,
+            master_brightness: 1.0,
+            master_hue: 0.0,
+            master_hue_amount: 0.0,
             audio: &inputs.audio,
             yaw: 0.0,
             pitch: 0.0,

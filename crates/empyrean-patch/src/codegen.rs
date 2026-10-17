@@ -88,6 +88,7 @@ fn is_cpu_kind(kind: &str) -> bool {
         kind,
         "time"
             | "slider"
+            | "globals"
             | "audio"
             | "imu"
             | "tap"

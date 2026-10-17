@@ -276,6 +276,25 @@ pub const TYPES: &[NodeType] = &[
         params: &[num("value", "Value", 0.0, 1.0, 0.5)],
     },
     NodeType {
+        // The crew's master controls, as the gate applies them outside the
+        // patch: brightness (0..1; the Output is scaled by it), speed (the
+        // multiplier every integrated param already follows), and the master
+        // hue pull (target hue in turns; amount is 0 while the pull is off).
+        // A patch can react to them, e.g. dim its accents as the crew dims
+        // the gate.
+        id: "globals",
+        label: "Gate globals",
+        category: Category::Input,
+        inputs: &[],
+        outputs: &[
+            PortDef { name: "brightness", shape: Shape::Scalar },
+            PortDef { name: "speed", shape: Shape::Scalar },
+            PortDef { name: "hue", shape: Shape::Scalar },
+            PortDef { name: "hue_amount", shape: Shape::Scalar },
+        ],
+        params: &[],
+    },
+    NodeType {
         id: "audio",
         label: "Audio",
         category: Category::Input,

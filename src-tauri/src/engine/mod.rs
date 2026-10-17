@@ -3037,6 +3037,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     // The scene scheduler's crossfade-effective speed, so patch
                     // phases follow show transitions exactly like layer phases.
                     master_speed: render_master_speed,
+                    // What the crew set (crossfade-effective), before the
+                    // smoothing envelope the composition applies.
+                    master_brightness: render_master_brightness,
+                    master_hue: cfg.render.master_hue,
+                    master_hue_amount: if cfg.render.master_hue_enabled {
+                        cfg.render.master_hue_amount
+                    } else {
+                        0.0
+                    },
                     audio: &audio,
                     yaw: control.yaw,
                     pitch: control.pitch,
@@ -3338,6 +3347,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                             .eval(&crate::patch::eval::EvalInputs {
                                 dt,
                                 master_speed: bus.master_speed,
+                                master_brightness: bus.inputs.globals.master,
+                                master_hue: cfg.render.master_hue,
+                                master_hue_amount: if cfg.render.master_hue_enabled {
+                                    cfg.render.master_hue_amount
+                                } else {
+                                    0.0
+                                },
                                 audio: &audio,
                                 yaw: control.yaw,
                                 pitch: control.pitch,

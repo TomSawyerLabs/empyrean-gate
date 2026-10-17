@@ -32,6 +32,11 @@ pub const DJ_EVENT_COUNT: usize = 11;
 pub struct EvalInputs<'a> {
     pub dt: f32,
     pub master_speed: f32,
+    /// The crew's master brightness (0..1) and hue pull (target in turns,
+    /// amount 0 while off), read by the Gate globals node.
+    pub master_brightness: f32,
+    pub master_hue: f32,
+    pub master_hue_amount: f32,
     pub audio: &'a [AudioUniform; MAX_AUDIO_SOURCES],
     pub yaw: f32,
     pub pitch: f32,
@@ -394,6 +399,19 @@ impl Runtime {
                     o.insert("pitch".into(), inp.pitch);
                     o.insert("roll".into(), inp.roll);
                     o.insert("shake".into(), inp.shake);
+                }
+                "globals" => {
+                    let o = &mut self.outputs[node];
+                    o.insert(
+                        "brightness".into(),
+                        finite_or(inp.master_brightness, 1.0).clamp(0.0, 1.0),
+                    );
+                    o.insert("speed".into(), ms);
+                    o.insert("hue".into(), finite_or(inp.master_hue, 0.0).rem_euclid(1.0));
+                    o.insert(
+                        "hue_amount".into(),
+                        finite_or(inp.master_hue_amount, 0.0).clamp(0.0, 1.0),
+                    );
                 }
                 "tap" => {
                     let st = &mut self.state[node];
@@ -882,6 +900,9 @@ mod tests {
         EvalInputs {
             dt: 0.1,
             master_speed: 1.0,
+            master_brightness: 1.0,
+            master_hue: 0.0,
+            master_hue_amount: 0.0,
             audio,
             yaw: 0.0,
             pitch: 0.0,
@@ -1483,6 +1504,52 @@ mod tests {
         half.master_speed = 0.5;
         rt.eval(&half);
         assert!((rt.slab[speed_slot] - 0.25).abs() < 1e-5);
+    }
+
+    #[test]
+    fn gate_globals_node_exposes_the_masters() {
+        let doc = PatchDoc {
+            nodes: vec![
+                node("g", "globals"),
+                node("mix", "blend"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("g", "brightness", "mix", "opacity"),
+                edge("g", "hue", "o", "master"),
+                edge("mix", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let mut rt = runtime(doc);
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let slot_of = |rt: &Runtime, name: &str| {
+            rt.prog
+                .slots
+                .iter()
+                .find(|s| s.param.as_deref() == Some(name))
+                .unwrap()
+                .slot
+        };
+        let opacity = slot_of(&rt, "opacity");
+        let master = slot_of(&rt, "master");
+        let g = rt.doc.nodes.iter().position(|n| n.id == "g").unwrap();
+
+        let mut inp = inputs(&audio);
+        inp.master_brightness = 0.3;
+        inp.master_hue = 1.25;
+        rt.eval(&inp);
+        assert!((rt.slab[opacity] - 0.3).abs() < 1e-6, "{}", rt.slab[opacity]);
+        assert!((rt.slab[master] - 0.25).abs() < 1e-6, "hue wraps to turns: {}", rt.slab[master]);
+        assert_eq!(rt.outputs[g]["speed"], 1.0);
+        assert_eq!(rt.outputs[g]["hue_amount"], 0.0);
+
+        // Garbage in stays inside the ranges the gate itself keeps.
+        inp.master_brightness = f32::NAN;
+        inp.master_hue_amount = 7.0;
+        rt.eval(&inp);
+        assert_eq!(rt.slab[opacity], 1.0);
+        assert_eq!(rt.outputs[g]["hue_amount"], 1.0);
     }
 
     #[test]

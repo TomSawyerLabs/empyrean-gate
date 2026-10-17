@@ -128,7 +128,7 @@ export default function Patch() {
       readOnlyHint="read-only — edit on the Gate machine"
       minis={getMiniHub(client)}
       globals={globals}
-      globalsNote="The Live tab's master brightness and speed, outside the patch: speed scales every Time node and phase, brightness scales the Output."
+      globalsNote="The Live tab's master brightness and speed, outside the patch: speed scales every Time node and phase, brightness scales the Output. To react to them, add a Gate globals node."
       nodeExtras={(node) =>
         node.kind === "video_in" ? (
           <p className="hint">

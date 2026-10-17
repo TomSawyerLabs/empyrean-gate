@@ -177,6 +177,9 @@ mod tests {
         let mut inputs = EvalInputs {
             dt: 0.1,
             master_speed: 1.0,
+            master_brightness: 1.0,
+            master_hue: 0.0,
+            master_hue_amount: 0.0,
             audio: &silent_audio,
             yaw: 0.0,
             pitch: 0.0,
