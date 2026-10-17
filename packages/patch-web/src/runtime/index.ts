@@ -60,6 +60,8 @@ export class PatchRuntime implements MiniSource {
 
   private sim: PatchSim | null = null;
   private generation = 0;
+  /** The generation whose shader is being installed, while one is. */
+  private pendingGen = 0;
   /** Frames are held (last image stays up) while new pipelines compile. */
   private pending = false;
   private raf = 0;
@@ -154,16 +156,22 @@ export class PatchRuntime implements MiniSource {
     const sim = this.sim!;
     if (shader) {
       this.pending = true;
+      this.pendingGen = gen;
       try {
         await this.gpu.setProgram(sim.wgsl(), sim.previewWgsl(), sim.previewNodes().length);
       } catch (e) {
+        if (this.pendingGen === gen) this.pending = false;
         if (gen !== this.generation) return;
         const detail = e instanceof ShaderError ? `${e.message}: ${e.details.join("; ")}` : errorText(e);
         this.setStatus({ active: false, touch: false, error: detail });
         return;
       }
+      // An edit may have arrived meanwhile that needed no shader of its own
+      // (a CPU-only node, a knob): it runs on the program just installed, so
+      // the frame loop resumes here even though the rest of this call is
+      // superseded. Only a newer shader install keeps the loop paused.
+      if (this.pendingGen === gen) this.pending = false;
       if (gen !== this.generation) return;
-      this.pending = false;
     }
     this.syncImages(sim);
     this.previewNodes = sim.previewNodes();
