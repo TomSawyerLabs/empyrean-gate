@@ -30,6 +30,8 @@ import {
   type Node as FlowNode,
   type NodeChange,
   type NodeProps,
+  type OnConnectEnd,
+  type OnConnectStart,
   Panel,
   useReactFlow,
   ReactFlowProvider,
@@ -38,6 +40,7 @@ import "@xyflow/react/dist/style.css";
 import "./editor.css";
 import { arrangeDoc, type NodeSize } from "./arrange";
 import { ClipPicker } from "./ClipPicker";
+import { SHAPE_LABEL, suggestConnections, type DragFrom, type Suggestion } from "./connect";
 import { imageFileToMedia } from "./files";
 import { History } from "./history";
 import { MiniMeter, MiniRing, type MiniSource } from "./minis";
@@ -186,10 +189,19 @@ function GlobalsCard({
   );
 }
 
+/** A wire being dragged: where it started, so every port can say whether it
+ * would take the other end. */
+type WireDrag = DragFrom & { node: string };
+
 /** What node views need from the editor without threading it through data. */
-const NodeContext = createContext<{ activeId: string | null; minis: MiniSource | null }>({
+const NodeContext = createContext<{
+  activeId: string | null;
+  minis: MiniSource | null;
+  drag: WireDrag | null;
+}>({
   activeId: null,
   minis: null,
+  drag: null,
 });
 
 const CATEGORY_LABELS: Record<PatchNodeType["category"], string> = {
@@ -292,28 +304,44 @@ type PatchFlowNode = FlowNode<
     docId: string;
     /** Output ports with at least one outgoing wire (meters show these). */
     wiredOut: string[];
+    /** Input ports already taken (one wire per input). */
+    wiredIn: string[];
   },
   "patch"
 >;
 
 const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<PatchFlowNode>) {
   const { node, def } = data;
-  const { activeId, minis } = useContext(NodeContext);
+  const { activeId, minis, drag } = useContext(NodeContext);
   if (!def) {
     return <div className="pnode pnode-unknown">unknown: {node.kind}</div>;
   }
   const ins = inputPorts(def, node);
   // Mini visualizers, per output style: field outputs get a thumbnail laid out
-  // like the hardware; scalar outputs get amplitude meters. Only for the patch
-  // that is actually on air — that is the graph the backend is evaluating.
+  // like the hardware; scalar outputs get amplitude meters and event outputs a
+  // fire strip. Only for the patch that is actually on air — that is the graph
+  // the backend is evaluating. A node with a handful of outputs meters them
+  // all; a wide one (Audio, Touch, DJ link) meters `out` and whatever is wired,
+  // or it would be taller than the canvas.
   const live = minis !== null && data.docId !== "" && activeId === data.docId;
   const outShape = def.outputs.find((p) => p.name === "out")?.shape;
   const showRing = live && (outShape === "field_color" || outShape === "field_scalar");
+  const meterable = def.outputs.filter((p) => p.shape === "scalar" || p.shape === "event");
   const meterPorts = live
-    ? def.outputs.filter(
-        (p) => p.shape === "scalar" && (p.name === "out" || data.wiredOut.includes(p.name)),
+    ? meterable.filter(
+        (p) => meterable.length <= 4 || p.name === "out" || data.wiredOut.includes(p.name),
       )
     : [];
+  // While a wire is being dragged, each port says whether it would take it.
+  const fitClass = (shape: PatchShape, dir: "in" | "out", name: string): string => {
+    if (!drag) return "";
+    if (drag.node === node.id) return " port-nofit";
+    const fits =
+      dir === "in"
+        ? drag.dir === "out" && shapeAccepts(shape, drag.shape) && !data.wiredIn.includes(name)
+        : drag.dir === "in" && shapeAccepts(drag.shape, shape);
+    return fits ? " port-fit" : " port-nofit";
+  };
   return (
     <div className={`pnode cat-${def.category} ${selected ? "selected" : ""}`}>
       <div className="pnode-head">
@@ -333,6 +361,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
               source={minis!}
               mini={`scalar:${node.id}:${p.name}`}
               label={p.name}
+              kind={p.shape === "event" ? "event" : "scalar"}
             />
           ))}
         </div>
@@ -356,7 +385,11 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
       <div className="pnode-body">
         <div className="pnode-col">
           {ins.map((p) => (
-            <div key={p.name} className="pnode-port in">
+            <div
+              key={p.name}
+              className={`pnode-port in${fitClass(p.shape, "in", p.name)}`}
+              title={`${p.name} · ${SHAPE_LABEL[p.shape]} in`}
+            >
               <Handle
                 type="target"
                 position={Position.Left}
@@ -369,7 +402,11 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
         </div>
         <div className="pnode-col out">
           {def.outputs.map((p) => (
-            <div key={p.name} className="pnode-port out">
+            <div
+              key={p.name}
+              className={`pnode-port out${fitClass(p.shape, "out", p.name)}`}
+              title={`${p.name} · ${SHAPE_LABEL[p.shape]} out`}
+            >
               <span>{p.name}</span>
               <Handle
                 type="source"
@@ -399,6 +436,7 @@ function toFlowNodes(doc: PatchDoc, registry: Registry): PatchFlowNode[] {
       def: registry.get(n.kind),
       docId: doc.id,
       wiredOut: doc.edges.filter((e) => e.from.node === n.id).map((e) => e.from.port),
+      wiredIn: doc.edges.filter((e) => e.to.node === n.id).map((e) => e.to.port),
     },
   }));
 }
@@ -790,6 +828,97 @@ function MenuSheet({ onClose, children }: { onClose: () => void; children: React
 
 // --- editor ---------------------------------------------------------------
 
+/** "Connect to…": what could take the other end of a wire dropped on empty
+ * canvas, best guess first, with a filter box. A popover at the drop point
+ * on a wide canvas; a sheet on a phone. Picking adds the node and the wire. */
+function ConnectChooser({
+  from,
+  at,
+  suggestions,
+  sheet,
+  onPick,
+  onClose,
+}: {
+  from: WireDrag & { port: string };
+  at: { x: number; y: number };
+  suggestions: Suggestion[];
+  sheet: boolean;
+  onPick: (s: Suggestion) => void;
+  onClose: () => void;
+}) {
+  const [filter, setFilter] = useState("");
+  const panel = useSheet(onClose);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+  // Outside click closes (the popover only; a sheet has Done).
+  useEffect(() => {
+    if (sheet) return;
+    const away = (e: PointerEvent) => {
+      if (!panel.ref.current?.contains(e.target as Node)) onClose();
+    };
+    const t = setTimeout(() => window.addEventListener("pointerdown", away), 0);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("pointerdown", away);
+    };
+  }, [onClose, panel.ref, sheet]);
+  const q = filter.trim().toLowerCase();
+  const shown = q
+    ? suggestions.filter((s) => `${s.type.label} ${s.port}`.toLowerCase().includes(q))
+    : suggestions;
+  const title = `${from.dir === "out" ? "Send" : "Feed"} ${from.port} (${SHAPE_LABEL[from.shape]}) ${from.dir === "out" ? "to…" : "from…"}`;
+  return (
+    <aside
+      className={`patch-connect ${sheet ? "patch-sheet" : "patch-popover"}`}
+      style={sheet ? undefined : { left: at.x, top: at.y }}
+      role="dialog"
+      aria-label={title}
+      ref={panel.ref}
+      tabIndex={panel.tabIndex}
+      onKeyDown={panel.onKeyDown}
+    >
+      {sheet ? <PanelHead title={title} onClose={onClose} /> : <h4>{title}</h4>}
+      <input
+        ref={inputRef}
+        type="search"
+        placeholder="Filter…"
+        aria-label="Filter node types"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && shown[0]) onPick(shown[0]);
+        }}
+      />
+      <div className="patch-connect-list">
+        {shown.length === 0 && <p className="hint">Nothing takes {SHAPE_LABEL[from.shape]} here.</p>}
+        {shown.map((s) => (
+          <button
+            key={`${s.type.id}.${s.port}`}
+            type="button"
+            className={`palette-item cat-${s.type.category}`}
+            onClick={() => onPick(s)}
+            title={
+              s.exact
+                ? `${s.type.label}: ${s.port} takes ${SHAPE_LABEL[from.shape]}`
+                : `${s.type.label}: ${s.port} takes it through an adapter`
+            }
+          >
+            {s.type.label}
+            <span className="patch-connect-port">
+              {from.dir === "out" ? "→ " : "← "}
+              {s.port}
+              {s.viaParam ? " (knob)" : ""}
+              {s.exact ? "" : " ≈"}
+            </span>
+          </button>
+        ))}
+      </div>
+    </aside>
+  );
+}
+
 function Editor({
   store,
   registry: registryList,
@@ -830,6 +959,16 @@ function Editor({
   // The globals card is open on a wide canvas and a one-line chip on a phone,
   // until the user toggles it.
   const [globalsOpen, setGlobalsOpen] = useState<boolean | null>(null);
+  // A wire being dragged (ports light up or dim), and the "connect to…"
+  // chooser that opens when it is dropped on empty canvas.
+  const [drag, setDrag] = useState<WireDrag | null>(null);
+  const [chooser, setChooser] = useState<{
+    from: WireDrag & { port: string };
+    /** Where it was dropped, in canvas pixels (for the popover) and in flow
+     * coordinates (for the new node). */
+    at: { x: number; y: number };
+    flow: { x: number; y: number };
+  } | null>(null);
   const docRef = useRef(doc);
   docRef.current = doc;
   const registryRef = useRef(registry);
@@ -1167,6 +1306,68 @@ function Editor({
     [canEdit, mutateDoc],
   );
 
+  // Dragging a wire: remember where it started so ports can show whether they
+  // fit, and if it is dropped on empty canvas, offer what could go there.
+  const onConnectStart = useCallback<OnConnectStart>(
+    (_e, p) => {
+      const d = docRef.current;
+      if (!d || !registry || !p.nodeId || !p.handleId || !p.handleType) return;
+      const node = d.nodes.find((n) => n.id === p.nodeId);
+      const dir = p.handleType === "source" ? "out" : "in";
+      const shape = portShape(registry.get(node?.kind ?? ""), p.handleId, dir, node);
+      if (shape) setDrag({ node: p.nodeId, shape, dir });
+      setChooser(null);
+    },
+    [registry],
+  );
+  const onConnectEnd = useCallback<OnConnectEnd>(
+    (e, state) => {
+      const from = drag;
+      setDrag(null);
+      if (!canEdit || !from || state.toHandle || !state.fromHandle?.id) return;
+      const canvas = canvasRef.current?.getBoundingClientRect();
+      const point = "changedTouches" in e ? e.changedTouches[0] : e;
+      if (!canvas || !point) return;
+      // The popover is 240 wide and up to 60% tall: keep it on the canvas.
+      const at = {
+        x: Math.max(0, Math.min(point.clientX - canvas.left, canvas.width - 256)),
+        y: Math.max(0, Math.min(point.clientY - canvas.top, canvas.height * 0.4)),
+      };
+      setChooser({
+        from: { ...from, port: state.fromHandle.id },
+        at,
+        flow: flow.screenToFlowPosition({ x: point.clientX, y: point.clientY }),
+      });
+    },
+    [canEdit, drag, flow],
+  );
+  /** The chooser's pick: a new node of that type at the drop point, wired. */
+  const connectNew = useCallback(
+    (s: Suggestion) => {
+      const c = chooser;
+      setChooser(null);
+      setSheet(null);
+      if (!c || !canEdit) return;
+      mutateDoc((d) => {
+        const id = freshId(d);
+        // Land the node so the wire meets it where the pointer let go: its
+        // left edge for an input, roughly its right edge for an output.
+        const x = Math.round(c.from.dir === "out" ? c.flow.x : c.flow.x - 180);
+        d.nodes.push({ id, kind: s.type.id, name: "", params: {}, pos: [x, Math.round(c.flow.y - 20)] });
+        d.edges.push(
+          c.from.dir === "out"
+            ? { from: { node: c.from.node, port: c.from.port }, to: { node: id, port: s.port } }
+            : { from: { node: id, port: s.port }, to: { node: c.from.node, port: c.from.port } },
+        );
+      });
+    },
+    [canEdit, chooser, mutateDoc],
+  );
+  const suggestions = useMemo(
+    () => (chooser && registry ? suggestConnections(registry.values(), chooser.from) : []),
+    [chooser, registry],
+  );
+
   const onNodesDelete = useCallback(
     (deleted: PatchFlowNode[]) => {
       if (!canEdit) return;
@@ -1400,7 +1601,7 @@ function Editor({
         </div>
       )}
 
-      <NodeContext.Provider value={{ activeId, minis }}>
+      <NodeContext.Provider value={{ activeId, minis, drag }}>
       <div className="patch-main">
         {canEdit && doc && registry && (!compact || sheet === "palette") && (
           <Palette
@@ -1436,6 +1637,8 @@ function Editor({
               onNodeClick={onNodeTap}
               onNodeDoubleClick={onNodeOpen}
               onConnect={onConnect}
+              onConnectStart={onConnectStart}
+              onConnectEnd={onConnectEnd}
               onNodesDelete={onNodesDelete}
               onEdgesDelete={onEdgesDelete}
               isValidConnection={isValidConnection}
@@ -1516,6 +1719,16 @@ function Editor({
             >
               {selectedDef.label} settings…
             </button>
+          )}
+          {chooser && (!compact || sheet === null) && (
+            <ConnectChooser
+              from={chooser.from}
+              at={chooser.at}
+              suggestions={suggestions}
+              sheet={compact}
+              onPick={connectNew}
+              onClose={() => setChooser(null)}
+            />
           )}
         </div>
 

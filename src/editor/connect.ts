@@ -1,0 +1,113 @@
+// Connection hints: when a wire is dragged from a port and dropped on empty
+// canvas, which node types could sit at the other end, and through which
+// port. Filtered by the shape rules (`shapeAccepts`) and sorted so the likely
+// answer is near the top: an exact shape match before an adapter, a shaped
+// input before a knob, the categories that usually follow this kind of data
+// first, then by name. Pure, so it is unit-tested on a small registry.
+
+import {
+  SUBPATCH_KIND,
+  shapeAccepts,
+  type PatchNodeType,
+  type PatchShape,
+} from "../types";
+
+export interface Suggestion {
+  type: PatchNodeType;
+  /** The port on `type` the wire would land on (an input when dragging from
+   * an output, an output when dragging from an input). */
+  port: string;
+  /** Same shape at both ends (no adapter). */
+  exact: boolean;
+  /** The port is a knob (a Number param) rather than a shaped input. */
+  viaParam: boolean;
+}
+
+export interface DragFrom {
+  shape: PatchShape;
+  /** "out": the wire starts at an output and wants a consumer; "in": it
+   * starts at an input and wants a producer. */
+  dir: "out" | "in";
+}
+
+type Category = PatchNodeType["category"];
+
+const ALL: Category[] = ["input", "scalar", "generator", "field", "combine", "texture", "sink"];
+
+/** Who usually consumes this kind of data, most likely first. */
+const CONSUMERS: Partial<Record<PatchShape, Category[]>> = {
+  scalar: ["scalar", "generator", "field", "combine", "texture", "sink", "input"],
+  event: ["scalar", "input", "generator", "field", "combine", "texture", "sink"],
+  field_scalar: ["field", "combine", "sink", "generator", "texture", "scalar", "input"],
+  field_color: ["combine", "field", "sink", "texture", "generator", "scalar", "input"],
+  points: ["field", "combine", "sink", "generator", "texture", "scalar", "input"],
+  effects: ["field", "combine", "sink", "generator", "texture", "scalar", "input"],
+  texture: ["texture", "field", "combine", "sink", "generator", "scalar", "input"],
+};
+
+/** Who usually produces this kind of data, most likely first. */
+const PRODUCERS: Partial<Record<PatchShape, Category[]>> = {
+  scalar: ["input", "scalar", "generator", "field", "combine", "texture", "sink"],
+  event: ["input", "scalar", "generator", "field", "combine", "texture", "sink"],
+  field_scalar: ["generator", "field", "combine", "input", "texture", "scalar", "sink"],
+  field_color: ["generator", "field", "combine", "texture", "input", "scalar", "sink"],
+  points: ["input", "generator", "field", "combine", "texture", "scalar", "sink"],
+  effects: ["input", "scalar", "generator", "field", "combine", "texture", "sink"],
+  texture: ["input", "texture", "generator", "field", "combine", "scalar", "sink"],
+};
+
+function rank(order: Category[] | undefined, c: Category): number {
+  const i = (order ?? ALL).indexOf(c);
+  return i < 0 ? ALL.length : i;
+}
+
+/** Every connectable input of a type: shaped inputs, then knobs (as scalars). */
+function inputsOf(t: PatchNodeType): { name: string; shape: PatchShape; viaParam: boolean }[] {
+  return [
+    ...t.inputs.map((p) => ({ name: p.name, shape: p.shape, viaParam: false })),
+    ...t.params
+      .filter((p) => p.kind === "number")
+      .map((p) => ({ name: p.name, shape: "scalar" as PatchShape, viaParam: true })),
+  ];
+}
+
+/** Node types that could take the other end of a wire from `from`, best
+ * first, each with the port it would use. Sub-patches are left out: their
+ * ports depend on the patch inside. */
+export function suggestConnections(registry: Iterable<PatchNodeType>, from: DragFrom): Suggestion[] {
+  const out: (Suggestion & { score: number })[] = [];
+  const order = from.dir === "out" ? CONSUMERS[from.shape] : PRODUCERS[from.shape];
+  for (const t of registry) {
+    if (t.id === SUBPATCH_KIND) continue;
+    const candidates =
+      from.dir === "out"
+        ? inputsOf(t)
+            .filter((p) => shapeAccepts(p.shape, from.shape))
+            .map((p) => ({ port: p.name, exact: p.shape === from.shape, viaParam: p.viaParam }))
+        : t.outputs
+            .filter((p) => shapeAccepts(from.shape, p.shape))
+            .map((p) => ({ port: p.name, exact: p.shape === from.shape, viaParam: false }));
+    if (candidates.length === 0) continue;
+    // The best port of this type: exact before adapter, shaped before knob,
+    // then the type's own order (its first port is its main one).
+    candidates.sort((a, b) => Number(b.exact) - Number(a.exact) || Number(a.viaParam) - Number(b.viaParam));
+    const best = candidates[0];
+    const score =
+      (best.exact ? 0 : 100) + (best.viaParam ? 50 : 0) + rank(order, t.category) * 2;
+    out.push({ type: t, port: best.port, exact: best.exact, viaParam: best.viaParam, score });
+  }
+  out.sort((a, b) => a.score - b.score || a.type.label.localeCompare(b.type.label));
+  return out.map(({ score: _, ...s }) => s);
+}
+
+/** What to call a shape in a tooltip or a hint. */
+export const SHAPE_LABEL: Record<PatchShape, string> = {
+  scalar: "number",
+  event: "event",
+  field_scalar: "field (grey)",
+  field_color: "field (colour)",
+  points: "points",
+  effects: "effects",
+  texture: "texture",
+  pixels: "pixels",
+};
