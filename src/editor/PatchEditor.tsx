@@ -36,6 +36,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./editor.css";
+import { arrangeDoc, type NodeSize } from "./arrange";
 import { ClipPicker } from "./ClipPicker";
 import { imageFileToMedia } from "./files";
 import { History } from "./history";
@@ -1017,6 +1018,33 @@ function Editor({
     if (next) restoreDoc(next);
   }, [canEdit, restoreDoc]);
 
+  /** Lay the graph out left to right by its wires: one undo step, then the
+   * view fits the result. Deterministic for a given document (see arrange.ts). */
+  const arrangeNodes = useCallback(() => {
+    const cur = docRef.current;
+    if (!cur || !canEdit) return;
+    const sizes = new Map<string, NodeSize>();
+    for (const n of flow.getNodes()) {
+      if (n.measured?.width && n.measured?.height) {
+        sizes.set(n.id, { width: n.measured.width, height: n.measured.height });
+      }
+    }
+    const placed = arrangeDoc(cur, sizes);
+    mutateDoc(
+      (d) => {
+        for (const n of d.nodes) {
+          const p = placed.get(n.id);
+          if (p) n.pos = p;
+        }
+      },
+      true,
+      "arrange",
+    );
+    // On a phone this comes from the menu sheet: close it to show the result.
+    setSheet(null);
+    requestAnimationFrame(() => void flow.fitView({ padding: 0.15, duration: 250 }));
+  }, [canEdit, flow, mutateDoc]);
+
   /** Copy the selected nodes (or `ids`) with the wires between them, offset
    * a little, and select the copies. */
   const duplicateNodes = useCallback(
@@ -1285,6 +1313,16 @@ function Editor({
       </button>
     </>
   );
+  const arrangeButton = canEdit && doc && (
+    <button
+      type="button"
+      onClick={arrangeNodes}
+      disabled={doc.nodes.length < 2}
+      title="Lay the graph out left to right by its wires (undoable)"
+    >
+      ⇆ Arrange
+    </button>
+  );
   const activateButton = doc && canEdit && showActivate && (
     <button
       type="button"
@@ -1333,6 +1371,7 @@ function Editor({
           </select>
           {canEdit && <button onClick={() => openDoc(emptyPatch())}>＋ New</button>}
           {undoRedo}
+          {arrangeButton}
           {canEdit && presets.length > 0 && (
             <select
               aria-label="New from preset"
@@ -1504,6 +1543,7 @@ function Editor({
             <div className="patch-menu-status">{statusLine}</div>
             <div className="patch-menu-actions">
               {undoRedo}
+              {arrangeButton}
               {activateButton}
               {toolbarExtra?.({
                 doc,

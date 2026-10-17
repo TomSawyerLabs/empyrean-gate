@@ -15,6 +15,7 @@
     "./types": "./src/types.ts"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.1.1",
     "@webgpu/types": "^0.1.66"
   },
   "peerDependencies": {
