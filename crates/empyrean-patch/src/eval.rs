@@ -162,6 +162,10 @@ pub struct Runtime {
     outputs: Vec<HashMap<String, f32>>,
     /// Event ports that fired this frame.
     events: Vec<Vec<&'static str>>,
+    /// How many times each event port has fired since the runtime (or the one
+    /// it adopted state from) started: what an event's meter shows, since a
+    /// one-frame pulse is invisible at the meters' sample rate.
+    event_counts: Vec<HashMap<&'static str, u32>>,
     /// One-shot effects emitted by Event effect nodes during the latest eval,
     /// with each node's `effects::effect_source`.
     emitted_effects: Vec<(EffectCfg, u32)>,
@@ -183,6 +187,7 @@ impl Runtime {
             slab,
             outputs: vec![HashMap::new(); n],
             events: vec![Vec::new(); n],
+            event_counts: vec![HashMap::new(); n],
             emitted_effects: Vec::new(),
         }
     }
@@ -211,6 +216,7 @@ impl Runtime {
             if let Some(j) = *j {
                 self.state[i] = old.state[j].clone();
                 self.outputs[i] = old.outputs[j].clone();
+                self.event_counts[i] = old.event_counts[j].clone();
             }
         }
         for (k, slot) in self.prog.slots.iter().enumerate() {
@@ -245,11 +251,14 @@ impl Runtime {
     /// evaluated yet is indistinguishable from one outputting zero, which is
     /// exactly what a meter should show).
     pub fn scalar_value(&self, node: usize, port: &str) -> f32 {
-        self.outputs
+        if let Some(v) = self.outputs.get(node).and_then(|o| o.get(port)) {
+            return *v;
+        }
+        // An event port: its meter value is the running count of fires.
+        self.event_counts
             .get(node)
-            .and_then(|o| o.get(port))
-            .copied()
-            .unwrap_or(0.0)
+            .and_then(|c| c.get(port))
+            .map_or(0.0, |&n| n as f32)
     }
 
     /// Apply a live param change (exposed-param play surface) without any
@@ -801,6 +810,9 @@ impl Runtime {
                     o.insert("index".into(), index as f32);
                 }
                 _ => {}
+            }
+            for port in &self.events[node] {
+                *self.event_counts[node].entry(port).or_insert(0) += 1;
             }
         }
 
@@ -1550,6 +1562,34 @@ mod tests {
         rt.eval(&inp);
         assert_eq!(rt.slab[opacity], 1.0);
         assert_eq!(rt.outputs[g]["hue_amount"], 1.0);
+    }
+
+    #[test]
+    fn event_ports_meter_as_a_running_fire_count() {
+        // A looping clock's `wrap` fires once per loop; the meter list carries
+        // it and its value climbs by one per fire, surviving a rebuild.
+        let mut t = node("t", "time");
+        t.params.insert("mode".into(), 1.0); // loop
+        t.params.insert("rate".into(), 1.0);
+        t.params.insert("end".into(), 0.25);
+        let doc = PatchDoc {
+            nodes: vec![t, node("n", "noise_field"), node("o", "output")],
+            edges: vec![edge("n", "out", "o", "in")],
+            ..Default::default()
+        };
+        let mut rt = runtime(doc.clone());
+        let ti = rt.doc.nodes.iter().position(|n| n.id == "t").unwrap();
+        assert!(rt.prog.preview_scalars.contains(&(ti, "wrap")), "events are metered");
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        assert_eq!(rt.scalar_value(ti, "wrap"), 0.0);
+        for _ in 0..10 {
+            rt.eval(&inputs(&audio)); // dt 0.1: the 0.25 loop wraps every 3 frames
+        }
+        let fired = rt.scalar_value(ti, "wrap");
+        assert!(fired >= 3.0, "{fired}");
+        let mut rebuilt = runtime(doc);
+        rebuilt.adopt_state(&rt);
+        assert_eq!(rebuilt.scalar_value(ti, "wrap"), fired, "the count carries over an edit");
     }
 
     #[test]

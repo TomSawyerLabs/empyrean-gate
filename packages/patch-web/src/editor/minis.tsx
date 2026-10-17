@@ -229,10 +229,14 @@ export function MiniMeter({
   source,
   mini,
   label,
+  kind = "scalar",
 }: {
   source: MiniSource;
   mini: string;
   label: string;
+  /** "event": the samples are a running fire count; the strip shows a tick
+   * at every sample where it grew, and the total. */
+  kind?: "scalar" | "event";
 }) {
   const [, bump] = useState(0);
   useEffect(() => {
@@ -246,6 +250,28 @@ export function MiniMeter({
   const entry = source.scalars.get(mini);
   const values = entry?.values ?? [];
   const latest = entry?.latest ?? 0;
+  if (kind === "event") {
+    const w = 72;
+    const h = 16;
+    const ticks: number[] = [];
+    for (let i = 1; i < values.length; i++) {
+      if (values[i] > values[i - 1]) ticks.push((i / (values.length - 1)) * w);
+    }
+    // Lit while the newest samples carry a fire.
+    const recent = values.length > 2 && values[values.length - 1] > values[values.length - 3];
+    return (
+      <div className={`mini-meter mini-event ${recent ? "lit" : ""}`}>
+        <span className="mini-meter-label">{label}</span>
+        <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} aria-hidden="true">
+          <line x1="0" y1={h - 1.5} x2={w} y2={h - 1.5} stroke="currentColor" strokeWidth="0.6" opacity="0.4" />
+          {ticks.map((x, i) => (
+            <line key={i} x1={x} y1="1.5" x2={x} y2={h - 1.5} stroke="currentColor" strokeWidth="1.4" />
+          ))}
+        </svg>
+        <span className="mini-meter-value">×{Math.round(latest)}</span>
+      </div>
+    );
+  }
   // Auto-scale to the window's own span so slow drifts stay visible; a flat
   // signal draws as a flat line rather than jittering on float noise.
   const min = values.length ? Math.min(...values, 0) : 0;

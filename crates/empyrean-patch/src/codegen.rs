@@ -327,9 +327,10 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         .copied()
         .flat_map(|i| {
             let ty = registry::lookup(&doc.nodes[i].kind).expect("validated kind");
+            // Events meter too: the runtime reports a fire count for them.
             ty.outputs
                 .iter()
-                .filter(|p| p.shape == Shape::Scalar)
+                .filter(|p| matches!(p.shape, Shape::Scalar | Shape::Event))
                 .map(move |p| (i, p.name))
         })
         .take(MAX_PREVIEW_SCALARS)

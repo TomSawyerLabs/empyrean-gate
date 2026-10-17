@@ -634,6 +634,76 @@
   line-height: 1.35;
 }
 
+/* While a wire is dragged: ports that would take it glow, the rest dim, so
+   the eye finds the answer before the pointer does. */
+.pnode-port.port-nofit {
+  opacity: 0.3;
+}
+
+.pnode-port.port-fit .port-dot {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.35), 0 0 10px 2px currentColor !important;
+}
+
+.pnode-port.port-fit span {
+  color: var(--pe-text, #e8e6f4);
+  font-weight: 600;
+}
+
+/* "Connect to…": what could sit at the other end of a wire dropped on empty
+   canvas. A popover at the drop point, or a sheet on a phone. */
+.patch-connect.patch-popover {
+  position: absolute;
+  z-index: 15;
+  width: 240px;
+  max-height: 60%;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  border: 1px solid #2a2445;
+  border-radius: 8px;
+  background: var(--pe-panel, #1a1530);
+  background-image: var(--pe-surface-grad, none);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+
+.patch-connect h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--pe-muted, #8a85a8);
+}
+
+.patch-connect input[type="search"] {
+  width: 100%;
+  margin-bottom: 6px;
+  box-sizing: border-box;
+}
+
+.patch-connect-list {
+  display: grid;
+  gap: 4px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.patch-connect .palette-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+}
+
+.patch-connect-port {
+  color: var(--pe-muted, #8a85a8);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.patch-connect.patch-sheet .patch-connect-list {
+  grid-template-columns: 1fr;
+}
+
 .patch-menu h4 {
   margin: 16px 0 6px;
   font-size: 11px;

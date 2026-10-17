@@ -29,6 +29,11 @@
   min-width: 24px;
 }
 
+/* An event's strip: ticks where it fired; the whole row lights on a fresh one. */
+.mini-event.lit {
+  color: var(--pe-accent2, #38d1c2);
+}
+
 .mini-meter-value {
   font-variant-numeric: tabular-nums;
   color: var(--pe-text, #e8e6f4);
