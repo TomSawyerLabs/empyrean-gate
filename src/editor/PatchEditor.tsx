@@ -1519,6 +1519,12 @@ function Editor({
       onChange={(e) => mutateDoc((d) => void (d.name = e.target.value), false)}
     />
   );
+  // Who made it, when it came from somewhere else (a playground submission).
+  const creditLabel = doc?.credit ? (
+    <span className="patch-credit" title="Who sent this pattern">
+      by {doc.credit}
+    </span>
+  ) : null;
   const undoRedo = canEdit && doc && (
     <>
       <button type="button" onClick={undo} disabled={!history.current.canUndo} title="Undo (Ctrl+Z)">
@@ -1608,6 +1614,7 @@ function Editor({
             </select>
           )}
           {nameField}
+          {creditLabel}
           {activateButton}
           {deleteButton}
           {toolbarExtra?.({ doc, open: openAs })}

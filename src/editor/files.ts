@@ -50,6 +50,7 @@ function parsePatchValue(raw: unknown, depth: number): PatchDoc {
     id: typeof r.id === "string" ? r.id : "",
     name: typeof r.name === "string" ? r.name : "",
     description: typeof r.description === "string" ? r.description : "",
+    ...(typeof r.credit === "string" && r.credit ? { credit: r.credit } : {}),
     nodes: r.nodes.map((n) => ({
       id: String(n.id ?? ""),
       kind: String(n.kind ?? ""),
