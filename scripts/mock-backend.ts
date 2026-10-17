@@ -179,6 +179,42 @@ const MOCK_PRESET: MockPatch = {
   // Exposed so the preset offers a port when inserted as a Sub-patch.
   exposed: [{ node: "n1", param: "scale", label: "Scale" }],
 };
+// Two playground submissions as the backend hands them on from the site
+// (empyreangate.org, worker/index.ts there): the Patch tab's Submissions
+// drawer lists them and opens their patches. Deciding one answers ok and
+// leaves the queue as it is, so every browser project sees the same two rows;
+// the drawer drops a decided row itself.
+const mockSubmissions = [
+  {
+    key: "submissions/2026-10-17/abcd/1760700000000-sub-1.json",
+    id: "sub-1",
+    submittedAt: "2026-10-17T08:02:00.000Z",
+    name: "Ada",
+    contact: "",
+    message: "Slow noise for the fire hour.",
+    country: "US",
+    patch: { ...MOCK_PRESET, id: "sent-1", name: "Ember Drift" },
+  },
+  {
+    key: "submissions/2026-10-16/ef01/1760600000000-sub-2.json",
+    id: "sub-2",
+    submittedAt: "2026-10-16T22:40:00.000Z",
+    name: "Grace",
+    contact: "grace@example.com",
+    message: "",
+    country: "CA",
+    patch: { ...MOCK_PRESET, id: "sent-2", name: "Night Tide" },
+  },
+];
+const submissionSummary = (s: (typeof mockSubmissions)[number]) => ({
+  ...s,
+  patch: {
+    name: s.patch.name,
+    description: s.patch.description,
+    nodes: s.patch.nodes.length,
+    edges: s.patch.edges.length,
+  },
+});
 const patchLibraries = new WeakMap<object, Map<string, MockPatch>>();
 const activePatch = new WeakMap<object, string | null>();
 let mintedPatches = 0;
@@ -303,6 +339,19 @@ const server = Bun.serve({
       ]);
     }
     if (url.pathname === "/patch/presets") return Response.json([MOCK_PRESET]);
+    if (url.pathname === "/patch/submissions") {
+      return Response.json({ submissions: mockSubmissions.map(submissionSummary) });
+    }
+    if (url.pathname === "/patch/submissions/record") {
+      const row = mockSubmissions.find((s) => s.key === url.searchParams.get("key"));
+      if (!row) return Response.json({ error: "No such submission." }, { status: 404 });
+      const { patch, ...submission } = row;
+      // As the backend does: a new patch here, credited to the sender.
+      return Response.json({ submission, patch: { ...patch, id: "", credit: row.name } });
+    }
+    if (url.pathname === "/patch/submissions/decide" && req.method === "POST") {
+      return req.json().then(() => Response.json({ ok: true }));
+    }
     // Test-only lever for states the backend reaches on its own but a mock never
     // will (the sACN contention banner needs something else to be on the wire).
     // POST a `RuntimeStatus` fragment with `?client=<empyrean-client-id>`; the

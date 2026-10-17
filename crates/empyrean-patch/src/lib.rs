@@ -92,6 +92,11 @@ pub struct PatchDoc {
     pub id: String,
     pub name: String,
     pub description: String,
+    /// Who made it, when that is not the crew: a playground submission
+    /// carries the sender's name here, and the public floor's `/health`
+    /// shows it next to the patch on air. Empty for the crew's own patches.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub credit: String,
     pub nodes: Vec<NodeInst>,
     pub edges: Vec<Edge>,
     /// Params promoted to remote play surfaces (Control tab) and, later, to
@@ -106,6 +111,7 @@ impl Default for PatchDoc {
             id: String::new(),
             name: String::new(),
             description: String::new(),
+            credit: String::new(),
             nodes: Vec::new(),
             edges: Vec::new(),
             exposed: Vec::new(),

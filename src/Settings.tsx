@@ -26,6 +26,7 @@ import {
   type DjLinkEventKind,
   type EffectKind,
   type PublicConfig,
+  type SubmissionsConfig,
   type UnlockKey,
 } from "./types";
 import { hsvToHex, liveColor } from "./liveColors";
@@ -49,6 +50,7 @@ export default function Settings() {
       <RedundancyPanel config={config} />
       <ClientsPanel />
       <PublicFloorPanel config={config} />
+      <SubmissionsPanel config={config} />
       <BrcEventsPanel />
       <DiagnosticsPanel />
       <UpdatesPanel config={config} />
@@ -910,6 +912,52 @@ const KNOWN_PERKS: { id: string; label: string; hint: string }[] = [
 
 /** The internet-facing floor: its listener, what it may do, who is on it, and
  *  the secret keys that unlock more (plans/public-floor.md). */
+/** The playground's submission queue: where it is and the token that opens
+ *  it. Typed here, on the Gate machine; a remote client only ever sees the
+ *  token blank, and the Patch tab's Submissions… button reads the queue
+ *  through the backend. */
+function SubmissionsPanel({ config }: { config: AppConfig }) {
+  const { client } = useGate();
+  const sub = config.submissions;
+  const local =
+    client.httpBase.startsWith("http://127.0.0.1") || client.httpBase.startsWith("http://localhost");
+  const patch = (next: Partial<SubmissionsConfig>) =>
+    client.setConfig({ ...config, submissions: { ...sub, ...next } });
+  return (
+    <section className="panel submissions-panel">
+      <h2>Submissions</h2>
+      <p className="hint">
+        Patterns people send from the playground on empyreangate.org wait in a queue there.
+        With the site's admin token set here, the Patch tab's <b>Submissions…</b> button lists
+        them, opens one as a new patch in a click, and marks it used or declined. The token is
+        the site repo's <code>ADMIN_TOKEN</code> secret; it stays on this machine.
+      </p>
+      <div className="public-grid">
+        <label className="field-row">
+          <span>Site</span>
+          <input
+            value={sub.site_url}
+            placeholder="https://empyreangate.org"
+            disabled={!local}
+            onChange={(e) => patch({ site_url: e.target.value.trim() })}
+          />
+        </label>
+        <label className="field-row">
+          <span>Admin token</span>
+          <input
+            type="password"
+            autoComplete="off"
+            value={sub.token}
+            placeholder={local ? "paste the site's admin token" : "set on the Gate machine"}
+            disabled={!local}
+            onChange={(e) => patch({ token: e.target.value.trim() })}
+          />
+        </label>
+      </div>
+    </section>
+  );
+}
+
 function PublicFloorPanel({ config }: { config: AppConfig }) {
   const { client, status } = useGate();
   const pub = config.public;

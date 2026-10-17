@@ -50,6 +50,8 @@ struct Ctx {
     remote: RemoteChains,
     media: Arc<MediaResolver>,
     brc_http: reqwest::Client,
+    /// For the site's submission queue (`/patch/submissions*`).
+    site_http: reqwest::Client,
 }
 
 pub fn spawn(state: Arc<SharedState>, remote: RemoteChains) -> std::thread::JoinHandle<()> {
@@ -76,12 +78,17 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .timeout(Duration::from_secs(15))
         .build()
         .expect("BRC API HTTP client");
+    let site_http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .expect("site HTTP client");
     let cache_media = media.clone();
     let ctx = Ctx {
         state: state.clone(),
         remote,
         media,
         brc_http,
+        site_http,
     };
     let app = Router::new()
         .route("/health", get(health))
@@ -97,6 +104,9 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .route("/patch/registry", get(patch_registry))
         .route("/patch/presets", get(patch_presets))
         .route("/patch/migrate", post(patch_migrate))
+        .route("/patch/submissions", get(patch_submissions))
+        .route("/patch/submissions/record", get(patch_submission_record))
+        .route("/patch/submissions/decide", post(patch_submission_decide))
         .route("/media/file/{id}", get(serve_media_file))
         .route("/version", get(running_version))
         .route("/focus", post(focus_window))
@@ -823,6 +833,133 @@ async fn patch_presets() -> Response {
 async fn patch_migrate(axum::Json(mut doc): axum::Json<patch::PatchDoc>) -> Response {
     patch::migrate::migrate(&mut doc);
     axum::Json(doc).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// The playground's submissions (empyreangate.org)
+// ---------------------------------------------------------------------------
+
+/// One call to the site's admin API with the configured token. Loopback
+/// only, like every patch edit, and through this backend rather than the
+/// browser so the token stays in the config file on this machine. Returns
+/// the site's status and body, or a ready-made refusal.
+async fn site_request(
+    ctx: &Ctx,
+    addr: SocketAddr,
+    method: reqwest::Method,
+    path: &str,
+    query: &[(&str, &str)],
+    body: Option<serde_json::Value>,
+) -> Result<(StatusCode, String), Response> {
+    if !addr.ip().is_loopback() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "submissions are reviewed on the Gate machine only",
+        )
+            .into_response());
+    }
+    let (base, token) = {
+        let cfg = ctx.state.config.read();
+        (
+            cfg.submissions.site_url.trim_end_matches('/').to_string(),
+            cfg.submissions.token.clone(),
+        )
+    };
+    if base.is_empty() || token.is_empty() {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "No site token — set it under Settings → Submissions.",
+        )
+            .into_response());
+    }
+    let mut url = url::Url::parse(&format!("{base}{path}")).map_err(|e| {
+        (StatusCode::SERVICE_UNAVAILABLE, format!("The site URL is not a URL: {e}")).into_response()
+    })?;
+    if !query.is_empty() {
+        url.query_pairs_mut().extend_pairs(query);
+    }
+    let mut req = ctx.site_http.request(method, url).bearer_auth(token);
+    if let Some(body) = body {
+        req = req
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body.to_string());
+    }
+    match req.send().await {
+        Ok(res) => {
+            let status = StatusCode::from_u16(res.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+            Ok((status, res.text().await.unwrap_or_default()))
+        }
+        Err(e) => Err((StatusCode::BAD_GATEWAY, format!("Could not reach {base}: {e}")).into_response()),
+    }
+}
+
+fn site_json(status: StatusCode, text: String) -> Response {
+    (status, [(header::CONTENT_TYPE, "application/json")], text).into_response()
+}
+
+/// The queue, newest first: the site's `GET /api/submissions`.
+async fn patch_submissions(State(ctx): State<Ctx>, ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Response {
+    match site_request(&ctx, addr, reqwest::Method::GET, "/api/submissions", &[], None).await {
+        Ok((status, text)) => site_json(status, text),
+        Err(refusal) => refusal,
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct SubmissionKey {
+    key: String,
+}
+
+/// One submission, its patch upgraded to the current format, credited to
+/// the sender and stripped of the sender's id, ready for the editor to open
+/// as a new patch in this library.
+async fn patch_submission_record(
+    State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Query(q): Query<SubmissionKey>,
+) -> Response {
+    let (status, text) =
+        match site_request(&ctx, addr, reqwest::Method::GET, "/api/submissions", &[("key", &q.key)], None).await {
+            Ok(v) => v,
+            Err(refusal) => return refusal,
+        };
+    if !status.is_success() {
+        return site_json(status, text);
+    }
+    let mut answer: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            return (StatusCode::BAD_GATEWAY, format!("The site's answer was not JSON: {e}")).into_response();
+        }
+    };
+    let Some(submission) = answer.get_mut("submission").filter(|s| s.is_object()) else {
+        return (StatusCode::BAD_GATEWAY, "The site's answer was not a submission.").into_response();
+    };
+    let raw_patch = submission.get_mut("patch").map(serde_json::Value::take).unwrap_or_default();
+    let mut doc: patch::PatchDoc = match serde_json::from_value(raw_patch) {
+        Ok(d) => d,
+        Err(e) => {
+            return (StatusCode::BAD_GATEWAY, format!("That submission's patch cannot be read: {e}")).into_response();
+        }
+    };
+    patch::migrate::migrate(&mut doc);
+    doc.id.clear();
+    if doc.credit.is_empty() {
+        doc.credit = submission.get("name").and_then(|n| n.as_str()).unwrap_or_default().to_string();
+    }
+    axum::Json(serde_json::json!({ "submission": submission, "patch": doc })).into_response()
+}
+
+/// Mark one used or declined: the site's `POST /api/submissions/decide`.
+async fn patch_submission_decide(
+    State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    axum::Json(body): axum::Json<serde_json::Value>,
+) -> Response {
+    match site_request(&ctx, addr, reqwest::Method::POST, "/api/submissions/decide", &[], Some(body)).await {
+        Ok((status, text)) => site_json(status, text),
+        Err(refusal) => refusal,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1578,6 +1715,7 @@ fn redact_for_remote(mut ev: ServerMsg, is_local: bool, admin: bool, own_id: &st
     match &mut ev {
         ServerMsg::State { config, status } => {
             config.server.admin_token.clear();
+            config.submissions.token.clear();
             if !admin {
                 config.server.join_token.clear();
                 config.server.staff_token.clear();
@@ -2243,6 +2381,7 @@ async fn handle_msg(
                 let require_token = c.server.require_token;
                 let active_patch = c.active_patch.clone();
                 let launch_at_startup = c.windows.launch_at_startup;
+                let submissions_token = c.submissions.token.clone();
                 let mut incoming = *config;
                 // Key redemption counters are the server's; a Settings page
                 // holding a stale copy must not reset them.
@@ -2254,6 +2393,11 @@ async fn handle_msg(
                 c.server.require_token = require_token;
                 c.active_patch = active_patch;
                 c.windows.launch_at_startup = launch_at_startup;
+                // The site token is typed on the Gate machine; a remote
+                // Settings page only ever holds the blanked copy.
+                if !addr.ip().is_loopback() {
+                    c.submissions.token = submissions_token;
+                }
             });
             if port_changed {
                 let _ = send_json(
@@ -3074,6 +3218,7 @@ mod diagnostics_tests {
             panic!("redaction changed the message kind");
         };
         assert!(config.server.admin_token.is_empty());
+        assert!(config.submissions.token.is_empty());
         // A remote admin keeps everything else: the roster needs the ids.
         assert_eq!(config.server.join_token, "join-secret");
         assert_eq!(config.clients.len(), 2);

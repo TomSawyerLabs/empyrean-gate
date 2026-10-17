@@ -6907,3 +6907,71 @@ button.hue-swatch-button[aria-expanded="true"] {
     height: min(60vh, 520px);
   }
 }
+
+/* The Patch tab's Submissions drawer (PatchSubmissions.tsx): the playground's
+   queue, beside the editor. */
+.submissions-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  width: min(440px, 100vw);
+  overflow: auto;
+  padding: 16px;
+  background-color: var(--bg2);
+  background-image: var(--surface-grad);
+  border-left: 1px solid #2a2445;
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.45);
+}
+
+.submissions-drawer header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.submissions-drawer header h2 {
+  flex: 1;
+  margin: 0;
+}
+
+.submissions-drawer ul {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.submissions-drawer li {
+  padding: 10px 12px;
+  border: 1px solid #2a2445;
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.submission-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.submission-head span,
+.submission-meta {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.submission-note {
+  margin: 6px 0;
+  font-style: italic;
+}
+
+.submission-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}

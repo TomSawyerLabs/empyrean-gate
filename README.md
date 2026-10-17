@@ -270,7 +270,11 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   **Import / Export** move patches as files — including ones made in the
   [empyreangate.org pattern playground](https://empyreangate.org/playground),
   which runs this same editor, compiler and shader in a browser (see
-  "Code layout" below). Slated to replace the layer stack once all pattern
+  "Code layout" below). **Submissions…** lists the patterns people sent from
+  that playground (the site keeps a queue; Settings → Submissions holds its
+  admin token, which stays on the Gate machine): one click opens a
+  submission as a new patch credited to its sender, Used / Decline take it
+  out of the queue. Slated to replace the layer stack once all pattern
   kinds are ported — see `plans/node-graph.md`.
 - **Legacy RGB archive**: open individual Uprising `.eg.data` RGB recordings or
   index an entire `Uprising-Data` checkout. Playback streams one 64×378 frame at a
@@ -372,8 +376,10 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   (`plans/hidden-modes.md`): a shape pad and whole games that exist only for
   the group holding the key. Once a public URL is set
   it is the venue QR too: ⊕ Connect opens on it and the poster carries it
-  (Guest and Admin stay a tap away for crew). TLS is deliberately the
-  proxy's job. The operator port, meanwhile, **refuses proxied requests** —
+  (Guest and Admin stay a tap away for crew), and the listener's `/health`
+  says what is on (floor open, players, game, the patch on air and its
+  credit) so empyreangate.org can show **Play it live** while the gate is
+  up. TLS is deliberately the proxy's job. The operator port, meanwhile, **refuses proxied requests** —
   a proxy on the show machine connects from loopback, and loopback is the
   operator — and guests no longer receive other devices' ids, the join/staff
   tokens, the Wi-Fi password or key secrets in their state snapshots.

@@ -68,6 +68,7 @@ fn flatten_at(
         id: doc.id.clone(),
         name: doc.name.clone(),
         description: doc.description.clone(),
+        credit: doc.credit.clone(),
         nodes: Vec::with_capacity(doc.nodes.len()),
         edges: Vec::with_capacity(doc.edges.len()),
         exposed: Vec::with_capacity(doc.exposed.len()),

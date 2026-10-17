@@ -14,6 +14,7 @@ import {
   type PatchStore,
 } from "@empyrean-gate/patch-web/editor";
 import { getMiniHub } from "./miniPreview";
+import { SubmissionsDrawer } from "./PatchSubmissions";
 import { useGate, useThrottled } from "./state";
 import type { GateClient } from "./ws";
 
@@ -42,6 +43,11 @@ export default function Patch() {
   const [registry, setRegistry] = useState<PatchNodeType[] | null>(null);
   const [presets, setPresets] = useState<PatchDoc[]>([]);
   const [importError, setImportError] = useState<string | null>(null);
+  // The playground's queue (empyreangate.org), as a drawer beside the editor.
+  // Opening a submission goes through the editor's own `open`, which the
+  // toolbar hook hands us on each render.
+  const [showSubmissions, setShowSubmissions] = useState(false);
+  const openInEditor = useRef<(doc: PatchDoc, asNew?: boolean) => void>(() => {});
 
   // Editing works only where the backend will accept it: loopback connections.
   const canEdit =
@@ -117,6 +123,7 @@ export default function Patch() {
   ];
 
   return (
+    <>
     <PatchEditor
       store={store}
       registry={registry}
@@ -139,6 +146,19 @@ export default function Patch() {
       }
       toolbarExtra={({ doc, open }) => (
         <>
+          {canEdit && (
+            <button
+              type="button"
+              className={showSubmissions ? "active" : undefined}
+              title="Patterns people sent from the playground on empyreangate.org"
+              onClick={() => {
+                openInEditor.current = open;
+                setShowSubmissions((v) => !v);
+              }}
+            >
+              Submissions…
+            </button>
+          )}
           {canEdit && (
             <button
               title="Open a patch file (for example one saved from the empyreangate.org playground) as a new patch"
@@ -175,5 +195,13 @@ export default function Patch() {
         </>
       )}
     />
+    {showSubmissions && canEdit && (
+      <SubmissionsDrawer
+        client={client}
+        onOpen={(doc) => openInEditor.current(doc, true)}
+        onClose={() => setShowSubmissions(false)}
+      />
+    )}
+    </>
   );
 }

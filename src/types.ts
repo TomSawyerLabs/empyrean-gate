@@ -259,6 +259,15 @@ export interface UnlockKey {
   flourish: boolean;
 }
 
+/** The playground's submission queue (empyreangate.org), read by the Patch
+ *  tab through the backend (mirrors src-tauri SubmissionsConfig). */
+export interface SubmissionsConfig {
+  site_url: string;
+  /** Redacted (empty) in configs sent to remote clients; typed on the Gate
+   *  machine, and a remote SetConfig never overwrites it. */
+  token: string;
+}
+
 /** Operator's view of the public floor (part of RuntimeStatus). */
 export interface PublicStatus {
   enabled: boolean;
@@ -485,6 +494,7 @@ export interface AppConfig {
   output: OutputConfig;
   server: ServerConfig;
   public: PublicConfig;
+  submissions: SubmissionsConfig;
   peer: PeerConfig;
   audio: AudioConfig;
   rhythm: RhythmConfig;

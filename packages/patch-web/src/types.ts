@@ -78,6 +78,9 @@ export interface PatchDoc {
   id: string;
   name: string;
   description: string;
+  /** Who made it, when that is not the crew (a playground submission carries
+   * the sender's name). Absent for the crew's own patches. */
+  credit?: string;
   nodes: PatchNode[];
   edges: PatchEdge[];
   exposed: PatchExposedParam[];

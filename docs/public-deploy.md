@@ -41,6 +41,25 @@ from a person, and why the public listener exists at all.
   `public_state` snapshot (what it may do, the game, the geometry), never the
   config or status.
 
+## What the site sees
+
+`GET /health` on the public listener answers JSON, and nothing in it is a
+secret:
+
+```json
+{ "ok": true, "open": true, "players": 3, "game": null,
+  "now_playing": { "name": "Ember Drift", "credit": "Ada" } }
+```
+
+`open` is the floor's master switch, `players` how many phones are on it,
+`game` the running game's kind, `now_playing` the patch on air (absent when
+the layer stack is rendering). empyreangate.org's Worker polls it through
+the public URL (`/api/live` there, memoised for ten seconds per edge) to show
+**Play it live** and "On the gate now: _Ember Drift_ by _Ada_" on the home
+page and the playground. The credit comes with the patch: a playground
+submission opened from the Patch tab's Submissions drawer is credited to its
+sender (`PatchDoc.credit`).
+
 ## TLS: let the proxy do it
 
 The app speaks plain HTTP on purpose. Certificates, renewal, HTTP/2, and

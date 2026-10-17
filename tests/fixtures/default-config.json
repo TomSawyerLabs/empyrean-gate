@@ -59,6 +59,10 @@
     "messages_per_second": 40,
     "keys": []
   },
+  "submissions": {
+    "site_url": "https://empyreangate.org",
+    "token": ""
+  },
   "peer": {
     "follow": "",
     "follow_token": "",

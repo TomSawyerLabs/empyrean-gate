@@ -825,6 +825,30 @@ pub struct VideoConfig {
     pub auto_advance: bool,
 }
 
+/// The playground's submissions (empyreangate.org), pulled into the Patch
+/// tab's Submissions drawer. The site lists its queue behind an admin
+/// token; this backend fetches with it (`/patch/submissions*` on the
+/// operator port, loopback only), so the token never reaches a browser.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SubmissionsConfig {
+    /// The site whose `/api/submissions` holds the queue.
+    pub site_url: String,
+    /// Its admin token (the site repo's `ADMIN_TOKEN` secret). Blank in
+    /// every config sent to a remote client and kept across a remote
+    /// `SetConfig`, like the admin token: it is typed on the Gate machine.
+    pub token: String,
+}
+
+impl Default for SubmissionsConfig {
+    fn default() -> Self {
+        Self {
+            site_url: "https://empyreangate.org".into(),
+            token: String::new(),
+        }
+    }
+}
+
 /// Self-update behavior (see `updater.rs`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -1098,6 +1122,8 @@ pub struct AppConfig {
     pub server: ServerConfig,
     /// The internet-facing play surface (second listener). Off by default.
     pub public: PublicConfig,
+    /// The playground's submission queue (empyreangate.org) for the Patch tab.
+    pub submissions: SubmissionsConfig,
     pub peer: PeerConfig,
     pub audio: AudioConfig,
     pub rhythm: RhythmConfig,
@@ -1151,6 +1177,7 @@ impl Default for AppConfig {
             output: OutputConfig::default(),
             server: ServerConfig::default(),
             public: PublicConfig::default(),
+            submissions: SubmissionsConfig::default(),
             peer: PeerConfig::default(),
             audio: AudioConfig::default(),
             rhythm: RhythmConfig::default(),

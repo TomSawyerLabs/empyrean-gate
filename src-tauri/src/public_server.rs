@@ -157,8 +157,51 @@ async fn serve(listener: tokio::net::TcpListener, ctx: Ctx, mut stop: watch::Rec
     }
 }
 
-async fn health() -> StatusCode {
-    StatusCode::NO_CONTENT
+/// `GET /health`: the floor is up, and what is on the gate. The site reads
+/// it (empyreangate.org's `/api/live`) to show "Play it live" and what is
+/// playing. Nothing here is private: whether the floor is open, how many
+/// are playing, the running game, the patch on air and who it credits.
+async fn health(State(ctx): State<Ctx>) -> Response {
+    let (open, active_patch) = {
+        let cfg = ctx.state.config.read();
+        (cfg.public.open, cfg.active_patch.clone())
+    };
+    let (game, patch_active) = {
+        let st = ctx.state.status.lock();
+        (st.game.active, st.patch_active)
+    };
+    let players = ctx.state.public.lock().sessions_count();
+    let now_playing = if patch_active { active_patch.and_then(|id| now_playing(&id)) } else { None };
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        axum::Json(serde_json::json!({
+            "ok": true,
+            "open": open,
+            "players": players,
+            "game": game,
+            "now_playing": now_playing,
+        })),
+    )
+        .into_response()
+}
+
+/// The patch on air by name and credit, from its file. Held for a few
+/// seconds: finding a patch reads the whole library, and the site asks from
+/// every edge it answers from.
+fn now_playing(id: &str) -> Option<serde_json::Value> {
+    use crate::patch::store;
+    static CACHE: std::sync::Mutex<Option<(Instant, String, serde_json::Value)>> = std::sync::Mutex::new(None);
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, cached_id, value)) = cache.as_ref()
+        && cached_id == id
+        && at.elapsed() < Duration::from_secs(5)
+    {
+        return Some(value.clone());
+    }
+    let doc = store::load(&store::patches_dir(), id).ok()?;
+    let value = serde_json::json!({ "name": doc.name, "credit": doc.credit });
+    *cache = Some((Instant::now(), id.to_string(), value.clone()));
+    Some(value)
 }
 
 /// The public page. `/k/<secret>` serves the same page; the UI reads the key

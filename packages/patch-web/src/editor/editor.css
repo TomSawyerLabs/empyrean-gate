@@ -67,6 +67,12 @@
   font-weight: 600;
 }
 
+.patch-toolbar .patch-credit {
+  color: var(--pe-muted, #8a85a8);
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
 .patch-toolbar button.active {
   border-color: var(--pe-accent2, #38d1c2);
   color: var(--pe-accent2, #38d1c2);
