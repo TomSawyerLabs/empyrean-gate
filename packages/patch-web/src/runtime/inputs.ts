@@ -51,9 +51,16 @@ export interface Motion {
   shake: number;
 }
 
+/** Where motion comes from: the device's sensors, or a host's stand-in. */
+export interface MotionSource {
+  /** The current orientation; returns and clears the shake spike. */
+  read(): Motion;
+  stop(): void;
+}
+
 /** Phone orientation and shakes, scaled as the gate's own phone client
  * (src/sensors.ts) sends them. `read()` returns and clears the shake spike. */
-export async function startMotion(): Promise<{ read: () => Motion; stop: () => void }> {
+export async function startMotion(): Promise<MotionSource> {
   if (!window.isSecureContext) {
     throw new Error("Motion and orientation need a secure (https) page.");
   }

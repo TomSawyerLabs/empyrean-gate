@@ -6,11 +6,17 @@ import { pushScalar, type MiniScalar, type MiniSource } from "../editor/minis";
 import type { PatchDoc } from "../types";
 import { loadPatchCore, type PatchCore, type PatchSim } from "./core";
 import { GateGpu, requestGateDevice, ShaderError, WebGpuUnavailable, type Geometry } from "./gpu";
-import { MediaTexture, startMicrophone, startMotion, type Motion } from "./inputs";
+import {
+  MediaTexture,
+  startMicrophone,
+  startMotion,
+  type Motion,
+  type MotionSource,
+} from "./inputs";
 
 export { loadPatchCore, type Limits, type PatchCore } from "./core";
 export { screenToPolar, ShaderError, WebGpuUnavailable, type Geometry } from "./gpu";
-export { MediaTexture, VIDEO_SIZE } from "./inputs";
+export { MediaTexture, VIDEO_SIZE, type Motion, type MotionSource } from "./inputs";
 
 /** The gate as built (`src-tauri/src/config.rs` defaults). */
 export const GATE_GEOMETRY: Geometry = { spokes: 64, pixels: 378, innerOverOuter: 8 / 25 };
@@ -362,6 +368,14 @@ export class PatchRuntime implements MiniSource {
     this.motion?.stop();
     this.motion = null;
     this.sim?.setMotion(0, 0, 0, 0);
+  }
+
+  /** Feed motion from somewhere other than the device's sensors: a host's
+   * stand-in on a desktop, so a Phone IMU node can be tried without a phone.
+   * Replaces whatever source was running; `stopMotion` ends it. */
+  setMotionSource(source: MotionSource) {
+    this.motion?.stop();
+    this.motion = source;
   }
 
   /** Use a local video or image file as the VIDEO texture; null to clear. */
