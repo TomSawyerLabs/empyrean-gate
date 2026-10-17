@@ -479,3 +479,114 @@
 .patch-clip .patch-image-preview {
   image-rendering: pixelated;
 }
+
+/* Compact: no toolbar row at all. The patch name is a chip on the canvas
+   (tap: the patch menu sheet), ＋ opens the palette, and a ⚠ chip appears
+   only while the patch cannot run. The canvas starts right under whatever
+   the host puts above it. */
+
+.patch-canvas-chips {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.patch-canvas-chips > * {
+  pointer-events: auto;
+}
+
+.patch-name-chip {
+  min-width: 0;
+  max-width: 60%;
+  margin-right: auto;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+.patch-status-chip {
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 14px;
+  line-height: 1;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+.patch-status-chip.error {
+  border-color: var(--pe-danger, #ff5c7a);
+  color: var(--pe-danger, #ff5c7a);
+}
+
+.patch-add-fab {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 999px;
+  border-color: var(--pe-accent, #7c5cff);
+  font-size: 22px;
+  line-height: 1;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+/* Below the chips row. */
+.patch-tab.compact .patch-node-pill {
+  top: 58px;
+}
+
+.patch-menu h4 {
+  margin: 16px 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--pe-muted, #8a85a8);
+}
+
+.patch-menu .patch-field .patch-name {
+  min-width: 0;
+  width: 100%;
+  font-weight: 600;
+}
+
+.patch-menu-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.patch-menu-status:empty {
+  display: none;
+}
+
+.patch-menu-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.patch-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.patch-menu-list button {
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+.patch-menu-list button.current {
+  border-color: var(--pe-accent2, #38d1c2);
+}

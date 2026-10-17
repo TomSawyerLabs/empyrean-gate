@@ -8,14 +8,16 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/#patch");
   await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
-  await page.getByRole("button", { name: "＋ New" }).click();
+  // Compact: there is no toolbar; a new patch comes from the patch chip's menu.
+  await page.locator(".patch-name-chip").click();
+  await page.getByRole("button", { name: "＋ Blank patch" }).click();
 });
 
 test("the palette is a sheet opened from Add node, and a pick closes it", async ({ page }) => {
   await expect(page.locator(".patch-tab")).toHaveClass(/compact/);
   await expect(page.locator(".patch-palette")).toHaveCount(0);
   const before = await page.locator(".pnode").count();
-  await page.getByRole("button", { name: "＋ Add node" }).click();
+  await page.getByRole("button", { name: "Add node" }).click();
   const sheet = page.locator(".patch-palette.patch-sheet");
   await expect(sheet).toBeVisible();
   // A sheet covers the canvas rather than squeezing it.
@@ -55,7 +57,29 @@ test("a wide window keeps the columns", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await expect(page.locator(".patch-tab")).not.toHaveClass(/compact/);
   await expect(page.locator(".patch-palette")).toBeVisible();
-  await expect(page.getByRole("button", { name: "＋ Add node" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add node" })).toHaveCount(0);
   await page.locator(".pnode", { hasText: "Output" }).click();
   await expect(page.locator(".patch-side")).toBeVisible();
+});
+
+test("the toolbar is gone; the patch chip opens a menu with rename, open and new", async ({
+  page,
+}) => {
+  await expect(page.locator(".patch-toolbar")).toHaveCount(0);
+  const chip = page.locator(".patch-name-chip");
+  await expect(chip).toContainText("New patch");
+  await chip.click();
+  const menu = page.locator(".patch-menu");
+  await expect(menu).toBeVisible();
+  await menu.getByLabel("Patch name").fill("Phone patch");
+  await menu.getByRole("button", { name: "Done" }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(chip).toContainText("Phone patch");
+
+  // Another patch from the menu's list, then a blank one.
+  await chip.click();
+  await expect(page.locator(".patch-menu-list button").first()).toBeVisible();
+  await page.getByRole("button", { name: "＋ Blank patch" }).click();
+  await expect(page.locator(".patch-menu")).toHaveCount(0);
+  await expect(chip).toContainText("New patch");
 });

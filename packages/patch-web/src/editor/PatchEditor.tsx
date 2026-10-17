@@ -690,6 +690,24 @@ function Palette({
   );
 }
 
+/** The compact layout's stand-in for the toolbar: everything about the open
+ * patch and the library, behind the patch-name chip on the canvas. */
+function MenuSheet({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  const sheet = useSheet(onClose);
+  return (
+    <aside
+      className="patch-side patch-sheet patch-menu"
+      aria-label="Patch menu"
+      ref={sheet.ref}
+      tabIndex={sheet.tabIndex}
+      onKeyDown={sheet.onKeyDown}
+    >
+      <PanelHead title="Patch" onClose={onClose} />
+      {children}
+    </aside>
+  );
+}
+
 // --- editor ---------------------------------------------------------------
 
 function Editor({
@@ -723,7 +741,9 @@ function Editor({
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const compact = useCompact(rootRef);
-  const [sheet, setSheet] = useState<"palette" | "node" | null>(null);
+  // "menu" is the compact stand-in for the toolbar: open/new/rename/save/
+  // delete and the host's extras, behind the patch-name chip on the canvas.
+  const [sheet, setSheet] = useState<"palette" | "node" | "menu" | null>(null);
   const lastTap = useRef<{ id: string; at: number } | null>(null);
   const docRef = useRef(doc);
   docRef.current = doc;
@@ -1141,112 +1161,121 @@ function Editor({
       ? registry.get(doc.nodes.find((n) => n.id === selectedNode)?.kind ?? "")
       : undefined;
 
+  // Toolbar pieces, shared by the wide toolbar and the compact menu sheet.
+  const openPreset = (preset: PatchDoc) => {
+    // Instantiate a COPY: blank id makes the autosave mint a fresh patch, so
+    // the built-in template is never overwritten.
+    const copy = structuredClone(preset);
+    copy.id = "";
+    openDoc(copy);
+    scheduleSave(copy);
+  };
+  const deletePatch = () => {
+    if (!doc) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 3000);
+      return;
+    }
+    store.remove(doc.id);
+    setDoc(null);
+    setNodes([]);
+    setEdges([]);
+  };
+  const nameField = doc && (
+    <input
+      className="patch-name"
+      aria-label="Patch name"
+      value={doc.name}
+      disabled={!canEdit}
+      onChange={(e) => mutateDoc((d) => void (d.name = e.target.value), false)}
+    />
+  );
+  const undoRedo = canEdit && doc && (
+    <>
+      <button type="button" onClick={undo} disabled={!history.current.canUndo} title="Undo (Ctrl+Z)">
+        ↶ Undo
+      </button>
+      <button type="button" onClick={redo} disabled={!history.current.canRedo} title="Redo (Ctrl+Shift+Z)">
+        ↷ Redo
+      </button>
+    </>
+  );
+  const activateButton = doc && canEdit && showActivate && (
+    <button
+      type="button"
+      className={isActive ? "active" : ""}
+      disabled={doc.id === ""}
+      onClick={() => store.activate(isActive ? null : doc.id)}
+    >
+      {isActive ? "■ Deactivate" : "▶ Activate"}
+    </button>
+  );
+  const deleteButton = doc && canEdit && doc.id !== "" && (
+    <button type="button" className="danger" onClick={deletePatch}>
+      {confirmDelete ? "Really delete?" : "Delete"}
+    </button>
+  );
+  const statusLine = (
+    <>
+      {status?.error && <span className="patch-status error">⚠ {status.error}</span>}
+      {status?.active && !status.error && <span className="patch-status ok">patch rendering</span>}
+      {!canEdit && readOnlyHint && <span className="hint">{readOnlyHint}</span>}
+    </>
+  );
+
   return (
     <div className={`patch-tab ${compact ? "compact" : ""}`} ref={rootRef}>
-      <div className="patch-toolbar">
-        {compact && canEdit && doc && registry && (
-          <button type="button" className="patch-add-node" onClick={() => setSheet("palette")}>
-            ＋ Add node
-          </button>
-        )}
-        <select
-          value={doc?.id ?? ""}
-          onChange={(e) => {
-            const id = e.target.value;
-            if (!id) return;
-            requestedId.current = id;
-            store.get(id);
-          }}
-        >
-          <option value="" disabled>
-            {patches.length ? "Open patch…" : "No saved patches"}
-          </option>
-          {patches.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name} ({p.nodes}){p.id === activeId ? " ●" : ""}
-            </option>
-          ))}
-        </select>
-        {canEdit && <button onClick={() => openDoc(emptyPatch())}>＋ New</button>}
-        {canEdit && doc && (
-          <>
-            <button type="button" onClick={undo} disabled={!history.current.canUndo} title="Undo (Ctrl+Z)">
-              ↶ Undo
-            </button>
-            <button type="button" onClick={redo} disabled={!history.current.canRedo} title="Redo (Ctrl+Shift+Z)">
-              ↷ Redo
-            </button>
-          </>
-        )}
-        {canEdit && presets.length > 0 && (
+      {!compact && (
+        <div className="patch-toolbar">
           <select
-            value=""
+            aria-label="Open patch"
+            value={doc?.id ?? ""}
             onChange={(e) => {
-              const preset = presets.find((p) => p.id === e.target.value);
-              if (!preset) return;
-              // Instantiate a COPY: blank id makes the autosave mint a fresh
-              // patch, so the built-in template is never overwritten.
-              const copy = structuredClone(preset);
-              copy.id = "";
-              openDoc(copy);
-              scheduleSave(copy);
+              const id = e.target.value;
+              if (!id) return;
+              requestedId.current = id;
+              store.get(id);
             }}
           >
             <option value="" disabled>
-              New from preset…
+              {patches.length ? "Open patch…" : "No saved patches"}
             </option>
-            {presets.map((p) => (
+            {patches.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name}
+                {p.name} ({p.nodes}){p.id === activeId ? " ●" : ""}
               </option>
             ))}
           </select>
-        )}
-        {doc && (
-          <>
-            <input
-              className="patch-name"
-              value={doc.name}
-              disabled={!canEdit}
-              onChange={(e) => mutateDoc((d) => void (d.name = e.target.value), false)}
-            />
-            {canEdit && showActivate && (
-              <button
-                className={isActive ? "active" : ""}
-                disabled={doc.id === ""}
-                onClick={() => store.activate(isActive ? null : doc.id)}
-              >
-                {isActive ? "■ Deactivate" : "▶ Activate"}
-              </button>
-            )}
-            {canEdit && doc.id !== "" && (
-              <button
-                className="danger"
-                onClick={() => {
-                  if (!confirmDelete) {
-                    setConfirmDelete(true);
-                    setTimeout(() => setConfirmDelete(false), 3000);
-                    return;
-                  }
-                  store.remove(doc.id);
-                  setDoc(null);
-                  setNodes([]);
-                  setEdges([]);
-                }}
-              >
-                {confirmDelete ? "Really delete?" : "Delete"}
-              </button>
-            )}
-          </>
-        )}
-        {toolbarExtra?.({ doc, open: openAs })}
-        <span className="spacer" />
-        {status?.error && <span className="patch-status error">⚠ {status.error}</span>}
-        {status?.active && !status.error && (
-          <span className="patch-status ok">patch rendering</span>
-        )}
-        {!canEdit && readOnlyHint && <span className="hint">{readOnlyHint}</span>}
-      </div>
+          {canEdit && <button onClick={() => openDoc(emptyPatch())}>＋ New</button>}
+          {undoRedo}
+          {canEdit && presets.length > 0 && (
+            <select
+              aria-label="New from preset"
+              value=""
+              onChange={(e) => {
+                const preset = presets.find((p) => p.id === e.target.value);
+                if (preset) openPreset(preset);
+              }}
+            >
+              <option value="" disabled>
+                New from preset…
+              </option>
+              {presets.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {nameField}
+          {activateButton}
+          {deleteButton}
+          {toolbarExtra?.({ doc, open: openAs })}
+          <span className="spacer" />
+          {statusLine}
+        </div>
+      )}
 
       <NodeContext.Provider value={{ activeId, minis }}>
       <div className="patch-main">
@@ -1312,6 +1341,41 @@ function Editor({
                     : "No patches yet. Create one on the Gate machine."}
             </div>
           )}
+          {compact && sheet === null && (
+            <div className="patch-canvas-chips">
+              <button
+                type="button"
+                className="patch-name-chip"
+                onClick={() => setSheet("menu")}
+                aria-label={doc ? `Patch: ${doc.name || "Untitled"}. Open the patch menu` : "Open the patch menu"}
+              >
+                {doc ? doc.name || "Untitled" : patches.length ? "Open patch…" : "Patches"}
+                <span aria-hidden="true"> ▾</span>
+              </button>
+              {status?.error && (
+                <button
+                  type="button"
+                  className="patch-status-chip error"
+                  onClick={() => setSheet("menu")}
+                  title={status.error}
+                  aria-label={`This patch can't run: ${status.error}`}
+                >
+                  ⚠
+                </button>
+              )}
+              {canEdit && doc && registry && (
+                <button
+                  type="button"
+                  className="patch-add-fab"
+                  onClick={() => setSheet("palette")}
+                  aria-label="Add node"
+                  title="Add node"
+                >
+                  ＋
+                </button>
+              )}
+            </div>
+          )}
           {compact && sheet === null && selectedDef && (
             <button
               type="button"
@@ -1335,6 +1399,80 @@ function Editor({
             extras={nodeExtras}
             onClose={compact ? () => setSheet(null) : undefined}
           />
+        )}
+
+        {compact && sheet === "menu" && (
+          <MenuSheet onClose={() => setSheet(null)}>
+            {doc && (
+              <label className="patch-field">
+                <span>Name</span>
+                {nameField}
+              </label>
+            )}
+            <div className="patch-menu-status">{statusLine}</div>
+            <div className="patch-menu-actions">
+              {undoRedo}
+              {activateButton}
+              {toolbarExtra?.({
+                doc,
+                open: (d, asNew) => {
+                  openAs(d, asNew);
+                  setSheet(null);
+                },
+              })}
+              {deleteButton}
+            </div>
+            <h4>Open</h4>
+            <div className="patch-menu-list">
+              {patches.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={p.id === doc?.id ? "current" : ""}
+                  onClick={() => {
+                    requestedId.current = p.id;
+                    store.get(p.id);
+                    setSheet(null);
+                  }}
+                >
+                  {p.name}
+                  <span className="hint">
+                    {" "}
+                    ({p.nodes}){p.id === activeId ? " ●" : ""}
+                  </span>
+                </button>
+              ))}
+              {patches.length === 0 && <p className="hint">No saved patches yet.</p>}
+            </div>
+            {canEdit && (
+              <>
+                <h4>New</h4>
+                <div className="patch-menu-list">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openDoc(emptyPatch());
+                      setSheet(null);
+                    }}
+                  >
+                    ＋ Blank patch
+                  </button>
+                  {presets.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        openPreset(p);
+                        setSheet(null);
+                      }}
+                    >
+                      From preset: {p.name}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </MenuSheet>
         )}
       </div>
       </NodeContext.Provider>
