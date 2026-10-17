@@ -310,6 +310,15 @@ type PatchFlowNode = FlowNode<
   "patch"
 >;
 
+/** Output shapes that thumbnail on the ring (the crate's `previewable`). */
+const RING_SHAPES: readonly PatchShape[] = [
+  "field_color",
+  "field_scalar",
+  "points",
+  "effects",
+  "texture",
+];
+
 const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<PatchFlowNode>) {
   const { node, def } = data;
   const { activeId, minis, drag } = useContext(NodeContext);
@@ -318,14 +327,20 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
   }
   const ins = inputPorts(def, node);
   // Mini visualizers, per output style: field outputs get a thumbnail laid out
-  // like the hardware; scalar outputs get amplitude meters and event outputs a
-  // fire strip. Only for the patch that is actually on air — that is the graph
-  // the backend is evaluating. A node with a handful of outputs meters them
-  // all; a wide one (Audio, Touch, DJ link) meters `out` and whatever is wired,
-  // or it would be taller than the canvas.
+  // like the hardware, and so do the stream and texture sources (Touch
+  // strokes, Triggered effects, Event effect, Video in, Still image, Clip),
+  // drawn as their default consumer would draw them; scalar outputs get
+  // amplitude meters and event outputs a fire strip. Only for the patch that
+  // is actually on air — that is the graph the backend is evaluating. A node
+  // with a handful of outputs meters them all; a wide one (Audio, Touch, DJ
+  // link) meters `out` and whatever is wired, or it would be taller than the
+  // canvas.
   const live = minis !== null && data.docId !== "" && activeId === data.docId;
-  const outShape = def.outputs.find((p) => p.name === "out")?.shape;
-  const showRing = live && (outShape === "field_color" || outShape === "field_scalar");
+  // The principal output: `out`, or the single output of a source node.
+  const primary =
+    def.outputs.find((p) => p.name === "out") ??
+    (def.outputs.length === 1 ? def.outputs[0] : undefined);
+  const showRing = live && primary !== undefined && RING_SHAPES.includes(primary.shape);
   const meterable = def.outputs.filter((p) => p.shape === "scalar" || p.shape === "event");
   const meterPorts = live
     ? meterable.filter(

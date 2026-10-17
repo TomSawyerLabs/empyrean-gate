@@ -247,6 +247,24 @@ const server = Bun.serve({
           outputs: [{ name: "tex", shape: "texture" }],
           params: [],
         },
+        // Two stream sources, for the thumbnail rule: a points and an effects
+        // output preview on the ring like a field does.
+        {
+          id: "touch_dabs",
+          label: "Touch strokes",
+          category: "input",
+          inputs: [],
+          outputs: [{ name: "points", shape: "points" }],
+          params: [],
+        },
+        {
+          id: "effects_in",
+          label: "Triggered effects",
+          category: "input",
+          inputs: [],
+          outputs: [{ name: "effects", shape: "effects" }],
+          params: [],
+        },
         {
           id: "clip",
           label: "Clip",

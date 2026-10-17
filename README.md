@@ -119,7 +119,10 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   the lit ones so the show never pays for it), so the chip you are about to
   tap on Live shows what it would add. In the
   Patch editor the same idea follows the wire types: field nodes get the ring
-  thumbnail, scalar outputs get small amplitude meters with history.
+  thumbnail, and so do the stream and texture sources (Touch strokes, Triggered
+  effects, Event effect, Video in, Still image, Clip), drawn as their default
+  consumer would draw them; scalar outputs get small amplitude meters with
+  history, event outputs a strip of their fires.
 - **Effects**: transients that fire over the whole stack. Eight of them *move* —
   burst / strobe / swoosh / collapse / bloom / pinwheel / twinkle / wipe — from the
   keyboard (1–8), a pad, or a remote client. Seven are **shapes** — star / heart /

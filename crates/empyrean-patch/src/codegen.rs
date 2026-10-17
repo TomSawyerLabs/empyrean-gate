@@ -160,6 +160,41 @@ fn is_gpu_kind(kind: &str) -> bool {
     )
 }
 
+/// How a node's principal output thumbnails. Field nodes render their own
+/// function. The stream and texture sources have no function (their
+/// consumers read the buffers directly), so they preview as their default
+/// consumer would draw them with every knob at 1: the strokes with their own
+/// pens, the effects this chain carries, the texture mapped straight onto the
+/// ring. The cell shows what the node hands on before any downstream knobs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PreviewStyle {
+    Color,
+    Gray,
+    Points,
+    Effects,
+    Texture,
+}
+
+fn preview_style(kind: &str) -> Option<PreviewStyle> {
+    match kind {
+        "output" => return None,
+        "touch_dabs" => return Some(PreviewStyle::Points),
+        "effects_in" | "event_effect" => return Some(PreviewStyle::Effects),
+        "video_in" | "image_in" | "clip" => return Some(PreviewStyle::Texture),
+        _ => {}
+    }
+    match registry::lookup(kind)?.output_shape("out") {
+        Some(Shape::FieldColor) => Some(PreviewStyle::Color),
+        Some(Shape::FieldScalar) => Some(PreviewStyle::Gray),
+        _ => None,
+    }
+}
+
+/// Whether a node of this kind gets a mini-preview cell.
+pub fn previewable(kind: &str) -> bool {
+    preview_style(kind).is_some()
+}
+
 /// Node kinds that read raw touch. A patch containing any of them owns the
 /// touch surface: hosts send it raw touches instead of applying a tap or pen
 /// tool (see crate::touch).
@@ -303,17 +338,19 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
     let mut preview_code = code.clone();
     g.main_fn(&mut code, output)?;
 
+    // Field nodes and the stream/texture sources in graph order, then the
+    // Event effects (CPU nodes whose effects stream previews like Triggered
+    // effects does).
     let preview_nodes: Vec<usize> = gpu_order
         .iter()
         .copied()
-        .filter(|&i| i != output)
-        .filter(|&i| {
-            let ty = registry::lookup(&doc.nodes[i].kind).expect("validated kind");
-            matches!(
-                ty.output_shape("out"),
-                Some(Shape::FieldColor | Shape::FieldScalar)
-            )
-        })
+        .chain(
+            cpu_order
+                .iter()
+                .copied()
+                .filter(|&i| doc.nodes[i].kind == "event_effect"),
+        )
+        .filter(|&i| previewable(&doc.nodes[i].kind))
         .take(MAX_PREVIEW_NODES)
         .collect();
     let preview_wgsl = if preview_nodes.is_empty() {
@@ -363,10 +400,16 @@ impl Gen<'_> {
     /// the upstream Still image's own media cell, or the current frame of the
     /// upstream Clip's sheet.
     fn texture_sample_expr(&self, node: usize) -> String {
-        let Some((from, _)) = self.upstream(node, "tex") else {
-            return "video_at(uv)".to_string();
-        };
-        let from = *from;
+        match self.upstream(node, "tex") {
+            Some((from, _)) => self.texture_source_expr(*from),
+            None => "video_at(uv)".to_string(),
+        }
+    }
+
+    /// The RGBA a texture source node holds at `uv`: the live video frame,
+    /// the Still image's own media cell, or the current frame of the Clip's
+    /// sheet. Anything else reads as the live video.
+    fn texture_source_expr(&self, from: usize) -> String {
         let slot = self
             .images
             .iter()
@@ -393,8 +436,13 @@ impl Gen<'_> {
     /// back through chained Event effects: 0 for Triggered effects (clients),
     /// each Event effect's `effect_source`. Sorted, unique.
     fn effect_sources(&self, node: usize, port: &str) -> Vec<u32> {
+        self.effect_sources_from(self.upstream(node, port).map(|(from, _)| *from))
+    }
+
+    /// `effect_sources` for a chain whose head is `head` itself.
+    fn effect_sources_from(&self, head: Option<usize>) -> Vec<u32> {
         let mut out = Vec::new();
-        let mut at = self.upstream(node, port).map(|(from, _)| *from);
+        let mut at = head;
         // A chain is acyclic (validated) and at most every node long.
         for _ in 0..=self.doc.nodes.len() {
             let Some(i) = at else { break };
@@ -1195,23 +1243,23 @@ impl Gen<'_> {
 }
 
 impl Gen<'_> {
-    /// The mini-preview entry point: one thumbnail per field node. Invocation
-    /// space is `spokes * pixels * slots`; each slot renders its node's output
-    /// alone — no master, effects or dabs, so the cell shows exactly what that
-    /// node hands downstream.
+    /// The mini-preview entry point: one thumbnail per previewable node (see
+    /// [`preview_style`]). Invocation space is `spokes * pixels * slots`; each
+    /// slot renders its node's output alone — no master and nothing it does
+    /// not carry itself, so the cell shows exactly what that node hands
+    /// downstream.
     fn preview_main_fn(&self, code: &mut String, nodes: &[usize]) -> Result<(), String> {
         let mut cases = String::new();
         for (slot, &i) in nodes.iter().enumerate() {
-            let ty = registry::lookup(&self.doc.nodes[i].kind).expect("validated kind");
-            let expr = match ty.output_shape("out") {
-                Some(Shape::FieldColor) => format!("n{i}_f(ctx).rgb"),
-                Some(Shape::FieldScalar) => format!("vec3f(clamp(n{i}_f(ctx), 0.0, 1.0))"),
-                other => {
-                    return Err(format!(
-                        "node kind \"{}\" ({other:?}) is not previewable",
-                        self.doc.nodes[i].kind
-                    ));
+            let kind = self.doc.nodes[i].kind.as_str();
+            let expr = match preview_style(kind) {
+                Some(PreviewStyle::Color) => format!("n{i}_f(ctx).rgb"),
+                Some(PreviewStyle::Gray) => format!("vec3f(clamp(n{i}_f(ctx), 0.0, 1.0))"),
+                Some(style) => {
+                    self.preview_stream_fn(code, i, style);
+                    format!("n{i}_pv(ctx)")
                 }
+                None => return Err(format!("node kind \"{kind}\" is not previewable")),
             };
             let _ = writeln!(cases, "        case {slot}u: {{ acc = {expr}; }}");
         }
@@ -1257,6 +1305,54 @@ impl Gen<'_> {
         )
         .unwrap();
         Ok(())
+    }
+}
+
+impl Gen<'_> {
+    /// `n{i}_pv`, the preview-only renderer for a stream or texture source:
+    /// what Render points / Render effects / Texture sample would draw from it
+    /// with every knob at its neutral value.
+    fn preview_stream_fn(&self, code: &mut String, i: usize, style: PreviewStyle) {
+        let body = match style {
+            PreviewStyle::Points => "    var acc = vec3f(0.0);\n\
+                 \x20   for (var d = 0u; d < G.dab_count; d++) {\n\
+                 \x20       let D = DABS[d];\n\
+                 \x20       acc += dab_color(D, c, d);\n\
+                 \x20   }\n\
+                 \x20   return acc;"
+                .to_string(),
+            PreviewStyle::Effects => {
+                // Its own chain: Triggered effects is source 0; an Event effect
+                // carries its own fires plus whatever is chained into `in`.
+                let wanted = self
+                    .effect_sources_from(Some(i))
+                    .iter()
+                    .map(|s| format!("E.source == {s}u"))
+                    .collect::<Vec<_>>()
+                    .join(" || ");
+                format!(
+                    "    var acc = vec3f(0.0);\n\
+                     \x20   for (var e = 0u; e < G.effect_count; e++) {{\n\
+                     \x20       let E = FX[e];\n\
+                     \x20       if !({wanted}) {{\n\
+                     \x20           continue;\n\
+                     \x20       }}\n\
+                     \x20       acc += effect_color(E, c);\n\
+                     \x20   }}\n\
+                     \x20   return acc;"
+                )
+            }
+            PreviewStyle::Texture => format!(
+                "    let uv = vec2f(0.5 + c.pos.x * 0.5, 0.5 - c.pos.y * 0.5);\n\
+                 \x20   let s = {sample};\n\
+                 \x20   return select(vec3f(0.0), s.rgb, s.a > 0.0);",
+                sample = self.texture_source_expr(i),
+            ),
+            PreviewStyle::Color | PreviewStyle::Gray => unreachable!("field nodes use n{i}_f"),
+        };
+        writeln!(code, "\nfn n{i}_pv(c: Ctx) -> vec3f {{").unwrap();
+        writeln!(code, "{body}").unwrap();
+        code.push_str("}\n");
     }
 }
 
@@ -1407,13 +1503,13 @@ mod tests {
     fn preview_module_validates_and_lists_field_nodes() {
         let doc = valid_demo();
         let prog = compile(&doc).expect("compiles");
-        // Every field node (and only those) gets a preview cell, in graph order.
+        // Every previewable node (and only those) gets a cell, in graph order.
         assert!(!prog.preview_nodes.is_empty());
         for &i in &prog.preview_nodes {
+            let kind = &doc.nodes[i].kind;
             assert!(
-                is_gpu_kind(&doc.nodes[i].kind) && doc.nodes[i].kind != "output",
-                "cell for non-field node {}",
-                doc.nodes[i].kind
+                previewable(kind) && kind != "output",
+                "cell for non-previewable node {kind}"
             );
         }
         // CPU scalar outputs become meters — the audio node's bands among them.
@@ -1433,6 +1529,53 @@ mod tests {
         )
         .validate(&module)
         .expect("preview WGSL validates");
+    }
+
+    /// The stream and texture sources get cells too, each drawn by its
+    /// default consumer: strokes with their pens, an effects chain's own
+    /// sources, the texture straight onto the ring.
+    #[test]
+    fn stream_and_texture_sources_get_preview_cells() {
+        let doc = PatchDoc {
+            nodes: vec![
+                node("t", "touch_dabs"),
+                node("clients", "effects_in"),
+                node("ev", "event_effect"),
+                node("v", "video_in"),
+                node("img", "image_in"),
+                node("clip", "clip"),
+                node("bg", "solid"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("clients", "effects", "ev", "in"),
+                edge("bg", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let prog = compile(&doc).expect("compiles");
+        let cells: Vec<&str> = prog
+            .preview_nodes
+            .iter()
+            .map(|&i| doc.nodes[i].id.as_str())
+            .collect();
+        for id in ["t", "clients", "ev", "v", "img", "clip", "bg"] {
+            assert!(cells.contains(&id), "no cell for {id}: {cells:?}");
+        }
+        assert!(!cells.contains(&"o"));
+        let w = &prog.preview_wgsl;
+        assert!(w.contains("dab_color(D, c, d)"), "strokes draw their dabs");
+        assert!(w.contains("E.source == 0u"), "Triggered effects draws source 0");
+        let own = crate::effects::effect_source("ev");
+        assert!(
+            w.contains(&format!("E.source == 0u || E.source == {own}u"))
+                || w.contains(&format!("E.source == {own}u || E.source == 0u")),
+            "the Event effect draws its chain and itself"
+        );
+        assert!(w.contains("video_at(uv)"), "Video in samples the live frame");
+        assert!(w.contains("image_at(1u, uv)"), "Still image samples its own cell");
+        assert!(w.contains("clip_at(2u, uv"), "Clip samples its sheet");
+        validates(w);
     }
 
     /// The round-4 field nodes, chained, make one shader naga accepts, and
