@@ -1033,8 +1033,22 @@ pub struct PeerStatusInfo {
     pub detail: String,
 }
 
+/// Who drives the Phone IMU node right now (phones take turns; see
+/// `state::ImuTurns`). Client ids, so every UI can tell whether it is "you".
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct ImuTurnInfo {
+    /// The phone whose motion reaches the patch, if any is sending.
+    pub holder: Option<String>,
+    /// Phones sending motion behind it, front of the line first.
+    pub waiting: Vec<String>,
+    /// How long the holder keeps the controls, while someone waits.
+    pub seconds_left: Option<f32>,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeStatus {
+    /// Phone motion turns: who holds the Phone IMU controls and who waits.
+    pub imu_turns: ImuTurnInfo,
     /// Set when Vulkan init failed — the UI shows this prominently. No fallbacks.
     pub gpu_error: Option<String>,
     pub gpu_name: String,

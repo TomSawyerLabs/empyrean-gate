@@ -1235,6 +1235,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
     }
     state.connected_clients.lock().remove(&conn_id);
     state.game_controller_left(conn_id);
+    state.imu_left(conn_id);
     state.release_touches(conn_id);
     if state.stop_video(Some(conn_id)) {
         deactivate_video_audio(&ctx);
@@ -2895,11 +2896,8 @@ async fn handle_msg(
             roll,
             shake,
         } => {
-            let mut c = state.control.lock();
-            c.yaw = yaw;
-            c.pitch = pitch;
-            c.roll = roll;
-            c.shake = (c.shake + shake).min(3.0);
+            // Phones take turns on the control bus (state::ImuTurns).
+            state.imu_input(conn_id, client_id, yaw, pitch, roll, shake);
         }
         // Routed to `handle_peer_msg` by the connection loop before this
         // dispatch is ever reached (the peer role has its own gates).

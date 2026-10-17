@@ -749,6 +749,9 @@ export interface RuntimeStatus {
   /** The active patch reads raw touch: canvases send `touch` events instead
    * of applying their tap or pen tool. */
   patch_touch: boolean;
+  /** Phone motion turns: which phone (client id) drives the Phone IMU node,
+   * who waits behind it, and how long the holder has while someone waits. */
+  imu_turns: { holder: string | null; waiting: string[]; seconds_left: number | null };
   show: ScheduledShowStatus;
   performance_recording: boolean;
   performance_recording_name: string;

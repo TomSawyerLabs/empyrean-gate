@@ -1,4 +1,9 @@
 {
+  "imu_turns": {
+    "holder": null,
+    "waiting": [],
+    "seconds_left": null
+  },
   "gpu_error": null,
   "gpu_name": "",
   "engine_fps": 0.0,

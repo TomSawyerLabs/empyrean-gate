@@ -9,7 +9,7 @@ use parking_lot::{Mutex, RwLock};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 pub use empyrean_patch::eval::{
@@ -280,6 +280,177 @@ pub struct ControlInputs {
     pub shake: f32,
 }
 
+/// Phones take turns on the control bus: the front of the line drives the
+/// Phone IMU node, the rest wait. A phone is in line while it sends motion
+/// (30 Hz from Settings); it drops out after `IMU_IDLE` without a message or
+/// on disconnect. While someone waits, the holder's turn is limited, shorter
+/// the longer the line (`turn_limit`), and an expired holder goes to the back.
+/// Arbitration is lazy: evaluated on each motion message and on disconnect.
+#[derive(Default)]
+pub struct ImuTurns {
+    /// Front first; `.0` holds the controls.
+    line: Vec<ImuPhone>,
+    turn_started: Option<Instant>,
+}
+
+struct ImuPhone {
+    conn_id: u64,
+    client_id: String,
+    last_seen: Instant,
+}
+
+/// Without a motion message for this long, a phone leaves the line.
+pub const IMU_IDLE: Duration = Duration::from_secs(3);
+/// The shortest turn while others wait, however long the line.
+pub const IMU_MIN_TURN: Duration = Duration::from_secs(20);
+/// The longest turn while someone waits.
+pub const IMU_MAX_TURN: Duration = Duration::from_secs(120);
+/// What a new phone should expect to wait, which sets the turn length:
+/// `TARGET_WAIT / waiting`, clamped.
+pub const IMU_TARGET_WAIT: Duration = Duration::from_secs(90);
+
+impl ImuTurns {
+    /// A motion message from `conn_id`. Returns `(holds, changed)`: whether this
+    /// phone's values should reach the control bus, and whether the holder or
+    /// the line changed (so status should be re-broadcast).
+    pub fn arrive(&mut self, conn_id: u64, client_id: &str, now: Instant) -> (bool, bool) {
+        let before = self.ids();
+        if let Some(p) = self.line.iter_mut().find(|p| p.conn_id == conn_id) {
+            p.last_seen = now;
+        } else {
+            self.line.push(ImuPhone { conn_id, client_id: client_id.to_owned(), last_seen: now });
+        }
+        self.settle(now);
+        let holds = self.line.first().is_some_and(|p| p.conn_id == conn_id);
+        (holds, self.ids() != before)
+    }
+
+    /// A connection went away. Returns whether the holder or the line changed.
+    pub fn left(&mut self, conn_id: u64, now: Instant) -> bool {
+        let before = self.ids();
+        self.line.retain(|p| p.conn_id != conn_id);
+        self.settle(now);
+        self.ids() != before
+    }
+
+    /// Drop idle phones, then rotate an expired holder to the back.
+    fn settle(&mut self, now: Instant) {
+        let head = self.line.first().map(|p| p.conn_id);
+        self.line.retain(|p| now.duration_since(p.last_seen) <= IMU_IDLE);
+        if self.line.first().map(|p| p.conn_id) != head {
+            self.turn_started = self.line.first().map(|_| now);
+        }
+        if self.line.is_empty() {
+            self.turn_started = None;
+            return;
+        }
+        let started = *self.turn_started.get_or_insert(now);
+        if let Some(limit) = self.turn_limit() {
+            if now.duration_since(started) >= limit {
+                let holder = self.line.remove(0);
+                self.line.push(holder);
+                self.turn_started = Some(now);
+            }
+        }
+    }
+
+    /// How long a turn lasts while others wait; `None` with nobody waiting.
+    pub fn turn_limit(&self) -> Option<Duration> {
+        let waiting = self.line.len().saturating_sub(1) as u32;
+        if waiting == 0 {
+            return None;
+        }
+        Some((IMU_TARGET_WAIT / waiting).clamp(IMU_MIN_TURN, IMU_MAX_TURN))
+    }
+
+    /// What status carries.
+    pub fn info(&self, now: Instant) -> crate::protocol::ImuTurnInfo {
+        let seconds_left = match (self.turn_limit(), self.turn_started) {
+            (Some(limit), Some(started)) => {
+                Some(limit.saturating_sub(now.duration_since(started)).as_secs_f32())
+            }
+            _ => None,
+        };
+        crate::protocol::ImuTurnInfo {
+            holder: self.line.first().map(|p| p.client_id.clone()),
+            waiting: self.line.iter().skip(1).map(|p| p.client_id.clone()).collect(),
+            seconds_left,
+        }
+    }
+
+    fn ids(&self) -> Vec<u64> {
+        self.line.iter().map(|p| p.conn_id).collect()
+    }
+}
+
+#[cfg(test)]
+mod imu_turn_tests {
+    use super::*;
+
+    fn t(secs: f32) -> Instant {
+        // A fixed origin far enough back that subtracting is always valid.
+        Instant::now() - Duration::from_secs(10_000) + Duration::from_secs_f32(secs)
+    }
+
+    #[test]
+    fn one_phone_holds_without_a_limit() {
+        let mut q = ImuTurns::default();
+        assert_eq!(q.arrive(1, "a", t(0.0)), (true, true));
+        assert_eq!(q.arrive(1, "a", t(500.0)), (true, false), "no limit alone");
+        assert_eq!(q.turn_limit(), None);
+        assert_eq!(q.info(t(500.0)).holder.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn a_second_phone_waits_and_the_turn_shrinks_with_the_line() {
+        let mut q = ImuTurns::default();
+        q.arrive(1, "a", t(0.0));
+        assert_eq!(q.arrive(2, "b", t(1.0)), (false, true));
+        assert_eq!(q.turn_limit(), Some(Duration::from_secs(90)));
+        q.arrive(3, "c", t(1.0));
+        assert_eq!(q.turn_limit(), Some(Duration::from_secs(45)));
+        for (i, id) in [(4, "d"), (5, "e"), (6, "f"), (7, "g")] {
+            q.arrive(i, id, t(1.0));
+        }
+        assert_eq!(q.turn_limit(), Some(IMU_MIN_TURN), "the floor");
+        let info = q.info(t(2.0));
+        assert_eq!(info.holder.as_deref(), Some("a"));
+        assert_eq!(info.waiting.len(), 6);
+        assert!((info.seconds_left.unwrap() - 18.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn an_expired_holder_goes_to_the_back_and_the_next_takes_over() {
+        let mut q = ImuTurns::default();
+        q.arrive(1, "a", t(0.0));
+        q.arrive(2, "b", t(0.0));
+        // 90 s turns with one waiter. Keep both alive meanwhile.
+        for s in 1..90 {
+            q.arrive(1, "a", t(s as f32));
+            q.arrive(2, "b", t(s as f32));
+        }
+        assert_eq!(q.arrive(1, "a", t(89.5)), (true, false));
+        let (holds, changed) = q.arrive(1, "a", t(90.0));
+        assert!(!holds && changed, "a's turn is over");
+        assert_eq!(q.arrive(2, "b", t(90.1)), (true, false));
+        assert_eq!(q.info(t(90.1)).waiting, vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn idle_and_departed_phones_leave_the_line() {
+        let mut q = ImuTurns::default();
+        q.arrive(1, "a", t(0.0));
+        q.arrive(2, "b", t(0.0));
+        // a stops sending; b's next message after IMU_IDLE finds it gone.
+        assert_eq!(q.arrive(2, "b", t(3.5)), (true, true));
+        assert_eq!(q.info(t(3.5)).holder.as_deref(), Some("b"));
+        assert_eq!(q.turn_limit(), None);
+        assert!(q.left(2, t(4.0)));
+        assert_eq!(q.info(t(4.0)).holder, None);
+        assert!(!q.left(2, t(4.0)), "nothing to change");
+    }
+}
+
 pub struct ActiveEffect {
     pub cfg: EffectCfg,
     pub born: Instant,
@@ -489,6 +660,8 @@ pub struct SharedState {
     pub pioneer_debug_seq: AtomicU64,
     pub pioneer_tracks: Mutex<HashMap<u8, ProDjLinkTrackInfo>>,
     pub control: Mutex<ControlInputs>,
+    /// Which phone's motion reaches `control`, and who waits (see `ImuTurns`).
+    pub imu_turns: Mutex<ImuTurns>,
     /// Hardware commissioning mode. Deliberately NOT in `AppConfig`: it must not
     /// be able to survive a restart into a show. Always starts disarmed.
     pub test: Mutex<crate::testmode::TestState>,
@@ -672,6 +845,7 @@ impl SharedState {
             pioneer_debug_seq: AtomicU64::new(1),
             pioneer_tracks: Mutex::new(HashMap::new()),
             control: Mutex::new(ControlInputs::default()),
+            imu_turns: Mutex::new(ImuTurns::default()),
             test: Mutex::new(crate::testmode::TestState::default()),
             game: Mutex::new(crate::game::GameControl::default()),
             last_discovery: Mutex::new(None),
@@ -961,6 +1135,39 @@ impl SharedState {
         g.keys.push((key, down));
         g.last_input = Some(Instant::now());
         Ok(())
+    }
+
+    /// A phone's motion frame. Only the phone at the front of the line drives
+    /// the control bus; everyone sending is kept in line (see `ImuTurns`), and
+    /// a change of holder or line goes out in status so phones can show their
+    /// place and buzz when it is their turn.
+    pub fn imu_input(&self, conn_id: u64, client_id: &str, yaw: f32, pitch: f32, roll: f32, shake: f32) {
+        let now = Instant::now();
+        let (holds, changed) = self.imu_turns.lock().arrive(conn_id, client_id, now);
+        if holds {
+            let mut c = self.control.lock();
+            c.yaw = yaw;
+            c.pitch = pitch;
+            c.roll = roll;
+            c.shake = (c.shake + shake).min(3.0);
+        }
+        if changed {
+            self.publish_imu_turns(now);
+        }
+    }
+
+    /// Connection teardown for the motion line.
+    pub fn imu_left(&self, conn_id: u64) {
+        let now = Instant::now();
+        if self.imu_turns.lock().left(conn_id, now) {
+            self.publish_imu_turns(now);
+        }
+    }
+
+    fn publish_imu_turns(&self, now: Instant) {
+        let info = self.imu_turns.lock().info(now);
+        self.status.lock().imu_turns = info;
+        self.broadcast_state();
     }
 
     /// Connection teardown: a departing controller frees the controls. The

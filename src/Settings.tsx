@@ -2171,10 +2171,30 @@ function RedundancyPanel({ config }: { config: AppConfig }) {
 }
 
 function ThisDevicePanel() {
-  const { client } = useGate();
+  const { client, status } = useGate();
   const [micStop, setMicStop] = useState<(() => void) | null>(null);
   const [imuStop, setImuStop] = useState<(() => void) | null>(null);
   const [err, setErr] = useState("");
+
+  // Phone motion turns (plans/imu-turns.md): where this device stands in the
+  // line for the Phone IMU node, counted down locally from the last status,
+  // and a buzz the moment its turn starts.
+  const turns = status?.imu_turns;
+  const me = client.clientId;
+  const holding = turns?.holder === me;
+  const place = turns ? turns.waiting.indexOf(me) + 1 : 0;
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  useEffect(() => {
+    setSecondsLeft(turns?.seconds_left ?? null);
+    if (turns?.seconds_left == null) return;
+    const t = setInterval(() => setSecondsLeft((s) => (s == null ? s : Math.max(0, s - 1))), 1000);
+    return () => clearInterval(t);
+  }, [turns?.seconds_left, turns?.holder, turns?.waiting.length]);
+  const wasHolding = useRef(false);
+  useEffect(() => {
+    if (holding && !wasHolding.current) navigator.vibrate?.([80, 40, 80]);
+    wasHolding.current = holding;
+  }, [holding]);
 
   return (
     <section className="panel this-device-panel">
@@ -2230,7 +2250,33 @@ function ThisDevicePanel() {
           {imuStop ? "Stop motion" : "Send motion / orientation"}
         </button>
       </div>
+      {turns && (holding || place > 0) && (
+        <p className={`imu-turn ${holding ? "ok" : "hint"}`} role="status">
+          {holding
+            ? secondsLeft == null
+              ? "You have the gate's motion."
+              : `You have the gate's motion for ${Math.round(secondsLeft)} s, then it passes on.`
+            : `In line: ${ordinal(place)} of ${turns.waiting.length} for the gate's motion` +
+              (secondsLeft == null ? "." : `, about ${Math.round(secondsLeft + (place - 1) * (turns.seconds_left ?? 0))} s.`)}
+        </p>
+      )}
       {err && <p className="warn" role="alert">{err}</p>}
     </section>
   );
+}
+
+/** 1 → "1st", 2 → "2nd", 11 → "11th". */
+function ordinal(n: number): string {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
 }

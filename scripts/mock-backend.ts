@@ -211,6 +211,7 @@ const publicState = {
   preview_decimate: 12,
   max_dab_size: 0.25,
   patch_touch: false,
+  imu_turns: { holder: null, waiting: [], seconds_left: null },
 };
 const publicOverrides = new Map<string, Record<string, unknown>>();
 const publicSockets = new WeakSet<object>();
