@@ -1,7 +1,8 @@
 # Patch editor: drop-to-blend and minimized nodes (2026-10-17)
 
-Status: **drop-to-combine and minimize on gate `master` (4e6af6d)**; the
-multiple-blends question waits on Cameron. Gate worktree
+Status: drop-to-combine and minimize on gate `master` (4e6af6d), on the
+Preview. **Now: the Blend layer stack** (Cameron, 2026-10-18: "get going on
+the blend layers"). Gate worktree
 `C:\Users\camer\.t3\worktrees\Empyrean\auto-blend`, branch `auto-blend`.
 
 ## Goal
@@ -64,7 +65,40 @@ better way to do multiple blends?"
 7. [x] On the Preview: site `dev` b0232e4 (web-dist 19b8830, bump dispatched by
        hand: the 15-min schedule had not fired since 05:06Z); the playground shows
        − on every node and Blend/Plasma in the palette (2026-10-18).
-8. [ ] **Current:** multiple blends, waiting on Cameron (Open question 1).
+8. [ ] **Current:** Blend layer stack (design below, "Layer stack design").
+   1. [ ] Crate: `NodeInst.layers`; per-layer names resolved on the instance
+          (`input_shape`, `knob`, `knobs`, `shaped_inputs`, new `param_def`);
+          validate (`layers` only on Blend, 1..=8); codegen folds the layers;
+          convert-to-Code and eval's `has_param`/`sanitize` instance-aware;
+          palette carries `layered`; tests.
+   2. [ ] TS: `PatchNode.layers`, `PatchNodeType.layered`; instance ports in
+          the editor (node view, side panel, Control tab); pure
+          `editor/layers.ts` (add / remove / move a layer, renaming wires,
+          knob values and exposures), unit-tested.
+   3. [ ] Drop rules in combine.ts (below); side panel layer list with
+          add / remove / move up / move down.
+   4. [ ] Mock registry, behavior tests, agent guide, README; push; Preview.
+
+## Layer stack design
+
+- Blend keeps `base`, `over`, `mode`, `opacity` as layer 1, so every saved
+  patch reads as before. `NodeInst.layers` (absent = 1, at most 8) adds
+  layers 2..N, each with its own `over{k}` input, `mode{k}` select and
+  `opacity{k}` knob (wireable like any knob).
+- The repeated names are data: the registry lists them per kind
+  (`registry::layered`), the palette sends them as `layered: {names, max}`,
+  and the editor builds instance ports from that rather than knowing Blend.
+- Codegen: layer 1 exactly as before; each further layer composites onto
+  the result. An unwired layer 2+ is skipped (a Multiply layer with nothing
+  in it would otherwise blacken the picture).
+- Editor drop rules, first match wins:
+  1. On a taken input of a Blend itself (`base`, `over`, `over3`, …): a new
+     layer just above that one, wired from the dropped wire.
+  2. On a taken input fed by a Blend's `out` that feeds nothing else: a new
+     top layer on that Blend.
+  3. Otherwise (or the Blend is full): a new minimized Blend, as before.
+- Removing or moving a layer renames the higher layers' wires, knob values
+  and exposed entries so the numbers stay 2..N with no gaps.
 
 ## Findings / gotchas
 
@@ -89,8 +123,8 @@ better way to do multiple blends?"
 
 ## Open questions for the user
 
-1. Multiple blends: a single growing Blend ("layer stack") instead of chains?
-   Recommendation: yes. Blend keeps `base`/`over`/`mode`/`opacity` as layer 1
+1. ~~Multiple blends~~: answered 2026-10-18, build the layer stack.
+   Original recommendation: Blend keeps `base`/`over`/`mode`/`opacity` as layer 1
    (every saved patch unchanged) and grows `over2`, `mode2`, `opacity2`, …
    per layer (instance-sized ports, as Code nodes already have); a drop on a
    Blend-fed input appends a layer instead of adding a node; the side panel

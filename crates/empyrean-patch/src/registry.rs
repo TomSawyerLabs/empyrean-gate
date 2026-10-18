@@ -198,6 +198,37 @@ pub fn lookup(id: &str) -> Option<&'static NodeType> {
     TYPES.iter().find(|t| t.id == id)
 }
 
+/// Most layers a layered node may have (`NodeInst::layers`).
+pub const MAX_LAYERS: u32 = 8;
+
+/// The inputs and params a node of this kind repeats per layer, when it is
+/// layered (only Blend is). Layer 1 uses the names as they are; layer `k`
+/// (2..=[`MAX_LAYERS`]) the name followed by `k`: `over2`, `mode2`,
+/// `opacity2`. Empty for every other kind.
+pub fn layered(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "blend" => &["over", "mode", "opacity"],
+        _ => &[],
+    }
+}
+
+/// The name layer `k` (1-based) gives one of the repeated names.
+pub fn layer_name(name: &str, k: u32) -> String {
+    if k <= 1 { name.to_string() } else { format!("{name}{k}") }
+}
+
+/// `(repeated name, k)` when `name` is layer `k`'s copy (k in
+/// 2..=[`MAX_LAYERS`]) of one of `kind`'s repeated names: `over3` →
+/// `("over", 3)`. `None` for layer 1's own names and anything else.
+pub fn split_layer(kind: &str, name: &str) -> Option<(&'static str, u32)> {
+    layered(kind).iter().find_map(|&base| {
+        let digits = name.strip_prefix(base)?;
+        let k: u32 = digits.parse().ok()?;
+        // `over02` is not a layer name; `over1` is just `over`.
+        (k.to_string() == digits && (2..=MAX_LAYERS).contains(&k)).then_some((base, k))
+    })
+}
+
 /// The palette serialized for the editor (`GET /patch/registry`). Shapes use
 /// the same snake_case names as patch JSON; `kind` is `"number"` or
 /// `{"select": [labels…]}`. Nodes, ports and params each carry a
@@ -231,7 +262,7 @@ pub fn palette_json() -> serde_json::Value {
         TYPES
             .iter()
             .map(|t| {
-                json!({
+                let mut entry = json!({
                     "id": t.id,
                     "label": t.label,
                     "category": category(t.category),
@@ -253,7 +284,13 @@ pub fn palette_json() -> serde_json::Value {
                         },
                         "description": p.description,
                     })).collect::<Vec<_>>(),
-                })
+                });
+                // The inputs and params repeated per layer (see `layered`);
+                // absent on kinds that have no layers.
+                if !layered(t.id).is_empty() {
+                    entry["layered"] = json!({ "names": layered(t.id), "max": MAX_LAYERS });
+                }
+                entry
             })
             .collect::<Vec<_>>()
     )

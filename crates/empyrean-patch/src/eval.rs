@@ -6,7 +6,7 @@
 //! visual discontinuities.
 
 use super::codegen::Program;
-use super::registry::{self, ParamKind};
+use super::registry::ParamKind;
 use super::script;
 use super::{NodeInst, PatchDoc, Shape};
 use crate::abi::{AudioUniform, MAX_AUDIO_SOURCES};
@@ -928,8 +928,7 @@ fn finite_or(value: f32, fallback: f32) -> f32 {
 /// Whether `name` is something this node stores a value for: a knob, or a
 /// Select param of a built-in node.
 pub fn has_param(node: &NodeInst, name: &str) -> bool {
-    node.knob(name).is_some()
-        || registry::lookup(&node.kind).and_then(|t| t.param(name)).is_some()
+    node.knob(name).is_some() || node.param_def(name).is_some()
 }
 
 /// `value` held to the param's range: a knob's, or a Select's (rounded to
@@ -938,7 +937,7 @@ pub fn sanitize(node: &NodeInst, name: &str, value: f32) -> f32 {
     if let Some(k) = node.knob(name) {
         return finite_or(value, k.default).clamp(k.min, k.max);
     }
-    match registry::lookup(&node.kind).and_then(|t| t.param(name)) {
+    match node.param_def(name) {
         Some(def) => {
             let value = finite_or(value, def.default).clamp(def.min, def.max);
             match def.kind {

@@ -560,9 +560,16 @@ impl Gen<'_> {
 
     /// Baked value of a Select param (a compile-time constant).
     fn select(&self, node: usize, param: &str) -> u32 {
-        let ty = registry::lookup(&self.doc.nodes[node].kind).expect("kind");
-        let def = ty.param(param).expect("select param");
+        let def = self.doc.nodes[node].param_def(param).expect("select param");
         (self.doc.nodes[node].param(param).round()).clamp(def.min, def.max) as u32
+    }
+
+    /// Whether anything is wired into `port` of `node`. Read off the
+    /// document, so it holds in symbolic mode too (Convert to Code keeps
+    /// the wires).
+    fn wired(&self, node: usize, port: &str) -> bool {
+        let id = &self.doc.nodes[node].id;
+        self.doc.edges.iter().any(|e| e.to.node == *id && e.to.port == port)
     }
 
     fn upstream(&self, node: usize, port: &str) -> Option<&(usize, String)> {
@@ -835,16 +842,43 @@ impl Gen<'_> {
             ),
             "blend" => {
                 let mode = self.select(i, "mode");
-                format!(
+                let first = format!(
                     "    let base = {base};\n\
                      \x20   let over = {over};\n\
                      \x20   let op = clamp({op}, 0.0, 1.0);\n\
-                     \x20   let over_a = clamp(over.a * op, 0.0, 1.0);\n\
-                     \x20   return vec4f(apply_blend(base.rgb, over, op, {mode}u), over_a + base.a * (1.0 - over_a));",
+                     \x20   let over_a = clamp(over.a * op, 0.0, 1.0);\n",
                     base = self.color_input(i, "base", "c"),
                     over = self.color_input(i, "over", "c"),
                     op = self.p(i, "opacity"),
-                )
+                );
+                let composite = format!(
+                    "vec4f(apply_blend(base.rgb, over, op, {mode}u), over_a + base.a * (1.0 - over_a))"
+                );
+                // Layers 2.. composite onto the result in order; an unwired
+                // one is left out (a Multiply layer of nothing would
+                // blacken everything under it).
+                let layers: Vec<u32> = (2..=self.doc.nodes[i].layer_count())
+                    .filter(|&k| self.wired(i, &registry::layer_name("over", k)))
+                    .collect();
+                if layers.is_empty() {
+                    format!("{first}    return {composite};")
+                } else {
+                    let mut body = format!("{first}    var acc = {composite};\n");
+                    for k in layers {
+                        let name = |n: &str| registry::layer_name(n, k);
+                        body.push_str(&format!(
+                            "    let over{k} = {over};\n\
+                             \x20   let op{k} = clamp({op}, 0.0, 1.0);\n\
+                             \x20   let over{k}_a = clamp(over{k}.a * op{k}, 0.0, 1.0);\n\
+                             \x20   acc = vec4f(apply_blend(acc.rgb, over{k}, op{k}, {mode}u), over{k}_a + acc.a * (1.0 - over{k}_a));\n",
+                            over = self.color_input(i, &name("over"), "c"),
+                            op = self.p(i, &name("opacity")),
+                            mode = self.select(i, &name("mode")),
+                        ));
+                    }
+                    body.push_str("    return acc;");
+                    body
+                }
             }
             // -- ported layer-stack generators (gate.wgsl bodies, audio
             // couplings replaced by wireable params) ------------------------
@@ -2054,6 +2088,61 @@ mod tests {
         )
         .validate(&module)
         .expect("full-parity shader validates");
+    }
+
+    /// A Blend with layers composites each wired one onto the result, with
+    /// its own mode and opacity; an unwired layer is left out.
+    #[test]
+    fn blend_layers_fold_in_order() {
+        let mut mix = node("mix", "blend");
+        mix.layers = 3;
+        mix.params.insert("mode3".into(), 2.0);
+        let d = PatchDoc {
+            nodes: vec![
+                node("a", "plasma"),
+                node("b", "fire"),
+                node("c", "spiral"),
+                node("lfo", "lfo"),
+                mix,
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("a", "out", "mix", "base"),
+                edge("b", "out", "mix", "over"),
+                edge("c", "out", "mix", "over3"),
+                edge("lfo", "out", "mix", "opacity3"),
+                edge("mix", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let prog = compile(&d).expect("a layered blend compiles");
+        let module = naga::front::wgsl::parse_str(&prog.wgsl)
+            .unwrap_or_else(|e| panic!("parse: {e}\n{}", prog.wgsl));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .expect("layered blend validates");
+        // Layer 3 is there in screen mode, layer 2 (unwired) is not.
+        assert!(prog.wgsl.contains("acc = vec4f(apply_blend(acc.rgb, over3, op3, 2u)"), "{}", prog.wgsl);
+        assert!(!prog.wgsl.contains("over2"), "{}", prog.wgsl);
+        // Every layer's opacity is a knob in the slab; layer 3's is wired.
+        let mix = d.nodes.iter().position(|n| n.id == "mix").unwrap();
+        let knobs: Vec<(&str, bool)> = prog
+            .slots
+            .iter()
+            .filter(|s| s.node == mix)
+            .filter_map(|s| s.param.as_deref().map(|p| (p, s.wired.is_some())))
+            .collect();
+        assert_eq!(knobs, [("opacity", false), ("opacity2", false), ("opacity3", true)]);
+
+        // One layer: the body is the two-input Blend it always was.
+        let mut one = d.clone();
+        one.nodes[mix].layers = 1;
+        one.edges.retain(|e| e.to.port != "over3" && e.to.port != "opacity3");
+        let body = builtin_body(&one, mix).unwrap();
+        assert!(body.ends_with("return vec4f(apply_blend(base.rgb, over, op, 0u), over_a + base.a * (1.0 - over_a));"), "{body}");
     }
 
     /// Each Still image node samples its own media cell; Video in samples the

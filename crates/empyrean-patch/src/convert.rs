@@ -126,6 +126,7 @@ pub fn convert(doc: &mut PatchDoc, id: &str) -> Result<(), String> {
         }
     }
     node.kind = code::KIND.to_string();
+    node.layers = 0;
     node.code = Some(Box::new(def));
     for e in &mut doc.edges {
         if e.to.node == id {
@@ -162,9 +163,9 @@ fn knob_port(p: &registry::ParamDef) -> CodePort {
 fn header(node: &NodeInst, ty: &registry::NodeType) -> String {
     let mut h = format!("// Converted from {} ({}).", ty.label, ty.id);
     let mut baked = Vec::new();
-    for p in ty.params {
-        if let ParamKind::Select(options) = p.kind {
-            let i = (node.param(p.name).round().clamp(0.0, options.len() as f32 - 1.0)) as usize;
+    for p in node.params_of() {
+        if let ParamKind::Select(options) = p.def.kind {
+            let i = (node.param(&p.name).round().clamp(0.0, options.len() as f32 - 1.0)) as usize;
             baked.push(format!("{} = {}", p.label, options[i]));
         }
     }
@@ -180,14 +181,15 @@ fn gpu_definition(doc: &PatchDoc, index: usize) -> Result<CodeDef, String> {
     let node = &doc.nodes[index];
     let ty = registry::lookup(&node.kind).ok_or("unknown kind")?;
     let out_shape = ty.output_shape("out").ok_or("no `out`")?;
-    let inputs: Vec<CodePort> = ty
-        .params
+    // The instance's ports: a layered Blend's extra layers included.
+    let inputs: Vec<CodePort> = node
+        .params_of()
         .iter()
-        .filter(|p| matches!(p.kind, ParamKind::Number))
-        .map(knob_port)
-        .chain(ty.inputs.iter().map(|p| CodePort {
-            name: port_name(p.name),
-            shape: p.shape,
+        .filter(|p| matches!(p.def.kind, ParamKind::Number))
+        .map(|p| CodePort { name: port_name(&p.name), ..knob_port(p.def) })
+        .chain(node.shaped_inputs().into_iter().map(|(name, shape)| CodePort {
+            name: port_name(&name),
+            shape,
             ..Default::default()
         }))
         .collect();
@@ -504,6 +506,40 @@ mod tests {
             .validate(&module)
             .unwrap_or_else(|e| panic!("{}: {e:?}\n{}", t.id, def.body));
         }
+    }
+
+    /// A layered Blend converts with every layer's ports, its modes baked.
+    #[test]
+    fn blend_layers_convert() {
+        let mut doc = PatchDoc {
+            nodes: vec![
+                node("a", "plasma", &[]),
+                node("b", "fire", &[]),
+                node("n", "blend", &[("mode2", 4.0), ("opacity2", 0.25)]),
+                node("o", "output", &[]),
+            ],
+            edges: vec![
+                edge("a", "out", "n", "base"),
+                edge("b", "out", "n", "over2"),
+                edge("n", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        doc.nodes[2].layers = 2;
+        convert(&mut doc, "n").unwrap();
+        let n = &doc.nodes[2];
+        assert_eq!(n.layers, 0, "a Code node has no layers");
+        let def = n.code().unwrap();
+        assert!(def.body.contains("Mode 2 = max"), "{}", def.body);
+        for port in ["base", "over", "over2", "opacity", "opacity2"] {
+            assert!(def.input(port).is_some(), "{port}: {:?}", def.inputs);
+        }
+        assert_eq!(n.params.get("opacity2"), Some(&0.25));
+        let prog = compile(&doc).unwrap_or_else(|e| panic!("{e}\n{}", def.body));
+        let module = naga::front::wgsl::parse_str(&prog.wgsl).unwrap_or_else(|e| panic!("{e}\n{}", def.body));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default())
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("{e:?}\n{}", def.body));
     }
 
     #[test]

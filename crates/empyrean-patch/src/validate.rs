@@ -82,6 +82,11 @@ pub enum PatchError {
         node: String,
         detail: String,
     },
+    /// `layers` on a kind that has none, or more than `registry::MAX_LAYERS`.
+    BadLayers {
+        node: String,
+        layers: u32,
+    },
 }
 
 impl fmt::Display for PatchError {
@@ -120,6 +125,11 @@ impl fmt::Display for PatchError {
             ),
             Self::BadMedia { node, detail } => write!(f, "node \"{node}\": {detail}"),
             Self::Code { node, detail } => write!(f, "Code node \"{node}\": {detail}"),
+            Self::BadLayers { node, layers } => write!(
+                f,
+                "node \"{node}\" has {layers} layers: only a Blend has layers, at most {}",
+                registry::MAX_LAYERS
+            ),
             Self::Subpatch { detail } => f.write_str(detail),
             Self::Cycle { nodes } => write!(f, "dependency cycle through: {}", nodes.join(", ")),
             Self::ExposedUnknown { node, param } => {
@@ -191,6 +201,9 @@ pub fn validate(doc: &PatchDoc) -> Result<Validated, Vec<PatchError>> {
                 node: n.id.clone(),
                 detail: "only Code nodes carry code".to_string(),
             });
+        }
+        if n.layers > 1 && (registry::layered(&n.kind).is_empty() || n.layers > registry::MAX_LAYERS) {
+            errors.push(PatchError::BadLayers { node: n.id.clone(), layers: n.layers });
         }
     }
 
@@ -283,7 +296,7 @@ pub fn validate(doc: &PatchDoc) -> Result<Validated, Vec<PatchError>> {
         // Code node.
         let known = index.get(x.node.as_str()).is_some_and(|&i| {
             let n = &doc.nodes[i];
-            types[i].is_some_and(|t| t.param(&x.param).is_some()) || n.knob(&x.param).is_some()
+            n.param_def(&x.param).is_some() || n.knob(&x.param).is_some()
         });
         if !known {
             errors.push(PatchError::ExposedUnknown {
@@ -449,6 +462,40 @@ mod tests {
         );
         let errs = validate(&d).unwrap_err();
         assert!(matches!(errs[0], PatchError::BadInput { .. }), "{errs:?}");
+    }
+
+    #[test]
+    fn blend_layers_are_ports_up_to_their_count() {
+        let mut mix = node("mix", "blend");
+        mix.layers = 2;
+        let mut d = doc(
+            vec![node("a", "noise_field"), node("lfo", "lfo"), mix],
+            vec![edge("a", "out", "mix", "over2"), edge("lfo", "out", "mix", "opacity2")],
+        );
+        d.exposed.push(ExposedParam { node: "mix".into(), param: "mode2".into(), label: String::new() });
+        assert!(validate(&d).is_ok(), "{:?}", validate(&d).err());
+        // Past the last layer, and a layer's Select, are not inputs.
+        d.edges.push(edge("a", "out", "mix", "over3"));
+        d.edges.push(edge("lfo", "out", "mix", "mode2"));
+        let errs = validate(&d).unwrap_err();
+        assert_eq!(errs.iter().filter(|e| matches!(e, PatchError::BadInput { .. })).count(), 2, "{errs:?}");
+    }
+
+    #[test]
+    fn layers_only_on_a_blend_and_at_most_eight() {
+        let mut noise = node("n", "noise_field");
+        noise.layers = 2;
+        let mut mix = node("mix", "blend");
+        mix.layers = registry::MAX_LAYERS + 1;
+        let errs = validate(&doc(vec![noise, mix], vec![])).unwrap_err();
+        let bad: Vec<&str> = errs
+            .iter()
+            .filter_map(|e| match e {
+                PatchError::BadLayers { node, .. } => Some(node.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(bad, ["n", "mix"], "{errs:?}");
     }
 
     #[test]

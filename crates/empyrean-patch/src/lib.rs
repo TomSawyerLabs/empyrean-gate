@@ -234,6 +234,28 @@ pub struct NodeInst {
     /// knobs (purely presentational).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub collapsed: bool,
+    /// A Blend's number of layers, 1 to 8 (absent means 1). Layer 1 is
+    /// `over` / `mode` / `opacity` over `base`; layer k (2..) adds the input
+    /// `over{k}`, the Select `mode{k}` and the knob `opacity{k}` (in
+    /// `params` and wireable like any knob), composited onto the layers
+    /// below in order. An unwired layer above the first is skipped. Only
+    /// layered kinds (`registry::layered`) may carry it.
+    #[serde(skip_serializing_if = "one_layer")]
+    pub layers: u32,
+}
+
+fn one_layer(layers: &u32) -> bool {
+    *layers <= 1
+}
+
+/// A param of a node instance: its name on this instance (`opacity2` for
+/// layer 2's copy of `opacity`), its label there ("Opacity 2") and the
+/// registry definition it repeats.
+#[derive(Debug, Clone)]
+pub struct InstParam {
+    pub name: String,
+    pub label: String,
+    pub def: &'static registry::ParamDef,
 }
 
 /// A knob: the range of a Number param of a built-in node, or of a Scalar
@@ -260,6 +282,60 @@ impl NodeInst {
     /// A Code node's definition, when this is a Code node that has one.
     pub fn code(&self) -> Option<&code::CodeDef> {
         if self.kind == code::KIND { self.code.as_deref() } else { None }
+    }
+
+    /// How many layers this node has: `layers` on a layered kind (held to
+    /// 1..=`registry::MAX_LAYERS`), 1 on everything else.
+    pub fn layer_count(&self) -> u32 {
+        if registry::layered(&self.kind).is_empty() {
+            1
+        } else {
+            self.layers.clamp(1, registry::MAX_LAYERS)
+        }
+    }
+
+    /// The registry name behind a port or param name of this instance:
+    /// `over3` is `over` on a Blend with three layers or more; anything else
+    /// is itself.
+    fn layer_base<'a>(&self, name: &'a str) -> &'a str {
+        match registry::split_layer(&self.kind, name) {
+            Some((base, k)) if k <= self.layer_count() => base,
+            _ => name,
+        }
+    }
+
+    /// The registry definition of a param of a built-in node (Selects
+    /// included), layer copies resolved. `None` on a Code node.
+    pub fn param_def(&self, name: &str) -> Option<&'static registry::ParamDef> {
+        if self.code().is_some() {
+            return None;
+        }
+        registry::lookup(&self.kind)?.param(self.layer_base(name))
+    }
+
+    /// Every param of a built-in node (Selects included), in declaration
+    /// order and then layer by layer. Empty on a Code node.
+    pub fn params_of(&self) -> Vec<InstParam> {
+        let Some(t) = registry::lookup(&self.kind).filter(|_| self.code().is_none()) else {
+            return Vec::new();
+        };
+        let mut out: Vec<InstParam> = t
+            .params
+            .iter()
+            .map(|def| InstParam { name: def.name.to_string(), label: def.label.to_string(), def })
+            .collect();
+        for k in 2..=self.layer_count() {
+            for &name in registry::layered(&self.kind) {
+                if let Some(def) = t.param(name) {
+                    out.push(InstParam {
+                        name: registry::layer_name(name, k),
+                        label: format!("{} {k}", def.label),
+                        def,
+                    });
+                }
+            }
+        }
+        out
     }
 
     /// Whether this node runs on the CPU (Scalar/Event tier). A Code node
@@ -292,7 +368,7 @@ impl NodeInst {
                 integrate: p.integrate,
             });
         }
-        let p = registry::lookup(&self.kind)?.param(name)?;
+        let p = self.param_def(name)?;
         match p.kind {
             registry::ParamKind::Number => Some(Knob {
                 min: p.min,
@@ -314,14 +390,10 @@ impl NodeInst {
                 .filter_map(|p| self.knob(&p.name).map(|k| (p.name.clone(), k)))
                 .collect();
         }
-        registry::lookup(&self.kind)
-            .map(|t| {
-                t.params
-                    .iter()
-                    .filter_map(|p| self.knob(p.name).map(|k| (p.name.to_string(), k)))
-                    .collect()
-            })
-            .unwrap_or_default()
+        self.params_of()
+            .into_iter()
+            .filter_map(|p| self.knob(&p.name).map(|k| (p.name, k)))
+            .collect()
     }
 
     /// Shape of an input port: a shaped input, a Number param's implicit
@@ -331,7 +403,7 @@ impl NodeInst {
         if let Some(def) = self.code() {
             return def.input(name).map(|p| p.shape);
         }
-        registry::lookup(&self.kind)?.input_shape(name)
+        registry::lookup(&self.kind)?.input_shape(self.layer_base(name))
     }
 
     pub fn output_shape(&self, name: &str) -> Option<Shape> {
@@ -351,9 +423,19 @@ impl NodeInst {
                 .map(|p| (p.name.clone(), p.shape))
                 .collect();
         }
-        registry::lookup(&self.kind)
-            .map(|t| t.inputs.iter().map(|p| (p.name.to_string(), p.shape)).collect())
-            .unwrap_or_default()
+        let Some(t) = registry::lookup(&self.kind) else {
+            return Vec::new();
+        };
+        let mut out: Vec<(String, Shape)> =
+            t.inputs.iter().map(|p| (p.name.to_string(), p.shape)).collect();
+        for k in 2..=self.layer_count() {
+            for &name in registry::layered(&self.kind) {
+                if let Some(p) = t.inputs.iter().find(|p| p.name == name) {
+                    out.push((registry::layer_name(name, k), p.shape));
+                }
+            }
+        }
+        out
     }
 
     /// The output ports of this node, in declaration order.
@@ -504,6 +586,36 @@ mod tests {
     }
 
     #[test]
+    fn layers_name_the_extra_ports_and_knobs() {
+        let mut node = NodeInst {
+            id: "mix".into(),
+            kind: "blend".into(),
+            layers: 3,
+            ..Default::default()
+        };
+        assert_eq!(node.input_shape("over3"), Some(Shape::FieldColor));
+        assert_eq!(node.input_shape("opacity2"), Some(Shape::Scalar));
+        assert_eq!(node.input_shape("mode2"), None, "a layer's mode is a Select");
+        assert_eq!(node.input_shape("over4"), None, "past the last layer");
+        assert_eq!(node.input_shape("over03"), None);
+        assert_eq!(node.param("opacity3"), 1.0, "a layer's knob defaults like layer 1's");
+        let inputs: Vec<String> = node.shaped_inputs().into_iter().map(|(n, _)| n).collect();
+        assert_eq!(inputs, ["base", "over", "over2", "over3"]);
+        let knobs: Vec<String> = node.knobs().into_iter().map(|(n, _)| n).collect();
+        assert_eq!(knobs, ["opacity", "opacity2", "opacity3"]);
+        let labels: Vec<String> = node.params_of().into_iter().map(|p| p.label).collect();
+        assert_eq!(labels, ["Mode", "Opacity", "Mode 2", "Opacity 2", "Mode 3", "Opacity 3"]);
+
+        let json = serde_json::to_string(&node).unwrap();
+        assert!(json.contains(r#""layers":3"#));
+        node.layers = 1;
+        assert!(!serde_json::to_string(&node).unwrap().contains("layers"));
+        // Other kinds have one layer whatever they carry.
+        let noise = NodeInst { kind: "noise_field".into(), layers: 4, ..Default::default() };
+        assert_eq!(noise.layer_count(), 1);
+    }
+
+    #[test]
     fn minimal_json_gets_defaults() {
         let doc: PatchDoc = serde_json::from_str(r#"{"name":"x"}"#).unwrap();
         assert_eq!(doc.format, PATCH_FORMAT);
@@ -532,7 +644,7 @@ mod tests {
         for def in ["NodeInst", "Edge", "PortRef", "ExposedParam", "CodeDef", "CodePort", "Shape"] {
             assert!(defs[def].is_object(), "schema lacks $defs/{def}");
         }
-        for key in ["id", "kind", "params", "pos", "media", "sub", "code", "collapsed"] {
+        for key in ["id", "kind", "params", "pos", "media", "sub", "code", "collapsed", "layers"] {
             assert!(defs["NodeInst"]["properties"][key]["description"].is_string(), "NodeInst.{key}");
         }
         assert_eq!(defs["Edge"]["required"], serde_json::json!(["from", "to"]));
