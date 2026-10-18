@@ -50,12 +50,12 @@ pub struct Program {
     /// (to_node, to_port) → (from_node, from_port), for CPU-side input lookup.
     pub wires: HashMap<(usize, String), (usize, String)>,
     /// Companion module for per-node mini previews: same node functions and
-    /// parameter slab, but the entry point renders `preview_nodes[slot]`'s own
+    /// parameter slab, but the entry point renders `preview_cells[slot]`'s
     /// output into `OUT[slot * spokes * pixels + pix]`. Empty when the patch
     /// has no field nodes to preview.
     pub preview_wgsl: String,
-    /// Doc node index rendered by each preview cell slot.
-    pub preview_nodes: Vec<usize>,
+    /// What each preview cell slot renders.
+    pub preview_cells: Vec<PreviewCell>,
     /// CPU node scalar outputs (doc node index, port) for amplitude meters.
     pub preview_scalars: Vec<(usize, String)>,
     /// Where each GPU Code node's body sits in `wgsl` (and `preview_wgsl`,
@@ -86,6 +86,33 @@ pub struct SlabSlot {
     pub wired: Option<(usize, String)>,
     /// Integrate the value over time (× master speed) into a phase.
     pub integrate: bool,
+}
+
+/// One mini-preview cell: a node's principal output (`port` None: its `out`,
+/// or what a stream/texture source would draw), or one more field output of
+/// a Code node, by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewCell {
+    pub node: usize,
+    pub port: Option<String>,
+}
+
+impl Program {
+    /// The key of each preview cell, in slot order: the node id, or
+    /// `"<id>:<port>"` for a Code node's extra outputs. Hosts prefix it with
+    /// `node:` to name the mini.
+    pub fn preview_keys(&self) -> Vec<String> {
+        self.preview_cells
+            .iter()
+            .map(|c| {
+                let id = &self.doc.nodes[c.node].id;
+                match &c.port {
+                    Some(p) => format!("{id}:{p}"),
+                    None => id.clone(),
+                }
+            })
+            .collect()
+    }
 }
 
 /// Where a GPU Code node's body landed in the generated module.
@@ -343,7 +370,9 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
     // Field nodes and the stream/texture sources in graph order, then the
     // Event effects (CPU nodes whose effects stream previews like Triggered
     // effects does).
-    let preview_nodes: Vec<usize> = gpu_order
+    // A Code node previews every field output: its principal one as the
+    // node's cell, the others by port name.
+    let preview_cells: Vec<PreviewCell> = gpu_order
         .iter()
         .copied()
         .chain(
@@ -353,12 +382,30 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
                 .filter(|&i| doc.nodes[i].kind == "event_effect"),
         )
         .filter(|&i| previewable(&doc.nodes[i]))
+        .flat_map(|i| {
+            let node = &doc.nodes[i];
+            let mut cells = vec![PreviewCell { node: i, port: None }];
+            if let Some(def) = node.code() {
+                let principal = def.principal().map(|p| p.name.clone());
+                cells.extend(
+                    def.outputs
+                        .iter()
+                        .filter(|p| matches!(p.shape, Shape::FieldColor | Shape::FieldScalar))
+                        .filter(|p| Some(&p.name) != principal.as_ref())
+                        .map(|p| PreviewCell {
+                            node: i,
+                            port: Some(p.name.clone()),
+                        }),
+                );
+            }
+            cells
+        })
         .take(MAX_PREVIEW_NODES)
         .collect();
-    let preview_wgsl = if preview_nodes.is_empty() {
+    let preview_wgsl = if preview_cells.is_empty() {
         String::new()
     } else {
-        g.preview_main_fn(&mut preview_code, &preview_nodes)?;
+        g.preview_main_fn(&mut preview_code, &preview_cells)?;
         preview_code
     };
     let preview_scalars: Vec<(usize, String)> = cpu_order
@@ -382,7 +429,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         cpu_order,
         wires,
         preview_wgsl,
-        preview_nodes,
+        preview_cells,
         preview_scalars,
         code_lines,
         images,
@@ -1345,13 +1392,27 @@ impl Gen<'_> {
     /// slot renders its node's output alone — no master and nothing it does
     /// not carry itself, so the cell shows exactly what that node hands
     /// downstream.
-    fn preview_main_fn(&self, code: &mut String, nodes: &[usize]) -> Result<(), String> {
+    fn preview_main_fn(&self, code: &mut String, cells: &[PreviewCell]) -> Result<(), String> {
         let mut cases = String::new();
-        for (slot, &i) in nodes.iter().enumerate() {
+        for (slot, cell) in cells.iter().enumerate() {
+            let i = cell.node;
             let node = &self.doc.nodes[i];
-            let expr = match preview_style(node) {
-                Some(PreviewStyle::Color) => format!("n{i}_f(ctx).rgb"),
-                Some(PreviewStyle::Gray) => format!("vec3f(clamp(n{i}_f(ctx), 0.0, 1.0))"),
+            // A Code node's extra output: its own accessor and shape.
+            let style = match &cell.port {
+                Some(port) => match node.output_shape(port) {
+                    Some(Shape::FieldColor) => Some(PreviewStyle::Color),
+                    Some(Shape::FieldScalar) => Some(PreviewStyle::Gray),
+                    _ => None,
+                },
+                None => preview_style(node),
+            };
+            let f = match &cell.port {
+                Some(port) => format!("n{i}_o_{port}"),
+                None => format!("n{i}_f"),
+            };
+            let expr = match style {
+                Some(PreviewStyle::Color) => format!("{f}(ctx).rgb"),
+                Some(PreviewStyle::Gray) => format!("vec3f(clamp({f}(ctx), 0.0, 1.0))"),
                 Some(style) => {
                     self.preview_stream_fn(code, i, style);
                     format!("n{i}_pv(ctx)")
@@ -1398,7 +1459,7 @@ impl Gen<'_> {
              \x20   let b = u32(acc.b * 255.0 + 0.5);\n\
              \x20   OUT[idx] = r | (g << 8u) | (b << 16u);\n\
              }}\n",
-            slots = nodes.len(),
+            slots = cells.len(),
         )
         .unwrap();
         Ok(())
@@ -1582,8 +1643,9 @@ mod tests {
         let doc = valid_demo();
         let prog = compile(&doc).expect("compiles");
         // Every previewable node (and only those) gets a cell, in graph order.
-        assert!(!prog.preview_nodes.is_empty());
-        for &i in &prog.preview_nodes {
+        assert!(!prog.preview_cells.is_empty());
+        for cell in &prog.preview_cells {
+            let i = cell.node;
             let kind = &doc.nodes[i].kind;
             assert!(
                 previewable(&doc.nodes[i]) && kind != "output",
@@ -1633,9 +1695,9 @@ mod tests {
         };
         let prog = compile(&doc).expect("compiles");
         let cells: Vec<&str> = prog
-            .preview_nodes
+            .preview_cells
             .iter()
-            .map(|&i| doc.nodes[i].id.as_str())
+            .map(|c| doc.nodes[c.node].id.as_str())
             .collect();
         for id in ["t", "clients", "ev", "v", "img", "clip", "bg"] {
             assert!(cells.contains(&id), "no cell for {id}: {cells:?}");
@@ -1813,7 +1875,11 @@ mod tests {
         assert_eq!(spin.wired, Some((0, "out".to_string())));
         // The grey field input wired from the LFO got an adapter slot.
         assert!(prog.slots.iter().any(|s| s.node == 2 && s.param.is_none() && s.wired.is_some()));
-        assert!(prog.preview_nodes.contains(&2), "the code node thumbnails");
+        // The node's cell is its principal output; `edge` gets a cell of its own.
+        let keys = prog.preview_keys();
+        assert!(keys.contains(&"c".to_string()), "{keys:?}");
+        assert!(keys.contains(&"c:edge".to_string()), "{keys:?}");
+        assert!(prog.preview_wgsl.contains("n2_o_edge(ctx)"), "the extra cell renders the port");
         // Body lines are on record and resolve back to the body.
         let lines = &prog.code_lines;
         assert_eq!(lines.len(), 1);
@@ -1854,7 +1920,7 @@ mod tests {
         assert!(prog.code_lines.is_empty());
         assert!(prog.preview_scalars.contains(&(1, "out".to_string())));
         assert!(prog.preview_scalars.contains(&(1, "tick".to_string())));
-        assert!(!prog.preview_nodes.contains(&1));
+        assert!(!prog.preview_cells.iter().any(|c| c.node == 1));
         let slot = prog.slots.iter().find(|s| s.node == 2 && s.param.as_deref() == Some("brightness")).unwrap();
         assert_eq!(slot.wired, Some((1, "out".to_string())));
     }

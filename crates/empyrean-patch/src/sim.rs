@@ -494,13 +494,13 @@ mod tests {
         assert_eq!(sim.doc().nodes.len(), 3);
         assert!(sim.flat_doc().nodes.len() > 3);
         let prog = sim.program();
-        for &i in &prog.preview_nodes {
+        for i in prog.preview_cells.iter().map(|c| c.node) {
             let _ = &sim.flat_doc().nodes[i];
         }
         for (i, _) in &prog.preview_scalars {
             let _ = &sim.flat_doc().nodes[*i];
         }
-        assert!(prog.preview_nodes.len() > 1, "the inner field nodes get thumbnails");
+        assert!(prog.preview_cells.len() > 1, "the inner field nodes get thumbnails");
         assert!(sim.uses_touch(), "touch nodes count wherever they are");
         assert!(sim.images().is_empty());
     }

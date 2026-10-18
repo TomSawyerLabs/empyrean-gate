@@ -1872,11 +1872,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                                 patch_preview = Some(minis::PatchPreviewInfo {
                                     key: format!("{id}:{patch_epoch}"),
                                     wgsl: prog.preview_wgsl.clone(),
-                                    node_ids: prog
-                                        .preview_nodes
-                                        .iter()
-                                        .map(|&n| prog.doc.nodes[n].id.clone())
-                                        .collect(),
+                                    node_ids: prog.preview_keys(),
                                     scalar_refs: prog
                                         .preview_scalars
                                         .iter()

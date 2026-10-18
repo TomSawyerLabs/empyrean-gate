@@ -252,9 +252,14 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   shader (scalar inputs are knobs, field inputs can be resampled with
   `name_at(ctx)`); with scalar/event ports only it runs on the CPU every
   frame through a small, bounded WGSL-subset interpreter (`state.x` keeps a
-  value across frames), so a submitted patch never runs native code. Shader
-  errors inside a body are reported against its own line numbers
-  (`plans/code-node.md`). Graphs compile to a single WGSL dispatch; knob tweaks and scalar
+  value across frames), so a submitted patch never runs native code. The
+  body is edited in a real code editor (CodeMirror: WGSL highlighting,
+  completion and hover docs read off the shader lib itself through
+  `GET /patch/code-reference`, Tab indents, Ctrl+Space), shader errors
+  inside a body are marked on its own lines, and every output of a Code
+  node gets a live mini (a ring per field output, a meter per scalar or
+  event) on the node and beside the editor (`plans/code-node.md`). Graphs
+  compile to a single WGSL dispatch; knob tweaks and scalar
   wires never recompile, and edits carry every timer and phase over. The
   editor has undo/redo (Ctrl+Z / Ctrl+Shift+Z) and duplicate (Ctrl+D).
   Patches save as JSON files under the config dir and activate live (the layer

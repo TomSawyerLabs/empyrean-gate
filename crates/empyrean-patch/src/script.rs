@@ -165,51 +165,57 @@ enum Builtin {
     Bool,
 }
 
-const BUILTINS: &[(&str, Builtin, usize)] = &[
-    ("abs", Builtin::Abs, 1),
-    ("floor", Builtin::Floor, 1),
-    ("ceil", Builtin::Ceil, 1),
-    ("round", Builtin::Round, 1),
-    ("fract", Builtin::Fract, 1),
-    ("trunc", Builtin::Trunc, 1),
-    ("sign", Builtin::Sign, 1),
-    ("sqrt", Builtin::Sqrt, 1),
-    ("inverseSqrt", Builtin::InverseSqrt, 1),
-    ("exp", Builtin::Exp, 1),
-    ("exp2", Builtin::Exp2, 1),
-    ("log", Builtin::Log, 1),
-    ("log2", Builtin::Log2, 1),
-    ("pow", Builtin::Pow, 2),
-    ("sin", Builtin::Sin, 1),
-    ("cos", Builtin::Cos, 1),
-    ("tan", Builtin::Tan, 1),
-    ("asin", Builtin::Asin, 1),
-    ("acos", Builtin::Acos, 1),
-    ("atan", Builtin::Atan, 1),
-    ("atan2", Builtin::Atan2, 2),
-    ("sinh", Builtin::Sinh, 1),
-    ("cosh", Builtin::Cosh, 1),
-    ("tanh", Builtin::Tanh, 1),
-    ("min", Builtin::Min, 2),
-    ("max", Builtin::Max, 2),
-    ("clamp", Builtin::Clamp, 3),
-    ("mix", Builtin::Mix, 3),
-    ("step", Builtin::Step, 2),
-    ("smoothstep", Builtin::Smoothstep, 3),
-    ("saturate", Builtin::Saturate, 1),
-    ("fma", Builtin::Fma, 3),
-    ("degrees", Builtin::Degrees, 1),
-    ("radians", Builtin::Radians, 1),
-    ("select", Builtin::Select, 3),
-    ("f32", Builtin::F32, 1),
-    ("i32", Builtin::I32, 1),
-    ("u32", Builtin::U32, 1),
-    ("bool", Builtin::Bool, 1),
+/// Name, implementation, arity, signature, one-line doc.
+const BUILTINS: &[(&str, Builtin, usize, &str, &str)] = &[
+    ("abs", Builtin::Abs, 1, "abs(x)", "Absolute value."),
+    ("floor", Builtin::Floor, 1, "floor(x)", "Round down."),
+    ("ceil", Builtin::Ceil, 1, "ceil(x)", "Round up."),
+    ("round", Builtin::Round, 1, "round(x)", "Round to nearest, halves to even (as WGSL)."),
+    ("fract", Builtin::Fract, 1, "fract(x)", "x - floor(x), 0..1."),
+    ("trunc", Builtin::Trunc, 1, "trunc(x)", "Round toward zero."),
+    ("sign", Builtin::Sign, 1, "sign(x)", "-1, 0 or 1."),
+    ("sqrt", Builtin::Sqrt, 1, "sqrt(x)", "Square root."),
+    ("inverseSqrt", Builtin::InverseSqrt, 1, "inverseSqrt(x)", "1 / sqrt(x)."),
+    ("exp", Builtin::Exp, 1, "exp(x)", "e^x."),
+    ("exp2", Builtin::Exp2, 1, "exp2(x)", "2^x."),
+    ("log", Builtin::Log, 1, "log(x)", "Natural log."),
+    ("log2", Builtin::Log2, 1, "log2(x)", "Log base 2."),
+    ("pow", Builtin::Pow, 2, "pow(x, y)", "x^y."),
+    ("sin", Builtin::Sin, 1, "sin(x)", "Sine, radians."),
+    ("cos", Builtin::Cos, 1, "cos(x)", "Cosine, radians."),
+    ("tan", Builtin::Tan, 1, "tan(x)", "Tangent, radians."),
+    ("asin", Builtin::Asin, 1, "asin(x)", "Arc sine."),
+    ("acos", Builtin::Acos, 1, "acos(x)", "Arc cosine."),
+    ("atan", Builtin::Atan, 1, "atan(x)", "Arc tangent."),
+    ("atan2", Builtin::Atan2, 2, "atan2(y, x)", "Angle of (x, y), radians."),
+    ("sinh", Builtin::Sinh, 1, "sinh(x)", "Hyperbolic sine."),
+    ("cosh", Builtin::Cosh, 1, "cosh(x)", "Hyperbolic cosine."),
+    ("tanh", Builtin::Tanh, 1, "tanh(x)", "Hyperbolic tangent; a soft clamp to -1..1."),
+    ("min", Builtin::Min, 2, "min(a, b)", "The smaller."),
+    ("max", Builtin::Max, 2, "max(a, b)", "The larger."),
+    ("clamp", Builtin::Clamp, 3, "clamp(x, lo, hi)", "x held to lo..hi."),
+    ("mix", Builtin::Mix, 3, "mix(a, b, t)", "a + (b - a) * t."),
+    ("step", Builtin::Step, 2, "step(edge, x)", "0 below edge, 1 from it."),
+    ("smoothstep", Builtin::Smoothstep, 3, "smoothstep(lo, hi, x)", "0 below lo, 1 above hi, a smooth ramp between."),
+    ("saturate", Builtin::Saturate, 1, "saturate(x)", "clamp(x, 0, 1)."),
+    ("fma", Builtin::Fma, 3, "fma(a, b, c)", "a * b + c."),
+    ("degrees", Builtin::Degrees, 1, "degrees(rad)", "Radians to degrees."),
+    ("radians", Builtin::Radians, 1, "radians(deg)", "Degrees to radians."),
+    ("select", Builtin::Select, 3, "select(if_false, if_true, cond)", "if_true when cond, else if_false (WGSL argument order)."),
+    ("f32", Builtin::F32, 1, "f32(x)", "To a number (true = 1)."),
+    ("i32", Builtin::I32, 1, "i32(x)", "Truncate to an integer."),
+    ("u32", Builtin::U32, 1, "u32(x)", "Truncate, never below 0."),
+    ("bool", Builtin::Bool, 1, "bool(x)", "True when non-zero."),
 ];
 
-/// The names the interpreter knows, for the editor's reference card.
+/// The names the interpreter knows.
 pub fn builtin_names() -> impl Iterator<Item = &'static str> {
-    BUILTINS.iter().map(|(n, _, _)| *n)
+    BUILTINS.iter().map(|(n, ..)| *n)
+}
+
+/// `(name, signature, doc)` for every builtin, for the editor's reference.
+pub fn builtin_reference() -> impl Iterator<Item = (&'static str, &'static str, &'static str)> {
+    BUILTINS.iter().map(|(n, _, _, sig, doc)| (*n, *sig, *doc))
 }
 
 /// A compiled body, ready to run every frame.
@@ -891,7 +897,7 @@ impl Parser {
                     Some((slot, _)) => Ok(Expr::Var(slot)),
                     None => {
                         self.pos -= 1;
-                        if BUILTINS.iter().any(|(n, _, _)| *n == name) {
+                        if BUILTINS.iter().any(|(n, ..)| *n == name) {
                             self.error(format!("`{name}` is a function: call it with `(`"))
                         } else if matches!(
                             name.as_str(),
@@ -911,7 +917,7 @@ impl Parser {
     }
 
     fn call(&mut self, name: &str) -> Result<Expr, Error> {
-        let Some((_, builtin, arity)) = BUILTINS.iter().find(|(n, _, _)| *n == name) else {
+        let Some((_, builtin, arity, ..)) = BUILTINS.iter().find(|(n, ..)| *n == name) else {
             self.pos -= 1;
             if matches!(name, "vec2f" | "vec3f" | "vec4f" | "vec2" | "vec3" | "vec4") {
                 return self.error(format!(

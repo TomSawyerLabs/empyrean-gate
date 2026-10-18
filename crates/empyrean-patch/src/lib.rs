@@ -18,6 +18,7 @@ pub mod eval;
 pub mod flatten;
 pub mod migrate;
 pub mod presets;
+pub mod reference;
 pub mod registry;
 pub mod script;
 pub mod sim;

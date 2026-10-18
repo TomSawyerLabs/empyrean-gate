@@ -103,6 +103,7 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .route("/brc/camp/{uid}", post(brc_camp))
         .route("/patch/registry", get(patch_registry))
         .route("/patch/presets", get(patch_presets))
+        .route("/patch/code-reference", get(patch_code_reference))
         .route("/patch/migrate", post(patch_migrate))
         .route("/patch/submissions", get(patch_submissions))
         .route("/patch/submissions/record", get(patch_submission_record))
@@ -820,6 +821,12 @@ async fn handover(
 /// registry so the frontend can never drift from what codegen understands.
 async fn patch_registry() -> Response {
     axum::Json(patch::registry::palette_json()).into_response()
+}
+
+/// What a Code node body may use, read off the shader lib and the
+/// interpreter (`empyrean_patch::reference`): the editor's completion.
+async fn patch_code_reference() -> Response {
+    axum::Json(patch::reference::code_reference_json()).into_response()
 }
 
 /// Built-in starter patches (immutable templates; the editor copies them).

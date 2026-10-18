@@ -108,6 +108,14 @@ pub fn limits() -> String {
     .to_string()
 }
 
+/// What a Code node body may use (`reference::Reference` as JSON): the
+/// shader lib's helpers with docs, its structs and globals, and the CPU
+/// tier's builtins. Feeds the editor's completion and hover docs.
+#[wasm_bindgen(js_name = codeReference)]
+pub fn code_reference() -> String {
+    empyrean_patch::reference::code_reference_json().to_string()
+}
+
 /// Effect kinds in GPU-id order, by their serde (wire) names.
 #[wasm_bindgen]
 pub fn effect_kinds() -> String {
@@ -174,16 +182,12 @@ impl PatchSim {
         self.sim.program().preview_wgsl.clone()
     }
 
-    /// Node ids rendered by each preview cell, in cell order.
+    /// The key of each preview cell, in cell order: a node id, or
+    /// `"<id>:<port>"` for a Code node's extra field outputs (the mini is
+    /// `node:<key>`).
     #[wasm_bindgen(js_name = previewNodes)]
     pub fn preview_nodes(&self) -> Vec<String> {
-        let doc = self.sim.flat_doc();
-        self.sim
-            .program()
-            .preview_nodes
-            .iter()
-            .map(|&i| doc.nodes[i].id.clone())
-            .collect()
+        self.sim.program().preview_keys()
     }
 
     /// `[[nodeId, port], ...]` for each value in `scalarValues()`.
