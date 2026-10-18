@@ -1,0 +1,32 @@
+{
+  "format": 6,
+  "id": "builtin-noise-garden",
+  "name": "Noise Garden",
+  "description": "Billowy Perlin clouds whose zoom follows a random walk and whose hue drifts on smooth noise, with a full-random flicker and a faint grain of static on top. Shows the noise nodes.",
+  "nodes": [
+    { "id": "walk", "kind": "random_walk", "name": "zoom drift", "params": { "wander": 0.25, "pull": 0.3, "min": 0.8, "max": 2.6 }, "pos": [-320, 0] },
+    { "id": "drift", "kind": "smooth_noise", "name": "hue drift", "params": { "speed": 0.05, "harmonics": 2, "min": 0.45, "max": 0.95 }, "pos": [-320, 260] },
+    { "id": "flicker", "kind": "full_random", "name": "flicker", "params": { "min": 0.85, "max": 1, "distribution": 1 }, "pos": [-320, 520] },
+    { "id": "clouds", "kind": "perlin_noise", "name": "", "params": { "harmonics": 5, "roughness": 0.55, "style": 1, "speed": 0.2 }, "pos": [-40, 0] },
+    { "id": "tint", "kind": "colorize", "name": "", "params": { "hue_range": 0.3, "saturation": 0.85 }, "pos": [220, 120] },
+    { "id": "static", "kind": "random_field", "name": "grain", "params": { "rate": 24 }, "pos": [-40, 420] },
+    { "id": "grain", "kind": "colorize", "name": "", "params": { "saturation": 0, "brightness": 0.12 }, "pos": [220, 420] },
+    { "id": "mix", "kind": "blend", "name": "", "params": { "mode": 0 }, "pos": [480, 240] },
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [720, 240] }
+  ],
+  "edges": [
+    { "from": { "node": "walk", "port": "out" }, "to": { "node": "clouds", "port": "scale" } },
+    { "from": { "node": "drift", "port": "out" }, "to": { "node": "tint", "port": "hue" } },
+    { "from": { "node": "flicker", "port": "out" }, "to": { "node": "tint", "port": "brightness" } },
+    { "from": { "node": "clouds", "port": "out" }, "to": { "node": "tint", "port": "in" } },
+    { "from": { "node": "static", "port": "out" }, "to": { "node": "grain", "port": "in" } },
+    { "from": { "node": "tint", "port": "out" }, "to": { "node": "mix", "port": "base" } },
+    { "from": { "node": "grain", "port": "out" }, "to": { "node": "mix", "port": "over" } },
+    { "from": { "node": "mix", "port": "out" }, "to": { "node": "out", "port": "in" } }
+  ],
+  "exposed": [
+    { "node": "clouds", "param": "harmonics", "label": "Harmonics" },
+    { "node": "clouds", "param": "style", "label": "Style" },
+    { "node": "out", "param": "master", "label": "Master" }
+  ]
+}

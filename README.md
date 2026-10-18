@@ -238,11 +238,14 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   `--no-default-features --features shader-hot-reload` builds without it.
   Design notes: `plans/doom.md`.
 - **Patches (early)**: a node-graph alternative to the layer stack — wire
-  generators (including Coordinate and Feedback), field ops (Field math,
+  generators (including Coordinate, Feedback, Perlin noise with 1-8
+  harmonics in Smooth, Billowy or Ridged styles, and Full random field:
+  per-LED, per-spoke or per-ring static), field ops (Field math,
   Brightness of, Color adjust, Palette, Transform, Colorize, Blend), inputs
   (audio features, beats, touch, IMU, PRO DJ LINK, video, still images and
   Clips: short loops stored in the patch as a sprite sheet) and control-rate
-  tools (Time, LFO, Math, Map range, Mix, Clamp, Smooth, Envelope, Random, and
+  tools (Time, LFO, Math, Map range, Mix, Clamp, Smooth, Envelope, Random,
+  the noise sources Full random, Random walk and Smooth noise, and
   the event tools Counter, Toggle, Threshold, Delay, Merge, Step sequencer)
   into a typed dataflow whose sink is the array. A saved patch or a preset can
   be dropped into another as a **Sub-patch** node whose inputs are its exposed

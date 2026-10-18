@@ -700,6 +700,84 @@ impl Runtime {
                     let v = current(st);
                     self.outputs[node].insert("out".into(), finite_or(v, 0.0));
                 }
+                "full_random" => {
+                    let lo = self.input(node, "min");
+                    let hi = self.input(node, "max");
+                    let bell = self.param(node, "distribution").round() as u32 == 1;
+                    let seed = seed_from_id(&self.doc.nodes[node].id);
+                    let st = &mut self.state[node];
+                    if st.rng == 0 {
+                        st.rng = seed;
+                    }
+                    let u = if bell {
+                        // ±3 standard deviations span the range.
+                        (0.5 + next_gauss(&mut st.rng) / 6.0).clamp(0.0, 1.0)
+                    } else {
+                        next_unit(&mut st.rng)
+                    };
+                    self.outputs[node].insert("out".into(), finite_or(lo + (hi - lo) * u, 0.0));
+                }
+                "random_walk" => {
+                    let wander = self.input(node, "wander").max(0.0);
+                    let jump = self.input(node, "jump").max(0.0);
+                    let pull = self.input(node, "pull").max(0.0);
+                    let (a, b) = (self.input(node, "min"), self.input(node, "max"));
+                    let (lo, hi) = (a.min(b), a.max(b));
+                    let edges = self.param(node, "edges").round() as u32;
+                    let step = self.event_fired(node, "step");
+                    let reset = self.event_fired(node, "reset");
+                    let seed = seed_from_id(&self.doc.nodes[node].id);
+                    let st = &mut self.state[node];
+                    let span = hi - lo;
+                    let mid = lo + span * 0.5;
+                    // The first frame and a reset show the middle itself.
+                    let start = st.rng == 0 || reset;
+                    if st.rng == 0 {
+                        st.rng = seed;
+                    }
+                    let t = ms * dt;
+                    let mut x = if start { mid } else { finite_or(st.y, mid) };
+                    if !start && wander > 0.0 && t > 0.0 {
+                        // Brownian: the spread grows with the square root of
+                        // time, so the drift per second is frame-rate free.
+                        x += next_gauss(&mut st.rng) * wander * span * t.sqrt();
+                    }
+                    if !start && pull > 0.0 {
+                        x -= (x - mid) * (pull * t).min(1.0);
+                    }
+                    if !start && step {
+                        x += (2.0 * next_unit(&mut st.rng) - 1.0) * jump * span;
+                    }
+                    x = if span <= 0.0 {
+                        lo
+                    } else {
+                        match edges {
+                            // Reflect: fold onto 0..2 spans, mirror the far half.
+                            0 => {
+                                let p = ((x - lo) / span).rem_euclid(2.0);
+                                lo + span * if p > 1.0 { 2.0 - p } else { p }
+                            }
+                            1 => lo + (x - lo).rem_euclid(span),
+                            _ => x.clamp(lo, hi),
+                        }
+                    };
+                    st.y = finite_or(x, mid);
+                    let y = st.y;
+                    self.outputs[node].insert("out".into(), y);
+                }
+                "smooth_noise" => {
+                    let speed = self.input(node, "speed").max(0.0);
+                    let harmonics = self.input(node, "harmonics").round().clamp(1.0, 8.0) as u32;
+                    let roughness = self.input(node, "roughness").clamp(0.0, 1.0);
+                    let spacing = self.input(node, "spacing").clamp(1.0, 8.0);
+                    let lo = self.input(node, "min");
+                    let hi = self.input(node, "max");
+                    let base = noise_offset(&self.doc.nodes[node].id);
+                    let st = &mut self.state[node];
+                    st.acc += f64::from(speed * ms * dt);
+                    let v = smooth_noise(st.acc, base, harmonics, roughness, spacing);
+                    self.outputs[node].insert("out".into(), finite_or(lo + (hi - lo) * v, 0.0));
+                }
                 "counter" => {
                     let steps = self.input(node, "steps").round().max(0.0) as i64;
                     let reset = self.event_fired(node, "reset");
@@ -919,6 +997,60 @@ fn next_unit(rng: &mut u64) -> f32 {
     x ^= x >> 27;
     *rng = x;
     (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 40) as f32 / (1u64 << 24) as f32
+}
+
+/// A standard normal draw (Box–Muller), from two xorshift values.
+fn next_gauss(rng: &mut u64) -> f32 {
+    // 1 - u keeps the log's argument in (0, 1].
+    let u1 = 1.0 - next_unit(rng);
+    let u2 = next_unit(rng);
+    (-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()
+}
+
+/// Where a Smooth noise node starts in the noise: a whole number from its
+/// id, so two nodes wander differently and "Convert to Code" can bake the
+/// same number into the body.
+pub(crate) fn noise_offset(id: &str) -> f32 {
+    (seed_from_id(id) % 1000) as f32
+}
+
+/// Lattice points per harmonic before the gradients repeat. Keeps the hash's
+/// argument small enough for f32 `sin` however long the gate runs.
+pub(crate) const NOISE_PERIOD: f64 = 4096.0;
+
+/// One harmonic of Smooth noise: 1-D Perlin at `x`, about -1..1. The
+/// gradient at lattice point `i` is the `fract(sin(i·12.9898)·43758.5453)`
+/// hash, in f32 exactly as a Code body computes it.
+fn perlin1(x: f64) -> f32 {
+    let i = x.floor();
+    let f = (x - i) as f32;
+    let grad = |i: f64| {
+        let i = i.rem_euclid(NOISE_PERIOD) as f32;
+        let h = (i * 12.9898).sin() * 43758.5453;
+        (h - h.floor()) * 2.0 - 1.0
+    };
+    let (g0, g1) = (grad(i), grad(i + 1.0));
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    // A 1-D Perlin with slopes in -1..1 peaks at ±0.5.
+    2.0 * (g0 * f + (g1 * (f - 1.0) - g0 * f) * u)
+}
+
+/// Smooth noise at time `t` (in first-harmonic periods): `harmonics` layers
+/// of `perlin1`, each `spacing` times faster and `roughness` times weaker
+/// than the one before, offset from each other so they don't line up;
+/// normalized to 0..1.
+fn smooth_noise(t: f64, base: f32, harmonics: u32, roughness: f32, spacing: f32) -> f32 {
+    let mut sum = 0.0;
+    let mut norm = 0.0;
+    let mut amp = 1.0;
+    let mut freq = 1.0f64;
+    for k in 0..harmonics {
+        sum += amp * perlin1(t * freq + f64::from(base) + 17.0 * f64::from(k));
+        norm += amp;
+        amp *= roughness;
+        freq *= f64::from(spacing);
+    }
+    (0.5 + 0.5 * sum / norm.max(1e-6)).clamp(0.0, 1.0)
 }
 
 fn finite_or(value: f32, fallback: f32) -> f32 {
@@ -1308,6 +1440,122 @@ mod tests {
             changes += usize::from(fired(&rt, "r", "changed"));
         }
         assert_eq!(changes, 4);
+    }
+
+    /// Node `n` of `kind` (with `params`, and the clock's `wrap` into each of
+    /// `events`) run for `frames` frames at 60 fps: its `out` every frame.
+    fn noise_trace(kind: &str, params: serde_json::Value, events: &[&str], frames: usize) -> Vec<f32> {
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let edges: Vec<_> = events
+            .iter()
+            .map(|e| serde_json::json!({ "from": { "node": "clock", "port": "wrap" }, "to": { "node": "n", "port": e } }))
+            .collect();
+        let doc = clocked(
+            serde_json::json!([{ "id": "n", "kind": kind, "params": params }]),
+            serde_json::Value::Array(edges),
+        );
+        let mut rt = runtime(doc);
+        (0..frames)
+            .map(|_| {
+                let mut inp = inputs(&audio);
+                inp.dt = 1.0 / 60.0;
+                rt.eval(&inp);
+                value(&rt, "n", "out")
+            })
+            .collect()
+    }
+
+    fn mean(v: &[f32]) -> f32 {
+        v.iter().sum::<f32>() / v.len() as f32
+    }
+
+    fn spread(v: &[f32]) -> f32 {
+        let m = mean(v);
+        (v.iter().map(|x| (x - m) * (x - m)).sum::<f32>() / v.len() as f32).sqrt()
+    }
+
+    #[test]
+    fn full_random_is_fresh_every_frame_within_range() {
+        let uniform = noise_trace("full_random", serde_json::json!({ "min": 2, "max": 4 }), &[], 4000);
+        assert!(uniform.iter().all(|v| (2.0..=4.0).contains(v)));
+        assert!(uniform.windows(2).all(|w| w[0] != w[1]), "a new value every frame");
+        assert!((mean(&uniform) - 3.0).abs() < 0.05, "{}", mean(&uniform));
+        // A uniform 2..4 has a standard deviation of 2/√12 ≈ 0.577.
+        assert!((spread(&uniform) - 0.577).abs() < 0.03, "{}", spread(&uniform));
+        assert_eq!(
+            noise_trace("full_random", serde_json::json!({ "min": 2, "max": 4 }), &[], 4000),
+            uniform,
+            "same patch, same sequence"
+        );
+
+        let bell = noise_trace("full_random", serde_json::json!({ "min": 2, "max": 4, "distribution": 1 }), &[], 4000);
+        assert!(bell.iter().all(|v| (2.0..=4.0).contains(v)));
+        assert!((mean(&bell) - 3.0).abs() < 0.03, "{}", mean(&bell));
+        // ±3σ spans the range: σ = 1/3.
+        assert!((spread(&bell) - 1.0 / 3.0).abs() < 0.03, "{}", spread(&bell));
+    }
+
+    #[test]
+    fn random_walk_wanders_continuously_inside_its_edges() {
+        let still = noise_trace("random_walk", serde_json::json!({ "wander": 0, "min": 2, "max": 4 }), &[], 50);
+        assert!(still.iter().all(|&v| v == 3.0), "starts in the middle and, without wander, stays");
+
+        let walk = noise_trace("random_walk", serde_json::json!({ "wander": 0.3 }), &[], 3000);
+        assert!(walk.iter().all(|v| (0.0..=1.0).contains(v)));
+        // A walk, not noise: frame-to-frame moves are tiny (σ = 0.3·√(1/60)
+        // ≈ 0.04 of the range), but over time it covers ground.
+        let biggest = walk.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
+        assert!(biggest < 0.2, "{biggest}");
+        let (lo, hi) = walk.iter().fold((1.0f32, 0.0f32), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+        assert!(hi - lo > 0.4, "it wanders: {lo}..{hi}");
+        assert_eq!(noise_trace("random_walk", serde_json::json!({ "wander": 0.3 }), &[], 3000), walk);
+
+        // Every edge mode holds the range, even wandering hard.
+        for edges in 0..3 {
+            let wild = noise_trace("random_walk", serde_json::json!({ "wander": 2, "edges": edges, "min": -1, "max": 1 }), &[], 2000);
+            assert!(wild.iter().all(|v| (-1.0..=1.0).contains(v)), "edges {edges}");
+        }
+        // Wrap jumps across: some frame goes from near one edge to the other.
+        let wrap = noise_trace("random_walk", serde_json::json!({ "wander": 2, "edges": 1 }), &[], 2000);
+        assert!(wrap.windows(2).any(|w| (w[1] - w[0]).abs() > 0.5));
+
+        // Pull keeps it nearer the middle.
+        let free = noise_trace("random_walk", serde_json::json!({ "wander": 0.5 }), &[], 6000);
+        let pulled = noise_trace("random_walk", serde_json::json!({ "wander": 0.5, "pull": 4 }), &[], 6000);
+        let off = |v: &[f32]| v.iter().map(|x| (x - 0.5).abs()).sum::<f32>() / v.len() as f32;
+        assert!(off(&pulled) < off(&free) * 0.7, "pulled {} vs free {}", off(&pulled), off(&free));
+
+        // `step` jumps (the clock wraps every 60 frames here); `reset`
+        // returns to the middle.
+        let steps = noise_trace("random_walk", serde_json::json!({ "wander": 0, "jump": 0.3 }), &["step"], 240);
+        let moves: Vec<_> = steps.windows(2).filter(|w| w[0] != w[1]).collect();
+        assert!(!moves.is_empty() && moves.len() <= 4, "{moves:?}");
+        assert!(moves.iter().all(|w| (w[1] - w[0]).abs() <= 0.3 + 1e-6));
+        let reset = noise_trace("random_walk", serde_json::json!({ "wander": 1 }), &["reset"], 240);
+        assert!(reset.iter().any(|&v| v == 0.5), "back to the middle on reset");
+    }
+
+    #[test]
+    fn smooth_noise_is_smooth_deterministic_and_per_node() {
+        let a = noise_trace("smooth_noise", serde_json::json!({ "speed": 1, "min": -1, "max": 1 }), &[], 1200);
+        assert!(a.iter().all(|v| (-1.0..=1.0).contains(v)));
+        let biggest = a.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
+        assert!(biggest < 0.15, "smooth: {biggest}");
+        assert!(spread(&a) > 0.1, "it moves: {}", spread(&a));
+        assert_eq!(noise_trace("smooth_noise", serde_json::json!({ "speed": 1, "min": -1, "max": 1 }), &[], 1200), a);
+
+        let frozen = noise_trace("smooth_noise", serde_json::json!({ "speed": 0 }), &[], 30);
+        assert!(frozen.windows(2).all(|w| w[0] == w[1]));
+
+        // More harmonics, more detail: bigger frame-to-frame changes.
+        let rough = |harmonics: f32| {
+            let v = noise_trace("smooth_noise", serde_json::json!({ "speed": 0.5, "harmonics": harmonics, "roughness": 0.8 }), &[], 1200);
+            v.windows(2).map(|w| (w[1] - w[0]).abs()).sum::<f32>()
+        };
+        assert!(rough(6.0) > rough(1.0) * 1.5, "{} vs {}", rough(6.0), rough(1.0));
+
+        // Two nodes, two different wanders.
+        assert_ne!(super::noise_offset("n"), super::noise_offset("n2"));
     }
 
     #[test]

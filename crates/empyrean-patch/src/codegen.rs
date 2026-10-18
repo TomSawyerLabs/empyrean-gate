@@ -838,6 +838,34 @@ impl Gen<'_> {
                 s = self.p(i, "saturation"),
                 b = self.p(i, "brightness"),
             ),
+            "perlin_noise" => format!(
+                "    let p = vec3f(c.pos * {scale}, {phase});\n\
+                 \x20   let v = perlin_fbm(p, {harmonics}, {roughness}, {spacing}, {style}u, u32(max({seed}, 0.0)) * 7919u);\n\
+                 \x20   return clamp(0.5 + (v - 0.5) * {contrast}, 0.0, 1.0);",
+                scale = self.p(i, "scale"),
+                phase = self.p(i, "speed"),
+                harmonics = self.p(i, "harmonics"),
+                roughness = self.p(i, "roughness"),
+                spacing = self.p(i, "spacing"),
+                style = self.select(i, "style"),
+                seed = self.p(i, "seed"),
+                contrast = self.p(i, "contrast"),
+            ),
+            "random_field" => {
+                // The physical LED, spoke or ring: Transform does not move it.
+                let cell = match self.select(i, "grain") {
+                    1 => "wang_hash(c.spoke + 0x6a09e667u)",
+                    2 => "wang_hash(c.i + 0xbb67ae85u)",
+                    _ => "wang_hash(c.spoke * 65599u + c.i)",
+                };
+                format!(
+                    "    let roll = u32(max(floor({rate}), 0.0));\n\
+                     \x20   let s = wang_hash((u32(max({seed}, 0.0)) * 2654435761u) ^ roll);\n\
+                     \x20   return hash01({cell} ^ s);",
+                    rate = self.p(i, "rate"),
+                    seed = self.p(i, "seed"),
+                )
+            }
             "radial_waves" => format!(
                 "    let harmonics = u32(clamp({waves}, 1.0, 8.0));\n\
                  \x20   var v = 0.0;\n\

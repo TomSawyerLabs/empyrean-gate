@@ -258,6 +258,90 @@ fn fbm3(p: vec3f, octaves: u32) -> f32 {
     return value;
 }
 
+/// Hash of an integer lattice point to 0..2^32 (for gradient noise).
+fn lattice_hash(i: vec3i, seed: u32) -> u32 {
+    let u = bitcast<vec3u>(i);
+    return wang_hash(u.x ^ wang_hash(u.y ^ wang_hash(u.z ^ wang_hash(seed))));
+}
+
+/// One of Perlin's twelve cube-edge gradients, chosen by `h`, dotted with `d`.
+fn perlin_grad(h: u32, d: vec3f) -> f32 {
+    switch h % 12u {
+        case 0u: { return d.x + d.y; }
+        case 1u: { return -d.x + d.y; }
+        case 2u: { return d.x - d.y; }
+        case 3u: { return -d.x - d.y; }
+        case 4u: { return d.x + d.z; }
+        case 5u: { return -d.x + d.z; }
+        case 6u: { return d.x - d.z; }
+        case 7u: { return -d.x - d.z; }
+        case 8u: { return d.y + d.z; }
+        case 9u: { return -d.y + d.z; }
+        case 10u: { return d.y - d.z; }
+        default: { return -d.y - d.z; }
+    }
+}
+
+/// Classic (improved) Perlin gradient noise at `p`, about -1..1; `seed`
+/// picks an independent noise. Use the third component for time.
+fn perlin3(p: vec3f, seed: u32) -> f32 {
+    let fl = floor(p);
+    let i = vec3i(fl);
+    let f = p - fl;
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    let n000 = perlin_grad(lattice_hash(i, seed), f);
+    let n100 = perlin_grad(lattice_hash(i + vec3i(1, 0, 0), seed), f - vec3f(1.0, 0.0, 0.0));
+    let n010 = perlin_grad(lattice_hash(i + vec3i(0, 1, 0), seed), f - vec3f(0.0, 1.0, 0.0));
+    let n110 = perlin_grad(lattice_hash(i + vec3i(1, 1, 0), seed), f - vec3f(1.0, 1.0, 0.0));
+    let n001 = perlin_grad(lattice_hash(i + vec3i(0, 0, 1), seed), f - vec3f(0.0, 0.0, 1.0));
+    let n101 = perlin_grad(lattice_hash(i + vec3i(1, 0, 1), seed), f - vec3f(1.0, 0.0, 1.0));
+    let n011 = perlin_grad(lattice_hash(i + vec3i(0, 1, 1), seed), f - vec3f(0.0, 1.0, 1.0));
+    let n111 = perlin_grad(lattice_hash(i + vec3i(1, 1, 1), seed), f - vec3f(1.0, 1.0, 1.0));
+    let x00 = mix(n000, n100, u.x);
+    let x10 = mix(n010, n110, u.x);
+    let x01 = mix(n001, n101, u.x);
+    let x11 = mix(n011, n111, u.x);
+    return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
+}
+
+/// Fractal Perlin noise, 0..1: `harmonics` octaves (1..8) of `perlin3`,
+/// each `spacing` times finer and `roughness` times weaker than the last.
+/// `style` 0 sums them (smooth), 1 sums their absolute values (billowy:
+/// dark creases), 2 sums (1 - |n|)² (ridged: bright ridges). Each style is
+/// centred on its mean and divided by the root-sum-square of the octave
+/// weights, so the spread is the same whatever the harmonics, then scaled
+/// to fill 0..1 (about 2% clipped at each end for Smooth).
+fn perlin_fbm(p: vec3f, harmonics: f32, roughness: f32, spacing: f32, style: u32, seed: u32) -> f32 {
+    let octaves = u32(clamp(round(harmonics), 1.0, 8.0));
+    var sum = 0.0;
+    var norm = 0.0;
+    var amp = 1.0;
+    var q = p;
+    for (var o = 0u; o < octaves; o++) {
+        let n = perlin3(q, seed + o * 1013u);
+        // Means of |n| and (1 - |n|)² for this noise, measured.
+        var v = n;
+        if style == 1u {
+            v = abs(n) - 0.22;
+        } else if style == 2u {
+            let r = 1.0 - abs(n);
+            v = r * r - 0.633;
+        }
+        sum += amp * v;
+        norm += amp * amp;
+        amp *= clamp(roughness, 0.0, 1.0);
+        // A small turn per octave keeps the lattices from lining up.
+        q = vec3f(q.x * 0.8 - q.y * 0.6, q.x * 0.6 + q.y * 0.8, q.z) * max(spacing, 1.0);
+    }
+    let s = sum / sqrt(max(norm, 1e-6));
+    if style == 1u {
+        return clamp(0.4 + 1.6 * s, 0.0, 1.0);
+    } else if style == 2u {
+        return clamp(0.5 + 1.15 * s, 0.0, 1.0);
+    }
+    return clamp(0.5 + 0.9 * s, 0.0, 1.0);
+}
+
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------

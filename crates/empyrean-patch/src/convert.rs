@@ -41,6 +41,9 @@ fn cpu_template_kind(kind: &str) -> bool {
             | "mix"
             | "clamp"
             | "random"
+            | "full_random"
+            | "random_walk"
+            | "smooth_noise"
             | "counter"
             | "toggle"
             | "threshold"
@@ -341,6 +344,90 @@ fn cpu_template(node: &NodeInst) -> Result<CodeDef, String> {
                      if fire {\n  state.from = current;\n  state.n += 1.0;\n  state.target = low + (high - low) * fract(sin(state.n * 12.9898) * 43758.5453);\n  state.glide_t = 0.0;\n  changed = true;\n} else {\n  state.glide_t += dt;\n}\n\
                      if g > 1e-4 && state.glide_t < g {\n  out = state.from + (state.target - state.from) * (state.glide_t / g);\n} else {\n  out = state.target;\n}"
             .to_string(),
+        "full_random" => {
+            let draw = if sel("distribution") == 1 {
+                // Box–Muller, ±3 standard deviations across the range.
+                "state.n += 1.0;\n\
+                 let u1 = 1.0 - fract(sin(state.n * 12.9898) * 43758.5453);\n\
+                 state.n += 1.0;\n\
+                 let u2 = fract(sin(state.n * 12.9898) * 43758.5453);\n\
+                 let z = sqrt(-2.0 * log(max(u1, 1e-7))) * cos(TAU * u2);\n\
+                 let u = clamp(0.5 + z / 6.0, 0.0, 1.0);"
+            } else {
+                "state.n += 1.0;\n\
+                 let u = fract(sin(state.n * 12.9898) * 43758.5453);"
+            };
+            format!(
+                "// The built-in draws from xorshift seeded by the node id; this hashes a counter.\n\
+                 {draw}\n\
+                 out = low + (high - low) * u;"
+            )
+        }
+        "random_walk" => {
+            let edge = match sel("edges") {
+                0 => "let p0 = (x - lo) / span;\n  let p = p0 - 2.0 * floor(p0 / 2.0);\n  x = lo + span * select(p, 2.0 - p, p > 1.0);",
+                1 => "x = lo + (x - lo) - span * floor((x - lo) / span);",
+                _ => "x = clamp(x, lo, hi);",
+            };
+            format!(
+                "// The built-in draws from xorshift seeded by the node id; this hashes a counter.\n\
+                 let lo = min(low, high);\n\
+                 let hi = max(low, high);\n\
+                 let span = hi - lo;\n\
+                 let mid = lo + span * 0.5;\n\
+                 let t = master_speed * dt;\n\
+                 var x = state.x;\n\
+                 if state.init == 0.0 || reset {{\n  state.init = 1.0;\n  x = mid;\n}} else {{\n\
+                 \x20 if wander > 0.0 && t > 0.0 {{\n\
+                 \x20   state.n += 1.0;\n\
+                 \x20   let u1 = 1.0 - fract(sin(state.n * 12.9898) * 43758.5453);\n\
+                 \x20   state.n += 1.0;\n\
+                 \x20   let u2 = fract(sin(state.n * 12.9898) * 43758.5453);\n\
+                 \x20   x += sqrt(-2.0 * log(max(u1, 1e-7))) * cos(TAU * u2) * wander * span * sqrt(t);\n\
+                 \x20 }}\n\
+                 \x20 if pull > 0.0 {{\n    x -= (x - mid) * min(pull * t, 1.0);\n  }}\n\
+                 \x20 if advance {{\n\
+                 \x20   state.n += 1.0;\n\
+                 \x20   x += (2.0 * fract(sin(state.n * 12.9898) * 43758.5453) - 1.0) * jump * span;\n\
+                 \x20 }}\n\
+                 }}\n\
+                 if span <= 0.0 {{\n  x = lo;\n}} else {{\n  {edge}\n}}\n\
+                 state.x = x;\n\
+                 out = x;"
+            )
+        }
+        // The same hash and arithmetic as the built-in, so it matches it;
+        // `base` is where this node's noise starts (from its id).
+        "smooth_noise" => format!(
+            "let base = {base:.1};\n\
+             state.t += max(speed, 0.0) * master_speed * dt;\n\
+             let n = clamp(round(harmonics), 1.0, 8.0);\n\
+             let r = clamp(roughness, 0.0, 1.0);\n\
+             let sp = clamp(spacing, 1.0, 8.0);\n\
+             var sum = 0.0;\n\
+             var norm = 0.0;\n\
+             var amp = 1.0;\n\
+             var freq = 1.0;\n\
+             for (var k = 0.0; k < n; k += 1.0) {{\n\
+             \x20 let x = state.t * freq + base + 17.0 * k;\n\
+             \x20 let i = floor(x);\n\
+             \x20 let f = x - i;\n\
+             \x20 // Gradients repeat every 4096 steps, keeping sin's argument small.\n\
+             \x20 let ia = i - 4096.0 * floor(i / 4096.0);\n\
+             \x20 let ib = (i + 1.0) - 4096.0 * floor((i + 1.0) / 4096.0);\n\
+             \x20 let ha = sin(ia * 12.9898) * 43758.5453;\n\
+             \x20 let hb = sin(ib * 12.9898) * 43758.5453;\n\
+             \x20 let g0 = (ha - floor(ha)) * 2.0 - 1.0;\n\
+             \x20 let g1 = (hb - floor(hb)) * 2.0 - 1.0;\n\
+             \x20 let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);\n\
+             \x20 sum += amp * (2.0 * mix(g0 * f, g1 * (f - 1.0), u));\n\
+             \x20 norm += amp;\n\
+             \x20 amp *= r;\n\
+             \x20 freq *= sp;\n\
+             }}\n\
+             out = low + (high - low) * clamp(0.5 + 0.5 * sum / max(norm, 1e-6), 0.0, 1.0);",
+            base = crate::eval::noise_offset(&node.id),
+        ),
         "counter" => "let n = max(round(steps), 0.0);\n\
                       if reset {\n  state.count = 0.0;\n}\n\
                       if count {\n  state.count += 1.0;\n}\n\
@@ -699,8 +786,44 @@ mod tests {
         check_template("delay", &[("seconds", 0.0)], &[], &["in"]);
         check_template("event_merge", &[], &[], &["b"]);
         check_template("sequence", &[("steps", 3.0), ("v2", 0.9)], &[], &["step"]);
+        check_template("smooth_noise", &[], &[], &[]);
+        check_template("smooth_noise", &[("harmonics", 6.0), ("roughness", 0.8), ("min", -2.0)], &["speed"], &[]);
         for mode in 0..4 {
             check_template("time", &[("mode", mode as f32), ("rate", 0.8), ("end", 2.0)], &[], &["reset"]);
+        }
+    }
+
+    /// Full random and Random walk draw from the node's xorshift, which a
+    /// body cannot reach; their conversions hash a counter instead, so they
+    /// are checked for behaving alike rather than matching value for value.
+    #[test]
+    fn random_noise_templates_stay_in_range_and_move() {
+        for (kind, params) in [
+            ("full_random", vec![("min", -1.0), ("max", 3.0)]),
+            ("full_random", vec![("min", -1.0), ("max", 3.0), ("distribution", 1.0)]),
+            ("random_walk", vec![("min", -1.0), ("max", 3.0), ("wander", 2.0)]),
+            ("random_walk", vec![("min", -1.0), ("max", 3.0), ("wander", 2.0), ("edges", 1.0)]),
+            ("random_walk", vec![("min", -1.0), ("max", 3.0), ("wander", 2.0), ("edges", 2.0)]),
+        ] {
+            let mut doc = PatchDoc {
+                nodes: vec![node("n", kind, &params), node("o", "output", &[])],
+                ..Default::default()
+            };
+            convert(&mut doc, "n").unwrap_or_else(|e| panic!("{kind}: {e}"));
+            let body = doc.nodes[0].code().unwrap().body.clone();
+            let mut rt = Runtime::new(compile(&doc).unwrap_or_else(|e| panic!("{kind}: {e}\n{body}")));
+            let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+            let touches = Touches::new();
+            let view = touches.view(0.0, 0.0);
+            let trace: Vec<f32> = (0..400)
+                .map(|_| {
+                    rt.eval(&inputs(&audio, &view, 1.0 / 60.0));
+                    rt.scalar_value(0, "out")
+                })
+                .collect();
+            assert!(trace.iter().all(|v| (-1.0..=3.0).contains(v)), "{kind} {params:?}: {trace:?}\n{body}");
+            let distinct = trace.windows(2).filter(|w| w[0] != w[1]).count();
+            assert!(distinct > 300, "{kind} {params:?} moves: {distinct}\n{body}");
         }
     }
 

@@ -24,6 +24,7 @@ const SOURCES: &[&str] = &[
     include_str!("presets/touch-ripples.json"),
     include_str!("presets/step-and-sample.json"),
     include_str!("presets/code-ripple-warp.json"),
+    include_str!("presets/noise-garden.json"),
 ];
 
 pub fn presets() -> &'static [PatchDoc] {

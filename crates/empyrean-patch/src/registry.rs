@@ -98,6 +98,9 @@ pub fn is_cpu_kind(kind: &str) -> bool {
             | "mix"
             | "clamp"
             | "random"
+            | "full_random"
+            | "random_walk"
+            | "smooth_noise"
             | "counter"
             | "toggle"
             | "threshold"
@@ -117,6 +120,8 @@ pub fn is_gpu_kind(kind: &str) -> bool {
             | "gradient_radial"
             | "noise_field"
             | "noise_color"
+            | "perlin_noise"
+            | "random_field"
             | "radial_waves"
             | "spiral"
             | "plasma"
@@ -1403,6 +1408,116 @@ pub const TYPES: &[NodeType] = &[
         ],
     },
     NodeType {
+        // Seeded from the node id, like Random.
+        id: "full_random",
+        label: "Full random",
+        category: Category::ScalarOp,
+        description: "White noise: a fresh random value in Min..Max on every frame, uncorrelated with the last. Bell piles the values toward the middle. For jitter and flicker; Random holds a value, Random walk and Smooth noise wander.",
+        inputs: &[],
+        outputs: &[port("out", Shape::Scalar, "This frame's value.")],
+        params: &[
+            num("min", "Min", -8.0, 8.0, 0.0, "Lowest value."),
+            num("max", "Max", -8.0, 8.0, 1.0, "Highest value."),
+            sel(
+                "distribution",
+                "Distribution",
+                &["Uniform", "Bell"],
+                "Uniform: every value in range equally likely. Bell: a normal curve centred on the middle, ±3 standard deviations reaching the ends (clamped).",
+            ),
+        ],
+    },
+    NodeType {
+        // Seeded from the node id, like Random.
+        id: "random_walk",
+        label: "Random walk",
+        category: Category::ScalarOp,
+        description: "A value that wanders by tiny random steps every frame (Brownian motion), kept within Min..Max, optionally pulled back toward the middle; a `step` event also makes one bigger random jump. Starts in the middle. Good for slow, natural drift of any knob.",
+        inputs: &[
+            port("step", Shape::Event, "Jumps by a random amount up to ±Jump now."),
+            port("reset", Shape::Event, "Back to the middle of the range."),
+        ],
+        outputs: &[port("out", Shape::Scalar, "The current position.")],
+        params: &[
+            num(
+                "wander",
+                "Wander",
+                0.0,
+                2.0,
+                0.25,
+                "How far it typically drifts in one second, as a fraction of the range (× master speed); 0 moves only on `step`.",
+            ),
+            num(
+                "jump",
+                "Jump",
+                0.0,
+                1.0,
+                0.2,
+                "Largest jump a `step` event makes, as a fraction of the range.",
+            ),
+            num(
+                "pull",
+                "Pull",
+                0.0,
+                4.0,
+                0.0,
+                "Pull back toward the middle, per second (× master speed): 0 roams freely, higher stays closer to the centre.",
+            ),
+            num("min", "Min", -8.0, 8.0, 0.0, "One edge of the range."),
+            num("max", "Max", -8.0, 8.0, 1.0, "The other edge."),
+            sel(
+                "edges",
+                "Edges",
+                &["Bounce", "Wrap", "Stick"],
+                "At an edge, Bounce reflects back in, Wrap comes in from the other side (for hues and angles), Stick holds at the edge until it wanders away.",
+            ),
+        ],
+    },
+    NodeType {
+        // Offset in the noise by the node id, so two of them differ.
+        id: "smooth_noise",
+        label: "Smooth noise",
+        category: Category::ScalarOp,
+        description: "Perlin noise over time: a smooth, never-repeating wander in Min..Max, built from Harmonics layers of noise at rising speeds. Roughness sets how much the faster layers add (low = lazy swells, high = nervous detail). The scalar sibling of Perlin noise.",
+        inputs: &[],
+        outputs: &[port("out", Shape::Scalar, "The current value.")],
+        params: &[
+            num(
+                "speed",
+                "Speed (Hz)",
+                0.0,
+                10.0,
+                0.5,
+                "Swells per second of the first harmonic (× master speed); 0 freezes it.",
+            ),
+            num(
+                "harmonics",
+                "Harmonics",
+                1.0,
+                8.0,
+                3.0,
+                "Layers of noise summed, each faster than the last (1 = one smooth wave).",
+            ),
+            num(
+                "roughness",
+                "Roughness",
+                0.0,
+                1.0,
+                0.5,
+                "Each harmonic's strength relative to the one before it.",
+            ),
+            num(
+                "spacing",
+                "Spacing",
+                1.5,
+                4.0,
+                2.0,
+                "Each harmonic's speed relative to the one before it.",
+            ),
+            num("min", "Min", -8.0, 8.0, 0.0, "Lowest value."),
+            num("max", "Max", -8.0, 8.0, 1.0, "Highest value."),
+        ],
+    },
+    NodeType {
         id: "counter",
         label: "Counter",
         category: Category::ScalarOp,
@@ -1792,6 +1907,118 @@ pub const TYPES: &[NodeType] = &[
                 "Saturation of the tint (0 = no tint).",
             ),
             BRIGHTNESS,
+        ],
+    },
+    NodeType {
+        id: "perlin_noise",
+        label: "Perlin noise",
+        category: Category::Generator,
+        description: "Classic Perlin gradient noise as a grey 0..1 field, evolving over time: Harmonics layers (octaves) at rising detail, Roughness and Spacing shaping how they stack, and a Style for soft clouds, billows or sharp ridges. Wire it into Colorize or Palette for colour, into Field math as a mask, or straight into Output as grey.",
+        inputs: &[],
+        outputs: &[port(
+            "out",
+            Shape::FieldScalar,
+            "The noise, 0..1 per pixel (0.5 on average).",
+        )],
+        params: &[
+            num(
+                "scale",
+                "Scale",
+                0.1,
+                8.0,
+                1.5,
+                "Size of the first harmonic's features: higher makes them smaller and busier.",
+            ),
+            num(
+                "harmonics",
+                "Harmonics",
+                1.0,
+                8.0,
+                4.0,
+                "Layers of noise summed, each finer than the last (1 = plain, smooth Perlin).",
+            ),
+            num(
+                "roughness",
+                "Roughness",
+                0.0,
+                1.0,
+                0.5,
+                "Each harmonic's strength relative to the one before it: low stays soft, high is grainy.",
+            ),
+            num(
+                "spacing",
+                "Spacing",
+                1.5,
+                4.0,
+                2.0,
+                "Each harmonic's frequency relative to the one before it (2 = an octave).",
+            ),
+            sel(
+                "style",
+                "Style",
+                &["Smooth", "Billowy", "Ridged"],
+                "Smooth: plain fractal noise. Billowy: the absolute value of each layer, puffy clouds with dark creases. Ridged: inverted creases, sharp bright ridges like veins or lightning.",
+            ),
+            num(
+                "contrast",
+                "Contrast",
+                0.0,
+                4.0,
+                1.0,
+                "Stretches the values away from (above 1) or toward (below 1) the middle grey, clamped to 0..1.",
+            ),
+            rate(
+                "speed",
+                "Speed",
+                0.0,
+                4.0,
+                0.3,
+                "How fast the noise evolves in place, integrated (× the gate's master speed) so changes never jump; 0 freezes it.",
+            ),
+            num(
+                "seed",
+                "Seed",
+                0.0,
+                100.0,
+                0.0,
+                "Picks a different stretch of noise, so two Perlin nodes need not match.",
+            ),
+        ],
+    },
+    NodeType {
+        id: "random_field",
+        label: "Full random field",
+        category: Category::Generator,
+        description: "Static: an independent random grey value 0..1 for every LED (or every spoke, or every ring), re-rolled Rate times a second. Keys on the physical LED, so Transform does not move it. A mask for glitter and glitches, or TV snow straight into Output.",
+        inputs: &[],
+        outputs: &[port(
+            "out",
+            Shape::FieldScalar,
+            "A random 0..1 per LED, spoke or ring.",
+        )],
+        params: &[
+            rate(
+                "rate",
+                "Rate (Hz)",
+                0.0,
+                60.0,
+                30.0,
+                "Re-rolls per second (× master speed; 30 and up looks like every frame); 0 freezes the pattern.",
+            ),
+            sel(
+                "grain",
+                "Grain",
+                &["LED", "Spoke", "Ring"],
+                "What shares one value: each LED, a whole spoke, or every LED at the same distance from the centre.",
+            ),
+            num(
+                "seed",
+                "Seed",
+                0.0,
+                100.0,
+                0.0,
+                "Picks a different pattern, so two of these need not match.",
+            ),
         ],
     },
     NodeType {
