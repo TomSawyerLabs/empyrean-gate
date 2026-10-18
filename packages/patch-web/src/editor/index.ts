@@ -4,6 +4,7 @@
 export {
   PatchEditor,
   type GlobalControl,
+  type PatchEditorHandle,
   type PatchEditorProps,
   type PatchStore,
   type PatchStoreEvent,

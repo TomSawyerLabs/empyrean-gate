@@ -10,10 +10,12 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
   type ReactNode,
+  type Ref,
 } from "react";
 import {
   applyEdgeChanges,
@@ -127,6 +129,24 @@ export interface PatchEditorProps {
   globals?: GlobalControl[];
   /** One line under the globals, saying where they come from on this host. */
   globalsNote?: ReactNode;
+  /** Drive the editor from outside (an agent's tools): see `PatchEditorHandle`. */
+  editorRef?: Ref<PatchEditorHandle>;
+}
+
+/** The editor, driven from outside: what a host's agent tools act through,
+ * so an agent's change lands where the person is looking and is one step of
+ * their undo history like any of their own. */
+export interface PatchEditorHandle {
+  /** The document open in the editor, with edits not yet saved. */
+  doc(): PatchDoc | null;
+  /** Open a document as the person's Open would (clears undo history);
+   * `asNew` blanks its id so saving creates a copy. */
+  open(doc: PatchDoc, asNew?: boolean): void;
+  /** Replace the open document's contents (keeping its id) as one undoable
+   * edit, saved like any other. Opens it as new when nothing is open. */
+  replace(doc: PatchDoc): void;
+  /** Lay the graph out, as the Arrange button does. */
+  arrange(): void;
 }
 
 /** One global the host exposes in the editor's canvas. */
@@ -267,6 +287,7 @@ function panelParams(def: PatchNodeType, node: PatchNode, registry: Registry): P
       default: inner?.params[port.param] ?? innerDef?.default ?? 0,
       integrate: innerDef?.integrate ?? false,
       kind: "number",
+      description: innerDef?.description,
     };
   });
 }
@@ -674,6 +695,7 @@ function ParamPanel({
       onKeyDown={sheet.onKeyDown}
     >
       <PanelHead title={def.label} onClose={onClose} />
+      {def.description && <p className="hint patch-node-about">{def.description}</p>}
       <label className="patch-field">
         <span>Name</span>
         <input
@@ -741,6 +763,7 @@ function ParamPanel({
                 </label>
               )}
             </div>
+            {p.description && <div className="hint patch-param-about">{p.description}</div>}
             {wire ? (
               <div className="hint wired-chip">
                 wired from {wire.from.node}.{wire.from.port}
@@ -782,8 +805,8 @@ function ParamPanel({
       )}
       {extras?.(node)}
       {canEdit && node.kind !== "output" && onDuplicate && (
-        <button type="button" onClick={onDuplicate} title="Ctrl+D">
-          Duplicate
+        <button type="button" onClick={onDuplicate}>
+          Duplicate{!onClose && <span className="hint"> · Ctrl+D</span>}
         </button>
       )}
       {canEdit && node.kind !== "output" && (
@@ -1005,6 +1028,7 @@ function Editor({
   nodeExtras,
   globals,
   globalsNote,
+  editorRef,
 }: PatchEditorProps) {
   const flow = useReactFlow();
   const registry = useMemo<Registry | null>(
@@ -1523,6 +1547,36 @@ function Editor({
       if (asNew) scheduleSave(copy);
     },
     [openDoc, scheduleSave],
+  );
+
+  useImperativeHandle(
+    editorRef,
+    () => ({
+      doc: () => docRef.current,
+      open: (d: PatchDoc, asNew = false) => {
+        openAs(d, asNew);
+        // Read back at once, before the next render catches up.
+        docRef.current = { ...structuredClone(d), id: asNew ? "" : d.id };
+      },
+      replace: (d: PatchDoc) => {
+        const cur = docRef.current;
+        if (!cur) {
+          openAs(d, true);
+          docRef.current = { ...structuredClone(d), id: "" };
+          return;
+        }
+        // Wholly: a field the new document leaves out goes, as on Open.
+        const next: PatchDoc = { ...structuredClone(d), id: cur.id };
+        mutateDoc((c) => {
+          for (const key of Object.keys(c)) delete (c as unknown as Record<string, unknown>)[key];
+          Object.assign(c, next);
+        }, true);
+        docRef.current = next;
+        setSelectedNode((sel) => (sel && d.nodes.some((n) => n.id === sel) ? sel : null));
+      },
+      arrange: arrangeNodes,
+    }),
+    [openAs, mutateDoc, arrangeNodes],
   );
 
   const isActive = doc !== null && doc.id !== "" && activeId === doc.id;
