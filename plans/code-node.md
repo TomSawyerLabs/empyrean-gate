@@ -207,8 +207,12 @@ Steps:
    node with `out`, `edge`, `glow` field outputs gives cells `node:gpu`,
    `node:gpu:edge`, `node:gpu:glow`, all lit; the CPU node's `out` and
    `tick` are metered.
-4. [ ] Commit, push, bump; site passes `codeReference` to the editor
-   (`app/playground/Playground.tsx`, after the bump lands).
+4. [x] Gate master `f498703` (crate `3a5…`/editor commits), web-dist
+   `bc71eb0`, site `dev` `e5514df` (bump) + `203c8fb` (Playground passes
+   `core.codeReference`). Preview checked in headless Chrome with WebGPU:
+   typing `cosine_pal` completes to `cosine_palette(t: f32, which: u32) ->
+   vec3f` from the engine's reference; a second field output adds a ring
+   on the node and in the panel; a bad body is marked on its own line.
 
 Gotcha: CodeMirror ignores Enter for 75 ms after a completion list opens
 (`interactionDelay`); a spec must wait before accepting.
