@@ -169,6 +169,27 @@ test("a built-in node converts to a Code node in place, keeping its id and wire"
   await expect(panel.locator(".patch-param-head").filter({ hasText: "scale" })).not.toContainText("(rate)");
 });
 
+test("the body opens in a large modal, edits there reach the patch, Esc comes back", async ({ page }) => {
+  const sent: string[] = [];
+  const node = await newPatchWithCode(page, sent);
+  await node.click();
+  const panel = page.locator(".patch-side");
+  await panel.getByRole("button", { name: "Open the body in a bigger editor" }).click();
+  const modal = page.locator("dialog.code-modal");
+  await expect(modal).toBeVisible();
+  // One editor: the panel's own moved into the modal.
+  await expect(panel.locator(".code-body .cm-editor")).toHaveCount(0);
+  await expect(modal.locator(".cm-editor")).toHaveCount(1);
+  const body = modal.getByLabel("Body (WGSL)");
+  await body.fill("out = vec4f(0.5);");
+  await expect
+    .poll(() => sent.some((m) => m.includes('"patch_save"') && m.includes("out = vec4f(0.5);")))
+    .toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(modal).toHaveCount(0);
+  await expect(panel.getByLabel("Body (WGSL)")).toContainText("out = vec4f(0.5);");
+});
+
 test("the body takes a Tab as an indent", async ({ page }) => {
   const sent: string[] = [];
   const node = await newPatchWithCode(page, sent);
