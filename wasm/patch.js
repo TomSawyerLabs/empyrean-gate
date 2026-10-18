@@ -563,7 +563,8 @@ export function presets() {
 }
 
 /**
- * The node palette (`GET /patch/registry` on the gate), as JSON.
+ * The node palette (`GET /patch/registry` on the gate), as JSON. Every
+ * node, port and param carries a `description`.
  * @returns {string}
  */
 export function registry() {
@@ -571,6 +572,44 @@ export function registry() {
     let deferred1_1;
     try {
         const ret = wasm.registry();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * The JSON Schema (draft 2020-12) of a patch document, as a JSON string:
+ * the structure `validate` and `PatchSim` accept, with a `description` on
+ * every field. Which node kinds, ports and params exist is `registry()`'s.
+ * @returns {string}
+ */
+export function schema() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.schema();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * The wire shapes as JSON `[{"id", "label", "description", "accepts"}]`:
+ * what flows on each kind of wire and which shapes may drive an input of
+ * it (`accepts`, shape ids as in patch JSON and `registry()`).
+ * @returns {string}
+ */
+export function shapes() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.shapes();
         deferred1_0 = ret[0];
         deferred1_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);

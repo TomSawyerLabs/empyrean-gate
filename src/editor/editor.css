@@ -170,6 +170,18 @@
   font-size: 12px;
   margin-bottom: 2px;
 }
+/* What the node and each knob do (the registry's descriptions), inline: the
+   panel is where someone deciding what to turn is already looking. */
+.patch-node-about {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.patch-param-about {
+  margin-bottom: 3px;
+  font-size: 11px;
+  line-height: 1.35;
+}
 
 .expose-toggle {
   font-size: 11px;

@@ -43,6 +43,8 @@ export const patchsim_usesTouch: (a: number) => number;
 export const patchsim_wgsl: (a: number) => [number, number];
 export const presets: () => [number, number];
 export const registry: () => [number, number];
+export const schema: () => [number, number];
+export const shapes: () => [number, number];
 export const validate: (a: number, b: number) => [number, number];
 export const __wbindgen_externrefs: WebAssembly.Table;
 export const __wbindgen_free: (a: number, b: number, c: number) => void;

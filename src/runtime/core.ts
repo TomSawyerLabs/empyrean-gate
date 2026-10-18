@@ -3,7 +3,7 @@
 // its JSON answers into types.
 
 import init, * as wasm from "../../wasm/patch.js";
-import type { CodeReference, PatchDoc, PatchNodeType } from "../types";
+import type { CodeReference, PatchDoc, PatchNodeType, PatchShapeDef } from "../types";
 
 export type { PatchSim } from "../../wasm/patch.js";
 
@@ -37,6 +37,10 @@ export interface PatchCore {
   registry: PatchNodeType[];
   /** What a Code node body may use (helpers, structs, globals, CPU builtins). */
   codeReference: CodeReference;
+  /** The wire shapes, what flows on each and what each input accepts. */
+  shapes: PatchShapeDef[];
+  /** JSON Schema (2020-12) of a patch document, from the Rust types. */
+  schema: Record<string, unknown>;
   presets: PatchDoc[];
   limits: Limits;
   /** Effect kinds by wire name, in GPU-id order. */
@@ -53,11 +57,15 @@ export interface PatchCore {
 
 let loading: Promise<PatchCore> | null = null;
 
-/** Load (once) and return the patch core. */
-export function loadPatchCore(): Promise<PatchCore> {
-  loading ??= init().then(() => ({
+/** Load (once) and return the patch core. In a browser the wasm is fetched
+ * next to this module; where `fetch` cannot read files (Node, Bun), pass the
+ * bytes of `wasm/patch_bg.wasm`. */
+export function loadPatchCore(wasmBytes?: BufferSource): Promise<PatchCore> {
+  loading ??= init(wasmBytes ? { module_or_path: wasmBytes } : undefined).then(() => ({
     registry: JSON.parse(wasm.registry()) as PatchNodeType[],
     codeReference: JSON.parse(wasm.codeReference()) as CodeReference,
+    shapes: JSON.parse(wasm.shapes()) as PatchShapeDef[],
+    schema: JSON.parse(wasm.schema()) as Record<string, unknown>,
     presets: JSON.parse(wasm.presets()) as PatchDoc[],
     limits: JSON.parse(wasm.limits()) as Limits,
     effectKinds: JSON.parse(wasm.effect_kinds()) as string[],

@@ -210,9 +210,24 @@ export function migrate(doc: string): string;
 export function presets(): string;
 
 /**
- * The node palette (`GET /patch/registry` on the gate), as JSON.
+ * The node palette (`GET /patch/registry` on the gate), as JSON. Every
+ * node, port and param carries a `description`.
  */
 export function registry(): string;
+
+/**
+ * The JSON Schema (draft 2020-12) of a patch document, as a JSON string:
+ * the structure `validate` and `PatchSim` accept, with a `description` on
+ * every field. Which node kinds, ports and params exist is `registry()`'s.
+ */
+export function schema(): string;
+
+/**
+ * The wire shapes as JSON `[{"id", "label", "description", "accepts"}]`:
+ * what flows on each kind of wire and which shapes may drive an input of
+ * it (`accepts`, shape ids as in patch JSON and `registry()`).
+ */
+export function shapes(): string;
 
 /**
  * Check a patch exactly as the gate does before it will run it. Returns
@@ -266,6 +281,8 @@ export interface InitOutput {
     readonly patchsim_wgsl: (a: number) => [number, number];
     readonly presets: () => [number, number];
     readonly registry: () => [number, number];
+    readonly schema: () => [number, number];
+    readonly shapes: () => [number, number];
     readonly validate: (a: number, b: number) => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;

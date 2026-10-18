@@ -2,7 +2,7 @@
 // renders it, and any number of canvases show it. Also a MiniSource, so the
 // editor's node thumbnails and meters work exactly as they do against a gate.
 
-import { pushScalar, type MiniScalar, type MiniSource } from "../editor/minis";
+import { pushScalar, type MiniScalar, type MiniSource } from "../editor/minis-source";
 import type { PatchDoc } from "../types";
 import { loadPatchCore, type PatchCore, type PatchSim } from "./core";
 import { GateGpu, requestGateDevice, ShaderError, WebGpuUnavailable, type Geometry } from "./gpu";
@@ -15,7 +15,26 @@ import {
 } from "./inputs";
 
 export { loadPatchCore, type Limits, type PatchCore } from "./core";
-export { screenToPolar, ShaderError, WebGpuUnavailable, type Geometry } from "./gpu";
+export { requestGateDevice, screenToPolar, ShaderError, WebGpuUnavailable, type Geometry } from "./gpu";
+export {
+  attachGroove,
+  GROOVE_BPM,
+  grooveAt,
+  grooveAudio,
+  grooveDjLink,
+  type GrooveFeatures,
+  type GrooveSettings,
+} from "./groove";
+export {
+  contactSheet,
+  encodePng,
+  frameStats,
+  renderRing,
+  toBase64,
+  type FrameStats,
+  type Picture,
+  type RingOptions,
+} from "./ring";
 export { MediaTexture, VIDEO_SIZE, type Motion, type MotionSource } from "./inputs";
 
 /** The gate as built (`src-tauri/src/config.rs` defaults). */
@@ -25,6 +44,10 @@ export const GATE_GEOMETRY: Geometry = { spokes: 64, pixels: 378, innerOverOuter
 const PREVIEW_INTERVAL_MS = 100;
 /** Shake decay, as the engine applies to phone shakes. */
 const SHAKE_TAU = 0.3;
+/** Simulated frame rate when stepping without the display (a capture). */
+const STEP_HZ = 60;
+/** Most frames one capture returns. */
+export const MAX_CAPTURE_FRAMES = 16;
 
 export interface RuntimeStatus {
   /** A patch is compiled and rendering. */
@@ -53,12 +76,43 @@ export interface EffectTrigger {
   fill?: number;
 }
 
+export interface RuntimeOptions {
+  /** The WebGPU entry point where there is no `navigator.gpu` (Node or Bun
+   * with the `webgpu` package). */
+  gpu?: GPU;
+  /** The patch core's wasm bytes, where it cannot be fetched (see
+   * `loadPatchCore`). */
+  wasm?: BufferSource;
+}
+
+export interface CaptureOptions {
+  /** How many frames (default 1, at most `MAX_CAPTURE_FRAMES`). */
+  frames?: number;
+  /** Seconds of patch time between frames (default 0.5). */
+  interval?: number;
+  /** Seconds of patch time to run before the first frame (default 0, or 1
+   * after a restart, so a fresh patch has had a moment to get going). */
+  warmup?: number;
+  /** Start the patch afresh first (phases, effects, counters), so the same
+   * patch and options give the same frames. */
+  restart?: boolean;
+}
+
+/** One captured frame: `t` seconds of patch time after the capture began,
+ * `rgb` as `GateGpu.readFrame` gives it. */
+export interface CapturedFrame {
+  t: number;
+  rgb: Uint8Array;
+}
+
 export class PatchRuntime implements MiniSource {
   readonly core: PatchCore;
   readonly gpu: GateGpu;
   readonly geometry: Geometry;
 
   private sim: PatchSim | null = null;
+  /** The document last given to `setPatch`, for `restart`. */
+  private doc: PatchDoc | null = null;
   private generation = 0;
   /** The generation whose shader is being installed, while one is. */
   private pendingGen = 0;
@@ -69,6 +123,7 @@ export class PatchRuntime implements MiniSource {
   private status: RuntimeStatus = { active: false, touch: false, error: null };
   private statusListeners = new Set<(s: RuntimeStatus) => void>();
   private frameListeners = new Set<(dt: number) => void>();
+  private restartListeners = new Set<() => void>();
 
   private stopMic: (() => void) | null = null;
   private motion: { read: () => Motion; stop: () => void } | null = null;
@@ -100,8 +155,8 @@ export class PatchRuntime implements MiniSource {
 
   /** Load the patch core and a WebGPU device. Rejects with
    * [`WebGpuUnavailable`] where WebGPU is missing. */
-  static async create(geometry: Geometry = GATE_GEOMETRY): Promise<PatchRuntime> {
-    const [core, device] = await Promise.all([loadPatchCore(), requestGateDevice()]);
+  static async create(geometry: Geometry = GATE_GEOMETRY, options: RuntimeOptions = {}): Promise<PatchRuntime> {
+    const [core, device] = await Promise.all([loadPatchCore(options.wasm), requestGateDevice(options.gpu)]);
     return new PatchRuntime(core, new GateGpu(device, core.limits, geometry));
   }
 
@@ -121,6 +176,13 @@ export class PatchRuntime implements MiniSource {
     return () => this.frameListeners.delete(listener);
   }
 
+  /** Run `listener` whenever `restart` starts the patch afresh: the place to
+   * reset a host's own clocks (a synthetic beat), so a capture repeats. */
+  onRestart(listener: () => void): () => void {
+    this.restartListeners.add(listener);
+    return () => this.restartListeners.delete(listener);
+  }
+
   private setStatus(s: RuntimeStatus) {
     this.status = s;
     this.statusListeners.forEach((l) => l(s));
@@ -131,6 +193,7 @@ export class PatchRuntime implements MiniSource {
    * rendering and reports why in the status. */
   async setPatch(doc: PatchDoc | null): Promise<void> {
     const gen = ++this.generation;
+    this.doc = doc;
     if (!doc) {
       this.sim?.free();
       this.sim = null;
@@ -233,13 +296,92 @@ export class PatchRuntime implements MiniSource {
   }
 
   stop() {
-    cancelAnimationFrame(this.raf);
+    // Guarded: a host with no display (Node) has no animation frames.
+    if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+  }
+
+  /** The frame loop is running (`start`ed and not `stop`ped). */
+  get running(): boolean {
+    return this.raf !== 0;
   }
 
   private frame(now: number) {
     const dt = Math.min(0.5, Math.max(0, (now - this.last) / 1000));
     this.last = now;
+    this.advance(dt, now);
+  }
+
+  /** Run exactly one frame of `dt` seconds, whether or not the loop is
+   * running: evaluate, render, draw the views. For stepping by hand (tests,
+   * captures); with the loop running, its own frames come in between. */
+  step(dt: number) {
+    this.advance(Math.max(0, dt), performance.now());
+  }
+
+  /** Start the running patch afresh, as if it had just been opened: phases,
+   * effects, strokes and counters all reset. */
+  async restart(): Promise<void> {
+    const doc = this.doc;
+    if (!doc) return;
+    this.sim?.free();
+    this.sim = null;
+    this.shake = 0;
+    this.restartListeners.forEach((l) => l());
+    await this.setPatch(doc);
+  }
+
+  /** The LED colors of the frame last rendered (see `GateGpu.readFrame`). */
+  async readFrame(): Promise<Uint8Array> {
+    for (;;) {
+      const rgb = await this.gpu.readFrame();
+      if (rgb) return rgb;
+      await new Promise((r) => setTimeout(r, 4));
+    }
+  }
+
+  /**
+   * Frames of the running patch for someone who cannot watch it (an agent):
+   * the loop pauses, the patch is stepped through patch time at a steady
+   * 60 Hz (so it does not depend on how fast this machine is), each frame is
+   * read back, and the loop resumes where it was. Rejects when no patch is
+   * running, with the reason when it is one that cannot run.
+   */
+  async capture(options: CaptureOptions = {}): Promise<CapturedFrame[]> {
+    const frames = Math.max(1, Math.min(MAX_CAPTURE_FRAMES, Math.round(options.frames ?? 1)));
+    const interval = Math.max(0, options.interval ?? 0.5);
+    const warmup = Math.max(0, options.warmup ?? (options.restart ? 1 : 0));
+    const wasRunning = this.running;
+    this.stop();
+    try {
+      if (options.restart) await this.restart();
+      // A shader still installing holds frames; wait for it (bounded).
+      for (let waited = 0; this.pending && waited < 15000; waited += 16) {
+        await new Promise((r) => setTimeout(r, 16));
+      }
+      if (!this.sim || this.pending || !this.status.active) {
+        throw new Error(this.status.error ?? "No patch is running.");
+      }
+      const out: CapturedFrame[] = [];
+      let t = 0;
+      const run = (seconds: number) => {
+        const n = Math.ceil(seconds * STEP_HZ);
+        for (let i = 0; i < n; i++) this.step(seconds / n);
+        t += seconds;
+      };
+      // Something to read even with no warmup: the frame as it stands.
+      run(warmup > 0 ? warmup : 1 / STEP_HZ);
+      for (let f = 0; f < frames; f++) {
+        if (f > 0) run(interval);
+        out.push({ t: Math.round(t * 1000) / 1000, rgb: await this.readFrame() });
+      }
+      return out;
+    } finally {
+      if (wasRunning) this.start();
+    }
+  }
+
+  private advance(dt: number, now: number) {
     const sim = this.sim;
     if (!sim || this.pending) return;
 

@@ -16,9 +16,22 @@ export type PatchShape =
   | "texture"
   | "pixels";
 
+/** One wire shape as the patch core's `shapes()` describes it: what flows on
+ * such a wire, and which shapes may drive an input of it (`accepts`, the
+ * same rule as `shapeAccepts`). */
+export interface PatchShapeDef {
+  id: PatchShape;
+  label: string;
+  description: string;
+  accepts: PatchShape[];
+}
+
 export interface PatchPortDef {
   name: string;
   shape: PatchShape;
+  /** What the port carries, with units and ranges where they matter.
+   * Optional: registries from older gates have none. */
+  description?: string;
 }
 
 export interface PatchParamDef {
@@ -29,6 +42,9 @@ export interface PatchParamDef {
   default: number;
   integrate: boolean;
   kind: "number" | { select: string[] };
+  /** What the param does: units, what the ends of the range mean, and for a
+   * select what each option does. Optional: older gates send none. */
+  description?: string;
 }
 
 /** One palette entry from the node registry (`GET /patch/registry` on the
@@ -37,6 +53,9 @@ export interface PatchNodeType {
   id: string;
   label: string;
   category: "input" | "scalar" | "generator" | "field" | "combine" | "texture" | "sink" | "code";
+  /** What the node does, what its inputs mean, and when to use it (one to
+   * three sentences). Optional: older gates send none. */
+  description?: string;
   inputs: PatchPortDef[];
   outputs: PatchPortDef[];
   params: PatchParamDef[];

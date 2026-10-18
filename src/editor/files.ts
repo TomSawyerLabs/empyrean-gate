@@ -58,6 +58,8 @@ function parsePatchValue(raw: unknown, depth: number): PatchDoc {
       params: n.params && typeof n.params === "object" ? { ...n.params } : {},
       pos: Array.isArray(n.pos) && n.pos.length === 2 ? [Number(n.pos[0]), Number(n.pos[1])] : [0, 0],
       ...(typeof n.media === "string" ? { media: n.media } : {}),
+      // A Code node's ports and body; the core checks them.
+      ...(n.code && typeof n.code === "object" ? { code: structuredClone(n.code) } : {}),
       ...(n.sub && typeof n.sub === "object"
         ? depth < MAX_SUBPATCH_DEPTH
           ? { sub: parsePatchValue(n.sub, depth + 1) }

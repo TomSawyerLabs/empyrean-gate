@@ -56,11 +56,14 @@ export class ShaderError extends Error {
   }
 }
 
-export async function requestGateDevice(): Promise<GPUDevice> {
-  if (typeof navigator === "undefined" || !navigator.gpu) {
+/** A WebGPU device for the array: from the browser's `navigator.gpu`, or from
+ * `gpu` where there is no navigator (Node or Bun with the `webgpu` package). */
+export async function requestGateDevice(gpu?: GPU): Promise<GPUDevice> {
+  gpu ??= typeof navigator === "undefined" ? undefined : navigator.gpu;
+  if (!gpu) {
     throw new WebGpuUnavailable("This browser does not support WebGPU.");
   }
-  const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+  const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" });
   if (!adapter) throw new WebGpuUnavailable("No WebGPU adapter is available.");
   return adapter.requestDevice();
 }
@@ -143,7 +146,6 @@ export class GateGpu {
   readonly device: GPUDevice;
   readonly geometry: Geometry;
   private limits: Limits;
-  private format: GPUTextureFormat;
 
   private globals: GPUBuffer;
   private previewGlobals: GPUBuffer;
@@ -168,14 +170,16 @@ export class GateGpu {
   private previewCells = 0;
 
   private viewLayout: GPUBindGroupLayout;
-  private viewPipeline: GPURenderPipeline;
+  /** Built with the first view, so a host with no canvas (an agent's
+   * headless capture) never needs a canvas format. */
+  private viewPipeline: GPURenderPipeline | null = null;
+  private frameRead: GPUBuffer | null = null;
   private views = new Map<HTMLCanvasElement, View>();
 
   constructor(device: GPUDevice, limits: Limits, geometry: Geometry) {
     this.device = device;
     this.limits = limits;
     this.geometry = geometry;
-    this.format = navigator.gpu.getPreferredCanvasFormat();
     const leds = geometry.spokes * geometry.pixels;
     const U = GPUBufferUsage;
     const buf = (size: number, usage: number) =>
@@ -185,7 +189,7 @@ export class GateGpu {
     this.previewGlobals = buf(limits.globalsBytes, U.UNIFORM | U.COPY_DST);
     this.audio = buf(limits.audioBytes, U.UNIFORM | U.COPY_DST);
     this.fx = buf(limits.effectBytes * limits.maxEffects, U.STORAGE | U.COPY_DST);
-    // COPY_SRC so tests (and a future capture/export) can read the frame back.
+    // COPY_SRC so tests and `readFrame` (an agent's snapshot) can read it back.
     // Two frames: the patch's `finish` keeps frame N-1 in the second half
     // for its Feedback node (patch_lib.wgsl); the view draws the first.
     this.out = buf(leds * 8, U.STORAGE | U.COPY_SRC);
@@ -222,8 +226,12 @@ export class GateGpu {
         { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: ro },
       ],
     });
+  }
+
+  private buildViewPipeline(format: GPUTextureFormat): GPURenderPipeline {
+    const device = this.device;
     const module = device.createShaderModule({ label: "gate view", code: VIEW_WGSL });
-    this.viewPipeline = device.createRenderPipeline({
+    return device.createRenderPipeline({
       label: "gate view",
       layout: device.createPipelineLayout({ bindGroupLayouts: [this.viewLayout] }),
       vertex: { module, entryPoint: "vs" },
@@ -232,7 +240,7 @@ export class GateGpu {
         entryPoint: "fs",
         targets: [
           {
-            format: this.format,
+            format,
             blend: {
               color: { srcFactor: "one", dstFactor: "one", operation: "add" },
               alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
@@ -415,12 +423,41 @@ export class GateGpu {
     }
   }
 
+  /** The frame last rendered, as RGB bytes per LED (`spokes × pixels × 3`,
+   * spoke-major, LED 0 at the outer end): what `ring.ts` draws and measures.
+   * Resolves null while a readback is already in flight. */
+  async readFrame(): Promise<Uint8Array | null> {
+    const leds = this.geometry.spokes * this.geometry.pixels;
+    this.frameRead ??= this.device.createBuffer({
+      size: leds * 4,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
+    const read = this.frameRead;
+    if (read.mapState !== "unmapped") return null;
+    const enc = this.device.createCommandEncoder({ label: "frame readback" });
+    enc.copyBufferToBuffer(this.out, 0, read, 0, leds * 4);
+    this.device.queue.submit([enc.finish()]);
+    await read.mapAsync(GPUMapMode.READ);
+    const packed = new Uint32Array(read.getMappedRange().slice(0));
+    read.unmap();
+    const rgb = new Uint8Array(leds * 3);
+    for (let p = 0; p < leds; p++) {
+      const v = packed[p]!;
+      rgb[p * 3] = v & 0xff;
+      rgb[p * 3 + 1] = (v >> 8) & 0xff;
+      rgb[p * 3 + 2] = (v >> 16) & 0xff;
+    }
+    return rgb;
+  }
+
   /** Draw the array into `canvas` every frame until detached. */
   attach(canvas: HTMLCanvasElement) {
     if (this.views.has(canvas)) return;
     const context = canvas.getContext("webgpu");
     if (!context) throw new WebGpuUnavailable("Could not create a WebGPU canvas context.");
-    context.configure({ device: this.device, format: this.format, alphaMode: "premultiplied" });
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    this.viewPipeline ??= this.buildViewPipeline(format);
+    context.configure({ device: this.device, format, alphaMode: "premultiplied" });
     const uniform = this.device.createBuffer({
       size: VIEW_BYTES,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -485,7 +522,7 @@ export class GateGpu {
         },
       ],
     });
-    pass.setPipeline(this.viewPipeline);
+    pass.setPipeline(this.viewPipeline!);
     pass.setBindGroup(0, view.bind);
     pass.draw(6, spokes * drawn);
     pass.end();
@@ -506,6 +543,7 @@ export class GateGpu {
       this.touches,
       this.previewOut,
       this.previewRead,
+      this.frameRead,
     ]) {
       b?.destroy();
     }
