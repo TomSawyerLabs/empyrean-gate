@@ -132,6 +132,43 @@ test("the body editor completes the node's own ports and the lib's helpers", asy
     .toBe(true);
 });
 
+test("a built-in node converts to a Code node in place, keeping its id and wire", async ({ page }) => {
+  const sent: string[] = [];
+  page.on("websocket", (ws) =>
+    ws.on("framesent", (f) => {
+      if (typeof f.payload === "string") sent.push(f.payload);
+    }),
+  );
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto("/#patch");
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+  await page.getByRole("button", { name: "＋ New" }).click();
+  await expect(page.locator(".pnode")).toHaveCount(2);
+  // Noise is convertible (the mock marks it); Output is not.
+  await page.locator(".pnode", { hasText: "Output" }).click();
+  const panel = page.locator(".patch-side");
+  await expect(panel.getByRole("button", { name: "Convert to Code" })).toHaveCount(0);
+  await page.locator(".pnode", { hasText: "Noise" }).click();
+  await panel.getByRole("button", { name: "Convert to Code" }).click();
+  // The node is a Code node now, with the stand-in body, still wired into Output.
+  const node = page.locator(".pnode.cat-code");
+  await expect(node).toBeVisible();
+  await expect(node.locator(".pnode-port.in")).toHaveText(["scale"]);
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+  await expect(panel.locator("h3")).toHaveText("Code");
+  await expect(panel.getByLabel("Body (WGSL)")).toContainText("Converted from");
+  // A scalar input of a GPU node can be marked as a rate.
+  await panel.getByLabel("Input scale is a rate").check();
+  await expect(panel.locator(".patch-param-head").filter({ hasText: "scale" })).toContainText("(rate)");
+  await expect
+    .poll(() => sent.some((m) => m.includes('"patch_save"') && m.includes('"integrate":true')))
+    .toBe(true);
+  // Undo (from the toolbar: the checkbox has the focus) takes the flag back
+  // in one step; the conversion itself was another.
+  await page.getByRole("button", { name: "↶ Undo" }).click();
+  await expect(panel.locator(".patch-param-head").filter({ hasText: "scale" })).not.toContainText("(rate)");
+});
+
 test("the body takes a Tab as an indent", async ({ page }) => {
   const sent: string[] = [];
   const node = await newPatchWithCode(page, sent);

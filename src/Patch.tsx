@@ -138,6 +138,16 @@ export default function Patch() {
       registry={registry}
       presets={presets}
       codeReference={codeReference}
+      convertToCode={async (doc, node) => {
+        const r = await fetch(`${client.httpBase}/patch/convert-to-code`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ patch: doc, node }),
+        });
+        const json = (await r.json()) as PatchDoc | { error: string };
+        if (!r.ok || "error" in json) throw new Error("error" in json ? json.error : "conversion failed");
+        return json;
+      }}
       ready={connected}
       activeId={config?.active_patch ?? null}
       status={status ? { active: status.patch_active, error: status.patch_error ?? null } : null}

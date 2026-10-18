@@ -272,6 +272,7 @@ const server = Bun.serve({
           label: "Noise",
           category: "generator",
           description: "Mock noise: a drifting Field<f32>.",
+          convertible: true,
           inputs: [],
           outputs: [{ name: "out", shape: "field_scalar", description: "The noise value at each pixel, 0..1." }],
           params: [],
@@ -356,6 +357,22 @@ const server = Bun.serve({
       ]);
     }
     if (url.pathname === "/patch/presets") return Response.json([MOCK_PRESET]);
+    // "Convert to Code" (the real one reproduces the node's body): here the
+    // node becomes a Code node with a stand-in body, keeping its id.
+    if (url.pathname === "/patch/convert-to-code" && req.method === "POST") {
+      return req.json().then((body) => {
+        const { patch, node } = body as { patch: MockPatch; node: string };
+        const n = patch.nodes.find((x) => (x as { id: string }).id === node) as Record<string, unknown> | undefined;
+        if (!n) return Response.json({ error: "no such node" }, { status: 400 });
+        n.kind = "code";
+        n.code = {
+          inputs: [{ name: "scale", shape: "scalar", min: 0.1, max: 8, default: 1 }],
+          outputs: [{ name: "out", shape: "field_scalar", min: 0, max: 1, default: 0 }],
+          body: `// Converted from ${String(n.kind)} (mock).\nout = c.r01 * scale;\n`,
+        };
+        return Response.json(patch);
+      });
+    }
     // The Code node's reference (the real one is read off the shader lib);
     // enough for the editor's completion to have something to offer.
     if (url.pathname === "/patch/code-reference") {

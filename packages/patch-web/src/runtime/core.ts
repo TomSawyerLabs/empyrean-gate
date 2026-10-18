@@ -41,6 +41,9 @@ export interface PatchCore {
   shapes: PatchShapeDef[];
   /** JSON Schema (2020-12) of a patch document, from the Rust types. */
   schema: Record<string, unknown>;
+  /** "Convert to Code": node `id` of `doc` as a Code node, same wires and
+   * knobs, a body that reproduces it. Throws when the kind cannot be. */
+  convertToCode(doc: PatchDoc, id: string): PatchDoc;
   presets: PatchDoc[];
   limits: Limits;
   /** Effect kinds by wire name, in GPU-id order. */
@@ -66,6 +69,9 @@ export function loadPatchCore(wasmBytes?: BufferSource): Promise<PatchCore> {
     codeReference: JSON.parse(wasm.codeReference()) as CodeReference,
     shapes: JSON.parse(wasm.shapes()) as PatchShapeDef[],
     schema: JSON.parse(wasm.schema()) as Record<string, unknown>,
+    convertToCode(doc, id) {
+      return JSON.parse(wasm.convertToCode(JSON.stringify(doc), id)) as PatchDoc;
+    },
     presets: JSON.parse(wasm.presets()) as PatchDoc[],
     limits: JSON.parse(wasm.limits()) as Limits,
     effectKinds: JSON.parse(wasm.effect_kinds()) as string[],

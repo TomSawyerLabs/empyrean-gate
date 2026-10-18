@@ -52,6 +52,8 @@ export interface PatchParamDef {
 export interface PatchNodeType {
   id: string;
   label: string;
+  /** "Convert to Code" is offered for this kind (crate `convert::convertible`). */
+  convertible?: boolean;
   category: "input" | "scalar" | "generator" | "field" | "combine" | "texture" | "sink" | "code";
   /** What the node does, what its inputs mean, and when to use it (one to
    * three sentences). Optional: older gates send none. */
@@ -88,6 +90,9 @@ export interface CodePort {
   min: number;
   max: number;
   default: number;
+  /** A Scalar input that is a rate: the engine integrates it into a phase
+   * (× master speed), like a built-in node's `speed` knob. GPU tier only. */
+  integrate?: boolean;
 }
 
 /** A Code node's interface and body (WGSL; see plans/code-node.md). */
@@ -222,7 +227,7 @@ export function codeParams(node: PatchNode | undefined): PatchParamDef[] {
       min: p.min,
       max: p.max,
       default: p.default,
-      integrate: false,
+      integrate: p.integrate ?? false,
       kind: "number" as const,
     }));
 }

@@ -140,6 +140,14 @@ export function CodePanel({
       `${id}.code.inputs.${index}.${field}`,
     );
 
+  const setIntegrate = (index: number, on: boolean) =>
+    edit((code) => {
+      const port = code.inputs[index];
+      if (!port) return;
+      if (on) port.integrate = true;
+      else delete port.integrate;
+    });
+
   const remove = (dir: "inputs" | "outputs", index: number) =>
     edit((code, n, d) => {
       const port = code[dir][index];
@@ -244,6 +252,21 @@ export function CodePanel({
                 />
               </label>
             ))}
+            {tier === "gpu" && (
+              <label
+                className="code-port-rate"
+                title="A rate: the engine integrates this knob over time (× master speed) and the body sees the accumulated phase, like a built-in node's speed knob."
+              >
+                <input
+                  type="checkbox"
+                  checked={p.integrate ?? false}
+                  disabled={!canEdit}
+                  aria-label={`Input ${p.name} is a rate`}
+                  onChange={(e) => setIntegrate(i, e.target.checked)}
+                />
+                <span>rate</span>
+              </label>
+            )}
           </div>
         )}
       </div>
@@ -320,7 +343,9 @@ export function CodePanel({
         <ul>
           <li>
             Every input by name; every output by name — assign it (<code>out = …;</code>). Unassigned
-            outputs are 0. Ctrl+Space lists what is in scope; hover a name for its doc.
+            outputs are 0; <code>return;</code> ends the body early. Ctrl+Space lists what is in scope;
+            hover a name for its doc. Any built-in node's panel has "Convert to Code" to start from its
+            body.
           </li>
           {tier === "gpu" ? (
             <>
@@ -351,8 +376,9 @@ export function CodePanel({
               </li>
               <li>
                 An event input is true on the frame it fires; an event output fires when left true.{" "}
-                <code>dt</code> is seconds since the last frame; <code>state.name</code> keeps a number
-                across frames (<code>state.n += 1.0;</code>).
+                <code>dt</code> is seconds since the last frame, <code>master_speed</code> the crew's speed
+                multiplier; <code>state.name</code> keeps a number across frames (
+                <code>state.n += 1.0;</code>).
               </li>
             </>
           )}
