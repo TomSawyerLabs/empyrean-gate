@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 9531;
+// PW_PORT: run beside another checkout's mock backend without reusing it.
+const PORT = Number(process.env.PW_PORT ?? 9531);
 
 /**
  * The layout gate plus the handful of UI behaviours that only exist in the
