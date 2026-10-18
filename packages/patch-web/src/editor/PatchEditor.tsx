@@ -1346,11 +1346,16 @@ function Editor({
   const onNodesChange = useCallback(
     (changes: NodeChange<PatchFlowNode>[]) => {
       setNodes((nds) => applyNodeChanges(changes, nds));
+      // Moving the selection from one node to another arrives as one batch
+      // (old deselected, new selected, in either order): the selection wins
+      // over the deselection, or the panel closes on every switch.
+      let next: string | null | undefined;
       for (const ch of changes) {
-        if (ch.type === "select") {
-          setSelectedNode(ch.selected ? ch.id : null);
-        }
+        if (ch.type !== "select") continue;
+        if (ch.selected) next = ch.id;
+        else if (next === undefined) next = null;
       }
+      if (next !== undefined) setSelectedNode(next);
     },
     [],
   );
