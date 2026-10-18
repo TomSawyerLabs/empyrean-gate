@@ -290,6 +290,53 @@ one editor instance (the panel shows "Editing in the large view" meanwhile,
 so two CodeMirrors never fight over one body), the live minis row and the
 node's error line; Done or Esc returns it to the panel. Spec case added.
 
+## Round 5: safety, buffers, notes, a starter (2026-10-18)
+
+Cameron's answers to the outstanding list: hold the app release; fix the
+GPU lock; more Code node features; the two approximate templates are fine;
+good linting; a starter preset, and text/comment nodes.
+
+Design:
+- **GPU lock**: `code::check_gpu_body` refuses `loop` and `while` in a
+  field-tier body and accepts `for` only with a literal bound in its
+  condition (`i < 64u`, `i <= 7`, …; cap 4096), tokens only, comments
+  skipped. Lib helpers keep their own loops (bounded by the buffers).
+- **Body checks with positions** (the "good linting"): the same scanner
+  reports `return <value>` ("assign the output"), unbalanced `{}` / `()`,
+  writes to an input, and uses of the output buffer / slab / entry points
+  (`OUT`, `P`, `finish`, `main`, `PREVIEW`), each as `line L:C: …`, so they
+  arrive as marks on the body's lines through the existing path.
+- **Buffer inputs** (GPU tier only): a Points input `pts` gives
+  `pts_count` and `pts_at(k) -> Dab`; an Effects input `fx` gives
+  `fx_count`, `fx_at(k) -> Effect`, `fx_on(k) -> bool` (belongs to the
+  chain wired in); a Texture input `tex` gives `tex` (sampled at this
+  pixel with the ring mapping) and `tex_at(uv) -> vec4f`. `dab_color`,
+  `effect_color` and the `Dab`/`Effect` fields get docs. Render points,
+  Render effects and Texture sample become convertible (their bodies
+  rewritten to the port idiom in symbolic mode).
+- **Note node** (`note`, text in `NodeInst.text`, format 6): no ports, not
+  evaluated, drawn as a sticky note; its panel is a textarea.
+- **Starter preset** "Code: Ripple warp": a Note explaining the patch, a
+  Plasma into a Code node that warps it with `snoise3` and a `twist` knob,
+  into the Output.
+
+Steps:
+1. [x] Crate: body scanner + loop rule (literal, `_count`, `G.<count>`, or
+   a `let` clamped to a literal, which is how the built-ins write theirs),
+   buffer inputs in tier/codegen/convert/reference, Note kind, format 6,
+   preset "Code: Ripple Warp", docs on `Dab`/`Effect`/the renderers.
+   126 crate tests; Render points/effects and Texture sample convert now
+   (their bodies use the port idiom; every `return X;` in a converted body
+   becomes `out = X;` + `return;`, and bodies are re-indented by depth).
+2. [x] Editor: input/output shape lists split, completion for `_count` /
+   `_at` / `_on`, Note node (sticky-note look, textarea panel), reference
+   card lines for buffers and the loop rule.
+3. [ ] Hosts, specs (Note case added), commit, push, bump, site.
+
+Gotcha: a mock backend left running from a debugging session is reused
+by Playwright (`reuseExistingServer`) and serves a stale registry; check
+`netstat` for the port before trusting a palette-related failure.
+
 ## Findings / gotchas
 
 - `codegen::leak()` interned port names as `&'static str` for `slot_of`;
