@@ -61,8 +61,10 @@ better way to do multiple blends?"
 6. [x] README/docs; rebased on round 3/4 (conflicts: editor.css tail,
        ISSUES.md), pushed gate `master` 4e6af6d (CI builds web-dist; the
        site's bump bot lands it on site `dev`).
-7. [ ] **Current:** confirm on the Preview (dev.empyreangate.org/playground).
-8. [ ] Multiple blends: waiting on Cameron (Open question 1).
+7. [x] On the Preview: site `dev` b0232e4 (web-dist 19b8830, bump dispatched by
+       hand: the 15-min schedule had not fired since 05:06Z); the playground shows
+       − on every node and Blend/Plasma in the palette (2026-10-18).
+8. [ ] **Current:** multiple blends, waiting on Cameron (Open question 1).
 
 ## Findings / gotchas
 
