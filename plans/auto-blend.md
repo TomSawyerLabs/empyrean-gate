@@ -1,7 +1,8 @@
 # Patch editor: drop-to-blend and minimized nodes (2026-10-17)
 
-Status: **in progress** (gate worktree `C:\Users\camer\.t3\worktrees\Empyrean\auto-blend`,
-branch `auto-blend` off gate `origin/master` e04afb3).
+Status: **drop-to-combine and minimize on gate `master` (4e6af6d)**; the
+multiple-blends question waits on Cameron. Gate worktree
+`C:\Users\camer\.t3\worktrees\Empyrean\auto-blend`, branch `auto-blend`.
 
 ## Goal
 
@@ -57,9 +58,11 @@ better way to do multiple blends?"
 4. [x] Editor: minimized node view + − / + toggle in the head; CSS.
 5. [x] Behavior test `tests/patch-combine.spec.ts` (mock registry gained
        Plasma, Blend, Field math; its Output now takes a colour field like the real one).
-6. [ ] **Current:** README/docs done; commit, merge to gate `master`, push (CI
-       builds web-dist; the site's bump bot lands it on site `dev`).
-7. [ ] Multiple blends: waiting on Cameron (Open question 1).
+6. [x] README/docs; rebased on round 3/4 (conflicts: editor.css tail,
+       ISSUES.md), pushed gate `master` 4e6af6d (CI builds web-dist; the
+       site's bump bot lands it on site `dev`).
+7. [ ] **Current:** confirm on the Preview (dev.empyreangate.org/playground).
+8. [ ] Multiple blends: waiting on Cameron (Open question 1).
 
 ## Findings / gotchas
 
@@ -78,6 +81,9 @@ better way to do multiple blends?"
 
 - [x] 2026-10-17: steps 1–5; crate tests 112 pass, patch-web unit 50 pass,
       typecheck clean (patch-web and app), patch-combine 3/3 + patch-connect pass.
+- [x] 2026-10-17, after rebasing on gate master 5e86561: crate 119 pass,
+      unit 50 pass, typechecks clean, behavior 143/144 (the one failure is
+      the known WebKit `multitouch` flake in ISSUES.md; 6/6 alone).
 
 ## Open questions for the user
 
