@@ -33,10 +33,19 @@ pub fn migrate(doc: &str) -> Result<String, JsError> {
     Ok(serde_json::to_string(&parse_doc(doc)?).expect("patch serializes"))
 }
 
-/// The node palette (`GET /patch/registry` on the gate), as JSON.
+/// The node palette (`GET /patch/registry` on the gate), as JSON. Every
+/// node, port and param carries a `description`.
 #[wasm_bindgen]
 pub fn registry() -> String {
     empyrean_patch::registry::palette_json().to_string()
+}
+
+/// The wire shapes as JSON `[{"id", "label", "description", "accepts"}]`:
+/// what flows on each kind of wire and which shapes may drive an input of
+/// it (`accepts`, shape ids as in patch JSON and `registry()`).
+#[wasm_bindgen]
+pub fn shapes() -> String {
+    empyrean_patch::registry::shapes_json().to_string()
 }
 
 /// The built-in starter patches (`GET /patch/presets`), as a JSON array.

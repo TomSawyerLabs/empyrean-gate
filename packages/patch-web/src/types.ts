@@ -16,6 +16,16 @@ export type PatchShape =
   | "texture"
   | "pixels";
 
+/** One wire shape as the patch core's `shapes()` describes it: what flows on
+ * such a wire, and which shapes may drive an input of it (`accepts`, the
+ * same rule as `shapeAccepts`). */
+export interface PatchShapeDef {
+  id: PatchShape;
+  label: string;
+  description: string;
+  accepts: PatchShape[];
+}
+
 export interface PatchPortDef {
   name: string;
   shape: PatchShape;

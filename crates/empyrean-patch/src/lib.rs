@@ -48,13 +48,16 @@ pub const MAX_PATCH_EDGES: usize = 1024;
 
 /// The data type flowing on a wire — the whole type system. Wires connect only
 /// matching shapes, plus two blessed adapters (see [`Shape::accepts`]).
+/// [`Shape::description`] says the same for agents and the editor
+/// ([`registry::shapes_json`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Shape {
     /// Control-rate f32, evaluated on the CPU every frame: audio bands, sliders,
     /// LFOs, IMU axes. The cheap glue between everything else.
     Scalar,
-    /// Discrete trigger with payload: a beat, a tap, a key press.
+    /// Discrete trigger, no value: it fired this frame or it didn't (a beat, a
+    /// tap, a touch-down, a counter wrapping).
     Event,
     /// A scalar function over the polar domain (angle, radius). Symbolic on the
     /// GPU — compiled inline into WGSL, never materialized.
@@ -72,6 +75,64 @@ pub enum Shape {
 }
 
 impl Shape {
+    /// Every shape, in declaration order.
+    pub const ALL: [Shape; 8] = [
+        Shape::Scalar,
+        Shape::Event,
+        Shape::FieldScalar,
+        Shape::FieldColor,
+        Shape::Points,
+        Shape::Effects,
+        Shape::Texture,
+        Shape::Pixels,
+    ];
+
+    /// What the editor calls it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Shape::Scalar => "Scalar (number)",
+            Shape::Event => "Event",
+            Shape::FieldScalar => "Grey field (Field<f32>)",
+            Shape::FieldColor => "Colour field (Field<color>)",
+            Shape::Points => "Points",
+            Shape::Effects => "Effects",
+            Shape::Texture => "Texture",
+            Shape::Pixels => "Pixels",
+        }
+    }
+
+    /// What flows on a wire of this shape, where it is computed, and what it
+    /// may connect to — for a person or an agent composing a patch. Keep in
+    /// step with [`Shape::accepts`].
+    pub fn description(self) -> &'static str {
+        match self {
+            Shape::Scalar => {
+                "One number per frame, computed on the CPU: audio bands, sliders, LFOs, touch position, phone tilt. Every Number param of every node is also a Scalar input of the same name: its knob is the fallback while nothing is wired (a knob is held to its range, a wired value is not). A Scalar can drive any Scalar input and any grey-field input (as a uniform field, the same value at every pixel), but not a colour-field input directly: go through Colorize or Palette."
+            }
+            Shape::Event => {
+                "A trigger that fires on a frame and carries no value: a beat, a tap, a touch-down, a counter wrapping. Events connect only to Event inputs, which exist only on CPU nodes (Envelope, Counter, Toggle, Random, Delay, Event effect …). Envelope, Toggle, Counter and Random turn events into Scalars; Threshold turns a Scalar into events."
+            }
+            Shape::FieldScalar => {
+                "Field<f32>: one number per pixel, computed on the GPU as a function of the pixel's position (gradients, masks, Coordinate, Touch mask, Field math). Compiled inline into the patch shader, never stored. It drives grey-field inputs, and colour-field inputs as greyscale (RGB = the value, alpha = the value clamped to 0..1). A grey-field input also accepts a Scalar (as a uniform field)."
+            }
+            Shape::FieldColor => {
+                "Field<color>: an RGB colour per pixel plus a 0..1 coverage alpha, computed on the GPU — every generator's output. RGB may exceed 1 (the Output soft-clips); the alpha is what Blend's alpha_over and Brightness of's alpha measure read. It connects only to colour-field inputs (Transform, Blend, Color adjust, Brightness of, Output …); a colour-field input also accepts a grey field (as greyscale), but not a Scalar."
+            }
+            Shape::Points => {
+                "A bounded stream of point sprites: the live-draw dabs from Touch strokes, each with its own position, pen, colour and age. Connects only to Points inputs (Render points), which draw it into a colour field."
+            }
+            Shape::Effects => {
+                "A bounded stream of triggered show effects (bursts, strobes, sweeps, figures …) from Triggered effects (clients) and Event effect nodes. Connects only to Effects inputs: Render effects draws it into a colour field, and an Event effect's `in` merges it into that node's own stream. Render effects draws only the effects whose sources are wired into it."
+            }
+            Shape::Texture => {
+                "A materialized RGBA picture: the live video (Video in), a picture stored in the patch (Still image in) or a sprite-sheet animation (Clip). Connects only to Texture inputs (Texture sample), which map it onto the disc as a colour field."
+            }
+            Shape::Pixels => {
+                "The final per-pixel RGB sent to the LEDs and the preview. Reserved for the sink: no node port has this shape today (the Output node takes a colour field)."
+            }
+        }
+    }
+
     /// Whether a wire carrying `from` may drive an input of this shape.
     /// Two adapters are blessed because both compile to trivial WGSL:
     /// Scalar → Field<f32> (uniform field) and Field<f32> → Field<color>

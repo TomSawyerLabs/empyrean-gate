@@ -257,6 +257,33 @@ pub fn palette_json() -> serde_json::Value {
     )
 }
 
+/// The wire shapes, for agents and the editor:
+/// `[{"id", "label", "description", "accepts": [shape ids]}]`, where
+/// `accepts` lists the shapes a wire may carry into an input of this shape
+/// ([`Shape::accepts`]). `id` is the snake_case name used in patch JSON and
+/// in [`palette_json`].
+pub fn shapes_json() -> serde_json::Value {
+    use serde_json::json;
+    let id = |s: Shape| serde_json::to_value(s).expect("shape serializes");
+    json!(
+        Shape::ALL
+            .iter()
+            .map(|&s| {
+                json!({
+                    "id": id(s),
+                    "label": s.label(),
+                    "description": s.description(),
+                    "accepts": Shape::ALL
+                        .iter()
+                        .filter(|&&from| s.accepts(from))
+                        .map(|&from| id(from))
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect::<Vec<_>>()
+    )
+}
+
 const fn num(
     name: &'static str,
     label: &'static str,
@@ -2989,6 +3016,29 @@ mod tests {
                     t.id,
                     p.name
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn shapes_json_lists_every_shape_with_its_adapters() {
+        let json = shapes_json();
+        let shapes = json.as_array().unwrap();
+        assert_eq!(shapes.len(), Shape::ALL.len());
+        for s in shapes {
+            assert!(s["description"].as_str().is_some_and(|d| !d.is_empty()));
+            assert!(s["label"].as_str().is_some_and(|d| !d.is_empty()));
+        }
+        let accepts = |id: &str| {
+            shapes.iter().find(|s| s["id"] == id).unwrap()["accepts"].clone()
+        };
+        assert_eq!(accepts("field_scalar"), serde_json::json!(["scalar", "field_scalar"]));
+        assert_eq!(accepts("field_color"), serde_json::json!(["field_scalar", "field_color"]));
+        assert_eq!(accepts("event"), serde_json::json!(["event"]));
+        // Every shape a registry port uses is listed.
+        for t in TYPES {
+            for p in t.inputs.iter().chain(t.outputs) {
+                assert!(Shape::ALL.contains(&p.shape));
             }
         }
     }
