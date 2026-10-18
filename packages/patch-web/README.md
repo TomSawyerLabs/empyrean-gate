@@ -24,12 +24,57 @@ control-rate evaluator, effect and audio analysis. This package only hosts it.
   `startMic`, `startMotion`, `setMedia` (local video/image), `setDjLink` /
   `fireDjEvent`, `setMaster`. It is also a `MiniSource` for the editor.
   `loadPatchCore()` alone gives the registry, presets and `validate()` without
-  a GPU.
+  a GPU. For someone who cannot watch it: `step(dt)`, `restart()`,
+  `readFrame()` and `capture({ frames, interval, warmup, restart })`, which
+  steps the patch through patch time at a steady 60 Hz and reads each frame
+  back; `renderRing`, `contactSheet`, `encodePng` and `frameStats` turn
+  frames into PNGs and numbers without a GPU view. `attachGroove(runtime)`
+  plays a synthetic 122 BPM groove and a stand-in DJ deck when there is no
+  music. `PatchRuntime.create(geometry, { gpu, wasm })` runs without a
+  browser (Node, with the `webgpu` package).
+- `@empyrean-gate/patch-web/agent` — patches for AI agents: `createPatchApi(host)`
+  (guide, node types, presets, get/set/validate, `edit(ops)` with small
+  operations, `snapshot`, `link`), `patchTools(api)` (the same as tool
+  definitions with JSON-Schema inputs and MCP-shaped results),
+  `registerWebMcp(tools, signal)` (offers them to the browser's agent through
+  [WebMCP](https://webmachinelearning.github.io/webmcp/)), `agentGuide(core)`
+  (the guide, generated from the registry), and `patchLink` /
+  `readPatchLink` (a patch in a URL fragment). The editor takes an
+  `editorRef` (`PatchEditorHandle`: `doc`, `open`, `replace`, `arrange`), so a
+  host's tools act through it and every agent change is one undo step.
 - `@empyrean-gate/patch-web/types` — the patch document types.
 
 Peer dependencies: `react`, `react-dom`, `@xyflow/react`. Consumers bundle with
 Vite (the source ships as TypeScript, and the wasm is loaded with
 `new URL(..., import.meta.url)`).
+
+## The command line
+
+The package's `bin`, `empyrean-patch` (bundled JS; Node 22+), is the patch core
+on the command line:
+
+```sh
+npx -p webgpu -p github:TomSawyerLabs/empyrean-gate#web-dist empyrean-patch <command>
+```
+
+| Command                       | What it does                                                         |
+| ----------------------------- | -------------------------------------------------------------------- |
+| `guide [--brief]`             | The guide to making patterns (markdown)                              |
+| `nodes [kind...] [--json]`    | Node types in brief, or the named ones in full                       |
+| `presets [name]`              | The built-in patches, or one as JSON                                 |
+| `schema`                      | JSON Schema of a patch document                                      |
+| `validate <file\|->`          | Check a patch; exit 1 with the reasons                               |
+| `link <file\|->`              | A playground link that opens it                                      |
+| `render <file\|-> [-o x.png]` | Frames over time as PNG (`--frames --interval --warmup --size`)      |
+| `mcp [file]`                  | An MCP server on stdio with the agent tools, optionally bound to a file |
+
+`render` and `mcp`'s `snapshot` need WebGPU, from the optional `webgpu`
+package (Dawn); everything else runs without it. Run it with Node: Dawn's
+addon crashes Bun. For a coding agent:
+
+```sh
+claude mcp add empyrean -- npx -y -p webgpu -p github:TomSawyerLabs/empyrean-gate#web-dist empyrean-patch mcp pattern.json
+```
 
 ## Installing
 
@@ -49,6 +94,7 @@ source. The runtime needs the wasm build:
 rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli --version 0.2.129 --locked
 bun run build:wasm      # crates/empyrean-patch-wasm -> ./wasm (gitignored)
+bun run build:cli       # cli/ -> cli/empyrean-patch.mjs (gitignored)
 bun run typecheck
 bun run demo            # every preset on a bare WebGPU page, port 28150
 ```

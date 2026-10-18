@@ -18,9 +18,13 @@
   },
   "scripts": {
     "build:wasm": "bun scripts/build-wasm.ts",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p cli/tsconfig.json",
     "test": "bun test src",
-    "demo": "vite --config demo/vite.config.ts"
+    "demo": "vite --config demo/vite.config.ts",
+    "build:cli": "bun scripts/build-cli.ts"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
@@ -36,6 +40,16 @@
   "peerDependencies": {
     "@xyflow/react": "^12.11.3",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "webgpu": "^0.6.2"
+  },
+  "peerDependenciesMeta": {
+    "webgpu": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@types/node": "^24"
   }
 }

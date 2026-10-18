@@ -48,6 +48,7 @@ jobs:
         working-directory: packages/patch-web
         run: |
           bun run build:wasm
+          bun run build:cli
           bun run typecheck
 
       - name: Check out web-dist (or start it)
