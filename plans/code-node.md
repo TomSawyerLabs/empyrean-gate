@@ -217,6 +217,65 @@ Steps:
 Gotcha: CodeMirror ignores Enter for 75 ms after a completion list opens
 (`interactionDelay`); a spec must wait before accepting.
 
+## Round 3: "Convert to Code" (2026-10-18)
+
+Cameron: "sounds great. boil the ocean." A button on a built-in node's
+panel that turns it into a Code node with the same wires, as a starting
+point.
+
+Design:
+- **GPU kinds**: the generator gets a `symbolic` mode in which knob refs
+  are the knob's name and field inputs are the port's name (or
+  `name_at(ctx)` when sampled elsewhere). `code::convert(doc, node_id)`
+  rewrites the node in place: kind `code`, inputs = Number params (range,
+  `integrate` for rates) + field inputs, output `out`, body = the node's
+  generated body with the final `return X;` as `out = X;`, a header
+  comment naming the kind and every baked Select choice, and `let c0 = c;`
+  for the kinds that transform the context. Param names that are not valid
+  port names (`min`, `max`) are renamed (`min_`, `max_`), wires, knob
+  values and exposures following. Excluded: nodes that read buffers
+  (Render points/effects, Texture sample) and the stream/texture sources,
+  Output, Sub-patch, Code.
+- **CPU kinds**: hand-written script templates per kind (per Select choice
+  where it matters), checked against the real implementations by running
+  both for a few hundred frames in a test. Host inputs (Audio, IMU, Tap,
+  Touch, DJ link, Gate globals, Event effect) are not convertible.
+  Random is converted with a hash in place of xorshift (noted in the
+  body); Delay as a single delay (echoes noted).
+- **`integrate` on Code inputs** (`CodePort.integrate`): the slab
+  integrates the knob into a phase like a built-in rate, so a converted
+  `speed` keeps animating; a "rate" checkbox in the ports table.
+- **`master_speed`** joins the CPU tier's scope (templates for Time and
+  LFO need it).
+- **`return;`** ends a GPU body too: the token pass rewrites a bare
+  `return` into `return N<i>Out(…)`.
+- Registry palette gains `convertible: bool`; the editor shows "Convert to
+  Code" when set and calls a host-provided `convertToCode(doc, nodeId)`
+  (wasm `convertToCode`, gate `POST /patch/convert-to-code`, mock stub);
+  the result replaces the document as one undo step.
+
+Steps:
+1. [x] Crate: integrate flag, master_speed, `return;`, symbolic codegen,
+   `convert.rs` (GPU via the generator, 16 CPU templates), palette flag,
+   tests (every convertible GPU kind compiles + naga-validates; every CPU
+   template matches the built-in frame by frame for 120 frames, events
+   by fire count). 112 tests pass.
+2. [x] Hosts: wasm `convertToCode`, gate `POST /patch/convert-to-code`,
+   Patch.tsx, mock stub; `cargo check` clean. Site Playground: pending the
+   bump.
+3. [x] Editor: "Convert to Code" on convertible kinds, "rate" checkbox on
+   GPU scalar inputs, reference card mentions `return;`, `master_speed`
+   and the button; spec case. Found and fixed on the way: switching the
+   selection between two nodes closed the side panel (React Flow sends
+   the deselect and the select in one batch; the handler let whichever
+   came last win).
+
+Gotchas: `c` is the pixel context, so Merge events' `c` port converts as
+`c_`; `min`/`max`/`length`/`floor`/`step`/`set` are renamed (`low`,
+`high`, `len`, `base`, `advance`, `turn_on`). Comparing a converted Time
+against the built-in needs per-frame steps exact in f32 (master speed
+1.25, rate 0.8), or a cycle boundary lands a frame apart.
+
 ## Findings / gotchas
 
 - `codegen::leak()` interned port names as `&'static str` for `slot_of`;
