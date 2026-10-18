@@ -169,6 +169,50 @@ one-line summary.
    CI green, web-dist `bccbb56`, bump bot run by hand → site `dev`
    `11fd321`; Preview verified. README notes in both repos committed.
 
+## Round 2: developer experience (2026-10-18)
+
+Cameron: "i trust you. do it. i want a first class developer experience.
+can we make automatic minis too?" Reading of "automatic minis": every
+output of a Code node gets its own live mini (ring for a field, meter for a
+scalar/event), on the node and beside the editor, with no wiring needed.
+
+Decisions:
+- **CodeMirror 6** in the shared editor package (`CodeEditor.tsx`): a
+  hand-written WGSL stream mode, completion, hover docs, lint marks from
+  the host's relocated error, bracket matching, line numbers, Tab indents,
+  its own history inside the editor (the patch history still records body
+  edits, coalesced). Monaco rejected: megabytes, poor on phones.
+- **The reference comes from the patch core**, not a hand-kept list: a new
+  crate module `reference.rs` parses `patch_lib.wgsl` (every top-level `fn`
+  with its `///` doc, the `Ctx`/`Globals`/`AudioU`… struct fields with their
+  comments, the bindings, the consts) and lists the interpreter's builtins
+  with signatures. wasm `codeReference()`, gate `GET /patch/code-reference`,
+  editor prop `codeReference` (the site passes `core.codeReference` once the
+  bump lands; without it completion still has ports, keywords and WGSL
+  builtins).
+- **Preview cells are per output**: `Program.preview_cells` (node + optional
+  port), `preview_keys()` gives `"id"` for the principal / stream / texture
+  cell and `"id:port"` for a Code node's other field outputs; both hosts
+  already build mini keys as `node:<key>`, so nothing else changes.
+
+Steps:
+1. [x] Crate: `reference.rs`, builtin signatures in `script.rs`, preview
+   cells in codegen (+ tests; 105 pass), wasm exports, engine/server
+   plumbing (`cargo check` clean).
+2. [x] Editor: `CodeEditor.tsx` (CodeMirror), `CodePanel` uses it + a minis
+   row, node view rings per field output, `NodeContext` moved to
+   `context.ts`, `codeReference`/`status` props down to the panel.
+3. [x] Gate app fetches the reference; mock route; spec updated for
+   CodeMirror (4 cases pass). Real-WebGPU check through the demo: a Code
+   node with `out`, `edge`, `glow` field outputs gives cells `node:gpu`,
+   `node:gpu:edge`, `node:gpu:glow`, all lit; the CPU node's `out` and
+   `tick` are metered.
+4. [ ] Commit, push, bump; site passes `codeReference` to the editor
+   (`app/playground/Playground.tsx`, after the bump lands).
+
+Gotcha: CodeMirror ignores Enter for 75 ms after a completion list opens
+(`interactionDelay`); a spec must wait before accepting.
+
 ## Findings / gotchas
 
 - `codegen::leak()` interned port names as `&'static str` for `slot_of`;
