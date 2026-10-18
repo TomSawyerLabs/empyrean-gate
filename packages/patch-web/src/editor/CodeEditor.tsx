@@ -333,11 +333,26 @@ function makeCompletions(scope: () => CodeScope) {
     const from = word ? word.from : ctx.pos;
     const options: Completion[] = [];
     for (const p of s.inputs) {
-      options.push({ label: p.name, type: "variable", detail: `input · ${SHAPE_WORD[p.shape]}`, boost: 3 });
+      const n = p.name;
+      if (p.shape === "points" || p.shape === "effects") {
+        const rec = p.shape === "points" ? "Dab" : "Effect";
+        options.push({ label: `${n}_count`, type: "variable", detail: `u32 · live ${p.shape} on this input`, boost: 3 });
+        options.push(fnCompletion({ name: `${n}_at`, signature: `${n}_at(k: u32) -> ${rec}`, doc: `The k-th of the live ${p.shape} (0..${n}_count); a zeroed ${rec} past the end.` }, 2));
+        if (p.shape === "effects") {
+          options.push(fnCompletion({ name: `${n}_on`, signature: `${n}_on(k: u32) -> bool`, doc: `Whether effect k belongs to the chain wired into ${n} (the Effects buffer holds every chain's).` }, 2));
+        }
+        continue;
+      }
+      if (p.shape === "texture") {
+        options.push({ label: n, type: "variable", detail: "vec4f · the texture at this pixel (ring mapping)", boost: 3 });
+        options.push(fnCompletion({ name: `${n}_at`, signature: `${n}_at(uv: vec2f) -> vec4f`, doc: `The texture wired into ${n} at uv (0..1, y down), RGBA.` }, 2));
+        continue;
+      }
+      options.push({ label: n, type: "variable", detail: `input · ${SHAPE_WORD[p.shape]}`, boost: 3 });
       if (p.shape === "field_scalar" || p.shape === "field_color") {
         options.push(
           fnCompletion(
-            { name: `${p.name}_at`, signature: `${p.name}_at(ctx) -> ${p.shape === "field_color" ? "vec4f" : "f32"}`, doc: `The ${p.name} input sampled at another position, e.g. ${p.name}_at(ctx_transform(c, angle, zoom, 0.0, 0.0)).` },
+            { name: `${n}_at`, signature: `${n}_at(ctx) -> ${p.shape === "field_color" ? "vec4f" : "f32"}`, doc: `The ${n} input sampled at another position, e.g. ${n}_at(ctx_transform(c, angle, zoom, 0.0, 0.0)).` },
             2,
           ),
         );

@@ -200,3 +200,28 @@ test("the body takes a Tab as an indent", async ({ page }) => {
   await body.press("Tab");
   await expect(body).toHaveText("  out = vec4f(1.0);");
 });
+
+test("a Note node holds text on the canvas and in its panel, and saves it", async ({ page }) => {
+  const sent: string[] = [];
+  page.on("websocket", (ws) =>
+    ws.on("framesent", (f) => {
+      if (typeof f.payload === "string") sent.push(f.payload);
+    }),
+  );
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto("/#patch");
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+  await page.getByRole("button", { name: "＋ New" }).click();
+  await expect(page.locator(".pnode")).toHaveCount(2);
+  await page.locator(".palette-group", { has: page.locator("h4", { hasText: "Code" }) }).getByRole("button", { name: "Note" }).click();
+  const note = page.locator(".pnode", { has: page.locator(".pnode-note") });
+  await expect(note).toBeVisible();
+  await expect(note.locator(".pnode-port")).toHaveCount(0);
+  await note.click();
+  const text = page.locator(".patch-side").getByLabel("Note text");
+  await text.fill("Turn the twist knob first.");
+  await expect(note.locator(".pnode-note")).toHaveText("Turn the twist knob first.");
+  await expect
+    .poll(() => sent.some((m) => m.includes('"patch_save"') && m.includes('"kind":"note"') && m.includes('"text":"Turn the twist knob first."')))
+    .toBe(true);
+});

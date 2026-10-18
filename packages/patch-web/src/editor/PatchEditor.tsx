@@ -52,6 +52,7 @@ import { addLayer, layerFor, layerInput, moveLayer, removeLayer } from "./layers
 import { MiniMeter, MiniRing, type MiniSource } from "./minis";
 import {
   CODE_KIND,
+  NOTE_KIND,
   codeInputs,
   codeOutputs,
   codeParams,
@@ -615,6 +616,9 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
             : "no code"}
         </div>
       )}
+      {node.kind === NOTE_KIND && (
+        <div className="pnode-note">{node.text?.trim() ? node.text : <span className="hint">Empty note — write it on the right.</span>}</div>
+      )}
       <div className="pnode-body">
         <div className="pnode-col">
           {ins.map((p) => (
@@ -959,6 +963,25 @@ function ParamPanel({
             ? `A copy of "${node.sub.name || "patch"}" (${node.sub.nodes.length} nodes). Its exposed knobs are this node's inputs; to change the inside, edit that patch and insert it again.`
             : "An empty sub-patch renders black. Insert a saved patch or a preset from the palette's Sub-patches group instead."}
         </p>
+      )}
+      {node.kind === NOTE_KIND && (
+        <label className="patch-field">
+          <span>Text</span>
+          <textarea
+            className="note-text"
+            value={node.text ?? ""}
+            disabled={!canEdit}
+            rows={8}
+            placeholder="A remark for whoever opens this patch next."
+            aria-label="Note text"
+            onChange={(e) =>
+              onChange((d) => {
+                const n = d.nodes.find((x) => x.id === nodeId);
+                if (n) n.text = e.target.value;
+              }, `${nodeId}.text`)
+            }
+          />
+        </label>
       )}
       {node.kind === CODE_KIND && (
         <CodePanel
@@ -1832,8 +1855,9 @@ function Editor({
       const pos = canvasCenter();
       mutateDoc((d) => {
         const node: PatchNode = { id: freshId(d), kind, name: "", params: {}, pos };
-        // A Code node is nothing without its ports and body.
+        // A Code node is nothing without its ports and body; a Note is text.
         if (kind === CODE_KIND) node.code = defaultCode();
+        if (kind === NOTE_KIND) node.text = "";
         d.nodes.push(node);
       });
     },

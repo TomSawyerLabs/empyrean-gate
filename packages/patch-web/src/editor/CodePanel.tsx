@@ -9,7 +9,8 @@ import { CodeEditor, diagnosticsFor, type CodeScope } from "./CodeEditor";
 import { NodeContext } from "./context";
 import { MiniMeter, MiniRing } from "./minis";
 import {
-  CODE_SHAPES,
+  CODE_INPUT_SHAPES,
+  CODE_OUTPUT_SHAPES,
   codeTier,
   isPortName,
   MAX_CODE_PORTS,
@@ -269,7 +270,7 @@ export function CodePanel({
           aria-label={`${dir === "inputs" ? "Input" : "Output"} ${i + 1} shape`}
           onChange={(e) => reshape(dir, i, e.target.value as PatchShape)}
         >
-          {CODE_SHAPES.map((s) => (
+          {(dir === "inputs" ? CODE_INPUT_SHAPES : CODE_OUTPUT_SHAPES).map((s) => (
             <option key={s} value={s}>
               {SHAPE_NAMES[s]}
             </option>
@@ -405,7 +406,16 @@ export function CodePanel({
               </li>
               <li>
                 A field input is its value here; <code>name_at(ctx)</code> samples it elsewhere, e.g.{" "}
-                <code>img_at(ctx_transform(c, angle, zoom, 0.0, 0.0))</code>.
+                <code>img_at(ctx_transform(c, angle, zoom, 0.0, 0.0))</code>. A points or effects input
+                gives <code>name_count</code> and <code>name_at(k)</code> (a <code>Dab</code> /{" "}
+                <code>Effect</code>; <code>name_on(k)</code> says if effect k is on this wire); draw them with{" "}
+                <code>dab_color(D, c, k)</code> / <code>effect_color(E, c)</code>. A texture input is its colour
+                here, <code>name_at(uv)</code> elsewhere.
+              </li>
+              <li>
+                Loops: <code>for</code> with a fixed bound only (a literal up to 4096, a <code>_count</code>, or a{" "}
+                <code>let</code> clamped to a literal); <code>while</code> and <code>loop</code> are refused, since
+                an unbounded loop would hang the gate's GPU.
               </li>
               <li>
                 Helpers: <code>hsv2rgb(h, s, v)</code>, <code>rgb2hsv</code>, <code>snoise3(vec3f)</code>,{" "}
