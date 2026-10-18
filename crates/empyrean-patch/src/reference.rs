@@ -66,6 +66,12 @@ pub fn code_reference_json() -> serde_json::Value {
     serde_json::to_value(reference()).expect("reference serializes")
 }
 
+/// Documented, but not for a body: the entry points and the output writer.
+const INTERNAL_FNS: &[&str] = &["finish", "main"];
+/// Bindings a body has no business with: the output buffer, the parameter
+/// slab (knobs arrive by name) and the preview flag.
+const INTERNAL_GLOBALS: &[&str] = &["OUT", "P", "PREVIEW"];
+
 fn ident_at(s: &str) -> &str {
     let n = s
         .bytes()
@@ -103,7 +109,10 @@ fn parse_lib(src: &str) -> Reference {
         }
         if let Some(rest) = line.strip_prefix("fn ") {
             let name = ident_at(rest);
-            if !name.is_empty() {
+            // A `///` doc is what makes a helper part of the Code API: the
+            // undocumented ones are the lib's internals (noise primitives,
+            // the effect and dab renderers), and `finish` writes the output.
+            if !name.is_empty() && !doc.is_empty() && !INTERNAL_FNS.contains(&name) {
                 let sig_end = rest.find('{').unwrap_or(rest.len());
                 let signature = rest[..sig_end].trim().to_string();
                 helpers.push(FnRef {
@@ -171,7 +180,7 @@ fn parse_lib(src: &str) -> Reference {
                     .strip_prefix(':')
                     .map(|t| t.trim().trim_end_matches(';').trim().to_string())
                     .unwrap_or_default();
-                if !name.is_empty() {
+                if !name.is_empty() && !INTERNAL_GLOBALS.contains(&name) {
                     globals.push(GlobalRef {
                         name: name.to_string(),
                         r#type: ty,
@@ -219,12 +228,21 @@ mod tests {
         let r = reference();
         let f = |name: &str| r.helpers.iter().find(|h| h.name == name).unwrap_or_else(|| panic!("{name}"));
         assert_eq!(f("hsv2rgb").signature, "hsv2rgb(h: f32, s: f32, v: f32) -> vec3f");
+        assert!(f("hsv2rgb").doc.contains("turns"));
         assert!(f("ctx_transform").doc.contains("kaleidoscope"), "{:?}", f("ctx_transform").doc);
         assert!(f("cosine_palette").doc.contains("Quilez"));
         assert!(f("snoise3").signature.starts_with("snoise3(v: vec3f)"));
-        // One-line helpers are read too, and bodies are skipped whole.
-        assert!(r.helpers.iter().any(|h| h.name == "mod289v3"));
-        assert!(!r.helpers.iter().any(|h| h.name == "main"), "no entry point in the lib");
+        // Every listed helper is documented; the lib's internals (noise
+        // primitives, the renderers, the output writer) are not listed.
+        assert!(r.helpers.iter().all(|h| !h.doc.is_empty()));
+        for internal in ["mod289v3", "permute4", "taylor_inv_sqrt4", "video_texel", "image_texel", "effect_color", "dab_color", "stamp_frame", "finish", "main"] {
+            assert!(!r.helpers.iter().any(|h| h.name == internal), "{internal} listed");
+        }
+        for name in ["wave_at", "spec_at", "video_at", "fbm3", "rgb2hsv", "hash01", "ang_dist", "image_at", "rot2", "sd_star", "touch_mask", "touch_glow", "feedback_at", "clip_at"] {
+            assert!(r.helpers.iter().any(|h| h.name == name), "{name} missing");
+        }
+        assert!(!r.globals.iter().any(|g| matches!(g.name.as_str(), "OUT" | "P" | "PREVIEW")));
+        assert!(r.globals.iter().any(|g| g.name == "AUDIO"));
         let ctx = r.structs.iter().find(|s| s.name == "Ctx").expect("Ctx");
         let names: Vec<&str> = ctx.fields.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, ["spoke", "i", "theta", "r01", "rn", "pos"]);
@@ -239,7 +257,8 @@ mod tests {
         let gl = |name: &str| r.globals.iter().find(|g| g.name == name).unwrap_or_else(|| panic!("{name}"));
         assert_eq!(gl("G").r#type, "Globals");
         assert_eq!(gl("TAU").r#type, "f32");
-        assert!(gl("P").r#type.starts_with("array<f32"));
+        let i = ctx.fields.iter().find(|f| f.name == "i").unwrap();
+        assert!(i.doc.contains("outer"), "{:?}", i.doc);
         assert!(r.cpu_builtins.iter().any(|b| b.name == "mix" && b.signature == "mix(a, b, t)"));
         // It serializes (the hosts ship it as JSON).
         let json = code_reference_json();

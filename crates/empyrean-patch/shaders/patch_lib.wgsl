@@ -143,11 +143,13 @@ const WAVE_N: u32 = 256u;
 const SPEC_N: u32 = 64u;
 const SCOPE_STRIDE: u32 = WAVE_N + SPEC_N;
 
+/// The audio waveform of source `src` (0..3) at `t` turns around its ring of 256 samples, -1..1.
 fn wave_at(src: u32, t: f32) -> f32 {
     let i = u32(fract(t) * f32(WAVE_N)) % WAVE_N;
     return SCOPE[src * SCOPE_STRIDE + i];
 }
 
+/// Spectrum band `i` (0..63, low to high) of audio source `src` (0..3), 0..1.
 fn spec_at(src: u32, i: u32) -> f32 {
     return SCOPE[src * SCOPE_STRIDE + WAVE_N + min(i, SPEC_N - 1u)];
 }
@@ -158,6 +160,7 @@ fn video_texel(x: u32, y: u32) -> vec4f {
     return unpack4x8unorm(VIDEO[iy * G.video_width + ix]);
 }
 
+/// The live video frame at `uv` (0..1, y down), RGBA; transparent black outside it or with no video.
 fn video_at(uv: vec2f) -> vec4f {
     if G.video_active == 0u || G.video_width == 0u || G.video_height == 0u
         || any(uv < vec2f(0.0)) || any(uv > vec2f(1.0)) {
@@ -181,6 +184,7 @@ fn mod289v4(x: vec4f) -> vec4f { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 fn permute4(x: vec4f) -> vec4f { return mod289v4(((x * 34.0) + 1.0) * x); }
 fn taylor_inv_sqrt4(r: vec4f) -> vec4f { return 1.79284291400159 - 0.85373472095314 * r; }
 
+/// Simplex noise at `v` (use the third component for time), about -1..1.
 fn snoise3(v: vec3f) -> f32 {
     let C = vec2f(1.0 / 6.0, 1.0 / 3.0);
     let D = vec4f(0.0, 0.5, 1.0, 2.0);
@@ -241,6 +245,7 @@ fn snoise3(v: vec3f) -> f32 {
     return 42.0 * dot(m * m, vec4f(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
 }
 
+/// Fractal noise: `octaves` layers of snoise3 at doubling frequency, about -1..1.
 fn fbm3(p: vec3f, octaves: u32) -> f32 {
     var value = 0.0;
     var amplitude = 0.5;
@@ -257,6 +262,7 @@ fn fbm3(p: vec3f, octaves: u32) -> f32 {
 // Small helpers
 // ---------------------------------------------------------------------------
 
+/// Hue `h` in turns (wraps), saturation and value 0..1, to RGB.
 fn hsv2rgb(h: f32, s: f32, v: f32) -> vec3f {
     let hh = fract(h) * 6.0;
     let c = v * s;
@@ -274,6 +280,7 @@ fn hsv2rgb(h: f32, s: f32, v: f32) -> vec3f {
     return rgb + vec3f(v - c);
 }
 
+/// RGB to (hue in turns, saturation, value).
 fn rgb2hsv(c: vec3f) -> vec3f {
     let mx = max(c.r, max(c.g, c.b));
     let mn = min(c.r, min(c.g, c.b));
@@ -294,6 +301,7 @@ fn rgb2hsv(c: vec3f) -> vec3f {
 }
 
 // Master hue pull — keep in lockstep with the copy in gate.wgsl.
+/// The crew's master hue pull applied to a colour (what the Output does to every pixel).
 fn hue_pull(rgb: vec3f) -> vec3f {
     if G.hue_amount <= 0.0 {
         return rgb;
@@ -315,10 +323,12 @@ fn wang_hash(seed: u32) -> u32 {
     return s;
 }
 
+/// A fixed pseudo-random 0..1 for an integer seed (e.g. `c.spoke`, a particle index).
 fn hash01(seed: u32) -> f32 {
     return f32(wang_hash(seed)) / 4294967295.0;
 }
 
+/// The shortest angular distance between two angles in radians, 0..PI.
 fn ang_dist(a: f32, b: f32) -> f32 {
     let d = (a - b) % TAU;
     return abs(((d + 3.0 * PI) % TAU) - PI);
@@ -334,6 +344,7 @@ fn image_texel(slot: u32, x: u32, y: u32) -> vec4f {
     return unpack4x8unorm(VIDEO[slot * IMAGE_SIZE * IMAGE_SIZE + iy * IMAGE_SIZE + ix]);
 }
 
+/// A Still image node's picture: media cell `slot` (1..4) at `uv` (0..1), bilinear; transparent outside or when empty.
 fn image_at(slot: u32, uv: vec2f) -> vec4f {
     if (G.image_mask & (1u << slot)) == 0u || any(uv < vec2f(0.0)) || any(uv > vec2f(1.0)) {
         return vec4f(0.0);
@@ -432,8 +443,8 @@ fn feedback_at(c: Ctx) -> vec3f {
 // ---------------------------------------------------------------------------
 
 struct Ctx {
-    spoke: u32,
-    i: u32,
+    spoke: u32,  // spoke index, 0..G.spokes
+    i: u32,      // pixel index along the spoke, 0 at the outer end
     theta: f32,   // spoke angle, radians
     r01: f32,     // 0 = OUTER end of spoke, 1 = inner end (string order)
     rn: f32,      // radius normalized: inner/outer .. 1.0 (1 = outer edge)
@@ -484,14 +495,17 @@ fn apply_blend(acc: vec3f, c: vec4f, opacity: f32, mode: u32) -> vec3f {
     }
 }
 
+/// `x` wrapped into 0..`y` (unlike `%`, never negative).
 fn fmod_pos(x: f32, y: f32) -> f32 { return x - y * floor(x / y); }
 
+/// `p` rotated by `a` radians.
 fn rot2(p: vec2f, a: f32) -> vec2f {
     let c = cos(a);
     let s = sin(a);
     return vec2f(c * p.x + s * p.y, c * p.y - s * p.x);
 }
 
+/// Signed distance to an `n`-pointed star of radius `r` (`m` sets how deep the points are, 2..n); negative inside.
 fn sd_star(p_in: vec2f, r: f32, n: f32, m: f32) -> f32 {
     let an = PI / n;
     let en = PI / m;
@@ -509,10 +523,12 @@ fn heart_r(a: f32) -> f32 {
     return 2.0 - 2.0 * s + s * sqrt(abs(cos(a))) / (s + 1.4);
 }
 
+/// Signed distance to a diamond of radius `r`; negative inside.
 fn sd_diamond(p: vec2f, r: f32) -> f32 {
     return (abs(p.x) + abs(p.y) - r) * 0.70710678;
 }
 
+/// Signed distance to an equilateral triangle of radius `r`; negative inside.
 fn sd_triangle(p_in: vec2f, r: f32) -> f32 {
     let k = sqrt(3.0);
     let h = r * 0.86602540;
@@ -524,6 +540,7 @@ fn sd_triangle(p_in: vec2f, r: f32) -> f32 {
     return -length(p) * sign(p.y);
 }
 
+/// Signed distance to a crescent: a disc of radius `ra` minus one of radius `rb` offset by `d`; negative inside.
 fn sd_moon(p_in: vec2f, d: f32, ra: f32, rb: f32) -> f32 {
     let p = vec2f(p_in.x, abs(p_in.y));
     let a = (ra * ra - rb * rb + d * d) / (2.0 * d);
@@ -849,6 +866,7 @@ fn touch_cover(T: Touch, ctx: Ctx, radius: f32, soft: f32, fade: f32, grow: f32,
     return (1.0 - smoothstep(size * (1.0 - edge), size * (1.0 + edge * 0.5), dist)) * life;
 }
 
+/// Coverage 0..1 of the live touches at this pixel (the Touch mask node): spot `radius`, `soft` edge, `fade` seconds after release, `grow` while held, motion `trail`.
 fn touch_mask(ctx: Ctx, radius: f32, soft: f32, fade: f32, grow: f32, trail: f32) -> f32 {
     var acc = 0.0;
     for (var t = 0u; t < G.touch_count; t++) {
@@ -857,6 +875,7 @@ fn touch_mask(ctx: Ctx, radius: f32, soft: f32, fade: f32, grow: f32, trail: f32
     return acc;
 }
 
+/// The live touches at this pixel in each toucher's colour (the Touch glow node), RGBA; same knobs as touch_mask.
 fn touch_glow(ctx: Ctx, radius: f32, soft: f32, fade: f32, grow: f32, trail: f32) -> vec4f {
     var acc = vec3f(0.0);
     var cover = 0.0;
