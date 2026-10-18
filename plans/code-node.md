@@ -281,6 +281,15 @@ Gotchas: `c` is the pixel context, so Merge events' `c` port converts as
 against the built-in needs per-frame steps exact in f32 (master speed
 1.25, rate 0.8), or a cycle boundary lands a frame apart.
 
+## Round 4: the body in a large modal (2026-10-18)
+
+Cameron: "need to be able to open the wgsl editor in a bigger modal." An
+⤢ Expand control on the body opens a native `<dialog>` (showModal: focus
+trap, Esc, backdrop) at min(96vw, 1200px) × min(90vh, 900px) holding the
+one editor instance (the panel shows "Editing in the large view" meanwhile,
+so two CodeMirrors never fight over one body), the live minis row and the
+node's error line; Done or Esc returns it to the panel. Spec case added.
+
 ## Findings / gotchas
 
 - `codegen::leak()` interned port names as `&'static str` for `slot_of`;
