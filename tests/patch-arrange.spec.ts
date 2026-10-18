@@ -91,3 +91,33 @@ test("on a phone, Arrange is in the patch menu", async ({ page }) => {
   expect(nodes.length).toBe(2);
   expect(overlap(nodes[0], nodes[1])).toBe(false);
 });
+
+// The menu alone hid them (2026-10-18: "a little too hidden on mobile").
+test("on a phone, Arrange and Undo are also chips on the canvas", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#patch");
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+  await page.locator(".patch-name-chip").click();
+  await page.getByRole("button", { name: "＋ Blank patch" }).click();
+  await page.getByRole("button", { name: "Add node" }).click();
+  await page.locator(".patch-palette .palette-item", { hasText: "Noise" }).click();
+  await expect(page.locator(".react-flow__node")).toHaveCount(3);
+  const before = await placed(page);
+
+  await page.getByRole("button", { name: "Arrange", exact: true }).click();
+  await page.waitForTimeout(500);
+  const after = await placed(page);
+  for (const a of after) for (const b of after) if (a.id < b.id) expect(overlap(a, b), `${a.label} / ${b.label}`).toBe(false);
+  const moved = after.filter((n) => {
+    const b = before.find((m) => m.id === n.id)!;
+    return b.x !== n.x || b.y !== n.y;
+  });
+  expect(moved.length).toBeGreaterThan(0);
+
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  const back = await placed(page);
+  for (const n of before) {
+    const b = back.find((m) => m.id === n.id)!;
+    expect([b.x, b.y]).toEqual([n.x, n.y]);
+  }
+});

@@ -2172,8 +2172,8 @@ function Editor({
                 onClick={() => setSheet("menu")}
                 aria-label={doc ? `Patch: ${doc.name || "Untitled"}. Open the patch menu` : "Open the patch menu"}
               >
+                <span aria-hidden="true">☰ </span>
                 {doc ? doc.name || "Untitled" : patches.length ? "Open patch…" : "Patches"}
-                <span aria-hidden="true"> ▾</span>
               </button>
               {status?.error && (
                 <button
@@ -2185,6 +2185,32 @@ function Editor({
                 >
                   ⚠
                 </button>
+              )}
+              {/* Undo and Arrange are on the canvas too: in the menu alone a
+                  phone never found them. */}
+              {canEdit && doc && (
+                <>
+                  <button
+                    type="button"
+                    className="patch-tool-chip"
+                    onClick={undo}
+                    disabled={!history.current.canUndo}
+                    aria-label="Undo"
+                    title="Undo"
+                  >
+                    ↶
+                  </button>
+                  <button
+                    type="button"
+                    className="patch-tool-chip"
+                    onClick={arrangeNodes}
+                    disabled={doc.nodes.length < 2}
+                    aria-label="Arrange"
+                    title="Lay the graph out left to right by its wires (undoable)"
+                  >
+                    ⇆
+                  </button>
+                </>
               )}
               {canEdit && doc && registry && (
                 <button
