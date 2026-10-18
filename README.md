@@ -469,7 +469,7 @@ src-tauri/src/
 | `src/` | The operator UI (React), served to the desktop window and every client |
 | `crates/empyrean-patch` | The patch core, host-independent: document model, registry, validation, WGSL codegen (+ `shaders/patch_lib.wgsl`), control-rate evaluator, presets, effect types, the GPU records the patch shader reads, audio analysis, and a one-patch `Sim`. No I/O, no GPU dependency |
 | `crates/empyrean-patch-wasm` | `wasm-bindgen` bindings for that core |
-| `packages/patch-web` | `@empyrean-gate/patch-web`: the patch editor (used by the Patch tab) and a WebGPU runtime for patches, published to the `web-dist` branch for empyreangate.org — see its README |
+| `packages/patch-web` | `@empyrean-gate/patch-web`: the patch editor (used by the Patch tab), a WebGPU runtime for patches, tools for AI agents (WebMCP, a guide generated from the registry) and the `empyrean-patch` CLI / MCP server, published to the `web-dist` branch for empyreangate.org — see its README |
 
 `crates/` is its own Cargo workspace (`cd crates && cargo test`); `src-tauri`
 depends on `empyrean-patch` by path and re-exports it as `crate::patch`.
