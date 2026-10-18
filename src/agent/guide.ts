@@ -172,7 +172,8 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
     "- `id`: leave empty for a new patch; the store assigns one.",
     "- `nodes[]`: `id` (unique in the patch, short: `bow`, `n3`), `kind` (a node type), `name` (a label, may be empty), " +
       "`params` (knob values by param name; missing ones take the default), `pos` (canvas position; " +
-      "all `[0, 0]` or `arrange: true` lays the graph out for you).",
+      "all `[0, 0]` or `arrange: true` lays the graph out for you), and `collapsed: true` to show it minimized " +
+      "in the editor (looks only).",
     "- `edges[]`: `{ from: { node, port }, to: { node, port } }`, from an output port to an input port. " +
       "An input takes one wire.",
     "- `exposed[]`: knobs promoted to the gate's Control surface (phones on the dance floor can play them).",

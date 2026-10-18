@@ -39,9 +39,10 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./editor.css";
-import { arrangeDoc, type NodeSize } from "./arrange";
+import { arrangeDoc, DEFAULT_SIZE, type NodeSize } from "./arrange";
 import { ClipPicker } from "./ClipPicker";
 import { CodePanel } from "./CodePanel";
+import { combinerFor, freeSpot, insertCombiner, type Combiner, type PortRef } from "./combine";
 import { NodeContext, type WireDrag } from "./context";
 import { SHAPE_LABEL, suggestConnections, type Suggestion } from "./connect";
 import { imageFileToMedia } from "./files";
@@ -308,6 +309,36 @@ function portShape(
   return inputPorts(def, node).find((p) => p.name === port)?.shape ?? null;
 }
 
+/** The inputs of a node that are knobs (a Number param, a Code node's Scalar
+ * input, a Sub-patch's exposed knob) rather than shaped inputs. A minimized
+ * node shows a knob's port only while it is wired. */
+function knobNames(def: PatchNodeType, node: PatchNode): Set<string> {
+  if (def.id === SUBPATCH_KIND) return new Set(subpatchPorts(node).map((p) => p.name));
+  if (def.id === CODE_KIND) return new Set(codeParams(node).map((p) => p.name));
+  return new Set(def.params.filter((p) => p.kind === "number").map((p) => p.name));
+}
+
+/** A second wire, `from` → `to`, into an input that already has one: the
+ * combiner that would go in between. Null when the input is free, the wire is
+ * the one already there, or nothing combines that shape. */
+function combinerAt(d: PatchDoc, registry: Registry, from: PortRef, to: PortRef): Combiner | null {
+  const existing = d.edges.find((e) => e.to.node === to.node && e.to.port === to.port);
+  if (!existing) return null;
+  if (existing.from.node === from.node && existing.from.port === from.port) return null;
+  const shapeOf = (ref: PortRef, dir: "in" | "out") => {
+    const n = d.nodes.find((x) => x.id === ref.node);
+    return portShape(registry.get(n?.kind ?? ""), ref.port, dir, n);
+  };
+  const into = shapeOf(to, "in");
+  const old = shapeOf(existing.from, "out");
+  const incoming = shapeOf(from, "out");
+  return into && old && incoming ? combinerFor(registry, into, old, incoming) : null;
+}
+
+/** About what a minimized node measures (a mini ring, port dots, one line of
+ * head), for placing a new combiner before React Flow has measured it. */
+const COLLAPSED_SIZE: NodeSize = { width: 96, height: 112 };
+
 /** A new, unused node id in `d`. */
 function freshId(d: PatchDoc, taken?: Set<string>): string {
   let i = d.nodes.length + 1;
@@ -357,7 +388,7 @@ const RING_SHAPES: readonly PatchShape[] = [
 
 const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<PatchFlowNode>) {
   const { node, def } = data;
-  const { activeId, minis, drag } = useContext(NodeContext);
+  const { activeId, minis, drag, combines, setCollapsed } = useContext(NodeContext);
   if (!def) {
     return <div className="pnode pnode-unknown">unknown: {node.kind}</div>;
   }
@@ -395,21 +426,111 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
         (p) => meterable.length <= 4 || p.name === "out" || data.wiredOut.includes(p.name),
       )
     : [];
-  // While a wire is being dragged, each port says whether it would take it.
+  // While a wire is being dragged, each port says whether it would take it:
+  // a free input of a fitting shape, or a taken one that would put a
+  // combiner (a Blend, say) between the two wires.
   const fitClass = (shape: PatchShape, dir: "in" | "out", name: string): string => {
     if (!drag) return "";
     if (drag.node === node.id) return " port-nofit";
-    const fits =
-      dir === "in"
-        ? drag.dir === "out" && shapeAccepts(shape, drag.shape) && !data.wiredIn.includes(name)
-        : drag.dir === "in" && shapeAccepts(drag.shape, shape);
-    return fits ? " port-fit" : " port-nofit";
+    if (dir === "out") return drag.dir === "in" && shapeAccepts(drag.shape, shape) ? " port-fit" : " port-nofit";
+    if (drag.dir !== "out" || !shapeAccepts(shape, drag.shape)) return " port-nofit";
+    if (!data.wiredIn.includes(name)) return " port-fit";
+    return combines(node.id, name) ? " port-fit port-combine" : " port-nofit";
   };
+  const portLabel = (p: { name: string; shape: PatchShape }, dir: "in" | "out") =>
+    `${p.name} · ${SHAPE_LABEL[p.shape]} ${dir}`;
+  const collapseButton = setCollapsed && (
+    <button
+      type="button"
+      className="pnode-collapse nodrag"
+      aria-label={node.collapsed ? `Expand ${def.label}` : `Minimize ${def.label}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        setCollapsed(node.id, !node.collapsed);
+      }}
+    >
+      {node.collapsed ? "+" : "−"}
+    </button>
+  );
+
+  if (node.collapsed) {
+    // Minimized: the mini (or, off air, the node's first choice, such as a
+    // Blend's mode) between two columns of bare port dots. Shaped inputs
+    // always show, knobs only while wired, outputs while wired or principal.
+    // The dots are named while a wire is dragged, when it matters which is
+    // which; the side panel has the rest.
+    const knobs = knobNames(def, node);
+    const shownIns = ins.filter((p) => !knobs.has(p.name) || data.wiredIn.includes(p.name));
+    const wiredOuts = outs.filter((p) => p === primary || data.wiredOut.includes(p.name));
+    const shownOuts = wiredOuts.length > 0 ? wiredOuts : outs.slice(0, 1);
+    const choice = def.params.find((p) => p.kind !== "number");
+    const choiceLabel =
+      choice && choice.kind !== "number"
+        ? choice.kind.select[Math.round(node.params[choice.name] ?? choice.default)]
+        : undefined;
+    // No thumbnail (a number or event output): its meter instead.
+    const faceMeter = rings.length === 0 ? meterPorts.find((p) => shownOuts.includes(p)) : undefined;
+    const named = drag !== null;
+    return (
+      <div className={`pnode pnode-collapsed cat-${def.category} ${selected ? "selected" : ""}`}>
+        <div className="pnode-head">
+          <span className="pnode-title">{node.name || def.label}</span>
+          {collapseButton}
+        </div>
+        <div className="pnode-body">
+          <div className="pnode-col">
+            {shownIns.map((p) => (
+              <div
+                key={p.name}
+                className={`pnode-port in${fitClass(p.shape, "in", p.name)}`}
+                aria-label={portLabel(p, "in")}
+              >
+                <Handle type="target" position={Position.Left} id={p.name} className={`port-dot shape-${p.shape}`} />
+                {named && <span>{p.name}</span>}
+              </div>
+            ))}
+          </div>
+          <div className="pnode-face">
+            {rings.length > 0 ? (
+              <div className="pnode-mini">
+                <MiniRing source={minis!} mini={rings[0].mini} label={rings[0].label} />
+              </div>
+            ) : null}
+            {faceMeter && (
+              <MiniMeter
+                source={minis!}
+                mini={`scalar:${node.id}:${faceMeter.name}`}
+                label={faceMeter.name}
+                kind={faceMeter.shape === "event" ? "event" : "scalar"}
+              />
+            )}
+            {choiceLabel && <span className="pnode-choice">{choiceLabel}</span>}
+          </div>
+          <div className="pnode-col out">
+            {shownOuts.map((p) => (
+              <div
+                key={p.name}
+                className={`pnode-port out${fitClass(p.shape, "out", p.name)}`}
+                aria-label={portLabel(p, "out")}
+              >
+                {named && <span>{p.name}</span>}
+                <Handle type="source" position={Position.Right} id={p.name} className={`port-dot shape-${p.shape}`} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`pnode cat-${def.category} ${selected ? "selected" : ""}`}>
       <div className="pnode-head">
-        {def.label}
-        {node.name && <span className="pnode-name"> · {node.name}</span>}
+        <span className="pnode-title">
+          {def.label}
+          {node.name && <span className="pnode-name"> · {node.name}</span>}
+        </span>
+        {collapseButton}
       </div>
       {rings.length === 1 && (
         <div className="pnode-mini">
@@ -456,7 +577,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
         </div>
       )}
       {node.kind === CODE_KIND && (
-        <div className="pnode-code hint" title={node.code?.body}>
+        <div className="pnode-code hint">
           {node.code
             ? `${codeTier(node.code)?.toUpperCase() ?? "?"} · ${node.code.body.split("\n").filter((l) => l.trim()).length} lines`
             : "no code"}
@@ -468,7 +589,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
             <div
               key={p.name}
               className={`pnode-port in${fitClass(p.shape, "in", p.name)}`}
-              title={`${p.name} · ${SHAPE_LABEL[p.shape]} in`}
+              aria-label={portLabel(p, "in")}
             >
               <Handle
                 type="target"
@@ -485,7 +606,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
             <div
               key={p.name}
               className={`pnode-port out${fitClass(p.shape, "out", p.name)}`}
-              title={`${p.name} · ${SHAPE_LABEL[p.shape]} out`}
+              aria-label={portLabel(p, "out")}
             >
               <span>{p.name}</span>
               <Handle
@@ -1402,25 +1523,88 @@ function Editor({
       const from = portShape(registry.get(source?.kind ?? ""), conn.sourceHandle, "out", source);
       const into = portShape(registry.get(target?.kind ?? ""), conn.targetHandle, "in", target);
       if (!from || !into || !shapeAccepts(into, from)) return false;
-      // One wire per input.
-      return !d.edges.some(
-        (e) => e.to.node === conn.target && e.to.port === conn.targetHandle,
+      // One wire per input; a second one into a taken input is fine when a
+      // combiner can go between them (onConnect puts it there).
+      const taken = d.edges.some((e) => e.to.node === conn.target && e.to.port === conn.targetHandle);
+      return (
+        !taken ||
+        combinerAt(
+          d,
+          registry,
+          { node: conn.source, port: conn.sourceHandle },
+          { node: conn.target, port: conn.targetHandle },
+        ) !== null
       );
     },
     [registry],
   );
 
+  /** Where a combiner for input `to` goes: just left of that input, level
+   * with its port, in the first spot no node covers. */
+  const combinerSpot = useCallback(
+    (to: PortRef): [number, number] => {
+      const target = flow.getInternalNode(to.node);
+      if (!target) return [0, 0];
+      const at = target.internals.positionAbsolute;
+      const handle = target.internals.handleBounds?.target?.find((h) => h.id === to.port);
+      const y = handle ? at.y + handle.y + handle.height / 2 - COLLAPSED_SIZE.height / 2 : at.y;
+      const taken = flow.getNodes().map((n) => ({
+        x: n.position.x,
+        y: n.position.y,
+        width: n.measured?.width ?? DEFAULT_SIZE.width,
+        height: n.measured?.height ?? DEFAULT_SIZE.height,
+      }));
+      return freeSpot([at.x - COLLAPSED_SIZE.width - 48, y], COLLAPSED_SIZE, taken);
+    },
+    [flow],
+  );
+
   const onConnect = useCallback(
     (conn: Connection) => {
-      if (!canEdit || !conn.sourceHandle || !conn.targetHandle) return;
-      mutateDoc((d) => {
-        d.edges.push({
-          from: { node: conn.source, port: conn.sourceHandle! },
-          to: { node: conn.target, port: conn.targetHandle! },
+      const d = docRef.current;
+      if (!canEdit || !d || !registry || !conn.sourceHandle || !conn.targetHandle) return;
+      const from = { node: conn.source, port: conn.sourceHandle };
+      const to = { node: conn.target, port: conn.targetHandle };
+      const combiner = combinerAt(d, registry, from, to);
+      if (!combiner) {
+        mutateDoc((doc) => {
+          doc.edges.push({ from, to });
         });
+        return;
+      }
+      // A second wire into a taken input: a combiner between the two, as one
+      // undo step, selected so its mode and amount are in the side panel.
+      const id = freshId(d);
+      const pos = combinerSpot(to);
+      mutateDoc((doc) => {
+        insertCombiner(doc, to, from, combiner, id, pos);
+      });
+      setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })));
+      setSelectedNode(id);
+    },
+    [canEdit, combinerSpot, mutateDoc, registry],
+  );
+
+  /** For node views: would the wire being dragged combine into this taken input? */
+  const combines = useCallback(
+    (node: string, port: string) => {
+      const d = docRef.current;
+      if (!d || !registry || !drag || drag.dir !== "out") return false;
+      return combinerAt(d, registry, { node: drag.node, port: drag.port }, { node, port }) !== null;
+    },
+    [drag, registry],
+  );
+
+  const setCollapsed = useCallback(
+    (id: string, collapsed: boolean) => {
+      mutateDoc((d) => {
+        const n = d.nodes.find((x) => x.id === id);
+        if (!n) return;
+        if (collapsed) n.collapsed = true;
+        else delete n.collapsed;
       });
     },
-    [canEdit, mutateDoc],
+    [mutateDoc],
   );
 
   // Dragging a wire: remember where it started so ports can show whether they
@@ -1432,7 +1616,7 @@ function Editor({
       const node = d.nodes.find((n) => n.id === p.nodeId);
       const dir = p.handleType === "source" ? "out" : "in";
       const shape = portShape(registry.get(node?.kind ?? ""), p.handleId, dir, node);
-      if (shape) setDrag({ node: p.nodeId, shape, dir });
+      if (shape) setDrag({ node: p.nodeId, port: p.handleId, shape, dir });
       setChooser(null);
     },
     [registry],
@@ -1758,7 +1942,9 @@ function Editor({
         </div>
       )}
 
-      <NodeContext.Provider value={{ activeId, minis, drag }}>
+      <NodeContext.Provider
+        value={{ activeId, minis, drag, combines, setCollapsed: canEdit ? setCollapsed : null }}
+      >
       <div className="patch-main">
         {canEdit && doc && registry && (!compact || sheet === "palette") && (
           <Palette

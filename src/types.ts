@@ -80,6 +80,9 @@ export interface PatchNode {
    * inputs are its input ports (Scalar ones are knobs too, values in
    * `params`), the declared outputs its output ports. */
   code?: CodeDef;
+  /** Shown minimized in the editor: a mini with port dots, no labels or
+   * knobs (purely presentational; left out when false). */
+  collapsed?: boolean;
 }
 
 /** One declared port of a Code node. `min`/`max`/`default` matter for a
