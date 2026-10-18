@@ -1190,3 +1190,40 @@
   font-size: 10px;
   line-height: 18px;
 }
+
+/* Note nodes: a remark on the canvas */
+
+.pnode.kind-note,
+.pnode.cat-code:has(.pnode-note) {
+  background: #2d2a14;
+  border-color: #6b5f1e;
+}
+
+.pnode:has(.pnode-note) .pnode-head {
+  border-left: 3px solid #f2c94c;
+  color: #f2e6a8;
+}
+
+.pnode-note {
+  padding: 4px 10px 8px;
+  max-width: 260px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #f2e6a8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.note-text {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  color: inherit;
+  background: var(--pe-bg, #0d0a1a);
+  border: 1px solid #2a2445;
+  border-radius: 4px;
+  padding: 6px;
+  resize: vertical;
+}

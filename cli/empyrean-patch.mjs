@@ -5967,7 +5967,7 @@ function round(v) {
 }
 
 // src/types.ts
-var PATCH_FORMAT = 5;
+var PATCH_FORMAT = 6;
 var MAX_CODE_BYTES = 8192, MAX_CODE_PORTS = 16;
 
 // src/editor/files.ts

@@ -4,7 +4,7 @@
 
 /** The patch document format this package writes (crate::PATCH_FORMAT).
  * Older documents are upgraded with the patch core's `migrate`. */
-export const PATCH_FORMAT = 5;
+export const PATCH_FORMAT = 6;
 
 export type PatchShape =
   | "scalar"
@@ -85,6 +85,8 @@ export interface PatchNode {
    * inputs are its input ports (Scalar ones are knobs too, values in
    * `params`), the declared outputs its output ports. */
   code?: CodeDef;
+  /** A Note node's text: a remark on the canvas, nothing more. */
+  text?: string;
   /** Shown minimized in the editor: a mini with port dots, no labels or
    * knobs (purely presentational; left out when false). */
   collapsed?: boolean;
@@ -191,9 +193,24 @@ export interface CodeReference {
 /** The node kind whose ports and body live on the instance (crate `code::KIND`). */
 export const CODE_KIND = "code";
 
-/** Shapes a Code node's ports may have (the rest need their own binding
- * idiom in the body; a follow-up). */
-export const CODE_SHAPES: readonly PatchShape[] = ["scalar", "event", "field_scalar", "field_color"];
+/** The node kind that is a remark on the canvas (crate `registry::NOTE_KIND`). */
+export const NOTE_KIND = "note";
+
+/** Shapes a Code node's inputs may have. Points, Effects and Texture reach
+ * a GPU body as `name_count` / `name_at(k)` / `name_on(k)` / `name_at(uv)`. */
+export const CODE_INPUT_SHAPES: readonly PatchShape[] = [
+  "scalar",
+  "event",
+  "field_scalar",
+  "field_color",
+  "points",
+  "effects",
+  "texture",
+];
+/** Shapes a Code node's outputs may have: what a body can make. */
+export const CODE_OUTPUT_SHAPES: readonly PatchShape[] = ["scalar", "event", "field_scalar", "field_color"];
+/** @deprecated use CODE_INPUT_SHAPES / CODE_OUTPUT_SHAPES */
+export const CODE_SHAPES = CODE_OUTPUT_SHAPES;
 
 /** Longest body the core accepts (crate `code::MAX_CODE_BYTES`). */
 export const MAX_CODE_BYTES = 8192;
@@ -206,14 +223,16 @@ export const MAX_CODE_PORTS = 16;
 export function codeTier(def: CodeDef): "cpu" | "gpu" | null {
   const field = (s: PatchShape) => s === "field_scalar" || s === "field_color";
   const control = (s: PatchShape) => s === "scalar" || s === "event";
+  const buffer = (s: PatchShape) => s === "points" || s === "effects" || s === "texture";
   if (def.outputs.length === 0) return null;
-  for (const p of [...def.inputs, ...def.outputs]) if (!field(p.shape) && !control(p.shape)) return null;
+  for (const p of def.outputs) if (!field(p.shape) && !control(p.shape)) return null;
+  for (const p of def.inputs) if (!field(p.shape) && !control(p.shape) && !buffer(p.shape)) return null;
   if (def.outputs.some((p) => field(p.shape))) {
     if (def.outputs.some((p) => !field(p.shape))) return null;
     if (def.inputs.some((p) => p.shape === "event")) return null;
     return "gpu";
   }
-  if (def.inputs.some((p) => field(p.shape))) return null;
+  if (def.inputs.some((p) => field(p.shape) || buffer(p.shape))) return null;
   return "cpu";
 }
 
