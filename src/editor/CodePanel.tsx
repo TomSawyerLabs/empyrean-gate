@@ -1,9 +1,13 @@
-// The side panel of a Code node: its ports (editable), its body (WGSL), and
-// a reference card. The core validates the result on every edit; what it
-// refuses shows in the editor's status line, with body line numbers when a
-// shader error lands inside the body. See plans/code-node.md.
+// The side panel of a Code node: live minis for every output, its ports
+// (editable), its body in a real code editor (CodeEditor.tsx: WGSL mode,
+// completion, hover docs, error marks), and a reference card. The core
+// validates the result on every edit; what it refuses shows under the minis
+// and as a mark on the body's line. See plans/code-node.md.
 
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useContext, useMemo } from "react";
+import { CodeEditor, diagnosticsFor, type CodeScope } from "./CodeEditor";
+import { NodeContext } from "./context";
+import { MiniMeter, MiniRing } from "./minis";
 import {
   CODE_SHAPES,
   codeTier,
@@ -12,6 +16,7 @@ import {
   shapeAccepts,
   type CodeDef,
   type CodePort,
+  type CodeReference,
   type PatchDoc,
   type PatchNode,
   type PatchShape,
@@ -28,7 +33,7 @@ const SHAPE_NAMES: Record<PatchShape, string> = {
   pixels: "pixels",
 };
 
-/** A port name not yet used by `def`: `in2`, `in3`… */
+/** A port name not yet used by `def`: `in`, `in2`, `in3`… */
 function freshPortName(def: CodeDef, base: string): string {
   const taken = new Set([...def.inputs, ...def.outputs].map((p) => p.name));
   if (!taken.has(base)) return base;
@@ -37,20 +42,38 @@ function freshPortName(def: CodeDef, base: string): string {
   return `${base}${i}`;
 }
 
+/** The part of the host's error that is about this node, if any. */
+function ownError(error: string | null, node: PatchNode): string | null {
+  if (!error) return null;
+  const names = [node.id, node.name].filter(Boolean);
+  const parts = error.split(/(?=Code node ")/);
+  const mine = parts.filter((p) => names.some((n) => p.startsWith(`Code node "${n}"`)));
+  if (mine.length) return mine.join("").trim();
+  // A shader failure that names no node is still worth showing on a GPU node.
+  return null;
+}
+
 export function CodePanel({
   node,
+  doc,
   canEdit,
   onChange,
+  error,
+  reference,
 }: {
   node: PatchNode;
+  doc: PatchDoc;
   canEdit: boolean;
   onChange: (mutate: (d: PatchDoc) => void, key?: string) => void;
+  /** The renderer's verdict on the patch (`status.error`). */
+  error: string | null;
+  reference: CodeReference | null;
 }) {
   const def = node.code ?? { inputs: [], outputs: [], body: "" };
   const tier = codeTier(def);
   const id = node.id;
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
-  const [showRef, setShowRef] = useState(false);
+  const { activeId, minis } = useContext(NodeContext);
+  const live = minis !== null && doc.id !== "" && activeId === doc.id;
 
   /** Edit this node's definition in the document. */
   const edit = (mutate: (code: CodeDef, n: PatchNode, d: PatchDoc) => void, key?: string) =>
@@ -140,7 +163,7 @@ export function CodePanel({
         dir === "inputs"
           ? { name: freshPortName(code, "in"), shape: "scalar", min: 0, max: 1, default: 0 }
           : {
-              name: freshPortName(code, code.outputs.length === 0 ? "out" : "out"),
+              name: freshPortName(code, "out"),
               // Match the tier the node already has, so adding a port never
               // moves it between CPU and GPU.
               shape: codeTier(code) === "cpu" ? "scalar" : "field_color",
@@ -153,26 +176,23 @@ export function CodePanel({
 
   const setBody = (body: string) => edit((code) => void (code.body = body), `${id}.code.body`);
 
-  const onBodyKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key !== "Tab" || e.ctrlKey || e.metaKey || e.altKey) return;
-    e.preventDefault();
-    const el = e.currentTarget;
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const next = `${el.value.slice(0, start)}  ${el.value.slice(end)}`;
-    setBody(next);
-    requestAnimationFrame(() => {
-      const t = bodyRef.current;
-      if (t) t.setSelectionRange(start + 2, start + 2);
-    });
-  };
-
   const tierText =
     tier === "gpu"
       ? "Runs on the GPU, once per pixel: it makes a field."
       : tier === "cpu"
         ? "Runs on the CPU, once per frame: scalars and events."
         : "These ports do not fit one tier: a node either makes fields (GPU; scalar and field inputs) or scalars and events (CPU).";
+
+  const mine = ownError(error, node);
+  const scope: CodeScope = useMemo(
+    () => ({ tier, inputs: def.inputs, outputs: def.outputs, reference }),
+    [tier, def.inputs, def.outputs, reference],
+  );
+  const diagnostics = useMemo(
+    () => diagnosticsFor(error, [node.id, node.name].filter(Boolean), def.body),
+    [error, node.id, node.name, def.body],
+  );
+  const principal = def.outputs.find((p) => p.name === "out") ?? def.outputs[0];
 
   const portRows = (dir: "inputs" | "outputs") =>
     portList(dir).map((p, i) => (
@@ -232,6 +252,35 @@ export function CodePanel({
   return (
     <div className="code-panel">
       <p className={`hint code-tier ${tier ? "" : "error"}`}>{tierText}</p>
+      {live && def.outputs.length > 0 && (
+        <div className="code-minis" aria-label="Live outputs">
+          {def.outputs.map((p) =>
+            p.shape === "field_color" || p.shape === "field_scalar" ? (
+              <div key={p.name} className="code-mini">
+                <div className="pnode-mini">
+                  <MiniRing
+                    source={minis!}
+                    mini={p.name === principal?.name ? `node:${id}` : `node:${id}:${p.name}`}
+                    label={p.name}
+                  />
+                </div>
+                <span>{p.name}</span>
+              </div>
+            ) : (
+              <div key={p.name} className="code-mini">
+                <div className="pnode-meters">
+                  <MiniMeter
+                    source={minis!}
+                    mini={`scalar:${id}:${p.name}`}
+                    label={p.name}
+                    kind={p.shape === "event" ? "event" : "scalar"}
+                  />
+                </div>
+              </div>
+            ),
+          )}
+        </div>
+      )}
       <div className="code-ports">
         <div className="code-ports-head">
           <span>Inputs</span>
@@ -254,26 +303,24 @@ export function CodePanel({
         </div>
         {portRows("outputs")}
       </div>
-      <label className="patch-field code-body">
+      <div className="patch-field code-body">
         <span>Body (WGSL)</span>
-        <textarea
-          ref={bodyRef}
+        <CodeEditor
           value={def.body}
-          disabled={!canEdit}
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          rows={Math.min(24, Math.max(6, def.body.split("\n").length + 1))}
-          onChange={(e) => setBody(e.target.value)}
-          onKeyDown={onBodyKey}
+          onChange={setBody}
+          readOnly={!canEdit}
+          scope={scope}
+          diagnostics={diagnostics}
+          ariaLabel="Body (WGSL)"
         />
-      </label>
-      <details className="code-ref" open={showRef} onToggle={(e) => setShowRef(e.currentTarget.open)}>
+      </div>
+      {mine && <p className="code-error">⚠ {mine}</p>}
+      <details className="code-ref">
         <summary>What the body can use</summary>
         <ul>
           <li>
             Every input by name; every output by name — assign it (<code>out = …;</code>). Unassigned
-            outputs are 0.
+            outputs are 0. Ctrl+Space lists what is in scope; hover a name for its doc.
           </li>
           {tier === "gpu" ? (
             <>

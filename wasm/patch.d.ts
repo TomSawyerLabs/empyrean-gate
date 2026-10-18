@@ -62,7 +62,9 @@ export class PatchSim {
      */
     previewGlobals(): Uint8Array;
     /**
-     * Node ids rendered by each preview cell, in cell order.
+     * The key of each preview cell, in cell order: a node id, or
+     * `"<id>:<port>"` for a Code node's extra field outputs (the mini is
+     * `node:<key>`).
      */
     previewNodes(): string[];
     /**
@@ -179,6 +181,13 @@ export class PatchSim {
 }
 
 /**
+ * What a Code node body may use (`reference::Reference` as JSON): the
+ * shader lib's helpers with docs, its structs and globals, and the CPU
+ * tier's builtins. Feeds the editor's completion and hover docs.
+ */
+export function codeReference(): string;
+
+/**
  * Effect kinds in GPU-id order, by their serde (wire) names.
  */
 export function effect_kinds(): string;
@@ -216,6 +225,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_patchsim_free: (a: number, b: number) => void;
+    readonly codeReference: () => [number, number];
     readonly effect_kinds: () => [number, number];
     readonly limits: () => [number, number];
     readonly migrate: (a: number, b: number) => [number, number, number, number];

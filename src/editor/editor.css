@@ -881,3 +881,60 @@
   font-size: 10.5px;
   color: var(--pe-fg, #e8e4ff);
 }
+
+/* The Code node's body editor (CodeMirror) and its live minis */
+
+.code-editor {
+  margin-top: 4px;
+}
+
+.code-editor .cm-editor {
+  max-width: 100%;
+}
+
+.code-error {
+  margin: 4px 0 8px;
+  font-size: 11px;
+  color: #ff8a8a;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.code-minis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.code-minis .code-mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--pe-muted, #8a85a8);
+}
+
+.code-minis .pnode-mini,
+.code-minis .pnode-meters {
+  padding: 0;
+}
+
+.pnode-minis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 6px;
+}
+
+.pnode-minis .pnode-mini {
+  padding: 2px 0;
+}
+
+.pnode-mini-label {
+  display: block;
+  text-align: center;
+  font-size: 9px;
+  color: var(--pe-muted, #8a85a8);
+}

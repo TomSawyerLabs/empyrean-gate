@@ -163,7 +163,9 @@ export class PatchSim {
         return v1;
     }
     /**
-     * Node ids rendered by each preview cell, in cell order.
+     * The key of each preview cell, in cell order: a node id, or
+     * `"<id>:<port>"` for a Code node's extra field outputs (the mini is
+     * `node:<key>`).
      * @returns {string[]}
      */
     previewNodes() {
@@ -461,6 +463,25 @@ export class PatchSim {
     }
 }
 if (Symbol.dispose) PatchSim.prototype[Symbol.dispose] = PatchSim.prototype.free;
+
+/**
+ * What a Code node body may use (`reference::Reference` as JSON): the
+ * shader lib's helpers with docs, its structs and globals, and the CPU
+ * tier's builtins. Feeds the editor's completion and hover docs.
+ * @returns {string}
+ */
+export function codeReference() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.codeReference();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
 
 /**
  * Effect kinds in GPU-id order, by their serde (wire) names.
