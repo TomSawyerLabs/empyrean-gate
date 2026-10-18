@@ -484,6 +484,38 @@ export function codeReference() {
 }
 
 /**
+ * "Convert to Code": node `id` of the patch becomes a Code node with the
+ * same wires and knob values and a body that reproduces it (see the
+ * crate's `convert`). Returns the new document; throws when the node
+ * cannot be converted.
+ * @param {string} doc
+ * @param {string} id
+ * @returns {string}
+ */
+export function convertToCode(doc, id) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(doc, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.convertToCode(ptr0, len0, ptr1, len1);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
+        if (ret[3]) {
+            ptr3 = 0; len3 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
  * Effect kinds in GPU-id order, by their serde (wire) names.
  * @returns {string}
  */

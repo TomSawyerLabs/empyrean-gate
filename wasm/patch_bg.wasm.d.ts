@@ -3,6 +3,7 @@
 export const memory: WebAssembly.Memory;
 export const __wbg_patchsim_free: (a: number, b: number) => void;
 export const codeReference: () => [number, number];
+export const convertToCode: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const effect_kinds: () => [number, number];
 export const limits: () => [number, number];
 export const migrate: (a: number, b: number) => [number, number, number, number];

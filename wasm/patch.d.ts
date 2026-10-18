@@ -188,6 +188,14 @@ export class PatchSim {
 export function codeReference(): string;
 
 /**
+ * "Convert to Code": node `id` of the patch becomes a Code node with the
+ * same wires and knob values and a body that reproduces it (see the
+ * crate's `convert`). Returns the new document; throws when the node
+ * cannot be converted.
+ */
+export function convertToCode(doc: string, id: string): string;
+
+/**
  * Effect kinds in GPU-id order, by their serde (wire) names.
  */
 export function effect_kinds(): string;
@@ -241,6 +249,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_patchsim_free: (a: number, b: number) => void;
     readonly codeReference: () => [number, number];
+    readonly convertToCode: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly effect_kinds: () => [number, number];
     readonly limits: () => [number, number];
     readonly migrate: (a: number, b: number) => [number, number, number, number];

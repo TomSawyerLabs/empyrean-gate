@@ -950,3 +950,13 @@
   font-size: 9px;
   color: var(--pe-muted, #8a85a8);
 }
+
+.code-port-rate {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--pe-muted, #8a85a8);
+  align-self: flex-end;
+  padding-bottom: 2px;
+}

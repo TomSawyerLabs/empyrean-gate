@@ -8689,6 +8689,18 @@ function codeReference() {
     wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
   }
 }
+function convertToCode(doc, id) {
+  let deferred4_0, deferred4_1;
+  try {
+    let ptr0 = passStringToWasm0(doc, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc), len0 = WASM_VECTOR_LEN, ptr1 = passStringToWasm0(id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc), len1 = WASM_VECTOR_LEN, ret = wasm.convertToCode(ptr0, len0, ptr1, len1);
+    var ptr3 = ret[0], len3 = ret[1];
+    if (ret[3])
+      throw ptr3 = 0, len3 = 0, takeFromExternrefTable0(ret[2]);
+    return deferred4_0 = ptr3, deferred4_1 = len3, getStringFromWasm0(ptr3, len3);
+  } finally {
+    wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+  }
+}
 function effect_kinds() {
   let deferred1_0, deferred1_1;
   try {
@@ -8927,6 +8939,9 @@ function loadPatchCore(wasmBytes) {
     codeReference: JSON.parse(codeReference()),
     shapes: JSON.parse(shapes()),
     schema: JSON.parse(schema()),
+    convertToCode(doc, id) {
+      return JSON.parse(convertToCode(JSON.stringify(doc), id));
+    },
     presets: JSON.parse(presets()),
     limits: JSON.parse(limits()),
     effectKinds: JSON.parse(effect_kinds()),

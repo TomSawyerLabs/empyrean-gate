@@ -99,6 +99,11 @@ export interface PatchEditorProps {
    * `GET /patch/code-reference` on the gate): completion and hover docs.
    * Without it the body editor still completes ports, keywords and WGSL. */
   codeReference?: CodeReference | null;
+  /** "Convert to Code": the host turns node `id` of `doc` into a Code node
+   * (the patch core does it: `core.convertToCode` in the playground,
+   * `POST /patch/convert-to-code` on the gate). Offered on the panel of
+   * every kind the palette marks `convertible` when this is given. */
+  convertToCode?: (doc: PatchDoc, id: string) => Promise<PatchDoc>;
   /** The store is reachable (the gate: WebSocket connected). */
   ready: boolean;
   /** The patch rendering right now: its nodes get live thumbnails/meters. */
@@ -660,6 +665,7 @@ function ParamPanel({
   onClose,
   status,
   codeReference,
+  onConvertToCode,
 }: {
   doc: PatchDoc;
   nodeId: string;
@@ -674,6 +680,8 @@ function ParamPanel({
   /** The renderer's verdict, for a Code node's error marks. */
   status?: { active: boolean; error: string | null } | null;
   codeReference?: CodeReference | null;
+  /** Replace the node with its Code conversion (see `PatchEditorProps`). */
+  onConvertToCode?: () => void;
 }) {
   const sheet = useSheet(onClose);
   const node = doc.nodes.find((n) => n.id === nodeId);
@@ -804,6 +812,15 @@ function ParamPanel({
         <ClipPicker node={node} def={def} canEdit={canEdit} onChange={onChange} />
       )}
       {extras?.(node)}
+      {canEdit && def.convertible && onConvertToCode && (
+        <button
+          type="button"
+          onClick={onConvertToCode}
+          title="Replace this node with a Code node that does the same thing, to edit from there. Its wires and knobs stay."
+        >
+          Convert to Code
+        </button>
+      )}
       {canEdit && node.kind !== "output" && onDuplicate && (
         <button type="button" onClick={onDuplicate}>
           Duplicate{!onClose && <span className="hint"> · Ctrl+D</span>}
@@ -1016,6 +1033,7 @@ function Editor({
   registry: registryList,
   presets,
   codeReference = null,
+  convertToCode,
   ready,
   activeId,
   status,
@@ -1346,11 +1364,16 @@ function Editor({
   const onNodesChange = useCallback(
     (changes: NodeChange<PatchFlowNode>[]) => {
       setNodes((nds) => applyNodeChanges(changes, nds));
+      // Moving the selection from one node to another arrives as one batch
+      // (old deselected, new selected, in either order): the selection wins
+      // over the deselection, or the panel closes on every switch.
+      let next: string | null | undefined;
       for (const ch of changes) {
-        if (ch.type === "select") {
-          setSelectedNode(ch.selected ? ch.id : null);
-        }
+        if (ch.type !== "select") continue;
+        if (ch.selected) next = ch.id;
+        else if (next === undefined) next = null;
       }
+      if (next !== undefined) setSelectedNode(next);
     },
     [],
   );
@@ -1878,6 +1901,22 @@ function Editor({
             onClose={compact ? () => setSheet(null) : undefined}
             status={status}
             codeReference={codeReference}
+            onConvertToCode={
+              convertToCode
+                ? () => {
+                    if (!doc) return;
+                    void convertToCode(doc, selectedNode)
+                      .then((next) =>
+                        mutateDoc((d) => {
+                          d.nodes = structuredClone(next.nodes);
+                          d.edges = structuredClone(next.edges);
+                          d.exposed = structuredClone(next.exposed);
+                        }),
+                      )
+                      .catch((err: unknown) => console.error("convert to code:", err));
+                  }
+                : undefined
+            }
           />
         )}
 
