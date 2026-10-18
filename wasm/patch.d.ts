@@ -12,6 +12,11 @@ export class PatchSim {
      */
     audio(): Uint8Array;
     /**
+     * Where each GPU Code node's body sits in `wgsl()` (and `previewWgsl()`):
+     * `[{"node": id, "first": line, "count": lines}, ...]`, 1-based.
+     */
+    codeLines(): string;
+    /**
      * Binding 5 bytes: the live dabs only.
      */
     dabs(): Uint8Array;
@@ -69,6 +74,12 @@ export class PatchSim {
      * `spokes × pixels`, same bindings. Empty when nothing is previewable.
      */
     previewWgsl(): string;
+    /**
+     * `msg` with every `wgsl:L:C` location inside a Code node's body
+     * rewritten as `Code node "<name>" line N:C` (see the crate's
+     * `Program::relocate_error`).
+     */
+    relocateError(msg: string): string;
     /**
      * Current values for `previewScalars()`.
      */
@@ -209,6 +220,7 @@ export interface InitOutput {
     readonly limits: () => [number, number];
     readonly migrate: (a: number, b: number) => [number, number, number, number];
     readonly patchsim_audio: (a: number) => [number, number];
+    readonly patchsim_codeLines: (a: number) => [number, number];
     readonly patchsim_dabs: (a: number) => [number, number];
     readonly patchsim_draw: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly patchsim_effects: (a: number) => [number, number];
@@ -221,6 +233,7 @@ export interface InitOutput {
     readonly patchsim_previewNodes: (a: number) => [number, number];
     readonly patchsim_previewScalars: (a: number) => [number, number];
     readonly patchsim_previewWgsl: (a: number) => [number, number];
+    readonly patchsim_relocateError: (a: number, b: number, c: number) => [number, number];
     readonly patchsim_scalarValues: (a: number) => [number, number];
     readonly patchsim_scope: (a: number) => [number, number];
     readonly patchsim_setAudio: (a: number, b: number, c: number, d: number) => void;

@@ -25,6 +25,23 @@ export class PatchSim {
         return v1;
     }
     /**
+     * Where each GPU Code node's body sits in `wgsl()` (and `previewWgsl()`):
+     * `[{"node": id, "first": line, "count": lines}, ...]`, 1-based.
+     * @returns {string}
+     */
+    codeLines() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.patchsim_codeLines(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * Binding 5 bytes: the live dabs only.
      * @returns {Uint8Array}
      */
@@ -186,6 +203,27 @@ export class PatchSim {
             return getStringFromWasm0(ret[0], ret[1]);
         } finally {
             wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * `msg` with every `wgsl:L:C` location inside a Code node's body
+     * rewritten as `Code node "<name>" line N:C` (see the crate's
+     * `Program::relocate_error`).
+     * @param {string} msg
+     * @returns {string}
+     */
+    relocateError(msg) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ptr0 = passStringToWasm0(msg, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.patchsim_relocateError(this.__wbg_ptr, ptr0, len0);
+            deferred2_0 = ret[0];
+            deferred2_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
     }
     /**

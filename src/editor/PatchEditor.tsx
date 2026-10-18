@@ -40,11 +40,18 @@ import "@xyflow/react/dist/style.css";
 import "./editor.css";
 import { arrangeDoc, type NodeSize } from "./arrange";
 import { ClipPicker } from "./ClipPicker";
+import { CodePanel } from "./CodePanel";
 import { SHAPE_LABEL, suggestConnections, type DragFrom, type Suggestion } from "./connect";
 import { imageFileToMedia } from "./files";
 import { History } from "./history";
 import { MiniMeter, MiniRing, type MiniSource } from "./minis";
 import {
+  CODE_KIND,
+  codeInputs,
+  codeOutputs,
+  codeParams,
+  codeTier,
+  defaultCode,
   PATCH_FORMAT,
   SUBPATCH_KIND,
   shapeAccepts,
@@ -212,6 +219,7 @@ const CATEGORY_LABELS: Record<PatchNodeType["category"], string> = {
   combine: "Combine",
   texture: "Texture",
   sink: "Output",
+  code: "Code",
 };
 
 const CATEGORY_ORDER: PatchNodeType["category"][] = [
@@ -221,6 +229,7 @@ const CATEGORY_ORDER: PatchNodeType["category"][] = [
   "field",
   "combine",
   "texture",
+  "code",
   "sink",
 ];
 
@@ -233,6 +242,7 @@ function inputPorts(def: PatchNodeType, node?: PatchNode): { name: string; shape
   if (def.id === SUBPATCH_KIND) {
     return subpatchPorts(node).map((p) => ({ name: p.name, shape: "scalar" as PatchShape }));
   }
+  if (def.id === CODE_KIND) return codeInputs(node);
   return [
     ...def.inputs,
     ...def.params
@@ -241,10 +251,19 @@ function inputPorts(def: PatchNodeType, node?: PatchNode): { name: string; shape
   ];
 }
 
+/** The output ports of a node: the type's, or for a Code node the instance's
+ * declared outputs. */
+function outputPorts(def: PatchNodeType, node?: PatchNode): { name: string; shape: PatchShape }[] {
+  if (def.id === CODE_KIND) return codeOutputs(node);
+  return def.outputs;
+}
+
 /** The knobs a node's side panel shows: the type's params, or for a
  * Sub-patch one per exposed inner knob (its range from the inner node's
- * type, its default the inner node's current value). */
+ * type, its default the inner node's current value); for a Code node its
+ * Scalar inputs. */
 function panelParams(def: PatchNodeType, node: PatchNode, registry: Registry): PatchParamDef[] {
+  if (def.id === CODE_KIND) return codeParams(node);
   if (def.id !== SUBPATCH_KIND) return def.params;
   return subpatchPorts(node).map((port) => {
     const inner = node.sub?.nodes.find((n) => n.id === port.node);
@@ -268,7 +287,7 @@ function portShape(
   node?: PatchNode,
 ): PatchShape | null {
   if (!def) return null;
-  if (dir === "out") return def.outputs.find((p) => p.name === port)?.shape ?? null;
+  if (dir === "out") return outputPorts(def, node).find((p) => p.name === port)?.shape ?? null;
   return inputPorts(def, node).find((p) => p.name === port)?.shape ?? null;
 }
 
@@ -337,11 +356,10 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
   // canvas.
   const live = minis !== null && data.docId !== "" && activeId === data.docId;
   // The principal output: `out`, or the single output of a source node.
-  const primary =
-    def.outputs.find((p) => p.name === "out") ??
-    (def.outputs.length === 1 ? def.outputs[0] : undefined);
+  const outs = outputPorts(def, node);
+  const primary = outs.find((p) => p.name === "out") ?? (outs.length === 1 ? outs[0] : undefined);
   const showRing = live && primary !== undefined && RING_SHAPES.includes(primary.shape);
-  const meterable = def.outputs.filter((p) => p.shape === "scalar" || p.shape === "event");
+  const meterable = outs.filter((p) => p.shape === "scalar" || p.shape === "event");
   const meterPorts = live
     ? meterable.filter(
         (p) => meterable.length <= 4 || p.name === "out" || data.wiredOut.includes(p.name),
@@ -397,6 +415,13 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
           {node.sub ? `${node.sub.name || "patch"} · ${node.sub.nodes.length} nodes` : "empty"}
         </div>
       )}
+      {node.kind === CODE_KIND && (
+        <div className="pnode-code hint" title={node.code?.body}>
+          {node.code
+            ? `${codeTier(node.code)?.toUpperCase() ?? "?"} · ${node.code.body.split("\n").filter((l) => l.trim()).length} lines`
+            : "no code"}
+        </div>
+      )}
       <div className="pnode-body">
         <div className="pnode-col">
           {ins.map((p) => (
@@ -416,7 +441,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
           ))}
         </div>
         <div className="pnode-col out">
-          {def.outputs.map((p) => (
+          {outs.map((p) => (
             <div
               key={p.name}
               className={`pnode-port out${fitClass(p.shape, "out", p.name)}`}
@@ -651,6 +676,7 @@ function ParamPanel({
             : "An empty sub-patch renders black. Insert a saved patch or a preset from the palette's Sub-patches group instead."}
         </p>
       )}
+      {node.kind === CODE_KIND && <CodePanel node={node} canEdit={canEdit} onChange={onChange} />}
       {params.map((p) => {
         const value = node.params[p.name] ?? p.default;
         const wire = wiredInto(p.name);
@@ -1423,7 +1449,10 @@ function Editor({
     (kind: string) => {
       const pos = canvasCenter();
       mutateDoc((d) => {
-        d.nodes.push({ id: freshId(d), kind, name: "", params: {}, pos });
+        const node: PatchNode = { id: freshId(d), kind, name: "", params: {}, pos };
+        // A Code node is nothing without its ports and body.
+        if (kind === CODE_KIND) node.code = defaultCode();
+        d.nodes.push(node);
       });
     },
     [canvasCenter, mutateDoc],
