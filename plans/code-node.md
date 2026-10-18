@@ -331,7 +331,9 @@ Steps:
 2. [x] Editor: input/output shape lists split, completion for `_count` /
    `_at` / `_on`, Note node (sticky-note look, textarea panel), reference
    card lines for buffers and the loop rule.
-3. [ ] Hosts, specs (Note case added), commit, push, bump, site.
+3. [x] Gate master `b21a707`, web-dist `5491885`, site `dev` `7c28e93`. Preview
+   checked: the preset loads with its Note and renders; a `while` in the body
+   is marked at line 1:1 through the real validation path.
 
 Gotcha: a mock backend left running from a debugging session is reused
 by Playwright (`reuseExistingServer`) and serves a stale registry; check
