@@ -1,8 +1,12 @@
 # Code node: a node whose body is text (2026-10-18)
 
-Status: **in progress** (gate worktree `C:\Users\camer\.t3\worktrees\Empyrean\playground`,
-branch `patch-crate`, fast-forwarded to gate `master`; the site picks the
-result up through the web-dist bump bot). Thread: "code node" (Claude Fable 5.1).
+Status: **done** (2026-10-18). Gate `master` `4a2cd38` (crate `da58e18`,
+editor `7b126a6`, plan); web-dist `bccbb56`; the site's `dev` `11fd321`
+carries it and the Preview at dev.empyreangate.org/playground shows the Code
+group, inserts a node and renders (checked in headless Chrome with WebGPU).
+The real gate gets it with the next app release (Cameron tags releases).
+Worktree `C:\Users\camer\.t3\worktrees\Empyrean\playground`, branch
+`patch-crate` = `master`. Thread: "code node" (Claude Fable 5.1).
 
 ## Goal
 
@@ -156,12 +160,14 @@ one-line summary.
 5. [x] Desktop: `cargo check` clean (minis' scalar list owns its names, the
    engine relocates pipeline errors, the server clamps Code knobs through
    `eval::sanitize`); Control tab plays Code knobs; mock-backend registry
-   entry; `tests/patch-code.spec.ts` (3 cases, Chromium) + the other
-   patch specs pass. ← current: end-to-end render check, commit, push
-6. [ ] Preset using a Code node (optional, not started).
-7. [ ] Commit (crate / web / app in logical commits), push gate master; the
-   site's web-dist bump bot lands it on `dev`. README notes in both repos
-   (written, uncommitted).
+   entry; `tests/patch-code.spec.ts` (3 cases) + the other patch specs
+   pass locally on Chromium and in CI on both engines. End-to-end render
+   check done (see findings).
+6. [ ] Preset using a Code node: optional, not started; a follow-up if
+   Cameron wants one in the palette.
+7. [x] Committed (crate+engine / editor+tests / plan), gate master pushed,
+   CI green, web-dist `bccbb56`, bump bot run by hand → site `dev`
+   `11fd321`; Preview verified. README notes in both repos committed.
 
 ## Findings / gotchas
 
