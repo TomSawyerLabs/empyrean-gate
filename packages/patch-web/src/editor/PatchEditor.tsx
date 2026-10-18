@@ -21,13 +21,17 @@ import {
   applyEdgeChanges,
   applyNodeChanges,
   Background,
+  BaseEdge,
   Controls,
+  EdgeLabelRenderer,
+  getBezierPath,
   Handle,
   Position,
   ReactFlow,
   type Connection,
   type Edge as FlowEdge,
   type EdgeChange,
+  type EdgeProps,
   type Node as FlowNode,
   type NodeChange,
   type NodeProps,
@@ -35,6 +39,7 @@ import {
   type OnConnectStart,
   Panel,
   useReactFlow,
+  useStore,
   useUpdateNodeInternals,
   ReactFlowProvider,
 } from "@xyflow/react";
@@ -661,6 +666,57 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
 
 const NODE_TYPES = { patch: PatchNodeView };
 
+/** A wire. Selected (a tap or a click), it carries a ✕ at its middle: a
+ * phone has no Delete key, and on a desk it says what the key would do. The
+ * button keeps its size at any zoom. */
+const WireEdge = memo(function WireEdge({
+  id,
+  sourceX,
+  sourceY,
+  sourcePosition,
+  targetX,
+  targetY,
+  targetPosition,
+  selected,
+  markerEnd,
+  style,
+  interactionWidth,
+}: EdgeProps) {
+  const { deleteWire } = useContext(NodeContext);
+  const zoom = useStore((s) => s.transform[2]);
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  });
+  return (
+    <>
+      <BaseEdge path={path} markerEnd={markerEnd} style={style} interactionWidth={interactionWidth} />
+      {selected && deleteWire && (
+        <EdgeLabelRenderer>
+          <button
+            type="button"
+            className="patch-wire-delete nodrag nopan"
+            style={{
+              transform: `translate(${labelX}px, ${labelY}px) translate(-50%, -50%) scale(${1 / zoom})`,
+            }}
+            onClick={() => deleteWire(id)}
+            aria-label="Delete wire"
+            title="Delete wire (or press Delete)"
+          >
+            ✕
+          </button>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+});
+
+const EDGE_TYPES = { wire: WireEdge };
+
 // --- doc <-> flow mapping --------------------------------------------------
 
 function toFlowNodes(doc: PatchDoc, registry: Registry): PatchFlowNode[] {
@@ -689,6 +745,7 @@ function toFlowEdges(doc: PatchDoc, registry: Registry): FlowEdge[] {
     const shape = portShape(def, e.from.port, "out", from) ?? "scalar";
     return {
       id: edgeId(e),
+      type: "wire",
       source: e.from.node,
       sourceHandle: e.from.port,
       target: e.to.node,
@@ -1837,6 +1894,14 @@ function Editor({
     },
     [canEdit, mutateDoc],
   );
+  const deleteWire = useCallback(
+    (id: string) => {
+      mutateDoc((d) => {
+        d.edges = d.edges.filter((e) => edgeId(e) !== id);
+      });
+    },
+    [mutateDoc],
+  );
 
   /** Where a new node lands: the middle of the canvas as shown, not of the
    * window (a host may give the editor one corner of the page). */
@@ -2089,7 +2154,14 @@ function Editor({
       )}
 
       <NodeContext.Provider
-        value={{ activeId, minis, drag, combines, setCollapsed: canEdit ? setCollapsed : null }}
+        value={{
+          activeId,
+          minis,
+          drag,
+          combines,
+          setCollapsed: canEdit ? setCollapsed : null,
+          deleteWire: canEdit ? deleteWire : null,
+        }}
       >
       <div className="patch-main">
         {canEdit && doc && registry && (!compact || sheet === "palette") && (
@@ -2120,6 +2192,7 @@ function Editor({
               nodes={nodes}
               edges={edges}
               nodeTypes={NODE_TYPES}
+              edgeTypes={EDGE_TYPES}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onNodeDragStop={onNodeDragStop}
