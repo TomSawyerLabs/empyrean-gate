@@ -116,12 +116,18 @@ impl CodeDef {
         }
         let field = |s: Shape| matches!(s, Shape::FieldScalar | Shape::FieldColor);
         let control = |s: Shape| matches!(s, Shape::Scalar | Shape::Event);
-        for p in self.inputs.iter().chain(&self.outputs) {
+        let buffer = |s: Shape| matches!(s, Shape::Points | Shape::Effects | Shape::Texture);
+        for p in &self.outputs {
             if !field(p.shape) && !control(p.shape) {
                 return Err(format!(
-                    "port \"{}\": {:?} ports are not supported on Code nodes yet",
+                    "output \"{}\": a Code node cannot make {:?} (those streams come from the host); it makes fields, scalars or events",
                     p.name, p.shape
                 ));
+            }
+        }
+        for p in &self.inputs {
+            if !field(p.shape) && !control(p.shape) && !buffer(p.shape) {
+                return Err(format!("input \"{}\": {:?} is not an input a Code node can take", p.name, p.shape));
             }
         }
         if self.outputs.iter().any(|p| field(p.shape)) {
@@ -144,10 +150,10 @@ impl CodeDef {
             Ok(Tier::Gpu)
         } else {
             for p in &self.inputs {
-                if field(p.shape) {
+                if field(p.shape) || buffer(p.shape) {
                     return Err(format!(
-                        "input \"{}\": a field can only be read by a node that makes a field (this one outputs scalars, so it runs on the CPU)",
-                        p.name
+                        "input \"{}\": a {:?} can only be read by a node that makes a field (this one outputs scalars, so it runs on the CPU)",
+                        p.name, p.shape
                     ));
                 }
             }
@@ -188,8 +194,11 @@ impl CodeDef {
             }
         }
         let tier = self.tier()?;
-        if tier == Tier::Cpu {
-            crate::script::compile(self).map_err(|e| e.to_string())?;
+        match tier {
+            Tier::Cpu => {
+                crate::script::compile(self).map_err(|e| e.to_string())?;
+            }
+            Tier::Gpu => check_gpu_body(self)?,
         }
         Ok(tier)
     }
@@ -291,7 +300,7 @@ fn generated_name(name: &str) -> bool {
 /// through untouched; nothing else in the text changes. WGSL has no string
 /// literals, so identifiers and comments are the only lexical structure
 /// that matters.
-pub fn rewrite_body(body: &str, node: usize, field_inputs: &[&str], record: &str) -> String {
+pub fn rewrite_body(body: &str, node: usize, field_inputs: &[&str], effects_inputs: &[&str], record: &str) -> String {
     let mut out = String::with_capacity(body.len() + 64);
     let bytes = body.as_bytes();
     let mut i = 0;
@@ -315,14 +324,12 @@ pub fn rewrite_body(body: &str, node: usize, field_inputs: &[&str], record: &str
                 out.push_str("return ");
                 out.push_str(record);
             } else {
-                match ident
-                    .strip_suffix("_at")
-                    .filter(|base| field_inputs.contains(base))
-                {
-                    Some(base) => {
-                        out.push_str(&format!("n{node}_in_{base}"));
-                    }
-                    None => out.push_str(ident),
+                if let Some(base) = ident.strip_suffix("_at").filter(|b| field_inputs.contains(b)) {
+                    out.push_str(&format!("n{node}_in_{base}"));
+                } else if let Some(base) = ident.strip_suffix("_on").filter(|b| effects_inputs.contains(b)) {
+                    out.push_str(&format!("n{node}_on_{base}"));
+                } else {
+                    out.push_str(ident);
                 }
             }
             i = end;
@@ -342,6 +349,269 @@ pub fn rewrite_body(body: &str, node: usize, field_inputs: &[&str], record: &str
         }
     }
     out
+}
+
+/// Longest literal bound a `for` in a field body may run to.
+pub const MAX_LOOP: u32 = 4096;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokKind {
+    Ident,
+    Number,
+    Punct,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Tok<'a> {
+    text: &'a str,
+    kind: TokKind,
+    line: usize,
+    col: usize,
+}
+
+/// The identifiers, numbers and punctuation of a WGSL body, with positions;
+/// comments and whitespace skipped.
+fn tokens(body: &str) -> Vec<Tok<'_>> {
+    const PUNCT: &[&str] = &[
+        "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", "++", "--", "&&", "||", "->", "<<", ">>",
+    ];
+    let mut out = Vec::new();
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    let mut line = 1;
+    let mut line_start = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        let col = i - line_start + 1;
+        if b == b'\n' {
+            line += 1;
+            line_start = i + 1;
+            i += 1;
+        } else if b.is_ascii_whitespace() {
+            i += 1;
+        } else if b == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            i = body[i..].find('\n').map_or(bytes.len(), |n| i + n);
+        } else if b == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            let end = body[i + 2..].find("*/").map_or(bytes.len(), |n| i + 2 + n + 2);
+            for (k, ch) in body[i..end].bytes().enumerate() {
+                if ch == b'\n' {
+                    line += 1;
+                    line_start = i + k + 1;
+                }
+            }
+            i = end;
+        } else if b.is_ascii_alphabetic() || b == b'_' {
+            let end = i + body[i..].bytes().take_while(|c| c.is_ascii_alphanumeric() || *c == b'_').count();
+            out.push(Tok { text: &body[i..end], kind: TokKind::Ident, line, col });
+            i = end;
+        } else if b.is_ascii_digit() || (b == b'.' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit)) {
+            let end = i + body[i..].bytes().take_while(|c| c.is_ascii_alphanumeric() || *c == b'_' || *c == b'.').count();
+            out.push(Tok { text: &body[i..end], kind: TokKind::Number, line, col });
+            i = end;
+        } else {
+            let rest = &body[i..];
+            let text = PUNCT.iter().find(|p| rest.starts_with(**p)).copied().unwrap_or_else(|| {
+                let ch = rest.chars().next().unwrap();
+                &rest[..ch.len_utf8()]
+            });
+            out.push(Tok { text, kind: TokKind::Punct, line, col });
+            i += text.len();
+        }
+    }
+    out
+}
+
+fn at(t: &Tok<'_>, msg: impl Into<String>) -> String {
+    format!("line {}:{}: {}", t.line, t.col, msg.into())
+}
+
+/// The value of a numeric literal token (`64`, `64u`, `3.0`), if it is one.
+fn literal(t: &Tok<'_>) -> Option<f64> {
+    if t.kind != TokKind::Number {
+        return None;
+    }
+    t.text.trim_end_matches(['u', 'i', 'f', 'h']).parse().ok()
+}
+
+/// What a GPU body may not do, caught before the shader compiler sees it,
+/// each with a position so the editor can mark the line:
+/// - `loop` and `while`, and a `for` without a literal bound (or a buffer
+///   count: `<points input>_count`, `G.dab_count`…): an unbounded loop in a
+///   compute shader hangs the GPU, and the host recovers only by losing the
+///   device;
+/// - `return <value>` (outputs are assigned by name);
+/// - unbalanced `{}` / `()`;
+/// - writing to an input;
+/// - the engine's own names (`OUT`, `P`, `PREVIEW`, `finish`, `main`).
+pub fn check_gpu_body(def: &CodeDef) -> Result<(), String> {
+    let toks = tokens(&def.body);
+    let inputs: Vec<&str> = def.inputs.iter().map(|p| p.name.as_str()).collect();
+    let counts: Vec<String> = def
+        .inputs
+        .iter()
+        .filter(|p| matches!(p.shape, Shape::Points | Shape::Effects))
+        .map(|p| format!("{}_count", p.name))
+        .collect();
+    let mut braces: Vec<&Tok<'_>> = Vec::new();
+    let mut parens: Vec<&Tok<'_>> = Vec::new();
+    for (k, t) in toks.iter().enumerate() {
+        let next = toks.get(k + 1);
+        let prev = if k > 0 { toks.get(k - 1) } else { None };
+        match t.kind {
+            TokKind::Ident => match t.text {
+                "loop" | "while" => {
+                    return Err(at(t, format!(
+                        "`{}` is not allowed in a field body: a loop without a fixed bound can hang the GPU. Use `for (var i = 0u; i < N; i++)` with a literal N (up to {MAX_LOOP})",
+                        t.text
+                    )));
+                }
+                "for" => check_for(&toks, k, &counts)?,
+                "return" => {
+                    if next.is_some_and(|n| n.text != ";") {
+                        return Err(at(t, "return a value: assign the output by name instead (`out = …;`), then `return;` if the body must stop early"));
+                    }
+                }
+                "OUT" | "P" | "PREVIEW" | "finish" | "main" => {
+                    // `P` as a struct member (`x.P`) is someone's own name.
+                    if !prev.is_some_and(|p| p.text == ".") {
+                        return Err(at(t, format!("`{}` belongs to the engine; a body reads its inputs and sets its outputs", t.text)));
+                    }
+                }
+                name if inputs.contains(&name) => {
+                    let declared = prev.is_some_and(|p| p.kind == TokKind::Ident && matches!(p.text, "let" | "var" | "const"));
+                    let assigns = next.is_some_and(|n| n.kind == TokKind::Punct && matches!(n.text, "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "++" | "--"));
+                    let member = prev.is_some_and(|p| p.text == ".");
+                    if assigns && !declared && !member {
+                        return Err(at(t, format!("`{name}` is an input, and inputs are read-only; `var x = {name};` makes a copy to change")));
+                    }
+                }
+                _ => {}
+            },
+            TokKind::Punct => match t.text {
+                "{" => braces.push(t),
+                "}" => {
+                    if braces.pop().is_none() {
+                        return Err(at(t, "this `}` closes nothing"));
+                    }
+                }
+                "(" => parens.push(t),
+                ")" => {
+                    if parens.pop().is_none() {
+                        return Err(at(t, "this `)` closes nothing"));
+                    }
+                }
+                _ => {}
+            },
+            TokKind::Number => {}
+        }
+    }
+    if let Some(t) = braces.last() {
+        return Err(at(t, "this `{` is never closed"));
+    }
+    if let Some(t) = parens.last() {
+        return Err(at(t, "this `(` is never closed"));
+    }
+    Ok(())
+}
+
+/// `for ( init ; cond ; update )`: the condition must compare a name with a
+/// literal (≤ `MAX_LOOP`), a buffer input's `_count`, or a bounded engine
+/// count (`G.dab_count`, `G.effect_count`, `G.touch_count`, `G.spokes`,
+/// `G.pixels`).
+fn check_for(toks: &[Tok<'_>], k: usize, counts: &[String]) -> Result<(), String> {
+    let t = &toks[k];
+    let hint = format!("a `for` in a field body needs a fixed bound in its condition, e.g. `i < 64u` (up to {MAX_LOOP}), or a buffer count such as `points_count` or `G.dab_count`");
+    if toks.get(k + 1).is_none_or(|n| n.text != "(") {
+        return Err(at(t, &hint));
+    }
+    // The condition: between the first and second `;` at paren depth 1.
+    let mut depth = 0;
+    let mut semis = Vec::new();
+    let mut close = None;
+    for (j, x) in toks.iter().enumerate().skip(k + 1) {
+        match x.text {
+            "(" => depth += 1,
+            ")" => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(j);
+                    break;
+                }
+            }
+            ";" if depth == 1 => semis.push(j),
+            _ => {}
+        }
+    }
+    let (Some(close), [a, b]) = (close, semis.as_slice()) else {
+        return Err(at(t, &hint));
+    };
+    let _ = close;
+    let cond: Vec<&Tok<'_>> = toks[a + 1..*b].iter().collect();
+    let bounded = |x: &Tok<'_>, rest: &[&Tok<'_>]| -> bool {
+        // A literal, `<input>_count`, a `let` clamped to a literal, or
+        // `G.<bounded field>`.
+        if literal(x).is_some_and(|v| v >= 0.0 && v <= f64::from(MAX_LOOP)) {
+            return true;
+        }
+        if x.kind == TokKind::Ident && (counts.iter().any(|c| c == x.text) || clamped_let(toks, x.text)) {
+            return true;
+        }
+        x.text == "G"
+            && rest.len() >= 2
+            && rest[0].text == "."
+            && matches!(rest[1].text, "dab_count" | "effect_count" | "touch_count" | "spokes" | "pixels")
+    };
+    let is_op = |x: &Tok<'_>| x.kind == TokKind::Punct && matches!(x.text, "<" | "<=" | ">" | ">=" | "!=");
+    let ok = match cond.as_slice() {
+        [v, op, bound, rest @ ..] if v.kind == TokKind::Ident && is_op(op) => bounded(bound, rest) && (rest.is_empty() || bound.text == "G"),
+        [bound, op, v] if is_op(op) && v.kind == TokKind::Ident => bounded(bound, &[]),
+        [g, dot, field, op, v] if is_op(op) && v.kind == TokKind::Ident => bounded(g, &[dot, field]),
+        _ => false,
+    };
+    if ok { Ok(()) } else { Err(at(t, &hint)) }
+}
+
+/// Whether `name` is a `let` whose whole initializer is `clamp(…, lo, LIT)`
+/// or `min(…, LIT)` (optionally inside `u32(…)` / `i32(…)`) with the literal
+/// at most `MAX_LOOP`: a loop bound that cannot run away, the way the
+/// built-in generators write theirs (`let harmonics = u32(clamp(waves, 1.0,
+/// 8.0));`).
+fn clamped_let(toks: &[Tok<'_>], name: &str) -> bool {
+    let Some(k) = toks.windows(3).position(|w| {
+        w[0].kind == TokKind::Ident && w[0].text == "let" && w[1].text == name && w[2].text == "="
+    }) else {
+        return false;
+    };
+    let end = toks[k + 3..].iter().position(|t| t.text == ";").map(|n| k + 3 + n);
+    let Some(end) = end else { return false };
+    let mut init: &[Tok<'_>] = &toks[k + 3..end];
+    // Strip an outer `u32( … )` / `i32( … )`.
+    if init.len() >= 3 && matches!(init[0].text, "u32" | "i32") && init[1].text == "(" && init.last().is_some_and(|t| t.text == ")") {
+        init = &init[2..init.len() - 1];
+    }
+    if init.len() < 4 || !matches!(init[0].text, "clamp" | "min") || init[1].text != "(" || init.last().is_some_and(|t| t.text != ")") {
+        return false;
+    }
+    // Top-level arguments of the call.
+    let mut args: Vec<Vec<&Tok<'_>>> = vec![Vec::new()];
+    let mut depth = 0;
+    for t in &init[2..init.len() - 1] {
+        match t.text {
+            "(" => depth += 1,
+            ")" => depth -= 1,
+            "," if depth == 0 => {
+                args.push(Vec::new());
+                continue;
+            }
+            _ => {}
+        }
+        args.last_mut().unwrap().push(t);
+    }
+    let lit = |a: &Vec<&Tok<'_>>| a.len() == 1 && literal(a[0]).is_some_and(|v| v >= 0.0 && v <= f64::from(MAX_LOOP));
+    match init[0].text {
+        "clamp" => args.len() == 3 && lit(&args[2]),
+        _ => args.len() == 2 && (lit(&args[0]) || lit(&args[1])),
+    }
 }
 
 /// WGSL keywords and reserved words (naga `keywords/wgsl.rs`, spec
@@ -470,12 +740,6 @@ mod tests {
             body: String::new(),
         };
         assert!(event_into_gpu.check().is_err());
-        let points = CodeDef {
-            inputs: vec![port("pts", Shape::Points)],
-            outputs: vec![port("out", Shape::FieldColor)],
-            body: String::new(),
-        };
-        assert!(points.check().is_err());
         assert!(CodeDef::default().check().is_err(), "no outputs");
         let dup = CodeDef {
             inputs: vec![port("a", Shape::Scalar)],
@@ -498,21 +762,95 @@ mod tests {
     }
 
     #[test]
+    fn gpu_bodies_are_screened() {
+        let gpu = |body: &str, inputs: &[(&str, Shape)]| CodeDef {
+            inputs: inputs.iter().map(|(n, s)| port(n, *s)).collect(),
+            outputs: vec![port("out", Shape::FieldColor)],
+            body: body.into(),
+        };
+        let ok = |body: &str, inputs: &[(&str, Shape)]| {
+            gpu(body, inputs).check().unwrap_or_else(|e| panic!("{body:?}: {e}"));
+        };
+        let err = |body: &str, inputs: &[(&str, Shape)]| gpu(body, inputs).check().unwrap_err();
+        ok("for (var i = 0u; i < 64u; i++) { out += vec4f(0.01); }", &[]);
+        ok("for (var i = 0; i <= 7; i++) {}", &[]);
+        ok("for (var i = 0u; 16u > i; i++) {}", &[]);
+        ok("for (var i = 0u; i < G.dab_count; i++) {}", &[]);
+        ok("for (var i = 0u; i < pts_count; i++) { let D = pts_at(i); }", &[("pts", Shape::Points)]);
+        ok("// while in a comment\n/* loop */ out = vec4f(1.0);", &[]);
+        ok("let n = u32(clamp(waves, 1.0, 8.0));\nfor (var h = 1u; h <= n; h++) {}", &[("waves", Shape::Scalar)]);
+        ok("let n = min(u32(waves), 32u);\nfor (var h = 0u; h < n; h++) {}", &[("waves", Shape::Scalar)]);
+        assert!(err("let n = u32(waves);\nfor (var h = 0u; h < n; h++) {}", &[("waves", Shape::Scalar)]).contains("fixed bound"));
+        assert!(err("let n = clamp(waves, 1.0, 8.0) * 1000.0;\nfor (var h = 0u; h < u32(n); h++) {}", &[("waves", Shape::Scalar)]).contains("fixed bound"));
+        ok("if a > 0.5 { return; }", &[("a", Shape::Scalar)]);
+        ok("var x = a; x += 1.0; let b = vec4f(x); out = b;", &[("a", Shape::Scalar)]);
+        ok("let q = s.P;", &[("s", Shape::FieldColor)]);
+        let e = err("out = vec4f(1.0);\nloop { }", &[]);
+        assert!(e.starts_with("line 2:1:") && e.contains("hang"), "{e}");
+        assert!(err("while true { }", &[]).contains("`while`"));
+        assert!(err("for (var i = 0u; i < n; i++) {}", &[]).contains("fixed bound"));
+        assert!(err("for (var i = 0u; i < 100000u; i++) {}", &[]).contains("fixed bound"));
+        assert!(err("for (var i = 0u; ; i++) {}", &[]).contains("fixed bound"));
+        assert!(err("for (var i = 0u; i < a_count; i++) {}", &[("a", Shape::Scalar)]).contains("fixed bound"));
+        assert!(err("return vec4f(1.0);", &[]).contains("assign the output"));
+        assert!(err("OUT[0] = 1u;", &[]).contains("engine"));
+        assert!(err("finish(c, 0u, vec3f(0.0));", &[]).contains("engine"));
+        let e = err("a = 2.0;", &[("a", Shape::Scalar)]);
+        assert!(e.contains("read-only"), "{e}");
+        assert!(err("a += 1.0;", &[("a", Shape::Scalar)]).contains("read-only"));
+        assert!(err("if true { out = vec4f(1.0);", &[]).contains("never closed"));
+        assert!(err("out = vec4f(1.0)); }", &[]).contains("closes nothing"));
+        // CPU bodies are not screened this way (`loop` is fine there, bounded by the step budget).
+        let cpu = CodeDef {
+            inputs: vec![],
+            outputs: vec![port("out", Shape::Scalar)],
+            body: "loop { out += 1.0; if out > 3.0 { break; } }".into(),
+        };
+        assert_eq!(cpu.check().unwrap(), Tier::Cpu);
+    }
+
+    #[test]
+    fn buffer_inputs_are_gpu_only() {
+        for shape in [Shape::Points, Shape::Effects, Shape::Texture] {
+            let gpu = CodeDef {
+                inputs: vec![port("b", shape)],
+                outputs: vec![port("out", Shape::FieldColor)],
+                body: String::new(),
+            };
+            assert_eq!(gpu.check().unwrap(), Tier::Gpu, "{shape:?}");
+            let cpu = CodeDef {
+                inputs: vec![port("b", shape)],
+                outputs: vec![port("out", Shape::Scalar)],
+                body: String::new(),
+            };
+            assert!(cpu.check().is_err(), "{shape:?}");
+            let out = CodeDef {
+                inputs: vec![],
+                outputs: vec![port("b", shape)],
+                body: String::new(),
+            };
+            assert!(out.check().is_err(), "{shape:?} output");
+        }
+    }
+
+    #[test]
     fn body_rewrite_touches_only_resample_calls() {
         let body = "// img_at in a comment stays\nlet s = img_at(ctx_transform(c, 0.1, 1.0, 0.0, 0.0));\n/* mask_at */ out = s * mask_at(c).x + 1e5 + img;";
-        let got = rewrite_body(body, 7, &["img", "mask"], "N7Out(out)");
+        let got = rewrite_body(body, 7, &["img", "mask"], &[], "N7Out(out)");
         assert_eq!(
             got,
             "// img_at in a comment stays\nlet s = n7_in_img(ctx_transform(c, 0.1, 1.0, 0.0, 0.0));\n/* mask_at */ out = s * n7_in_mask(c).x + 1e5 + img;"
         );
         // A port that is not a field input is left alone.
-        assert_eq!(rewrite_body("x_at(c)", 1, &["img"], "R"), "x_at(c)");
+        assert_eq!(rewrite_body("x_at(c)", 1, &["img"], &[], "R"), "x_at(c)");
         // Unicode in a comment survives.
-        assert_eq!(rewrite_body("// héllo\nout = 1.0;", 1, &[], "R"), "// héllo\nout = 1.0;");
+        assert_eq!(rewrite_body("// héllo\nout = 1.0;", 1, &[], &[], "R"), "// héllo\nout = 1.0;");
+        // An Effects input's `_on` form.
+        assert_eq!(rewrite_body("if fx_on(e) { let E = fx_at(e); }", 2, &["fx"], &["fx"], "R"), "if n2_on_fx(e) { let E = n2_in_fx(e); }");
         // A bare return becomes a return of the record; `return x;` is left
         // for the compiler to refuse; a `returned` identifier is untouched.
         assert_eq!(
-            rewrite_body("if a { return; }\nreturn ;\nreturn x;\nlet returned = 1.0;", 3, &[], "N3Out(out)"),
+            rewrite_body("if a { return; }\nreturn ;\nreturn x;\nlet returned = 1.0;", 3, &[], &[], "N3Out(out)"),
             "if a { return N3Out(out); }\nreturn N3Out(out) ;\nreturn x;\nlet returned = 1.0;"
         );
     }

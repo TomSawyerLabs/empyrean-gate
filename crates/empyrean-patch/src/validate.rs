@@ -82,6 +82,11 @@ pub enum PatchError {
         node: String,
         detail: String,
     },
+    /// Note text on the wrong kind, or too long.
+    Note {
+        node: String,
+        detail: String,
+    },
     /// `layers` on a kind that has none, or more than `registry::MAX_LAYERS`.
     BadLayers {
         node: String,
@@ -125,6 +130,7 @@ impl fmt::Display for PatchError {
             ),
             Self::BadMedia { node, detail } => write!(f, "node \"{node}\": {detail}"),
             Self::Code { node, detail } => write!(f, "Code node \"{node}\": {detail}"),
+            Self::Note { node, detail } => write!(f, "node \"{node}\": {detail}"),
             Self::BadLayers { node, layers } => write!(
                 f,
                 "node \"{node}\" has {layers} layers: only a Blend has layers, at most {}",
@@ -138,6 +144,9 @@ impl fmt::Display for PatchError {
         }
     }
 }
+
+/// Longest Note text.
+pub const MAX_NOTE_BYTES: usize = 4000;
 
 /// Node kinds whose `media` lives in a media cell of the VIDEO buffer
 /// (`abi::MEDIA_CELLS`): Still images and Clips.
@@ -201,6 +210,18 @@ pub fn validate(doc: &PatchDoc) -> Result<Validated, Vec<PatchError>> {
                 node: n.id.clone(),
                 detail: "only Code nodes carry code".to_string(),
             });
+        }
+        if let Some(text) = &n.text {
+            let detail = if n.kind != registry::NOTE_KIND {
+                Some("only Note nodes carry text".to_string())
+            } else if text.len() > MAX_NOTE_BYTES {
+                Some(format!("its text is {} bytes; the limit is {MAX_NOTE_BYTES}", text.len()))
+            } else {
+                None
+            };
+            if let Some(detail) = detail {
+                errors.push(PatchError::Note { node: n.id.clone(), detail });
+            }
         }
         if n.layers > 1 && (registry::layered(&n.kind).is_empty() || n.layers > registry::MAX_LAYERS) {
             errors.push(PatchError::BadLayers { node: n.id.clone(), layers: n.layers });

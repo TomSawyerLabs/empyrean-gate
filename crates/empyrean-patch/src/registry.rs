@@ -73,6 +73,9 @@ pub enum Category {
     Code,
 }
 
+/// A remark on the canvas: text in `NodeInst::text`, no ports, never run.
+pub const NOTE_KIND: &str = "note";
+
 /// Node kinds the evaluator runs on the CPU every frame (Scalar/Event
 /// tier). A Code node's tier is per instance: see `NodeInst::is_cpu`.
 pub fn is_cpu_kind(kind: &str) -> bool {
@@ -2807,6 +2810,15 @@ pub const TYPES: &[NodeType] = &[
         label: "Code",
         category: Category::Code,
         description: "A node whose ports and body you write (stored in the node's `code`). If every port is a Scalar or Event, the body (a WGSL subset) runs on the CPU every frame; if it outputs a field, the WGSL body is compiled into the patch shader and runs per pixel. Scalar inputs are knobs like a built-in node's params.",
+        inputs: &[],
+        outputs: &[],
+        params: &[],
+    },
+    NodeType {
+        id: "note",
+        label: "Note",
+        category: Category::Code,
+        description: "A remark on the canvas (`text` on the node): no ports, never run. For explaining a patch, a sub-patch, or a Code node to the next person.",
         inputs: &[],
         outputs: &[],
         params: &[],

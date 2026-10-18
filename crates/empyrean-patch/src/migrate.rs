@@ -41,7 +41,8 @@ pub fn migrate(doc: &mut PatchDoc) -> bool {
     if doc.format <= 2 {
         v2_to_v3(doc);
     }
-    // 3 → 4 adds fields (`sub`, Clip nodes) and changes nothing that exists.
+    // 3 → 4 adds fields (`sub`, Clip nodes), 4 → 5 `code`, 5 → 6 `text`:
+    // additions only, nothing that exists changes.
     doc.format = PATCH_FORMAT;
     true
 }
@@ -101,6 +102,7 @@ fn add_node(doc: &mut PatchDoc, base: &str, kind: &str, pos: [f32; 2], params: &
         pos,
         media: None,
         code: None,
+        text: None,
         sub: None,
         collapsed: false,
         layers: 0,

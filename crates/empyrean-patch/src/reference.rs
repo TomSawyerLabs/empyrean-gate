@@ -235,10 +235,10 @@ mod tests {
         // Every listed helper is documented; the lib's internals (noise
         // primitives, the renderers, the output writer) are not listed.
         assert!(r.helpers.iter().all(|h| !h.doc.is_empty()));
-        for internal in ["mod289v3", "permute4", "taylor_inv_sqrt4", "video_texel", "image_texel", "effect_color", "dab_color", "stamp_frame", "finish", "main"] {
+        for internal in ["mod289v3", "permute4", "taylor_inv_sqrt4", "video_texel", "image_texel", "stamp_frame", "finish", "main"] {
             assert!(!r.helpers.iter().any(|h| h.name == internal), "{internal} listed");
         }
-        for name in ["wave_at", "spec_at", "video_at", "fbm3", "rgb2hsv", "hash01", "ang_dist", "image_at", "rot2", "sd_star", "touch_mask", "touch_glow", "feedback_at", "clip_at"] {
+        for name in ["wave_at", "spec_at", "video_at", "fbm3", "rgb2hsv", "hash01", "ang_dist", "image_at", "rot2", "sd_star", "touch_mask", "touch_glow", "feedback_at", "clip_at", "effect_color", "dab_color"] {
             assert!(r.helpers.iter().any(|h| h.name == name), "{name} missing");
         }
         assert!(!r.globals.iter().any(|g| matches!(g.name.as_str(), "OUT" | "P" | "PREVIEW")));

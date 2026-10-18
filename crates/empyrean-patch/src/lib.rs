@@ -36,8 +36,9 @@ use std::collections::BTreeMap;
 /// streams). 3: Still image nodes carry their own image ([`NodeInst::media`]).
 /// 4: Sub-patch nodes carry another document ([`NodeInst::sub`]; Clips carry
 /// a sprite sheet in `media`). 5: Code nodes carry their ports and body
-/// ([`NodeInst::code`]). Older files are upgraded by [`migrate::migrate`].
-pub const PATCH_FORMAT: u32 = 5;
+/// ([`NodeInst::code`]). 6: Note nodes carry text ([`NodeInst::text`]).
+/// Older files are upgraded by [`migrate::migrate`].
+pub const PATCH_FORMAT: u32 = 6;
 
 /// Pictures a patch may carry (Still image and Clip nodes), each its own
 /// media cell on the GPU.
@@ -230,6 +231,10 @@ pub struct NodeInst {
     /// outputs its output ports. Required on a Code node, refused elsewhere.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<Box<code::CodeDef>>,
+    /// A Note node's text: a remark on the canvas, nothing more (see
+    /// [`registry::NOTE_KIND`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
     /// Shown minimized in the editor: a mini with port dots, no labels or
     /// knobs (purely presentational).
     #[serde(skip_serializing_if = "std::ops::Not::not")]

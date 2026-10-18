@@ -22,17 +22,9 @@ pub fn convertible(kind: &str) -> bool {
     registry::is_gpu_kind(kind)
         && !matches!(
             kind,
-            // Read buffers that Code ports cannot name yet, or are sources
-            // with no function of their own, or are the sink.
-            "render_points"
-                | "render_effects"
-                | "texture_sample"
-                | "touch_dabs"
-                | "effects_in"
-                | "video_in"
-                | "image_in"
-                | "clip"
-                | "output"
+            // The stream and texture sources have no function of their own;
+            // Output is the sink.
+            "touch_dabs" | "effects_in" | "video_in" | "image_in" | "clip" | "output"
         )
 }
 
@@ -199,22 +191,40 @@ fn gpu_definition(doc: &PatchDoc, index: usize) -> Result<CodeDef, String> {
     if raw.contains("c0") {
         body.push_str("let c0 = c;\n");
     }
-    // Un-indent the generated body (four spaces inside a fn) and turn the
-    // final `return X;` into `out = X;`.
-    let mut lines: Vec<String> = raw
-        .lines()
-        .map(|l| l.strip_prefix("    ").unwrap_or(l).trim_end().to_string())
-        .collect();
-    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+    // Every `return X;` becomes `out = X;` (plus `return;` unless it is the
+    // last statement), then the body is re-indented by brace depth: the
+    // generated text carries the indentation of the Rust it came from.
+    let mut lines: Vec<String> = raw.lines().map(|l| l.trim().to_string()).collect();
+    while lines.last().is_some_and(|l| l.is_empty()) {
         lines.pop();
     }
-    if let Some(last) = lines.last_mut()
-        && let Some(expr) = last.trim().strip_prefix("return ")
-    {
-        *last = format!("out = {expr}");
+    let last = lines.len().saturating_sub(1);
+    let mut rewritten = Vec::with_capacity(lines.len() + 2);
+    for (k, line) in lines.into_iter().enumerate() {
+        match line.strip_prefix("return ").and_then(|r| r.strip_suffix(';')) {
+            Some(expr) => {
+                rewritten.push(format!("out = {expr};"));
+                if k != last {
+                    rewritten.push("return;".to_string());
+                }
+            }
+            None => rewritten.push(line),
+        }
     }
-    body.push_str(&lines.join("\n"));
-    body.push('\n');
+    let mut depth: usize = 0;
+    for line in rewritten {
+        if line.starts_with('}') {
+            depth = depth.saturating_sub(1);
+        }
+        if !line.is_empty() {
+            body.push_str(&"  ".repeat(depth));
+        }
+        body.push_str(&line);
+        body.push('\n');
+        if line.ends_with('{') {
+            depth += 1;
+        }
+    }
     Ok(CodeDef {
         inputs,
         outputs: vec![CodePort {
@@ -472,14 +482,23 @@ mod tests {
                     node("colour", "noise_field", &[]),
                     node("n", t.id, &[]),
                     node("o", "output", &[]),
+                    node("dabs", "touch_dabs", &[]),
+                    node("fx", "effects_in", &[]),
+                    node("video", "video_in", &[]),
                 ],
                 edges: vec![edge("n", "out", "o", "in")],
                 ..Default::default()
             };
-            // Feed every field input so a converted body references its ports.
+            // Feed every input so a converted body references its ports.
             for inp in t.inputs {
-                let src = if inp.shape == Shape::FieldScalar { "grey" } else { "colour" };
-                doc.edges.push(edge(src, "out", "n", inp.name));
+                let (src, port) = match inp.shape {
+                    Shape::FieldScalar => ("grey", "out"),
+                    Shape::Points => ("dabs", "points"),
+                    Shape::Effects => ("fx", "effects"),
+                    Shape::Texture => ("video", "tex"),
+                    _ => ("colour", "out"),
+                };
+                doc.edges.push(edge(src, port, "n", inp.name));
             }
             // A knob set off its default must survive the conversion.
             let first_knob = t.params.iter().find(|p| matches!(p.kind, ParamKind::Number));
@@ -577,7 +596,7 @@ mod tests {
 
     #[test]
     fn unconvertible_kinds_are_refused() {
-        for kind in ["output", "audio", "render_points", "video_in", "subpatch"] {
+        for kind in ["output", "audio", "touch_dabs", "video_in", "subpatch", "note"] {
             let mut doc = PatchDoc {
                 nodes: vec![node("n", kind, &[]), node("o", "output", &[])],
                 ..Default::default()

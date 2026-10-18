@@ -264,7 +264,14 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   knobs kept, with the body the engine itself generates for it (GPU
   kinds) or a script written to match it (CPU kinds; checked against the
   real node in tests), Select choices baked in and named, rate knobs
-  flagged as rates (`plans/code-node.md`). Graphs
+  flagged as rates. A GPU body may also take Points, Effects and Texture
+  inputs (`name_count`, `name_at(k)`, `name_on(k)`, `name_at(uv)`); loops
+  in it need a fixed bound (`while` and `loop` are refused before the
+  shader compiler sees them, so a patch cannot hang the GPU), and the core
+  reports `return <value>`, unbalanced braces and writes to inputs with
+  line and column. A **Note** node is a remark on the canvas, and the
+  preset "Code: Ripple Warp" is a starting point for writing one
+  (`plans/code-node.md`). Graphs
   compile to a single WGSL dispatch; knob tweaks and scalar
   wires never recompile, and edits carry every timer and phase over. The
   editor has undo/redo (Ctrl+Z / Ctrl+Shift+Z) and duplicate (Ctrl+D).

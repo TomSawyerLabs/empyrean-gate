@@ -72,32 +72,32 @@ struct AudioU {
 }
 
 struct Effect {
-    kind: u32,
-    size: f32,
-    age: f32,
-    duration: f32,
-    angle: f32,
-    radius: f32,
-    intensity: f32,
-    hue: f32,
+    kind: u32,      // effect kind index (burst, strobe, swoosh, …: EffectKind::ALL order)
+    size: f32,      // size multiplier, 1 = as triggered
+    age: f32,       // seconds since it was triggered
+    duration: f32,  // seconds it lives (0 = the kind's default)
+    angle: f32,     // where it was placed, radians
+    radius: f32,    // where it was placed, 0 centre .. 1 outer edge
+    intensity: f32, // brightness multiplier
+    hue: f32,       // hue in turns; below 0 = white
     saturation: f32,
     brightness: f32,
-    rotation: f32,
-    grow: f32,
-    edge: f32,
-    fill: f32,
+    rotation: f32,  // radians, for the shapes
+    grow: f32,      // -1..1: shrinks or grows over its life
+    edge: f32,      // 0..1 edge softness of the shapes
+    fill: f32,      // 0..1 how filled the shapes are
     source: u32,    // 0 = a client; else the emitting patch node (see abi.rs)
 }
 
 struct Dab {
-    kind: u32,
-    age: f32,
-    angle: f32,
-    radius: f32,
-    hue: f32,
-    size: f32,
-    intensity: f32,
-    dir: f32,
+    kind: u32,      // pen kind index (glow, comet, …: PenKind order)
+    age: f32,       // seconds since it was drawn
+    angle: f32,     // where it was drawn, radians
+    radius: f32,    // where it was drawn, 0 centre .. 1 outer edge
+    hue: f32,       // hue in turns; below 0 = white
+    size: f32,      // 0..1 of the array's radius
+    intensity: f32, // brightness multiplier
+    dir: f32,       // stroke direction, radians
     saturation: f32,
     brightness: f32,
     _pad0: f32,
@@ -625,6 +625,7 @@ fn shape_hold(t: f32) -> f32 {
 // live while a patch renders (effect pads and drawing keep working).
 // ---------------------------------------------------------------------------
 
+/// What one triggered effect adds at this pixel (the Render effects node draws every effect with this), RGB.
 fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
     let t = clamp(E.age / max(E.duration, 0.001), 0.0, 1.0);
     let fade = (1.0 - t) * (1.0 - t);
@@ -765,6 +766,7 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
     }
 }
 
+/// What one drawn dab adds at this pixel (the Render points node draws every dab with this), RGB; `dab_index` seeds its sparkle.
 fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
     let fade = (1.0 - D.age) * (1.0 - D.age);
     let origin = D.radius * vec2f(cos(D.angle), sin(D.angle));

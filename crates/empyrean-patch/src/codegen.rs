@@ -252,6 +252,10 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         .ok_or_else(|| "patch has no Output node".to_string())?;
 
     for n in &doc.nodes {
+        // A Note is text on the canvas: nothing to run.
+        if n.kind == registry::NOTE_KIND {
+            continue;
+        }
         if !n.is_cpu() && !n.is_gpu() {
             return Err(format!(
                 "node kind \"{}\" is not renderable yet (planned for a later step)",
@@ -470,6 +474,9 @@ impl Gen<'_> {
     /// the upstream Still image's own media cell, or the current frame of the
     /// upstream Clip's sheet.
     fn texture_sample_expr(&self, node: usize) -> String {
+        if self.symbolic {
+            return "tex_at(uv)".to_string();
+        }
         match self.upstream(node, "tex") {
             Some((from, _)) => self.texture_source_expr(*from),
             None => "video_at(uv)".to_string(),
@@ -641,6 +648,12 @@ impl Gen<'_> {
             .filter(|p| p.shape != Shape::Scalar)
             .map(|p| p.name.as_str())
             .collect();
+        let effects: Vec<&str> = def
+            .inputs
+            .iter()
+            .filter(|p| p.shape == Shape::Effects)
+            .map(|p| p.name.as_str())
+            .collect();
 
         writeln!(code, "\nstruct N{i}Out {{").unwrap();
         for p in &def.outputs {
@@ -648,17 +661,51 @@ impl Gen<'_> {
         }
         code.push_str("}\n");
         for p in def.inputs.iter().filter(|p| p.shape != Shape::Scalar) {
-            let expr = match p.shape {
-                Shape::FieldColor => self.color_input(i, &p.name, "c"),
-                _ => self.scalar_field_input(i, &p.name, "c"),
-            };
-            writeln!(
-                code,
-                "fn n{i}_in_{name}(c: Ctx) -> {ty} {{\n    let _unused = c.rn;\n    return {expr};\n}}",
-                name = p.name,
-                ty = ty(p.shape),
-            )
-            .unwrap();
+            let name = &p.name;
+            match p.shape {
+                // A Points input: the live dabs, `name_at(k)` and `name_count`.
+                Shape::Points => writeln!(
+                    code,
+                    "fn n{i}_in_{name}(k: u32) -> Dab {{\n    var d: Dab;\n    if k < G.dab_count {{\n        d = DABS[k];\n    }}\n    return d;\n}}"
+                )
+                .unwrap(),
+                // An Effects input: the live effects, `name_at(k)`, and
+                // `name_on(k)` for the ones this wire carries.
+                Shape::Effects => {
+                    let sources = self.effect_sources(i, name);
+                    let wanted = if sources.is_empty() {
+                        "false".to_string()
+                    } else {
+                        sources.iter().map(|s| format!("E.source == {s}u")).collect::<Vec<_>>().join(" || ")
+                    };
+                    writeln!(
+                        code,
+                        "fn n{i}_in_{name}(k: u32) -> Effect {{\n    var e: Effect;\n    if k < G.effect_count {{\n        e = FX[k];\n    }}\n    return e;\n}}\n\
+                         fn n{i}_on_{name}(k: u32) -> bool {{\n    if k >= G.effect_count {{\n        return false;\n    }}\n    let E = FX[k];\n    return {wanted};\n}}"
+                    )
+                    .unwrap();
+                }
+                // A Texture input: `name_at(uv)` samples the source wired in.
+                Shape::Texture => {
+                    let expr = match self.upstream(i, name) {
+                        Some((from, _)) => self.texture_source_expr(*from),
+                        None => "vec4f(0.0)".to_string(),
+                    };
+                    writeln!(code, "fn n{i}_in_{name}(uv: vec2f) -> vec4f {{\n    let _unused = uv.x;\n    return {expr};\n}}").unwrap();
+                }
+                _ => {
+                    let expr = match p.shape {
+                        Shape::FieldColor => self.color_input(i, name, "c"),
+                        _ => self.scalar_field_input(i, name, "c"),
+                    };
+                    writeln!(
+                        code,
+                        "fn n{i}_in_{name}(c: Ctx) -> {ty} {{\n    let _unused = c.rn;\n    return {expr};\n}}",
+                        ty = ty(p.shape),
+                    )
+                    .unwrap();
+                }
+            }
         }
         writeln!(code, "fn n{i}_all(c: Ctx) -> N{i}Out {{").unwrap();
         writeln!(code, "    let _unused = c.rn;").unwrap();
@@ -666,10 +713,23 @@ impl Gen<'_> {
             writeln!(code, "    var {}: {} = {};", p.name, ty(p.shape), zero(p.shape)).unwrap();
         }
         for p in &def.inputs {
-            if p.shape == Shape::Scalar {
-                writeln!(code, "    let {} = {};", p.name, self.p(i, &p.name)).unwrap();
-            } else {
-                writeln!(code, "    let {name} = n{i}_in_{name}(c);", name = p.name).unwrap();
+            let name = &p.name;
+            match p.shape {
+                Shape::Scalar => writeln!(code, "    let {name} = {};", self.p(i, name)).unwrap(),
+                Shape::Points => {
+                    let count = if self.upstream(i, name).is_some() { "G.dab_count" } else { "0u" };
+                    writeln!(code, "    let {name}_count: u32 = {count};").unwrap();
+                }
+                Shape::Effects => {
+                    let count = if self.effect_sources(i, name).is_empty() { "0u" } else { "G.effect_count" };
+                    writeln!(code, "    let {name}_count: u32 = {count};").unwrap();
+                }
+                Shape::Texture => writeln!(
+                    code,
+                    "    let {name} = n{i}_in_{name}(vec2f(0.5 + c.pos.x * 0.5, 0.5 - c.pos.y * 0.5));"
+                )
+                .unwrap(),
+                _ => writeln!(code, "    let {name} = n{i}_in_{name}(c);").unwrap(),
             }
         }
         let record = format!(
@@ -679,7 +739,7 @@ impl Gen<'_> {
         code.push_str("    {\n");
         let first = code.matches('\n').count() + 1;
         let count = def.body.split('\n').count();
-        code.push_str(&code::rewrite_body(&def.body, i, &fields, &record));
+        code.push_str(&code::rewrite_body(&def.body, i, &fields, &effects, &record));
         code.push_str("\n    }\n");
         let record = def
             .outputs
@@ -1357,7 +1417,7 @@ impl Gen<'_> {
                 bright = self.p(i, "brightness"),
             ),
             "texture_sample" => {
-                if self.upstream(i, "tex").is_none() {
+                if !self.symbolic && self.upstream(i, "tex").is_none() {
                     "    return vec4f(0.0);".to_string()
                 } else {
                     format!(
@@ -1380,7 +1440,22 @@ impl Gen<'_> {
                 }
             }
             "render_points" => {
-                if self.upstream(i, "points").is_none() {
+                if self.symbolic {
+                    // The Points port idiom of a Code node (see `code_fn`).
+                    let pen = self.select(i, "pen");
+                    let override_kind = if pen == 0 { String::new() } else { format!("        D.kind = {}u;\n", pen - 1) };
+                    format!(
+                        "    var acc = vec3f(0.0);\n\
+                         \x20   for (var d = 0u; d < points_count; d++) {{\n\
+                         \x20       var D = points_at(d);\n\
+                         {override_kind}\
+                         \x20       D.size = D.size * size;\n\
+                         \x20       D.intensity = D.intensity * intensity;\n\
+                         \x20       acc += dab_color(D, c, d);\n\
+                         \x20   }}\n\
+                         \x20   return vec4f(acc, clamp(max(acc.r, max(acc.g, acc.b)), 0.0, 1.0));"
+                    )
+                } else if self.upstream(i, "points").is_none() {
                     "    return vec4f(0.0);".to_string()
                 } else {
                     // Pen 0 = "as drawn" (keep each dab's own kind); size and
@@ -1408,7 +1483,21 @@ impl Gen<'_> {
             }
             "render_effects" => {
                 let sources = self.effect_sources(i, "effects");
-                if sources.is_empty() {
+                if self.symbolic {
+                    // The Effects port idiom of a Code node (see `code_fn`).
+                    "    var acc = vec3f(0.0);\n\
+                     \x20   for (var e = 0u; e < effects_count; e++) {\n\
+                     \x20       if !effects_on(e) {\n\
+                     \x20           continue;\n\
+                     \x20       }\n\
+                     \x20       var E = effects_at(e);\n\
+                     \x20       E.size = E.size * size;\n\
+                     \x20       E.intensity = E.intensity * intensity;\n\
+                     \x20       acc += effect_color(E, c);\n\
+                     \x20   }\n\
+                     \x20   return vec4f(acc, clamp(max(acc.r, max(acc.g, acc.b)), 0.0, 1.0));"
+                        .to_string()
+                } else if sources.is_empty() {
                     "    return vec4f(0.0);".to_string()
                 } else {
                     let wanted = sources

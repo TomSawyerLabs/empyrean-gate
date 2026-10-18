@@ -1,5 +1,5 @@
 {
-  "format": 5,
+  "format": 6,
   "id": "builtin-beat-pulse",
   "name": "Beat Pulse",
   "description": "Rings ride the beat over a slow noise bed; bass fades them in.",

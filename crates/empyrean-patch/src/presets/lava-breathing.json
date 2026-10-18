@@ -1,5 +1,5 @@
 {
-  "format": 5,
+  "format": 6,
   "id": "builtin-lava-breathing",
   "name": "Lava Breathing",
   "description": "Fire climbing the spokes, reach swelling on a slow LFO, whole field slowly rotating.",

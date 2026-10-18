@@ -1,0 +1,31 @@
+{
+  "format": 6,
+  "id": "builtin-code-ripple-warp",
+  "name": "Code: Ripple Warp",
+  "description": "A Plasma, warped and tinted by a Code node you can read and change. Open the Code node: its body is a few lines of WGSL, its knob is a port like any other.",
+  "nodes": [
+    { "id": "about", "kind": "note", "name": "", "params": {}, "pos": [-340, -150], "text": "This patch is a starting point for writing your own.\n\nThe Plasma on the left feeds the Code node as `img`. The Code node's body (click it, then ⤢ Expand) samples the plasma a little off from where this pixel is, by a noise that moves with time, and tints it by radius.\n\nTry: change the 3.0 (noise scale), the 0.2 (noise speed), or turn the `twist` knob. Ctrl+Space in the body lists everything you can use. Any built-in node has Convert to Code if you would rather start from one of those." },
+    { "id": "plasma", "kind": "plasma", "name": "", "params": { "scale": 1.4, "speed": 0.6, "hue": 0.55, "hue_range": 0.3 }, "pos": [-340, 80] },
+    {
+      "id": "warp",
+      "kind": "code",
+      "name": "ripple",
+      "params": { "twist": 1 },
+      "pos": [-40, 60],
+      "code": {
+        "inputs": [
+          { "name": "twist", "shape": "scalar", "min": 0, "max": 3, "default": 1 },
+          { "name": "img", "shape": "field_color", "min": 0, "max": 1, "default": 0 }
+        ],
+        "outputs": [{ "name": "out", "shape": "field_color", "min": 0, "max": 1, "default": 0 }],
+        "body": "// `img` is the plasma at this pixel; `img_at(ctx)` samples it anywhere.\n// `c` is this pixel: c.theta (angle), c.r01 (0 outer .. 1 inner), c.pos (x, y).\nlet n = snoise3(vec3f(c.pos * 3.0, G.time * 0.2));\nlet warped = ctx_transform(c, n * twist * 0.4, 1.0 + 0.15 * n, 0.0, 0.0);\nlet s = img_at(warped);\nlet tint = 0.6 + 0.4 * c.r01;\nout = vec4f(s.rgb * tint, s.a);\n"
+      }
+    },
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [260, 80] }
+  ],
+  "edges": [
+    { "from": { "node": "plasma", "port": "out" }, "to": { "node": "warp", "port": "img" } },
+    { "from": { "node": "warp", "port": "out" }, "to": { "node": "out", "port": "in" } }
+  ],
+  "exposed": [{ "node": "warp", "param": "twist", "label": "Twist" }]
+}
