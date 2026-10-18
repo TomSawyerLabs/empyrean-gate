@@ -6,8 +6,10 @@
 //! (fields, points, textures, events). `Select` params are enum-like topology
 //! choices and are NOT connectable.
 //!
-//! This registry defines interfaces only; WGSL codegen support arrives
-//! per-node in plan step 2 and activation is gated on it there.
+//! Every node type, port and param carries a `description`: plain sentences
+//! for a person or an agent composing patches without opening the editor
+//! (served in the palette JSON). Keep them true to `codegen` / `eval` when
+//! behaviour changes; units go in the param's description.
 
 use super::Shape;
 
@@ -15,6 +17,8 @@ use super::Shape;
 pub struct PortDef {
     pub name: &'static str,
     pub shape: Shape,
+    /// What the port carries, with units and ranges where they matter.
+    pub description: &'static str,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -37,25 +41,35 @@ pub struct ParamDef {
     /// sees the accumulated phase, so live speed changes never cause visual
     /// discontinuities — the same invariant the layer stack keeps per-layer.
     pub integrate: bool,
+    /// What the param does: units, what the ends of the range mean, and for a
+    /// Select what each option does.
+    pub description: &'static str,
 }
 
+/// Palette groups. Serialized as the snake-ish ids in [`palette_json`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Category {
-    /// Signals from outside the graph: time, touch, audio, IMU, video.
+    /// `input`: signals from outside the graph — time, sliders, the crew's
+    /// master controls, audio, phone motion, touch, PRO DJ LINK, the effect
+    /// and stroke streams clients send, video and pictures.
     Input,
-    /// Control-rate CPU operators.
+    /// `scalar`: control-rate CPU operators on Scalars and Events (math,
+    /// LFOs, envelopes, counters, latches, event effects). They run once per
+    /// frame, not per pixel.
     ScalarOp,
-    /// Field generators (the old layer kinds live here).
+    /// `generator`: nodes that make a field from nothing (the old layer kinds
+    /// live here), evaluated per pixel on the GPU.
     Generator,
-    /// Field transforms and color mapping.
+    /// `field`: per-pixel transforms and colour mapping of fields, and the
+    /// renderers that turn Points / Effects streams into colour.
     FieldOp,
-    /// Multi-field combination.
+    /// `combine`: multi-field combination (Blend) and Sub-patch.
     Combine,
-    /// Texture-tier nodes (materialized buffers).
+    /// `texture`: texture-tier nodes (materialized buffers) — Texture sample.
     Texture,
-    /// The one required end of every renderable patch.
+    /// `sink`: the one required end of every renderable patch (Output).
     Sink,
-    /// Nodes whose ports and body are written by the user (see `code`).
+    /// `code`: nodes whose ports and body are written by the user (see `code`).
     Code,
 }
 
@@ -145,6 +159,9 @@ pub struct NodeType {
     pub id: &'static str,
     pub label: &'static str,
     pub category: Category,
+    /// What the node does and outputs, what its inputs mean, and when to use
+    /// it: one to three sentences.
+    pub description: &'static str,
     /// Shaped inputs only; every `Number` param is additionally a Scalar input.
     pub inputs: &'static [PortDef],
     pub outputs: &'static [PortDef],
@@ -183,7 +200,8 @@ pub fn lookup(id: &str) -> Option<&'static NodeType> {
 
 /// The palette serialized for the editor (`GET /patch/registry`). Shapes use
 /// the same snake_case names as patch JSON; `kind` is `"number"` or
-/// `{"select": [labels…]}`.
+/// `{"select": [labels…]}`. Nodes, ports and params each carry a
+/// `description`.
 pub fn palette_json() -> serde_json::Value {
     use serde_json::json;
     let shape = |s: Shape| serde_json::to_value(s).expect("shape serializes");
@@ -197,6 +215,18 @@ pub fn palette_json() -> serde_json::Value {
         Category::Sink => "sink",
         Category::Code => "code",
     };
+    let ports = |ports: &[PortDef]| {
+        ports
+            .iter()
+            .map(|p| {
+                json!({
+                    "name": p.name,
+                    "shape": shape(p.shape),
+                    "description": p.description,
+                })
+            })
+            .collect::<Vec<_>>()
+    };
     json!(
         TYPES
             .iter()
@@ -205,14 +235,9 @@ pub fn palette_json() -> serde_json::Value {
                     "id": t.id,
                     "label": t.label,
                     "category": category(t.category),
-                    "inputs": t.inputs.iter().map(|p| json!({
-                        "name": p.name,
-                        "shape": shape(p.shape),
-                    })).collect::<Vec<_>>(),
-                    "outputs": t.outputs.iter().map(|p| json!({
-                        "name": p.name,
-                        "shape": shape(p.shape),
-                    })).collect::<Vec<_>>(),
+                    "description": t.description,
+                    "inputs": ports(t.inputs),
+                    "outputs": ports(t.outputs),
                     "params": t.params.iter().map(|p| json!({
                         "name": p.name,
                         "label": p.label,
@@ -224,6 +249,7 @@ pub fn palette_json() -> serde_json::Value {
                             ParamKind::Number => json!("number"),
                             ParamKind::Select(options) => json!({ "select": options }),
                         },
+                        "description": p.description,
                     })).collect::<Vec<_>>(),
                 })
             })
@@ -237,6 +263,7 @@ const fn num(
     min: f32,
     max: f32,
     default: f32,
+    description: &'static str,
 ) -> ParamDef {
     ParamDef {
         name,
@@ -246,6 +273,7 @@ const fn num(
         max,
         default,
         integrate: false,
+        description,
     }
 }
 
@@ -256,6 +284,7 @@ const fn rate(
     min: f32,
     max: f32,
     default: f32,
+    description: &'static str,
 ) -> ParamDef {
     ParamDef {
         name,
@@ -265,6 +294,7 @@ const fn rate(
         max,
         default,
         integrate: true,
+        description,
     }
 }
 
@@ -272,6 +302,7 @@ const fn sel(
     name: &'static str,
     label: &'static str,
     options: &'static [&'static str],
+    description: &'static str,
 ) -> ParamDef {
     ParamDef {
         name,
@@ -281,15 +312,23 @@ const fn sel(
         max: options.len() as f32 - 1.0,
         default: 0.0,
         integrate: false,
+        description,
     }
 }
 
-const fn out(shape: Shape) -> [PortDef; 1] {
-    [PortDef { name: "out", shape }]
+const fn port(name: &'static str, shape: Shape, description: &'static str) -> PortDef {
+    PortDef {
+        name,
+        shape,
+        description,
+    }
 }
 
-const COLOR_OUT: &[PortDef] = &out(Shape::FieldColor);
-const SCALAR_OUT: &[PortDef] = &out(Shape::Scalar);
+const COLOR_OUT: &[PortDef] = &[port(
+    "out",
+    Shape::FieldColor,
+    "The colour field: RGB per pixel (may exceed 1; the Output soft-clips), plus a 0..1 coverage alpha that Blend's alpha_over uses.",
+)];
 
 /// Keep this order in step with `layers::EffectKind::ALL`. `None` is useful
 /// while building a patch and makes an event mapping disable-able without
@@ -299,82 +338,211 @@ const EFFECT_KINDS: &[&str] = &[
     "Star", "Heart", "Flower", "Diamond", "Triangle", "Moon", "Ring", "Rotate",
 ];
 
+/// Shared description of a generator's integrated `speed`.
+const SPEED: &str = "Animation rate, integrated into a phase (× the gate's master speed) so changes never jump; 0 freezes the motion.";
+
 /// Shared color-mapping knobs used by every generator that owns its palette.
-const HUE: ParamDef = num("hue", "Hue", 0.0, 1.0, 0.6);
-const HUE_RANGE: ParamDef = num("hue_range", "Hue range", 0.0, 1.0, 0.2);
-const SATURATION: ParamDef = num("saturation", "Saturation", 0.0, 1.0, 0.9);
-const BRIGHTNESS: ParamDef = num("brightness", "Brightness", 0.0, 2.0, 1.0);
+const HUE: ParamDef = num(
+    "hue",
+    "Hue",
+    0.0,
+    1.0,
+    0.6,
+    "Base hue in turns: 0 red, 1/3 green, 2/3 blue (wraps, so 1 is red again).",
+);
+const HUE_RANGE: ParamDef = num(
+    "hue_range",
+    "Hue range",
+    0.0,
+    1.0,
+    0.2,
+    "How far the hue spreads across the pattern, in turns added to Hue (0 = a single hue).",
+);
+const SATURATION: ParamDef = num(
+    "saturation",
+    "Saturation",
+    0.0,
+    1.0,
+    0.9,
+    "Colour saturation: 0 white/grey, 1 full colour.",
+);
+const BRIGHTNESS: ParamDef = num(
+    "brightness",
+    "Brightness",
+    0.0,
+    2.0,
+    1.0,
+    "Brightness multiplier: 0 black, 1 normal, above 1 overdrives toward the Output's soft clip.",
+);
 
 /// Shared by Touch mask and Touch glow.
 const TOUCH_FIELD_PARAMS: &[ParamDef] = &[
-    num("radius", "Radius", 0.01, 0.8, 0.12),
-    num("soft", "Softness", 0.0, 1.0, 0.6),
-    num("fade", "Fade after release (s)", 0.0, 2.0, 0.8),
-    num("grow", "Grow while held", 0.0, 3.0, 0.0),
-    num("trail", "Motion trail", 0.0, 2.0, 0.3),
-    num("intensity", "Intensity", 0.0, 3.0, 1.0),
+    num(
+        "radius",
+        "Radius",
+        0.01,
+        0.8,
+        0.12,
+        "Blob radius in array radii (1 = centre to rim).",
+    ),
+    num(
+        "soft",
+        "Softness",
+        0.0,
+        1.0,
+        0.6,
+        "Edge softness: 0 a hard edge, 1 a wide soft falloff.",
+    ),
+    num(
+        "fade",
+        "Fade after release (s)",
+        0.0,
+        2.0,
+        0.8,
+        "Seconds a blob takes to fade out after its finger lifts (released fingers are kept at most 2 s).",
+    ),
+    num(
+        "grow",
+        "Grow while held",
+        0.0,
+        3.0,
+        0.0,
+        "How fast a held blob grows: its radius is multiplied by 1 + Grow × seconds held.",
+    ),
+    num(
+        "trail",
+        "Motion trail",
+        0.0,
+        2.0,
+        0.3,
+        "Stretches each blob back along its finger's motion, in proportion to the finger's speed.",
+    ),
+    num(
+        "intensity",
+        "Intensity",
+        0.0,
+        3.0,
+        1.0,
+        "Strength multiplier on the blobs (mask value or glow brightness).",
+    ),
 ];
 
 pub const TYPES: &[NodeType] = &[
     // -- Inputs -------------------------------------------------------------
     NodeType {
-        // A clock. Forever (the default) counts up from Start at Rate per
-        // second, exactly as Time always did; Loop wraps Start→End, Ping-pong
-        // bounces between them, Once stops at End. `phase` is the 0..1 position
-        // through Start→End and `wrap` fires at each loop, bounce or arrival.
         id: "time",
         label: "Time",
         category: Category::Input,
-        inputs: &[PortDef {
-            name: "reset",
-            shape: Shape::Event,
-        }],
+        description: "A clock. In Forever mode `out` counts up from Start at Rate per second (× master speed); Loop wraps from Start to End, Ping-pong bounces between them, Once stops at End. `phase` is the 0..1 position through Start→End and `wrap` fires at each loop, bounce or arrival — wire `out` into a knob for steady motion, `phase` for repeating sweeps.",
+        inputs: &[port(
+            "reset",
+            Shape::Event,
+            "Jumps the clock back to Start (and restarts its cycle count) when it fires.",
+        )],
         outputs: &[
-            PortDef {
-                name: "out",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "phase",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "wrap",
-                shape: Shape::Event,
-            },
+            port(
+                "out",
+                Shape::Scalar,
+                "The clock value: Start + elapsed × Rate in Forever mode, else the position between Start and End.",
+            ),
+            port(
+                "phase",
+                Shape::Scalar,
+                "0..1 through the Start→End span: cycles every span in Forever and Loop, goes back and forth in Ping-pong, holds at 1 in Once.",
+            ),
+            port(
+                "wrap",
+                Shape::Event,
+                "Fires each time the clock wraps or bounces, or (Once) arrives at End.",
+            ),
         ],
         params: &[
-            num("rate", "Rate (per second)", -8.0, 8.0, 1.0),
-            sel("mode", "Mode", &["forever", "loop", "ping-pong", "once"]),
-            num("start", "Start", -100.0, 100.0, 0.0),
-            num("end", "End", -100.0, 100.0, 1.0),
-            num("running", "Running (0 pauses)", 0.0, 1.0, 1.0),
+            num(
+                "rate",
+                "Rate (per second)",
+                -8.0,
+                8.0,
+                1.0,
+                "Units the clock advances per second (× master speed); negative runs it backwards.",
+            ),
+            sel(
+                "mode",
+                "Mode",
+                &["forever", "loop", "ping-pong", "once"],
+                "forever: count up without limit; loop: wrap from End back to Start; ping-pong: bounce between Start and End; once: stop at End.",
+            ),
+            num(
+                "start",
+                "Start",
+                -100.0,
+                100.0,
+                0.0,
+                "Value the clock starts from (and returns to on reset).",
+            ),
+            num(
+                "end",
+                "End",
+                -100.0,
+                100.0,
+                1.0,
+                "End of the Start→End span used by loop, ping-pong and once, and by `phase`.",
+            ),
+            num(
+                "running",
+                "Running (0 pauses)",
+                0.0,
+                1.0,
+                1.0,
+                "Above 0.5 the clock runs; below, it pauses where it is (wire a Toggle in).",
+            ),
         ],
     },
     NodeType {
         id: "slider",
         label: "Slider",
         category: Category::Input,
+        description: "One knob as a Scalar: outputs Value. Use it to drive several inputs from one control, or as a knob to expose on the Control tab.",
         inputs: &[],
-        outputs: SCALAR_OUT,
-        params: &[num("value", "Value", 0.0, 1.0, 0.5)],
+        outputs: &[port("out", Shape::Scalar, "The slider's value.")],
+        params: &[num(
+            "value",
+            "Value",
+            0.0,
+            1.0,
+            0.5,
+            "The value it outputs (0..1 on the knob; a wired value passes through unclamped).",
+        )],
     },
     NodeType {
         // The crew's master controls, as the gate applies them outside the
-        // patch: brightness (0..1; the Output is scaled by it), speed (the
-        // multiplier every integrated param already follows), and the master
-        // hue pull (target hue in turns; amount is 0 while the pull is off).
-        // A patch can react to them, e.g. dim its accents as the crew dims
-        // the gate.
+        // patch: a patch can react to them, e.g. dim its accents as the crew
+        // dims the gate.
         id: "globals",
         label: "Gate globals",
         category: Category::Input,
+        description: "The crew's master controls as the gate applies them outside the patch: brightness (the Output is already scaled by it), speed (the multiplier every integrated param already follows) and the master hue pull. Use it to react to them — e.g. dim accents as the crew dims the gate; you never need it to apply them.",
         inputs: &[],
         outputs: &[
-            PortDef { name: "brightness", shape: Shape::Scalar },
-            PortDef { name: "speed", shape: Shape::Scalar },
-            PortDef { name: "hue", shape: Shape::Scalar },
-            PortDef { name: "hue_amount", shape: Shape::Scalar },
+            port(
+                "brightness",
+                Shape::Scalar,
+                "Master brightness 0..1 (already applied to the Output).",
+            ),
+            port(
+                "speed",
+                Shape::Scalar,
+                "Master speed multiplier, 0 = paused (already applied to integrated params, Time, LFO and Random).",
+            ),
+            port(
+                "hue",
+                Shape::Scalar,
+                "Target hue of the master hue pull, in turns 0..1.",
+            ),
+            port(
+                "hue_amount",
+                Shape::Scalar,
+                "Strength of the master hue pull 0..1; 0 while the pull is off.",
+            ),
         ],
         params: &[],
     },
@@ -382,69 +550,89 @@ pub const TYPES: &[NodeType] = &[
         id: "audio",
         label: "Audio",
         category: Category::Input,
+        description: "Live analysis of one audio input: loudness, three bands, onsets and a tracked beat clock. Levels are normalised by a slow automatic gain so they read 0..1 at any volume. Wire bands into brightness or size knobs, `beat_phase` into Beat rings' front, or `beat` into an Envelope or Event effect.",
         inputs: &[],
         outputs: &[
-            PortDef {
-                name: "level",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "bass",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "mid",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "treble",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "onset",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "beat_phase",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "bpm",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "tempo",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "beat",
-                shape: Shape::Event,
-            },
+            port(
+                "level",
+                Shape::Scalar,
+                "Overall loudness (RMS), 0..1 after automatic gain.",
+            ),
+            port(
+                "bass",
+                Shape::Scalar,
+                "Energy from 20 to 150 Hz, 0..1 after automatic gain.",
+            ),
+            port(
+                "mid",
+                Shape::Scalar,
+                "Energy from 150 Hz to 2 kHz, 0..1 after automatic gain.",
+            ),
+            port(
+                "treble",
+                Shape::Scalar,
+                "Energy from 2 to 8 kHz, 0..1 after automatic gain.",
+            ),
+            port(
+                "onset",
+                Shape::Scalar,
+                "Jumps to 1 on a detected onset (a hit) and decays over about 0.15 s: a ready-made flash envelope.",
+            ),
+            port(
+                "beat_phase",
+                Shape::Scalar,
+                "0..1 ramp through the current beat of the tracked tempo (0 on the beat); 0 while no tempo is locked.",
+            ),
+            port(
+                "bpm",
+                Shape::Scalar,
+                "Tracked tempo in beats per minute (roughly 60–190); 0 while none.",
+            ),
+            port(
+                "tempo",
+                Shape::Scalar,
+                "Tempo relative to 120 BPM (bpm / 120): multiply a speed by it to follow the music.",
+            ),
+            port(
+                "beat",
+                Shape::Event,
+                "Fires on each beat of the tracked tempo (when beat_phase wraps).",
+            ),
         ],
-        params: &[sel("source", "Source", &["1", "2", "3", "4"])],
+        params: &[sel(
+            "source",
+            "Source",
+            &["1", "2", "3", "4"],
+            "Which of the (up to four) audio inputs to read.",
+        )],
     },
     NodeType {
         id: "imu",
         label: "Phone IMU",
         category: Category::Input,
+        description: "Motion of the phone that currently holds the gate's motion control (phones take turns; a phone sends motion once enabled in its Settings). Outputs hold their last values; all read 0 until a phone has sent any.",
         inputs: &[],
         outputs: &[
-            PortDef {
-                name: "yaw",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "pitch",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "roll",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "shake",
-                shape: Shape::Scalar,
-            },
+            port(
+                "yaw",
+                Shape::Scalar,
+                "Compass heading in radians, 0..2π.",
+            ),
+            port(
+                "pitch",
+                Shape::Scalar,
+                "Forward/back tilt, -1..1 (±90°).",
+            ),
+            port(
+                "roll",
+                Shape::Scalar,
+                "Left/right tilt, -1..1 (±90°).",
+            ),
+            port(
+                "shake",
+                Shape::Scalar,
+                "Shake intensity, 0..3: jumps when the phone is shaken, then decays.",
+            ),
         ],
         params: &[],
     },
@@ -454,72 +642,227 @@ pub const TYPES: &[NodeType] = &[
         id: "tap",
         label: "Effect taps",
         category: Category::Input,
+        description: "Fires whenever anyone triggers an effect from a client: effect pads, keys, a tap on the preview with the tap tool. Not raw touch (that is the Touch node), and not effects fired by this patch's own Event effect nodes.",
         inputs: &[],
-        outputs: &[PortDef {
-            name: "tap",
-            shape: Shape::Event,
-        }],
+        outputs: &[port(
+            "tap",
+            Shape::Event,
+            "Fires once per client-triggered effect.",
+        )],
         params: &[],
     },
     NodeType {
-        // Raw touch, one finger followed (see crate::touch). A patch with any
-        // touch node owns the touch surface: clients send raw touches instead
-        // of applying their own tap or pen tool.
+        // Raw touch, one finger followed (see crate::touch).
         id: "touch",
         label: "Touch",
         category: Category::Input,
+        description: "Raw touch from every connected client, following one finger. A patch with any Touch, Touch mask or Touch glow node owns the touch surface: clients send it raw touches instead of applying their own tap or pen tool, so Triggered effects and Touch strokes stop receiving taps and strokes. Outputs hold their last values after the finger lifts.",
         inputs: &[],
         outputs: &[
-            PortDef { name: "down", shape: Shape::Event },
-            PortDef { name: "up", shape: Shape::Event },
-            PortDef { name: "active", shape: Shape::Scalar },
-            PortDef { name: "count", shape: Shape::Scalar },
-            PortDef { name: "angle", shape: Shape::Scalar },
-            PortDef { name: "radius", shape: Shape::Scalar },
-            PortDef { name: "x", shape: Shape::Scalar },
-            PortDef { name: "y", shape: Shape::Scalar },
-            PortDef { name: "held", shape: Shape::Scalar },
-            PortDef { name: "speed", shape: Shape::Scalar },
-            PortDef { name: "dir", shape: Shape::Scalar },
-            PortDef { name: "hue", shape: Shape::Scalar },
+            port(
+                "down",
+                Shape::Event,
+                "Fires when a finger touches down (First finger mode: only when the first finger lands).",
+            ),
+            port(
+                "up",
+                Shape::Event,
+                "Fires when a finger lifts (First finger mode: only when the last finger lifts).",
+            ),
+            port(
+                "active",
+                Shape::Scalar,
+                "1 while the followed finger is held, else 0.",
+            ),
+            port(
+                "count",
+                Shape::Scalar,
+                "How many fingers are held right now.",
+            ),
+            port(
+                "angle",
+                Shape::Scalar,
+                "The followed finger's angle in radians, in the composition frame (wires straight into Event effect's angle).",
+            ),
+            port(
+                "radius",
+                Shape::Scalar,
+                "The followed finger's distance from the centre: 0 centre .. 1 outer edge (a little past 1 is possible).",
+            ),
+            port(
+                "x",
+                Shape::Scalar,
+                "Screen x of the followed finger as the gate preview draws it, -1 left .. 1 right.",
+            ),
+            port(
+                "y",
+                Shape::Scalar,
+                "Screen y of the followed finger, -1 bottom .. 1 top.",
+            ),
+            port(
+                "held",
+                Shape::Scalar,
+                "Seconds since the followed finger touched down (frozen when it lifts).",
+            ),
+            port(
+                "speed",
+                Shape::Scalar,
+                "Finger speed in array radii per second (0 once it has been still for about 0.1 s).",
+            ),
+            port(
+                "dir",
+                Shape::Scalar,
+                "Direction the finger is moving on screen, in radians 0..2π.",
+            ),
+            port(
+                "hue",
+                Shape::Scalar,
+                "The toucher's own colour hue in turns; -1 for white, or before anyone has touched.",
+            ),
         ],
-        params: &[sel("follow", "Follow", &["Latest finger", "First finger"])],
+        params: &[sel(
+            "follow",
+            "Follow",
+            &["Latest finger", "First finger"],
+            "Latest finger: follow the most recent touch. First finger: follow the oldest held finger (and down/up mean the first lands / the last lifts).",
+        )],
     },
     NodeType {
         id: "dj_link",
         label: "PRO DJ LINK",
         category: Category::Input,
+        description: "Pioneer PRO DJ LINK state from the CDJs and mixer on the gate's network: transport, on-air and crossfade, beat in bar, rekordbox phrases, and an event per transport change. Only the desktop gate has a LINK (elsewhere everything reads 0 unless a host simulates it); use `active` to fall back to other inputs.",
         inputs: &[],
         outputs: &[
-            PortDef { name: "active", shape: Shape::Scalar },
-            PortDef { name: "energy", shape: Shape::Scalar },
-            PortDef { name: "deck", shape: Shape::Scalar },
-            PortDef { name: "deck_side", shape: Shape::Scalar },
-            PortDef { name: "event_deck", shape: Shape::Scalar },
-            PortDef { name: "event_side", shape: Shape::Scalar },
-            PortDef { name: "playing", shape: Shape::Scalar },
-            PortDef { name: "on_air", shape: Shape::Scalar },
-            PortDef { name: "deck_1_on_air", shape: Shape::Scalar },
-            PortDef { name: "deck_2_on_air", shape: Shape::Scalar },
-            PortDef { name: "looping", shape: Shape::Scalar },
-            PortDef { name: "mix", shape: Shape::Scalar },
-            PortDef { name: "mix_activity", shape: Shape::Scalar },
-            PortDef { name: "beat_in_bar", shape: Shape::Scalar },
-            PortDef { name: "phrase_active", shape: Shape::Scalar },
-            PortDef { name: "phrase_kind", shape: Shape::Scalar },
-            PortDef { name: "phrase_progress", shape: Shape::Scalar },
-            PortDef { name: "phrase_fill", shape: Shape::Scalar },
-            PortDef { name: "play", shape: Shape::Event },
-            PortDef { name: "cue", shape: Shape::Event },
-            PortDef { name: "cue_release", shape: Shape::Event },
-            PortDef { name: "on_air_event", shape: Shape::Event },
-            PortDef { name: "off_air_event", shape: Shape::Event },
-            PortDef { name: "loop_start", shape: Shape::Event },
-            PortDef { name: "loop_wrap", shape: Shape::Event },
-            PortDef { name: "loop_end", shape: Shape::Event },
-            PortDef { name: "jump", shape: Shape::Event },
-            PortDef { name: "phrase_change", shape: Shape::Event },
-            PortDef { name: "fill_in", shape: Shape::Event },
+            port(
+                "active",
+                Shape::Scalar,
+                "1 while a PRO DJ LINK source is connected and driving visuals, else 0.",
+            ),
+            port(
+                "energy",
+                Shape::Scalar,
+                "Musical energy 0..1 of the followed deck (from the rekordbox waveform, or a beat-pulsed fallback).",
+            ),
+            port(
+                "deck",
+                Shape::Scalar,
+                "Player number of the deck the gate follows (normally the tempo master); 0 if none.",
+            ),
+            port(
+                "deck_side",
+                Shape::Scalar,
+                "-1 when the followed deck is player 1, +1 for player 2, 0 otherwise.",
+            ),
+            port(
+                "event_deck",
+                Shape::Scalar,
+                "Player number of the deck that fired the most recent event.",
+            ),
+            port(
+                "event_side",
+                Shape::Scalar,
+                "Side of the deck that fired the most recent event: -1 player 1, +1 player 2, 0 otherwise.",
+            ),
+            port(
+                "playing",
+                Shape::Scalar,
+                "1 while the followed deck is playing.",
+            ),
+            port(
+                "on_air",
+                Shape::Scalar,
+                "1 while the followed deck is on air at the mixer.",
+            ),
+            port("deck_1_on_air", Shape::Scalar, "1 while player 1 is on air."),
+            port("deck_2_on_air", Shape::Scalar, "1 while player 2 is on air."),
+            port(
+                "looping",
+                Shape::Scalar,
+                "1 while player 1 or 2 is in a loop.",
+            ),
+            port(
+                "mix",
+                Shape::Scalar,
+                "Eased crossfade position: 0 = player 1 alone on air, 1 = player 2, 0.5 = both; glides over about a second.",
+            ),
+            port(
+                "mix_activity",
+                Shape::Scalar,
+                "How fast the mix is moving, 0..1, decaying over about half a second: high during a transition.",
+            ),
+            port(
+                "beat_in_bar",
+                Shape::Scalar,
+                "Beat within the bar on the followed deck, 1..4 (0 when unknown).",
+            ),
+            port(
+                "phrase_active",
+                Shape::Scalar,
+                "1 while a rekordbox phrase analysis covers the playhead.",
+            ),
+            port(
+                "phrase_kind",
+                Shape::Scalar,
+                "The current phrase as a code: 1 intro, 2 up, 3 down, 4 chorus, 5 outro, 6 verse, 7 bridge, 0 none or unknown.",
+            ),
+            port(
+                "phrase_progress",
+                Shape::Scalar,
+                "0..1 through the current phrase.",
+            ),
+            port(
+                "phrase_fill",
+                Shape::Scalar,
+                "1 during the current phrase's fill-in.",
+            ),
+            port(
+                "play",
+                Shape::Event,
+                "Fires when a deck starts playing (event_deck says which).",
+            ),
+            port(
+                "cue",
+                Shape::Event,
+                "Fires when a deck goes to its cue point or starts cue-playing.",
+            ),
+            port(
+                "cue_release",
+                Shape::Event,
+                "Fires when a deck's cue is released.",
+            ),
+            port(
+                "on_air_event",
+                Shape::Event,
+                "Fires when a deck goes on air.",
+            ),
+            port(
+                "off_air_event",
+                Shape::Event,
+                "Fires when a deck goes off air.",
+            ),
+            port("loop_start", Shape::Event, "Fires when a loop starts."),
+            port(
+                "loop_wrap",
+                Shape::Event,
+                "Fires each time a loop jumps back to its start.",
+            ),
+            port("loop_end", Shape::Event, "Fires when a loop ends."),
+            port(
+                "jump",
+                Shape::Event,
+                "Fires when a deck's playhead jumps within the track.",
+            ),
+            port(
+                "phrase_change",
+                Shape::Event,
+                "Fires when a new rekordbox phrase begins.",
+            ),
+            port(
+                "fill_in",
+                Shape::Event,
+                "Fires when the current phrase's fill-in starts.",
+            ),
         ],
         params: &[],
     },
@@ -530,103 +873,224 @@ pub const TYPES: &[NodeType] = &[
         // The effects it fires are a stream: they show only where `effects`
         // is wired into a Render effects (through any further Event effects
         // chained on `in`, which merges the upstream stream into this one).
+        description: "Fires a show effect (burst, strobe, sweeps, figures …) each time `trigger` fires, looking as its knobs say — wire Touch angle/radius into Angle/Radius to place it under a finger. The effects are a stream: they show only where `effects` reaches a Render effects node, directly or through further Event effects chained on `in`.",
         inputs: &[
-            PortDef {
-                name: "trigger",
-                shape: Shape::Event,
-            },
-            PortDef {
-                name: "in",
-                shape: Shape::Effects,
-            },
+            port(
+                "trigger",
+                Shape::Event,
+                "Fires one effect each time an event arrives.",
+            ),
+            port(
+                "in",
+                Shape::Effects,
+                "Another effects stream to merge into this node's output (chain Event effects, or start from Triggered effects).",
+            ),
         ],
-        outputs: &[PortDef {
-            name: "effects",
-            shape: Shape::Effects,
-        }],
+        outputs: &[port(
+            "effects",
+            Shape::Effects,
+            "This node's effects plus everything chained into `in`; wire into Render effects to see them.",
+        )],
         params: &[
-            sel("effect", "Effect", EFFECT_KINDS),
-            num("angle", "Angle (rad)", -3.142, 3.142, 0.0),
-            num("radius", "Radius", 0.0, 1.2, 0.5),
-            num("intensity", "Intensity", 0.0, 2.0, 1.2),
-            num("size", "Size", 0.1, 4.0, 1.0),
-            num("hue", "Hue (-1 = white)", -1.0, 1.0, -1.0),
-            num("saturation", "Saturation", 0.0, 1.0, 0.9),
-            num("brightness", "Brightness", 0.0, 1.0, 1.0),
-            num("duration", "Duration (0 = default)", 0.0, 10.0, 0.0),
-            num("rotation", "Shape rotation", -3.142, 3.142, 0.0),
-            num("grow", "Shape growth", -1.0, 1.0, 0.0),
-            num("edge", "Shape edge", 0.0, 1.0, 0.3),
-            num("fill", "Shape fill", 0.0, 1.0, 0.15),
+            sel(
+                "effect",
+                "Effect",
+                EFFECT_KINDS,
+                "None: fires nothing (keeps the wiring). Burst: shockwave ring from Angle/Radius. Strobe: whole-array flash. Swoosh: an arm sweeping a full turn from Angle. Collapse: a ring closing from the rim to the centre. Bloom: a petalled iris opening from the centre. Pinwheel: spiral arms whipping up. Twinkle: a glitter storm. Wipe: a bar sweeping across toward Angle. Star, Heart, Flower, Diamond, Triangle, Moon: figures stamped at Angle/Radius. Ring: a clean ring expanding from the centre. Rotate: spins the whole composition (the sign of Angle picks the direction, Intensity the kick).",
+            ),
+            num(
+                "angle",
+                "Angle (rad)",
+                -3.142,
+                3.142,
+                0.0,
+                "Where the effect lands, in radians (composition frame, as Touch's angle); also Swoosh's start, Wipe's direction and Rotate's direction (by sign).",
+            ),
+            num(
+                "radius",
+                "Radius",
+                0.0,
+                1.2,
+                0.5,
+                "Distance of the origin from the centre: 0 centre .. 1 outer edge (Burst and the figures).",
+            ),
+            num(
+                "intensity",
+                "Intensity",
+                0.0,
+                2.0,
+                1.2,
+                "Brightness multiplier (for Rotate: the strength of the spin kick).",
+            ),
+            num(
+                "size",
+                "Size",
+                0.1,
+                4.0,
+                1.0,
+                "Width or scale multiplier for effects with a footprint (1 = default).",
+            ),
+            num(
+                "hue",
+                "Hue (-1 = white)",
+                -1.0,
+                1.0,
+                -1.0,
+                "Hue in turns; any negative value is white.",
+            ),
+            num(
+                "saturation",
+                "Saturation",
+                0.0,
+                1.0,
+                0.9,
+                "Colour saturation 0..1 (unused for white).",
+            ),
+            num(
+                "brightness",
+                "Brightness",
+                0.0,
+                1.0,
+                1.0,
+                "Colour value 0..1 (unused for white).",
+            ),
+            num(
+                "duration",
+                "Duration (0 = default)",
+                0.0,
+                10.0,
+                0.0,
+                "Lifetime in seconds; 0 uses the effect's own default (0.25 s for Strobe up to 1.8 s for figures).",
+            ),
+            num(
+                "rotation",
+                "Shape rotation",
+                -3.142,
+                3.142,
+                0.0,
+                "Figures only: the figure's own rotation in radians (separate from where it lands).",
+            ),
+            num(
+                "grow",
+                "Shape growth",
+                -1.0,
+                1.0,
+                0.0,
+                "Figures only: scale change over its life, × (1 + Grow × age): +1 doubles by the end, -1 shrinks to nothing.",
+            ),
+            num(
+                "edge",
+                "Shape edge",
+                0.0,
+                1.0,
+                0.3,
+                "Figures only: outline thickness, 0 hairline .. 1 fat (below about 0.3 the line breaks up between spokes).",
+            ),
+            num(
+                "fill",
+                "Shape fill",
+                0.0,
+                1.0,
+                0.15,
+                "Figures only: interior brightness, 0 outline only .. 1 solid.",
+            ),
         ],
     },
     NodeType {
         id: "touch_dabs",
         label: "Touch strokes",
         category: Category::Input,
+        description: "The live-draw strokes clients paint with their pen tool, as a Points stream (each dab keeps its pen, colour and size). Wire it into Render points to draw them. No strokes arrive while the patch reads raw touch (any Touch, Touch mask or Touch glow node).",
         inputs: &[],
-        outputs: &[PortDef {
-            name: "points",
-            shape: Shape::Points,
-        }],
+        outputs: &[port(
+            "points",
+            Shape::Points,
+            "Every live dab, each fading over its pen's lifetime.",
+        )],
         params: &[],
     },
     NodeType {
         id: "effects_in",
         label: "Triggered effects",
         category: Category::Input,
+        description: "The show effects clients trigger (effect pads, keys, taps on the preview), as an Effects stream. Wire it into Render effects, or into an Event effect's `in`: nothing reaches the Output unless it is wired.",
         inputs: &[],
-        outputs: &[PortDef {
-            name: "effects",
-            shape: Shape::Effects,
-        }],
+        outputs: &[port(
+            "effects",
+            Shape::Effects,
+            "Every live client-triggered effect.",
+        )],
         params: &[],
     },
     NodeType {
         id: "video_in",
         label: "Video in",
         category: Category::Input,
+        description: "The live video frame the host provides (a camera or video playing on the gate or in the playground), as a Texture. Map it onto the ring with Texture sample; transparent while no video plays.",
         inputs: &[],
-        outputs: &[PortDef {
-            name: "tex",
-            shape: Shape::Texture,
-        }],
+        outputs: &[port("tex", Shape::Texture, "The current video frame (RGBA).")],
         params: &[],
     },
     NodeType {
         id: "image_in",
         label: "Still image in",
         category: Category::Input,
+        description: "A still picture stored in the patch itself (the node's `media`: a 256×256 data:image URL), as a Texture for Texture sample. A patch carries at most four Still images and Clips together.",
         inputs: &[],
-        outputs: &[PortDef {
-            name: "tex",
-            shape: Shape::Texture,
-        }],
+        outputs: &[port(
+            "tex",
+            Shape::Texture,
+            "The picture (RGBA); transparent outside it and until it has loaded.",
+        )],
         params: &[],
     },
     NodeType {
         // A short loop stored in the patch: `media` is a 256² sprite sheet of
         // grid×grid frames (see `clip_at`); `fps` integrates into a frame
-        // phase, so speed changes never jump. Scrub mode follows `scrub`
-        // (wire Touch or Time into it).
+        // phase, so speed changes never jump.
         id: "clip",
         label: "Clip",
         category: Category::Input,
+        description: "A short looping animation stored in the patch: `media` is a 256×256 sprite sheet with its frames in a grid, row by row from the top left. It loops or ping-pongs at FPS (integrated, so speed changes never jump) or follows Scrub; map it onto the ring with Texture sample. Counts toward the four-picture limit with Still images.",
         inputs: &[],
-        outputs: &[PortDef {
-            name: "tex",
-            shape: Shape::Texture,
-        }],
+        outputs: &[port("tex", Shape::Texture, "The current frame (RGBA).")],
         params: &[
-            rate("fps", "Frames per second", -30.0, 30.0, 10.0),
-            sel("mode", "Mode", &["loop", "ping-pong", "scrub"]),
-            num("scrub", "Scrub (scrub mode)", 0.0, 1.0, 0.0),
-            num("frames", "Frames used", 1.0, 64.0, 16.0),
+            rate(
+                "fps",
+                "Frames per second",
+                -30.0,
+                30.0,
+                10.0,
+                "Frames per second (× master speed); negative plays backwards.",
+            ),
+            sel(
+                "mode",
+                "Mode",
+                &["loop", "ping-pong", "scrub"],
+                "loop: play the frames in order and wrap; ping-pong: forwards then backwards; scrub: show the frame Scrub picks.",
+            ),
+            num(
+                "scrub",
+                "Scrub (scrub mode)",
+                0.0,
+                1.0,
+                0.0,
+                "Scrub mode only: 0 the first frame .. 1 the last frame used (wire Touch or Time in).",
+            ),
+            num(
+                "frames",
+                "Frames used",
+                1.0,
+                64.0,
+                16.0,
+                "How many cells of the sheet are frames (counted row by row from the top left).",
+            ),
             // The sheet's layout; the picker sets it. Append only.
             sel(
                 "grid",
                 "Sheet",
                 &["4×4 (16 frames of 64 px)", "8×8 (64 frames of 32 px)", "2×2 (4 frames of 128 px)"],
+                "The sheet's layout (the clip picker sets it to match the media).",
             ),
         ],
     },
@@ -635,8 +1099,9 @@ pub const TYPES: &[NodeType] = &[
         id: "scalar_math",
         label: "Math",
         category: Category::ScalarOp,
+        description: "Control-rate arithmetic on A and B (wire Scalars in or set the knobs); unary ops use A only. A result that is not finite (dividing by 0, say) outputs 0.",
         inputs: &[],
-        outputs: SCALAR_OUT,
+        outputs: &[port("out", Shape::Scalar, "The result.")],
         params: &[
             // Append only: patches store the index. Unary ops use A.
             sel(
@@ -658,48 +1123,89 @@ pub const TYPES: &[NodeType] = &[
                     "sine (A in turns)",
                     "cosine (A in turns)",
                 ],
+                "The operation. Modulo always lands in 0..B, negatives included (so `time mod 1` loops); comparisons output 1 or 0; sine and cosine take A in turns, i.e. sin(2π·A).",
             ),
-            num("a", "A", -8.0, 8.0, 0.0),
-            num("b", "B", -8.0, 8.0, 0.0),
+            num(
+                "a",
+                "A",
+                -8.0,
+                8.0,
+                0.0,
+                "First operand (the only one for abs, floor, sine and cosine).",
+            ),
+            num("b", "B", -8.0, 8.0, 0.0, "Second operand."),
         ],
     },
     NodeType {
         id: "lfo",
         label: "LFO",
         category: Category::ScalarOp,
+        description: "A low-frequency oscillator: a repeating wave between Min and Max at Rate cycles per second (× master speed). Its phase survives edits, so changing the rate never jumps.",
         inputs: &[],
-        outputs: SCALAR_OUT,
+        outputs: &[port("out", Shape::Scalar, "The wave, between Min and Max.")],
         params: &[
-            num("rate", "Rate (Hz)", 0.01, 20.0, 0.25),
-            sel("wave", "Wave", &["sine", "triangle", "square", "saw"]),
-            num("min", "Min", 0.0, 1.0, 0.0),
-            num("max", "Max", 0.0, 1.0, 1.0),
+            num(
+                "rate",
+                "Rate (Hz)",
+                0.01,
+                20.0,
+                0.25,
+                "Cycles per second (× master speed).",
+            ),
+            sel(
+                "wave",
+                "Wave",
+                &["sine", "triangle", "square", "saw"],
+                "sine: smooth; triangle: straight up and down; square: Max for the first half of each cycle, then Min; saw: ramps from Min to Max, then drops.",
+            ),
+            num("min", "Min", 0.0, 1.0, 0.0, "Value at the bottom of the wave."),
+            num("max", "Max", 0.0, 1.0, 1.0, "Value at the top of the wave."),
         ],
     },
     NodeType {
         id: "smooth",
         label: "Smooth",
         category: Category::ScalarOp,
+        description: "Eases its output toward In with a one-pole low-pass filter, taking the jitter and steps out of audio bands, touch or stepped values.",
         inputs: &[],
-        outputs: SCALAR_OUT,
+        outputs: &[port("out", Shape::Scalar, "The smoothed value.")],
         params: &[
-            num("in", "In", -8.0, 8.0, 0.0),
-            num("seconds", "Seconds", 0.0, 10.0, 0.3),
+            num("in", "In", -8.0, 8.0, 0.0, "The value to follow."),
+            num(
+                "seconds",
+                "Seconds",
+                0.0,
+                10.0,
+                0.3,
+                "Smoothing time constant in seconds (0 passes In straight through).",
+            ),
         ],
     },
     NodeType {
         id: "envelope",
         label: "Envelope",
         category: Category::ScalarOp,
-        inputs: &[PortDef {
-            name: "trigger",
-            shape: Shape::Event,
-        }],
-        outputs: SCALAR_OUT,
+        description: "An attack/decay envelope: each `trigger` restarts it from 0, rising linearly to Peak over Attack seconds, then decaying exponentially. Outputs 0 until first triggered; wire audio `beat` or Touch `down` in for flashes and pulses.",
+        inputs: &[port("trigger", Shape::Event, "Restarts the envelope from 0.")],
+        outputs: &[port("out", Shape::Scalar, "The envelope value, 0..Peak.")],
         params: &[
-            num("attack", "Attack (s)", 0.0, 5.0, 0.01),
-            num("decay", "Decay (s)", 0.0, 10.0, 0.5),
-            num("peak", "Peak", 0.0, 2.0, 1.0),
+            num(
+                "attack",
+                "Attack (s)",
+                0.0,
+                5.0,
+                0.01,
+                "Seconds to rise from 0 to Peak.",
+            ),
+            num(
+                "decay",
+                "Decay (s)",
+                0.0,
+                10.0,
+                0.5,
+                "Decay time constant in seconds after the peak (about 37% of Peak remains after Decay seconds).",
+            ),
+            num("peak", "Peak", 0.0, 2.0, 1.0, "Height of the envelope."),
         ],
     },
     NodeType {
@@ -708,254 +1214,300 @@ pub const TYPES: &[NodeType] = &[
         id: "map_range",
         label: "Map range",
         category: Category::ScalarOp,
+        description: "Linearly maps In from In min..In max onto Out min..Out max: out = Out min + (In − In min) / (In max − In min) × (Out max − Out min). An inverted range flips the mapping; Clamp keeps the result inside the out range.",
         inputs: &[],
-        outputs: SCALAR_OUT,
+        outputs: &[port("out", Shape::Scalar, "The mapped value.")],
         params: &[
-            num("in", "In", -8.0, 8.0, 0.0),
-            num("in_min", "In min", -8.0, 8.0, 0.0),
-            num("in_max", "In max", -8.0, 8.0, 1.0),
-            num("out_min", "Out min", -8.0, 8.0, 0.0),
-            num("out_max", "Out max", -8.0, 8.0, 1.0),
-            sel("clamp", "Clamp to the out range", &["off", "on"]),
+            num("in", "In", -8.0, 8.0, 0.0, "The value to map."),
+            num(
+                "in_min",
+                "In min",
+                -8.0,
+                8.0,
+                0.0,
+                "Input value that maps to Out min.",
+            ),
+            num(
+                "in_max",
+                "In max",
+                -8.0,
+                8.0,
+                1.0,
+                "Input value that maps to Out max.",
+            ),
+            num(
+                "out_min",
+                "Out min",
+                -8.0,
+                8.0,
+                0.0,
+                "Output when In equals In min.",
+            ),
+            num(
+                "out_max",
+                "Out max",
+                -8.0,
+                8.0,
+                1.0,
+                "Output when In equals In max.",
+            ),
+            sel(
+                "clamp",
+                "Clamp to the out range",
+                &["off", "on"],
+                "on: hold the result between Out min and Out max; off: extrapolate beyond them.",
+            ),
         ],
     },
     NodeType {
         id: "mix",
         label: "Mix",
         category: Category::ScalarOp,
+        description: "A linear crossfade between two values: out = A + (B − A) × Mix.",
         inputs: &[],
-        outputs: SCALAR_OUT,
+        outputs: &[port("out", Shape::Scalar, "The blended value.")],
         params: &[
-            num("a", "A", -8.0, 8.0, 0.0),
-            num("b", "B", -8.0, 8.0, 1.0),
-            num("t", "Mix (0 = A, 1 = B)", 0.0, 1.0, 0.5),
+            num("a", "A", -8.0, 8.0, 0.0, "Value at Mix 0."),
+            num("b", "B", -8.0, 8.0, 1.0, "Value at Mix 1."),
+            num(
+                "t",
+                "Mix (0 = A, 1 = B)",
+                0.0,
+                1.0,
+                0.5,
+                "Crossfade amount: 0 = A, 1 = B (a wired value outside 0..1 extrapolates).",
+            ),
         ],
     },
     NodeType {
         id: "clamp",
         label: "Clamp",
         category: Category::ScalarOp,
+        description: "Holds In between Min and Max (either may be the larger).",
         inputs: &[],
-        outputs: SCALAR_OUT,
+        outputs: &[port("out", Shape::Scalar, "In, limited to the range.")],
         params: &[
-            num("in", "In", -8.0, 8.0, 0.0),
-            num("min", "Min", -8.0, 8.0, 0.0),
-            num("max", "Max", -8.0, 8.0, 1.0),
+            num("in", "In", -8.0, 8.0, 0.0, "The value to limit."),
+            num("min", "Min", -8.0, 8.0, 0.0, "One end of the allowed range."),
+            num("max", "Max", -8.0, 8.0, 1.0, "The other end of the allowed range."),
         ],
     },
     NodeType {
-        // A new value in Min..Max on every `trigger`, and on its own clock
-        // when Rate > 0; Glide eases towards it. The sequence is seeded from
-        // the node id, so a saved patch replays the same values.
+        // The sequence is seeded from the node id, so a saved patch replays
+        // the same values.
         id: "random",
         label: "Random",
         category: Category::ScalarOp,
-        inputs: &[PortDef {
-            name: "trigger",
-            shape: Shape::Event,
-        }],
+        description: "A random value in Min..Max, drawn anew on every `trigger` and also Rate times a second when Rate > 0 (× master speed); Glide eases from one value to the next. Seeded from the node id, so a saved patch replays the same sequence.",
+        inputs: &[port("trigger", Shape::Event, "Draws a new value now.")],
         outputs: &[
-            PortDef {
-                name: "out",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "changed",
-                shape: Shape::Event,
-            },
+            port(
+                "out",
+                Shape::Scalar,
+                "The current value (gliding toward the latest draw).",
+            ),
+            port(
+                "changed",
+                Shape::Event,
+                "Fires each time a new value is drawn.",
+            ),
         ],
         params: &[
-            num("rate", "Rate (Hz, 0 = trigger only)", 0.0, 20.0, 0.0),
-            num("min", "Min", -8.0, 8.0, 0.0),
-            num("max", "Max", -8.0, 8.0, 1.0),
-            num("glide", "Glide (s)", 0.0, 5.0, 0.0),
+            num(
+                "rate",
+                "Rate (Hz, 0 = trigger only)",
+                0.0,
+                20.0,
+                0.0,
+                "Automatic draws per second (× master speed); 0 draws only on trigger.",
+            ),
+            num("min", "Min", -8.0, 8.0, 0.0, "Lowest value drawn."),
+            num("max", "Max", -8.0, 8.0, 1.0, "Highest value drawn."),
+            num(
+                "glide",
+                "Glide (s)",
+                0.0,
+                5.0,
+                0.0,
+                "Seconds to ease from the old value to the new one (0 = jump).",
+            ),
         ],
     },
     NodeType {
-        // Counts `count` events; wraps back to 0 at Steps, firing `wrap`
-        // (which is also "every Nth event"). `phase` is count / Steps.
         id: "counter",
         label: "Counter",
         category: Category::ScalarOp,
+        description: "Counts `count` events. With Wrap at above 0 it wraps back to 0 on reaching it and fires `wrap`, which also makes it an every-Nth-event divider; `phase` is count / Wrap at.",
         inputs: &[
-            PortDef {
-                name: "count",
-                shape: Shape::Event,
-            },
-            PortDef {
-                name: "reset",
-                shape: Shape::Event,
-            },
+            port("count", Shape::Event, "Adds one."),
+            port(
+                "reset",
+                Shape::Event,
+                "Back to 0 (without firing wrap).",
+            ),
         ],
         outputs: &[
-            PortDef {
-                name: "out",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "phase",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "wrap",
-                shape: Shape::Event,
-            },
+            port(
+                "out",
+                Shape::Scalar,
+                "The count, 0 .. Wrap at − 1.",
+            ),
+            port(
+                "phase",
+                Shape::Scalar,
+                "count / Wrap at, 0..1 (0 when it never wraps).",
+            ),
+            port(
+                "wrap",
+                Shape::Event,
+                "Fires each time the count wraps to 0 (every Nth event).",
+            ),
         ],
-        params: &[num("steps", "Wrap at (0 = never)", 0.0, 64.0, 8.0)],
+        params: &[num(
+            "steps",
+            "Wrap at (0 = never)",
+            0.0,
+            64.0,
+            8.0,
+            "Count at which it wraps back to 0 (rounded); 0 counts forever.",
+        )],
     },
     NodeType {
-        // A latch: `toggle` flips it, `set`/`clear` force it; `on`/`off`
-        // fire on each change.
         id: "toggle",
         label: "Toggle",
         category: Category::ScalarOp,
+        description: "A latch: `toggle` flips it, `set` turns it on and `clear` turns it off (several in one frame apply in that order); `on` and `off` fire on each change. Use it to switch things with a tap, or to gate events through Merge events' Open.",
         inputs: &[
-            PortDef {
-                name: "toggle",
-                shape: Shape::Event,
-            },
-            PortDef {
-                name: "set",
-                shape: Shape::Event,
-            },
-            PortDef {
-                name: "clear",
-                shape: Shape::Event,
-            },
+            port("toggle", Shape::Event, "Flips the state."),
+            port("set", Shape::Event, "Turns it on."),
+            port("clear", Shape::Event, "Turns it off."),
         ],
         outputs: &[
-            PortDef {
-                name: "out",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "on",
-                shape: Shape::Event,
-            },
-            PortDef {
-                name: "off",
-                shape: Shape::Event,
-            },
+            port("out", Shape::Scalar, "1 while on, else 0."),
+            port("on", Shape::Event, "Fires when it turns on."),
+            port("off", Shape::Event, "Fires when it turns off."),
         ],
-        params: &[sel("initial", "Starts", &["off", "on"])],
+        params: &[sel(
+            "initial",
+            "Starts",
+            &["off", "on"],
+            "Its state before any event arrives.",
+        )],
     },
     NodeType {
-        // Scalar → events: `rise` when In climbs past Level (+ half the
-        // hysteresis), `fall` when it drops below (− half); `out` is 1 while
-        // above.
         id: "threshold",
         label: "Threshold",
         category: Category::ScalarOp,
+        description: "Turns a Scalar into events: `rise` fires when In climbs above Level (plus half the Hysteresis), `fall` when it drops below Level (minus half); `out` is 1 while above. Hysteresis stops a noisy signal from chattering — use it to fire effects from an audio band.",
         inputs: &[],
         outputs: &[
-            PortDef {
-                name: "out",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "rise",
-                shape: Shape::Event,
-            },
-            PortDef {
-                name: "fall",
-                shape: Shape::Event,
-            },
+            port("out", Shape::Scalar, "1 while In is above the level, else 0."),
+            port("rise", Shape::Event, "Fires when In crosses upward."),
+            port("fall", Shape::Event, "Fires when In crosses downward."),
         ],
         params: &[
-            num("in", "In", -8.0, 8.0, 0.0),
-            num("level", "Level", -8.0, 8.0, 0.5),
-            num("hysteresis", "Hysteresis", 0.0, 2.0, 0.05),
+            num("in", "In", -8.0, 8.0, 0.0, "The value to watch."),
+            num("level", "Level", -8.0, 8.0, 0.5, "The threshold."),
+            num(
+                "hysteresis",
+                "Hysteresis",
+                0.0,
+                2.0,
+                0.05,
+                "Dead band around Level: In must pass Level ± half of it to switch.",
+            ),
         ],
     },
     NodeType {
-        // Each `in` event comes out Seconds later, then again every Seconds
-        // for Echoes more times. Real seconds (master speed does not apply).
         id: "delay",
         label: "Delay",
         category: Category::ScalarOp,
-        inputs: &[PortDef {
-            name: "in",
-            shape: Shape::Event,
-        }],
-        outputs: &[PortDef {
-            name: "out",
-            shape: Shape::Event,
-        }],
+        description: "Delays events: each `in` event comes out Seconds later, then again every Seconds for Echoes more times. Real seconds (master speed does not apply); at most 64 events wait at once.",
+        inputs: &[port("in", Shape::Event, "Events to delay.")],
+        outputs: &[port(
+            "out",
+            Shape::Event,
+            "The delayed events (several falling due in one frame fire once).",
+        )],
         params: &[
-            num("seconds", "Seconds", 0.0, 10.0, 0.5),
-            num("echoes", "Echoes", 0.0, 16.0, 0.0),
+            num(
+                "seconds",
+                "Seconds",
+                0.0,
+                10.0,
+                0.5,
+                "Delay, and the spacing of the echoes, in seconds (0 passes events straight through).",
+            ),
+            num(
+                "echoes",
+                "Echoes",
+                0.0,
+                16.0,
+                0.0,
+                "Extra repeats after the first delayed copy (rounded).",
+            ),
         ],
     },
     NodeType {
-        // Any of a..d fires `out`, while Open is on (wire a Toggle in to
-        // gate a stream of events).
         id: "event_merge",
         label: "Merge events",
         category: Category::ScalarOp,
+        description: "Fires `out` whenever any of a..d fires, while Open is on: merge several triggers into one, or gate a stream of events by wiring a Toggle's `out` into Open.",
         inputs: &[
-            PortDef {
-                name: "a",
-                shape: Shape::Event,
-            },
-            PortDef {
-                name: "b",
-                shape: Shape::Event,
-            },
-            PortDef {
-                name: "c",
-                shape: Shape::Event,
-            },
-            PortDef {
-                name: "d",
-                shape: Shape::Event,
-            },
+            port("a", Shape::Event, "An event to merge."),
+            port("b", Shape::Event, "An event to merge."),
+            port("c", Shape::Event, "An event to merge."),
+            port("d", Shape::Event, "An event to merge."),
         ],
-        outputs: &[PortDef {
-            name: "out",
-            shape: Shape::Event,
-        }],
-        params: &[num("open", "Open (0 blocks)", 0.0, 1.0, 1.0)],
+        outputs: &[port(
+            "out",
+            Shape::Event,
+            "Fires when any input fires (at most once a frame).",
+        )],
+        params: &[num(
+            "open",
+            "Open (0 blocks)",
+            0.0,
+            1.0,
+            1.0,
+            "Above 0.5 events pass; below, they are blocked.",
+        )],
     },
     NodeType {
-        // `step` advances through the first Steps values and wraps (firing
-        // `wrap`); `out` is the current value, `index` its 0-based position.
         id: "sequence",
         label: "Step sequencer",
         category: Category::ScalarOp,
+        description: "Each `step` event advances through the first Steps values (Step 1..Step 8) and wraps, firing `wrap`; `out` is the current step's value and `index` its 0-based position. Wire beats into `step` for patterns that change with the music.",
         inputs: &[
-            PortDef {
-                name: "step",
-                shape: Shape::Event,
-            },
-            PortDef {
-                name: "reset",
-                shape: Shape::Event,
-            },
+            port("step", Shape::Event, "Advances one step."),
+            port("reset", Shape::Event, "Back to Step 1."),
         ],
         outputs: &[
-            PortDef {
-                name: "out",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "index",
-                shape: Shape::Scalar,
-            },
-            PortDef {
-                name: "wrap",
-                shape: Shape::Event,
-            },
+            port("out", Shape::Scalar, "The current step's value."),
+            port("index", Shape::Scalar, "The current step, 0-based."),
+            port(
+                "wrap",
+                Shape::Event,
+                "Fires each time it wraps back to Step 1.",
+            ),
         ],
         params: &[
-            num("steps", "Steps", 1.0, 8.0, 4.0),
-            num("v1", "Step 1", -8.0, 8.0, 0.0),
-            num("v2", "Step 2", -8.0, 8.0, 0.25),
-            num("v3", "Step 3", -8.0, 8.0, 0.5),
-            num("v4", "Step 4", -8.0, 8.0, 0.75),
-            num("v5", "Step 5", -8.0, 8.0, 1.0),
-            num("v6", "Step 6", -8.0, 8.0, 0.75),
-            num("v7", "Step 7", -8.0, 8.0, 0.5),
-            num("v8", "Step 8", -8.0, 8.0, 0.25),
+            num(
+                "steps",
+                "Steps",
+                1.0,
+                8.0,
+                4.0,
+                "How many of the eight values to cycle through (rounded).",
+            ),
+            num("v1", "Step 1", -8.0, 8.0, 0.0, "Value at step 1."),
+            num("v2", "Step 2", -8.0, 8.0, 0.25, "Value at step 2."),
+            num("v3", "Step 3", -8.0, 8.0, 0.5, "Value at step 3."),
+            num("v4", "Step 4", -8.0, 8.0, 0.75, "Value at step 4."),
+            num("v5", "Step 5", -8.0, 8.0, 1.0, "Value at step 5."),
+            num("v6", "Step 6", -8.0, 8.0, 0.75, "Value at step 6."),
+            num("v7", "Step 7", -8.0, 8.0, 0.5, "Value at step 7."),
+            num("v8", "Step 8", -8.0, 8.0, 0.25, "Value at step 8."),
         ],
     },
     // -- Generators ---------------------------------------------------------
@@ -963,6 +1515,7 @@ pub const TYPES: &[NodeType] = &[
         id: "solid",
         label: "Solid",
         category: Category::Generator,
+        description: "One colour over the whole array, fully opaque. Use it as a background, as a flat colour to Blend with, or as a tint to Multiply over a pattern.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[HUE, SATURATION, BRIGHTNESS],
@@ -971,24 +1524,59 @@ pub const TYPES: &[NodeType] = &[
         id: "gradient",
         label: "Gradient",
         category: Category::Generator,
+        description: "A Field<f32> ramp across the array: along each spoke (Inner at the inner end, Outer at the rim) or once around the ring (Inner at angle 0, reaching Outer a full turn later). Feed it to Colorize, Palette, Field math or a mask.",
         inputs: &[],
-        outputs: &out(Shape::FieldScalar),
+        outputs: &[port("out", Shape::FieldScalar, "The ramp value at each pixel.")],
         params: &[
-            sel("along", "Along", &["radius", "angle"]),
-            num("inner", "Inner", 0.0, 1.0, 0.0),
-            num("outer", "Outer", 0.0, 1.0, 1.0),
+            sel(
+                "along",
+                "Along",
+                &["radius", "angle"],
+                "radius: from the inner end of each spoke to the rim; angle: once around the ring.",
+            ),
+            num(
+                "inner",
+                "Inner",
+                0.0,
+                1.0,
+                0.0,
+                "Value at the inner end (or at angle 0).",
+            ),
+            num(
+                "outer",
+                "Outer",
+                0.0,
+                1.0,
+                1.0,
+                "Value at the rim (or after a full turn).",
+            ),
         ],
     },
     NodeType {
         id: "noise_field",
         label: "Noise field",
         category: Category::Generator,
+        description: "Drifting fractal simplex noise, thresholded into soft clouds and coloured by the noise value; the alpha follows the clouds. A good organic base layer.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("scale", "Scale", 0.1, 8.0, 1.0),
-            rate("speed", "Speed", 0.0, 4.0, 1.0),
-            num("threshold", "Threshold", 0.0, 1.0, 0.5),
+            num(
+                "scale",
+                "Scale",
+                0.1,
+                8.0,
+                1.0,
+                "Feature density: higher makes smaller, busier clouds.",
+            ),
+            rate("speed", "Speed", 0.0, 4.0, 1.0, SPEED),
+            num(
+                "threshold",
+                "Threshold",
+                0.0,
+                1.0,
+                0.5,
+                "Cut level: higher leaves less of the noise lit.",
+            ),
             HUE,
             HUE_RANGE,
             SATURATION,
@@ -999,13 +1587,35 @@ pub const TYPES: &[NodeType] = &[
         id: "radial_waves",
         label: "Radial waves",
         category: Category::Generator,
+        description: "Concentric rings rippling outward from the centre, built from up to eight harmonics; the hue shifts with radius by Hue range.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("waves", "Waves", 1.0, 8.0, 3.0),
-            num("scale", "Scale", 0.1, 8.0, 1.0),
-            rate("speed", "Speed", 0.0, 4.0, 1.0),
-            num("sharpness", "Sharpness", 0.0, 1.0, 0.5),
+            num(
+                "waves",
+                "Waves",
+                1.0,
+                8.0,
+                3.0,
+                "Harmonics summed (1 = a pure sine; more = peakier, more complex rings).",
+            ),
+            num(
+                "scale",
+                "Scale",
+                0.1,
+                8.0,
+                1.0,
+                "Ring density across the radius.",
+            ),
+            rate("speed", "Speed", 0.0, 4.0, 1.0, SPEED),
+            num(
+                "sharpness",
+                "Sharpness",
+                0.0,
+                1.0,
+                0.5,
+                "Narrows the bright bands (0 = a soft sine).",
+            ),
             HUE,
             HUE_RANGE,
             SATURATION,
@@ -1016,13 +1626,35 @@ pub const TYPES: &[NodeType] = &[
         id: "spiral",
         label: "Spiral",
         category: Category::Generator,
+        description: "Spiral arms turning around the centre: Twist curls them with radius and Speed spins them (negative reverses). The hue shifts slightly toward the rim.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("arms", "Arms", 1.0, 12.0, 3.0),
-            num("twist", "Twist", -4.0, 4.0, 1.0),
-            rate("speed", "Speed", -4.0, 4.0, 1.0),
-            num("sharpness", "Sharpness", 0.0, 1.0, 0.5),
+            num("arms", "Arms", 1.0, 12.0, 3.0, "Number of arms (rounded)."),
+            num(
+                "twist",
+                "Twist",
+                -4.0,
+                4.0,
+                1.0,
+                "Turns of curl from centre to rim; the sign sets the handedness (0 = straight arms).",
+            ),
+            rate(
+                "speed",
+                "Speed",
+                -4.0,
+                4.0,
+                1.0,
+                "Spin rate, integrated into a phase (× master speed); negative spins the other way, 0 stops.",
+            ),
+            num(
+                "sharpness",
+                "Sharpness",
+                0.0,
+                1.0,
+                0.5,
+                "Narrows the arms (0 = wide soft arms).",
+            ),
             HUE,
             SATURATION,
             BRIGHTNESS,
@@ -1032,12 +1664,27 @@ pub const TYPES: &[NodeType] = &[
         id: "gradient_radial",
         label: "Radial gradient",
         category: Category::Generator,
+        description: "Fully lit hue bands from the centre to the rim, scrolling toward the centre over time (Drift). The simplest colourful background.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            rate("drift", "Drift", 0.0, 4.0, 0.5),
+            rate(
+                "drift",
+                "Drift",
+                0.0,
+                4.0,
+                0.5,
+                "Scroll rate of the bands, integrated (× master speed); 0 holds still.",
+            ),
             HUE,
-            HUE_RANGE,
+            num(
+                "hue_range",
+                "Hue range",
+                0.0,
+                1.0,
+                0.2,
+                "Hue change per array radius, in turns (0 = one flat hue).",
+            ),
             SATURATION,
             BRIGHTNESS,
         ],
@@ -1046,13 +1693,35 @@ pub const TYPES: &[NodeType] = &[
         id: "noise_color",
         label: "Color noise",
         category: Category::Generator,
+        description: "Three independent simplex noises as red, green and blue, leaning 60% toward the Hue/Saturation tint: shifting multicoloured clouds, fully opaque.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("scale", "Scale", 0.1, 8.0, 1.0),
-            rate("speed", "Speed", 0.0, 4.0, 1.0),
-            HUE,
-            SATURATION,
+            num(
+                "scale",
+                "Scale",
+                0.1,
+                8.0,
+                1.0,
+                "Feature density: higher makes smaller, busier clouds.",
+            ),
+            rate("speed", "Speed", 0.0, 4.0, 1.0, SPEED),
+            num(
+                "hue",
+                "Hue",
+                0.0,
+                1.0,
+                0.6,
+                "Hue of the tint the colours lean toward, in turns.",
+            ),
+            num(
+                "saturation",
+                "Saturation",
+                0.0,
+                1.0,
+                0.9,
+                "Saturation of the tint (0 = no tint).",
+            ),
             BRIGHTNESS,
         ],
     },
@@ -1060,11 +1729,19 @@ pub const TYPES: &[NodeType] = &[
         id: "plasma",
         label: "Plasma",
         category: Category::Generator,
+        description: "The classic demoscene plasma: overlapping sine waves across the disc, giving smoothly morphing blobs whose brightness and hue follow the wave sum. Fully opaque.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("scale", "Scale", 0.1, 8.0, 1.0),
-            rate("speed", "Speed", 0.0, 4.0, 1.0),
+            num(
+                "scale",
+                "Scale",
+                0.1,
+                8.0,
+                1.0,
+                "Wave density: higher makes smaller blobs.",
+            ),
+            rate("speed", "Speed", 0.0, 4.0, 1.0, SPEED),
             HUE,
             HUE_RANGE,
             SATURATION,
@@ -1075,52 +1752,96 @@ pub const TYPES: &[NodeType] = &[
         id: "spoke_chase",
         label: "Spoke chase",
         category: Category::Generator,
+        description: "A bright head on every spoke running along it with an exponential tail, each spoke offset at random and tinted by Hue range: rain or comets running along the spokes.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            rate("speed", "Speed", 0.0, 8.0, 1.0),
-            sel("direction", "Direction", &["inward", "outward"]),
-            num("tail", "Tail length", 0.05, 0.45, 0.2),
+            rate(
+                "speed",
+                "Speed",
+                0.0,
+                8.0,
+                1.0,
+                "Running rate, integrated (× master speed): at 1 a head takes about 5 s to run a spoke; 0 stops.",
+            ),
+            sel(
+                "direction",
+                "Direction",
+                &["inward", "outward"],
+                "inward: heads run from the rim toward the centre; outward: from the centre to the rim.",
+            ),
+            num(
+                "tail",
+                "Tail length",
+                0.05,
+                0.45,
+                0.2,
+                "Tail length as a fraction of the spoke.",
+            ),
             HUE,
-            HUE_RANGE,
+            num(
+                "hue_range",
+                "Hue range",
+                0.0,
+                1.0,
+                0.2,
+                "Random hue spread between spokes, in turns.",
+            ),
             SATURATION,
             BRIGHTNESS,
         ],
     },
     NodeType {
-        // Every finger at once as a soft blob (a mask for colorize/blend).
         id: "touch_mask",
         label: "Touch mask",
         category: Category::Generator,
+        description: "Every held (and recently lifted) finger as a soft blob in a 0..1 Field<f32> mask, the strongest blob winning where they overlap. Use it as a mask for Colorize, Field math or Blend so touch reveals or paints a pattern. Reading touch makes the patch own the touch surface (see Touch).",
         inputs: &[],
-        outputs: &[PortDef {
-            name: "out",
-            shape: Shape::FieldScalar,
-        }],
+        outputs: &[port(
+            "out",
+            Shape::FieldScalar,
+            "Finger coverage, 0..1 × Intensity.",
+        )],
         params: TOUCH_FIELD_PARAMS,
     },
     NodeType {
-        // The same blobs, each in its toucher's own color.
         id: "touch_glow",
         label: "Touch glow",
         category: Category::Generator,
+        description: "The same finger blobs as Touch mask, each in its toucher's own colour (white for clients without one), summed into a colour field whose alpha is the coverage. Reading touch makes the patch own the touch surface (see Touch).",
         inputs: &[],
-        outputs: &[PortDef {
-            name: "out",
-            shape: Shape::FieldColor,
-        }],
+        outputs: &[port(
+            "out",
+            Shape::FieldColor,
+            "The glow: colours summed over fingers × Intensity; alpha is the strongest coverage.",
+        )],
         params: TOUCH_FIELD_PARAMS,
     },
     NodeType {
         id: "sparkle",
         label: "Sparkle",
         category: Category::Generator,
+        description: "Glitter: random LEDs flash and fade, each LED re-rolling its chance every twinkle; hues spread by Hue range. It keys on the physical LED, so Transform does not move it.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("density", "Density", 0.0, 1.0, 0.5),
-            num("twinkle", "Twinkle rate", 0.0, 1.0, 0.5),
-            rate("speed", "Speed", 0.0, 4.0, 1.0),
+            num(
+                "density",
+                "Density",
+                0.0,
+                1.0,
+                0.5,
+                "Share of LEDs lit per twinkle (1 = 20% of them).",
+            ),
+            num(
+                "twinkle",
+                "Twinkle rate",
+                0.0,
+                1.0,
+                0.5,
+                "How often the LEDs re-roll: 0 = 4, 1 = 24 twinkles per unit of phase.",
+            ),
+            rate("speed", "Speed", 0.0, 4.0, 1.0, SPEED),
             HUE,
             HUE_RANGE,
             SATURATION,
@@ -1131,15 +1852,42 @@ pub const TYPES: &[NodeType] = &[
         id: "beat_rings",
         label: "Beat rings",
         category: Category::Generator,
+        description: "One soft ring at Front along the radius, dimming to half as it reaches the far end, its hue shifting with position. Wire audio `beat_phase` into Front for a ring per beat, or an Envelope or Time phase for other sweeps.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
             // Wire audio.beat_phase in here for the classic beat-ring look.
-            num("front", "Front position", 0.0, 1.0, 0.0),
-            num("width", "Ring width", 0.02, 0.32, 0.1),
-            sel("direction", "Direction", &["outward", "inward"]),
+            num(
+                "front",
+                "Front position",
+                0.0,
+                1.0,
+                0.0,
+                "Ring position: 0 at the starting end, 1 at the far end (see Direction).",
+            ),
+            num(
+                "width",
+                "Ring width",
+                0.02,
+                0.32,
+                0.1,
+                "Ring width as a fraction of the spoke.",
+            ),
+            sel(
+                "direction",
+                "Direction",
+                &["outward", "inward"],
+                "outward: Front 0 is the inner end and 1 the rim; inward: the reverse.",
+            ),
             HUE,
-            HUE_RANGE,
+            num(
+                "hue_range",
+                "Hue range",
+                0.0,
+                1.0,
+                0.2,
+                "Hue shift as the ring travels from Front 0 to 1, in turns.",
+            ),
             SATURATION,
             BRIGHTNESS,
         ],
@@ -1148,11 +1896,26 @@ pub const TYPES: &[NodeType] = &[
         id: "breathe",
         label: "Breathe",
         category: Category::Generator,
+        description: "The whole array pulsing slowly in white between Depth floor and full brightness. It is uncoloured: Multiply-blend it over a pattern to make that pattern breathe.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            rate("speed", "Speed", 0.0, 4.0, 1.0),
-            num("floor", "Depth floor", 0.0, 1.0, 0.3),
+            rate(
+                "speed",
+                "Speed",
+                0.0,
+                4.0,
+                1.0,
+                "Breathing rate, integrated (× master speed): at 1 a breath takes about 6.3 s; 0 holds.",
+            ),
+            num(
+                "floor",
+                "Depth floor",
+                0.0,
+                1.0,
+                0.3,
+                "Brightness at the bottom of each breath, as a fraction of the top.",
+            ),
             BRIGHTNESS,
         ],
     },
@@ -1160,13 +1923,42 @@ pub const TYPES: &[NodeType] = &[
         id: "rainbow",
         label: "Rainbow",
         category: Category::Generator,
+        description: "A hue wheel around the ring (repeated Turns times), optionally shifting toward the rim by Hue range; Speed rotates the colours. Fully opaque.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("turns", "Turns", 1.0, 4.0, 1.0),
-            rate("speed", "Speed", 0.0, 4.0, 1.0),
-            HUE,
-            HUE_RANGE,
+            num(
+                "turns",
+                "Turns",
+                1.0,
+                4.0,
+                1.0,
+                "Times the hue wheel repeats around the ring (rounded).",
+            ),
+            rate(
+                "speed",
+                "Speed",
+                0.0,
+                4.0,
+                1.0,
+                "Colour rotation rate, integrated (× master speed); 0 holds still.",
+            ),
+            num(
+                "hue",
+                "Hue",
+                0.0,
+                1.0,
+                0.6,
+                "Hue offset of the wheel, in turns.",
+            ),
+            num(
+                "hue_range",
+                "Hue range",
+                0.0,
+                1.0,
+                0.2,
+                "Extra hue shift per array radius, in turns.",
+            ),
             SATURATION,
             BRIGHTNESS,
         ],
@@ -1175,17 +1967,60 @@ pub const TYPES: &[NodeType] = &[
         id: "wedges",
         label: "Wedges",
         category: Category::Generator,
+        description: "Bright pie slices with dark gaps around the ring, soft-edged, sheared into a pinwheel by Twist and rotating with Speed; each slice is half Hue, half Hue + Hue range. Flash lights the gaps too (wire audio onset in for an on-beat flash).",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("slices", "Slices", 2.0, 16.0, 8.0),
-            num("softness", "Edge softness", 0.05, 0.35, 0.15),
-            num("twist", "Radial twist", 0.0, 1.0, 0.5),
+            num(
+                "slices",
+                "Slices",
+                2.0,
+                16.0,
+                8.0,
+                "Number of slices (rounded).",
+            ),
+            num(
+                "softness",
+                "Edge softness",
+                0.05,
+                0.35,
+                0.15,
+                "Softness of the slice edges.",
+            ),
+            num(
+                "twist",
+                "Radial twist",
+                0.0,
+                1.0,
+                0.5,
+                "Shears the slices with radius into a pinwheel (0 = straight).",
+            ),
             // Wire audio.onset in here for the classic on-beat flash.
-            num("flash", "Flash", 0.0, 1.0, 0.0),
-            rate("speed", "Speed", 0.0, 4.0, 1.0),
+            num(
+                "flash",
+                "Flash",
+                0.0,
+                1.0,
+                0.0,
+                "Lights the gaps: 0 none .. 1 the whole ring lit.",
+            ),
+            rate(
+                "speed",
+                "Speed",
+                0.0,
+                4.0,
+                1.0,
+                "Rotation rate, integrated (× master speed); 0 holds still.",
+            ),
             HUE,
-            HUE_RANGE,
+            num(
+                "hue_range",
+                "Hue range",
+                0.0,
+                1.0,
+                0.2,
+                "Hue difference between the two halves of each slice, in turns.",
+            ),
             SATURATION,
             BRIGHTNESS,
         ],
@@ -1194,14 +2029,43 @@ pub const TYPES: &[NodeType] = &[
         id: "interference",
         label: "Interference",
         category: Category::Generator,
+        description: "Two point sources orbiting the centre, their circular waves interfering into moving moiré fringes.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("frequency", "Frequency", 0.0, 1.0, 0.5),
-            num("orbit", "Orbit size", 0.0, 1.0, 0.5),
-            num("sharpness", "Sharpness", 0.0, 1.0, 0.5),
-            num("scale", "Scale", 0.1, 8.0, 1.0),
-            rate("speed", "Speed", 0.0, 4.0, 1.0),
+            num(
+                "frequency",
+                "Frequency",
+                0.0,
+                1.0,
+                0.5,
+                "Wave density: more, tighter fringes.",
+            ),
+            num(
+                "orbit",
+                "Orbit size",
+                0.0,
+                1.0,
+                0.5,
+                "Size of the sources' orbits.",
+            ),
+            num(
+                "sharpness",
+                "Sharpness",
+                0.0,
+                1.0,
+                0.5,
+                "Narrows the bright fringes.",
+            ),
+            num(
+                "scale",
+                "Scale",
+                0.1,
+                8.0,
+                1.0,
+                "Overall wave-density multiplier.",
+            ),
+            rate("speed", "Speed", 0.0, 4.0, 1.0, SPEED),
             HUE,
             HUE_RANGE,
             SATURATION,
@@ -1212,14 +2076,43 @@ pub const TYPES: &[NodeType] = &[
         id: "fire",
         label: "Fire",
         category: Category::Generator,
+        description: "Flames licking inward from the rim: fractal noise rising along each spoke, hottest at the outer edge, the hottest parts paling toward white. Hue sets the flame colour — near 0 (red-orange) for classic fire; the default 0.6 burns blue.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("reach", "Flame reach", 0.0, 1.0, 0.5),
-            num("stretch", "Flame stretch", 0.0, 1.0, 0.5),
-            num("scale", "Scale", 0.1, 8.0, 1.0),
-            rate("speed", "Speed", 0.0, 4.0, 1.0),
-            HUE,
+            num(
+                "reach",
+                "Flame reach",
+                0.0,
+                1.0,
+                0.5,
+                "How far toward the centre the flames reach.",
+            ),
+            num(
+                "stretch",
+                "Flame stretch",
+                0.0,
+                1.0,
+                0.5,
+                "Elongates the flames along the spokes.",
+            ),
+            num(
+                "scale",
+                "Scale",
+                0.1,
+                8.0,
+                1.0,
+                "Noise scale around the ring: higher gives more, narrower tongues.",
+            ),
+            rate("speed", "Speed", 0.0, 4.0, 1.0, SPEED),
+            num(
+                "hue",
+                "Hue",
+                0.0,
+                1.0,
+                0.6,
+                "Flame base hue in turns (the hottest parts shift about 0.12 above it); near 0 for red-orange fire.",
+            ),
             SATURATION,
             BRIGHTNESS,
         ],
@@ -1228,15 +2121,51 @@ pub const TYPES: &[NodeType] = &[
         id: "cosmic_drift",
         label: "Cosmic drift",
         category: Category::Generator,
+        description: "A deep-space flight: dim nebula clouds and filaments drifting past, with six bright travellers streaking outward along curving lanes. Fully opaque.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("depth", "Cloud depth", 0.0, 1.0, 0.55),
-            num("trail", "Traveller trails", 0.0, 1.0, 0.45),
-            rate("speed", "Flight speed", 0.0, 4.0, 0.35),
-            num("pulse", "Pulse", 0.0, 1.0, 0.0),
-            HUE,
-            HUE_RANGE,
+            num(
+                "depth",
+                "Cloud depth",
+                0.0,
+                1.0,
+                0.55,
+                "Depth and detail of the nebula clouds.",
+            ),
+            num(
+                "trail",
+                "Traveller trails",
+                0.0,
+                1.0,
+                0.45,
+                "Length of the travellers' tails.",
+            ),
+            rate(
+                "speed",
+                "Flight speed",
+                0.0,
+                4.0,
+                0.35,
+                "Flight speed, integrated (× master speed); 0 holds still.",
+            ),
+            num(
+                "pulse",
+                "Pulse",
+                0.0,
+                1.0,
+                0.0,
+                "Extra traveller brightness (wire audio onset or an Envelope in to pulse with the music).",
+            ),
+            num("hue", "Hue", 0.0, 1.0, 0.6, "Nebula hue, in turns."),
+            num(
+                "hue_range",
+                "Hue range",
+                0.0,
+                1.0,
+                0.2,
+                "Hue spread of the clouds and travellers, in turns.",
+            ),
             SATURATION,
             BRIGHTNESS,
         ],
@@ -1245,16 +2174,66 @@ pub const TYPES: &[NodeType] = &[
         id: "earth_current",
         label: "Forest canopy",
         category: Category::Generator,
+        description: "Layered canopy leaves swaying in the wind, with shadowed depths and sunlit highlights; green by default (Shadow green and Leaf hue set the colours). Fully opaque.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("scale", "Leaf scale", 0.1, 4.0, 0.9),
-            num("warp", "Wind bend", 0.0, 1.0, 0.6),
-            num("width", "Leaf coverage", 0.0, 1.0, 0.5),
-            rate("speed", "Wind speed", 0.0, 4.0, 0.22),
-            num("pulse", "Dappled sun", 0.0, 1.0, 0.0),
-            num("root_hue", "Shadow green", 0.0, 1.0, 0.39),
-            num("leaf_hue", "Leaf hue", 0.0, 1.0, 0.31),
+            num(
+                "scale",
+                "Leaf scale",
+                0.1,
+                4.0,
+                0.9,
+                "Leaf density: higher packs in more, smaller leaf masses.",
+            ),
+            num(
+                "warp",
+                "Wind bend",
+                0.0,
+                1.0,
+                0.6,
+                "How much the wind bends the leaves.",
+            ),
+            num(
+                "width",
+                "Leaf coverage",
+                0.0,
+                1.0,
+                0.5,
+                "How much of the canopy is lit leaf.",
+            ),
+            rate(
+                "speed",
+                "Wind speed",
+                0.0,
+                4.0,
+                0.22,
+                "Wind speed, integrated (× master speed); 0 holds still.",
+            ),
+            num(
+                "pulse",
+                "Dappled sun",
+                0.0,
+                1.0,
+                0.0,
+                "Brightens the sunlit layer (wire audio onset in to flicker it).",
+            ),
+            num(
+                "root_hue",
+                "Shadow green",
+                0.0,
+                1.0,
+                0.39,
+                "Hue of the deep shadow layer, in turns.",
+            ),
+            num(
+                "leaf_hue",
+                "Leaf hue",
+                0.0,
+                1.0,
+                0.31,
+                "Base hue of the leaves, in turns (the layers vary around it).",
+            ),
             SATURATION,
             BRIGHTNESS,
         ],
@@ -1263,15 +2242,42 @@ pub const TYPES: &[NodeType] = &[
         id: "meteors",
         label: "Meteors",
         category: Category::Generator,
+        description: "Meteors shooting along random spokes with fading tails, each spoke launching at random times.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("density", "Density", 0.0, 1.0, 0.5),
-            num("tail", "Rate / tail", 0.0, 1.0, 0.5),
-            sel("direction", "Direction", &["inward", "outward"]),
-            rate("speed", "Speed", 0.0, 4.0, 1.0),
+            num(
+                "density",
+                "Density",
+                0.0,
+                1.0,
+                0.5,
+                "Share of spokes carrying a meteor at a time.",
+            ),
+            num(
+                "tail",
+                "Rate / tail",
+                0.0,
+                1.0,
+                0.5,
+                "Both how often meteors launch and how long their tails are.",
+            ),
+            sel(
+                "direction",
+                "Direction",
+                &["inward", "outward"],
+                "inward: from the rim toward the centre; outward: from the centre to the rim.",
+            ),
+            rate("speed", "Speed", 0.0, 4.0, 1.0, SPEED),
             HUE,
-            HUE_RANGE,
+            num(
+                "hue_range",
+                "Hue range",
+                0.0,
+                1.0,
+                0.2,
+                "Random hue spread between meteors, in turns.",
+            ),
             SATURATION,
             BRIGHTNESS,
         ],
@@ -1280,13 +2286,35 @@ pub const TYPES: &[NodeType] = &[
         id: "warp",
         label: "Warp",
         category: Category::Generator,
+        description: "A hyperspace starfield: short star streaks rushing outward along the spokes, brighter toward the rim. Colours stay pale (saturation × 0.6).",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            num("density", "Star density", 0.0, 1.0, 0.5),
-            rate("speed", "Speed", 0.0, 8.0, 1.0),
+            num(
+                "density",
+                "Star density",
+                0.0,
+                1.0,
+                0.5,
+                "How many stars, and how closely they follow each other along a spoke.",
+            ),
+            rate(
+                "speed",
+                "Speed",
+                0.0,
+                8.0,
+                1.0,
+                "Rush speed, integrated (× master speed); 0 holds still.",
+            ),
             HUE,
-            HUE_RANGE,
+            num(
+                "hue_range",
+                "Hue range",
+                0.0,
+                1.0,
+                0.2,
+                "Random hue spread between stars, in turns.",
+            ),
             SATURATION,
             BRIGHTNESS,
         ],
@@ -1295,16 +2323,57 @@ pub const TYPES: &[NodeType] = &[
         id: "waveform",
         label: "Waveform",
         category: Category::Generator,
+        description: "An oscilloscope ring: a circle whose radius wobbles with the live audio waveform, traced once around the ring; Drift rotates the trace.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            sel("source", "Source", &["1", "2", "3", "4"]),
-            num("ring", "Ring radius", 0.0, 1.0, 0.5),
-            num("depth", "Depth", 0.0, 1.0, 0.5),
-            num("thickness", "Thickness", 0.0, 1.0, 0.5),
-            rate("drift", "Drift", 0.0, 4.0, 1.0),
+            sel(
+                "source",
+                "Source",
+                &["1", "2", "3", "4"],
+                "Which audio input's waveform to draw.",
+            ),
+            num(
+                "ring",
+                "Ring radius",
+                0.0,
+                1.0,
+                0.5,
+                "Base radius of the circle: 0 = 0.35, 1 = 0.95 of the array radius.",
+            ),
+            num(
+                "depth",
+                "Depth",
+                0.0,
+                1.0,
+                0.5,
+                "How far the waveform pushes the ring in and out.",
+            ),
+            num(
+                "thickness",
+                "Thickness",
+                0.0,
+                1.0,
+                0.5,
+                "Line thickness.",
+            ),
+            rate(
+                "drift",
+                "Drift",
+                0.0,
+                4.0,
+                1.0,
+                "Rotation rate of the trace, integrated (× master speed); 0 holds still.",
+            ),
             HUE,
-            HUE_RANGE,
+            num(
+                "hue_range",
+                "Hue range",
+                0.0,
+                1.0,
+                0.2,
+                "Hue shift with the waveform's value, in turns.",
+            ),
             SATURATION,
             BRIGHTNESS,
         ],
@@ -1313,90 +2382,204 @@ pub const TYPES: &[NodeType] = &[
         id: "spectrum",
         label: "Spectrum",
         category: Category::Generator,
+        description: "A radial spectrum analyser: 64 log-spaced frequency bars around the ring, lows to highs, each growing along its spokes with that band's energy.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
-            sel("source", "Source", &["1", "2", "3", "4"]),
-            num("length", "Bar length", 0.0, 1.0, 0.5),
-            sel("from", "Bars grow from", &["outer", "inner"]),
-            rate("drift", "Drift", 0.0, 4.0, 1.0),
+            sel(
+                "source",
+                "Source",
+                &["1", "2", "3", "4"],
+                "Which audio input's spectrum to draw.",
+            ),
+            num(
+                "length",
+                "Bar length",
+                0.0,
+                1.0,
+                0.5,
+                "How far a loud band's bar reaches along the spoke.",
+            ),
+            sel(
+                "from",
+                "Bars grow from",
+                &["outer", "inner"],
+                "outer: bars grow inward from the rim; inner: outward from the inner end.",
+            ),
+            rate(
+                "drift",
+                "Drift",
+                0.0,
+                4.0,
+                1.0,
+                "Rotation rate of the bars, integrated (× master speed); 0 holds still.",
+            ),
             HUE,
-            HUE_RANGE,
+            num(
+                "hue_range",
+                "Hue range",
+                0.0,
+                1.0,
+                0.2,
+                "Hue shift once around the ring (lows to highs), in turns.",
+            ),
             SATURATION,
             BRIGHTNESS,
         ],
     },
     NodeType {
-        // The pixel's own position as a field: radius 0 (inner) → 1 (outer),
-        // angle in turns, x/y 0..1, spoke and pixel index as fractions.
         // After a Transform it reports the transformed position.
         id: "coordinate",
         label: "Coordinate",
         category: Category::Generator,
+        description: "The pixel's own position as a Field<f32>, for building custom gradients and masks with Field math, Colorize or Palette. After a Transform it reports the transformed position (except Spoke, which stays physical).",
         inputs: &[],
-        outputs: &out(Shape::FieldScalar),
+        outputs: &[port(
+            "out",
+            Shape::FieldScalar,
+            "The chosen coordinate × Scale + Offset (wrapped into 0..1 if Wrap is on).",
+        )],
         params: &[
-            sel("which", "Which", &["radius", "angle", "x", "y", "spoke", "pixel"]),
-            num("scale", "Scale", -8.0, 8.0, 1.0),
-            num("offset", "Offset", -2.0, 2.0, 0.0),
-            sel("wrap", "Wrap into 0..1", &["off", "on"]),
+            sel(
+                "which",
+                "Which",
+                &["radius", "angle", "x", "y", "spoke", "pixel"],
+                "radius: 0 at the inner end .. 1 at the rim; angle: once around the ring in turns, 0..1; x, y: 0..1 across the disc; spoke: the spoke's index as a fraction 0..1; pixel: position along the spoke, 0 at the outer end .. 1 at the inner end.",
+            ),
+            num(
+                "scale",
+                "Scale",
+                -8.0,
+                8.0,
+                1.0,
+                "Multiplier on the coordinate (negative flips it).",
+            ),
+            num(
+                "offset",
+                "Offset",
+                -2.0,
+                2.0,
+                0.0,
+                "Added after scaling.",
+            ),
+            sel(
+                "wrap",
+                "Wrap into 0..1",
+                &["off", "on"],
+                "on: keep only the fractional part, so the ramp repeats Scale times.",
+            ),
         ],
     },
     NodeType {
         // What the array showed last frame, at this pixel (after a Transform:
-        // at the transformed position, so zoom/rotate trails work), times
-        // Decay. Blend it under a new source for trails and echoes.
+        // at the transformed position, so zoom/rotate trails work).
         id: "feedback",
         label: "Feedback",
         category: Category::Generator,
+        description: "What the array showed last frame at this pixel (the final, mastered picture) times Decay — downstream of a Transform, at the transformed position. Blend new content over it (Blend max or add, with a Transform zoom or spin in between) for trails, echoes and tunnels. Black in node thumbnails.",
         inputs: &[],
-        outputs: COLOR_OUT,
-        params: &[num("decay", "Decay", 0.0, 1.0, 0.9)],
+        outputs: &[port(
+            "out",
+            Shape::FieldColor,
+            "Last frame's colour × Decay; alpha is its brightest channel.",
+        )],
+        params: &[num(
+            "decay",
+            "Decay",
+            0.0,
+            1.0,
+            0.9,
+            "How much of last frame survives each frame: 0 none, 1 everything (trails never fade).",
+        )],
     },
     // -- Field ops ----------------------------------------------------------
     NodeType {
         id: "transform",
         label: "Transform",
         category: Category::FieldOp,
-        inputs: &[PortDef {
-            name: "in",
-            shape: Shape::FieldColor,
-        }],
-        outputs: COLOR_OUT,
+        description: "Moves where everything upstream is sampled: rotate, spin, zoom, an N-way kaleidoscope and a left/right mirror, for any colour field (generators, video, feedback). Nodes that key on the physical LED or spoke (Sparkle, and the per-spoke randomness of Spoke chase, Meteors and Warp) only partly follow it.",
+        inputs: &[port("in", Shape::FieldColor, "The colour field to transform.")],
+        outputs: &[port("out", Shape::FieldColor, "The transformed field.")],
         params: &[
-            num("rotate", "Rotate (turns)", -1.0, 1.0, 0.0),
-            rate("spin", "Spin (turns/s)", -2.0, 2.0, 0.0),
-            num("zoom", "Zoom", 0.1, 8.0, 1.0),
-            num("kaleido", "Kaleidoscope", 0.0, 10.0, 0.0),
-            sel("mirror", "Mirror", &["off", "on"]),
+            num(
+                "rotate",
+                "Rotate (turns)",
+                -1.0,
+                1.0,
+                0.0,
+                "Fixed rotation in turns (wire Time in for steady rotation that never wraps).",
+            ),
+            rate(
+                "spin",
+                "Spin (turns/s)",
+                -2.0,
+                2.0,
+                0.0,
+                "Continuous rotation in turns per second, integrated (× master speed); negative spins the other way.",
+            ),
+            num(
+                "zoom",
+                "Zoom",
+                0.1,
+                8.0,
+                1.0,
+                "Magnification: above 1 enlarges the pattern (samples nearer the centre), below 1 shrinks it.",
+            ),
+            num(
+                "kaleido",
+                "Kaleidoscope",
+                0.0,
+                10.0,
+                0.0,
+                "Kaleidoscope segments (rounded): 2 or more folds the disc into that many mirrored wedges; 0 or 1 is off.",
+            ),
+            sel(
+                "mirror",
+                "Mirror",
+                &["off", "on"],
+                "on: mirror one half of the disc onto the other (left/right).",
+            ),
         ],
     },
     NodeType {
         id: "colorize",
         label: "Colorize",
         category: Category::FieldOp,
-        inputs: &[PortDef {
-            name: "in",
-            shape: Shape::FieldScalar,
-        }],
+        description: "Turns a Field<f32> into colour: brightness follows the value (× Brightness), hue is Hue + value × Hue range, alpha is the value clamped to 0..1. A Scalar wired into `in` colours the whole array uniformly.",
+        inputs: &[port(
+            "in",
+            Shape::FieldScalar,
+            "The value field (typically 0..1); unwired reads 0, which is black.",
+        )],
         outputs: COLOR_OUT,
-        params: &[HUE, HUE_RANGE, SATURATION, BRIGHTNESS],
+        params: &[
+            num("hue", "Hue", 0.0, 1.0, 0.6, "Hue at value 0, in turns."),
+            num(
+                "hue_range",
+                "Hue range",
+                0.0,
+                1.0,
+                0.2,
+                "Hue added per unit of value, in turns.",
+            ),
+            SATURATION,
+            BRIGHTNESS,
+        ],
     },
     NodeType {
         id: "field_math",
         label: "Field math",
         category: Category::FieldOp,
+        description: "Per-pixel arithmetic on two Field<f32> inputs: (A op B) × Gain + Offset. A Scalar wired into A or B becomes a uniform field; an unwired input reads 0.",
         inputs: &[
-            PortDef {
-                name: "a",
-                shape: Shape::FieldScalar,
-            },
-            PortDef {
-                name: "b",
-                shape: Shape::FieldScalar,
-            },
+            port("a", Shape::FieldScalar, "First operand (the only one for invert)."),
+            port("b", Shape::FieldScalar, "Second operand."),
         ],
-        outputs: &out(Shape::FieldScalar),
+        outputs: &[port(
+            "out",
+            Shape::FieldScalar,
+            "(A op B) × Gain + Offset at each pixel.",
+        )],
         params: &[
             // Append only. Unary ops use A.
             sel(
@@ -1414,37 +2597,86 @@ pub const TYPES: &[NodeType] = &[
                     "invert (1 − A)",
                     "power",
                 ],
+                "add, subtract, multiply, min, max; difference: |A − B|; greater than: 1 where A > B, else 0; step: a soft 0→1 edge as A passes B ± 0.1; invert: 1 − A; power: A (clamped to ≥ 0) raised to B.",
             ),
-            num("gain", "Gain", -4.0, 4.0, 1.0),
-            num("offset", "Offset", -2.0, 2.0, 0.0),
+            num(
+                "gain",
+                "Gain",
+                -4.0,
+                4.0,
+                1.0,
+                "Multiplier on the result.",
+            ),
+            num(
+                "offset",
+                "Offset",
+                -2.0,
+                2.0,
+                0.0,
+                "Added after Gain.",
+            ),
         ],
     },
     NodeType {
         id: "luminance",
         label: "Brightness of",
         category: Category::FieldOp,
-        inputs: &[PortDef {
-            name: "in",
-            shape: Shape::FieldColor,
-        }],
-        outputs: &out(Shape::FieldScalar),
-        params: &[sel("measure", "Measure", &["luminance", "brightest channel", "alpha"])],
+        description: "Measures a colour field back into a Field<f32> (perceived luminance, the brightest channel, or the alpha coverage) to drive masks, Field math or Palette from any pattern or video.",
+        inputs: &[port("in", Shape::FieldColor, "The colour field to measure.")],
+        outputs: &[port("out", Shape::FieldScalar, "The measurement at each pixel.")],
+        params: &[sel(
+            "measure",
+            "Measure",
+            &["luminance", "brightest channel", "alpha"],
+            "luminance: perceived brightness (Rec. 709 weights); brightest channel: max(R, G, B); alpha: the field's coverage.",
+        )],
     },
     NodeType {
         id: "color_adjust",
         label: "Color adjust",
         category: Category::FieldOp,
-        inputs: &[PortDef {
-            name: "in",
-            shape: Shape::FieldColor,
-        }],
+        description: "Adjusts a colour field in HSV (shift hue, scale saturation and brightness), then applies contrast around mid-grey and an optional invert. Alpha passes through.",
+        inputs: &[port("in", Shape::FieldColor, "The colour field to adjust.")],
         outputs: COLOR_OUT,
         params: &[
-            num("hue", "Hue shift (turns)", -1.0, 1.0, 0.0),
-            num("saturation", "Saturation ×", 0.0, 3.0, 1.0),
-            num("brightness", "Brightness ×", 0.0, 3.0, 1.0),
-            num("contrast", "Contrast", 0.0, 3.0, 1.0),
-            sel("invert", "Invert", &["off", "on"]),
+            num(
+                "hue",
+                "Hue shift (turns)",
+                -1.0,
+                1.0,
+                0.0,
+                "Hue shift in turns (±0.5 = complementary colours).",
+            ),
+            num(
+                "saturation",
+                "Saturation ×",
+                0.0,
+                3.0,
+                1.0,
+                "Saturation multiplier: 0 greyscale, 1 unchanged.",
+            ),
+            num(
+                "brightness",
+                "Brightness ×",
+                0.0,
+                3.0,
+                1.0,
+                "Brightness (HSV value) multiplier.",
+            ),
+            num(
+                "contrast",
+                "Contrast",
+                0.0,
+                3.0,
+                1.0,
+                "Contrast around 0.5 grey: 1 unchanged, 0 flat grey, above 1 punchier.",
+            ),
+            sel(
+                "invert",
+                "Invert",
+                &["off", "on"],
+                "on: replace each channel with 1 − it.",
+            ),
         ],
     },
     NodeType {
@@ -1452,42 +2684,63 @@ pub const TYPES: &[NodeType] = &[
         id: "palette",
         label: "Palette",
         category: Category::FieldOp,
-        inputs: &[PortDef {
-            name: "in",
-            shape: Shape::FieldScalar,
-        }],
+        description: "Maps a Field<f32> through a smooth cosine colour ramp (after Inigo Quilez); the ramp repeats every 1 / Cycles of input, and alpha is the input clamped to 0..1. A Scalar wired into `in` gives one uniform colour.",
+        inputs: &[port(
+            "in",
+            Shape::FieldScalar,
+            "The value field to colour; unwired reads 0.",
+        )],
         outputs: COLOR_OUT,
         params: &[
             sel(
                 "palette",
                 "Palette",
                 &["rainbow", "fire", "ocean", "neon", "pastel", "mono", "sunset", "forest"],
+                "Which colour ramp (named for its look).",
             ),
-            num("cycles", "Cycles", 0.1, 8.0, 1.0),
-            num("offset", "Offset", -1.0, 1.0, 0.0),
+            num(
+                "cycles",
+                "Cycles",
+                0.1,
+                8.0,
+                1.0,
+                "Ramp repeats per unit of input.",
+            ),
+            num(
+                "offset",
+                "Offset",
+                -1.0,
+                1.0,
+                0.0,
+                "Shift along the ramp, in turns of it.",
+            ),
             BRIGHTNESS,
         ],
     },
     // -- Combine ------------------------------------------------------------
     NodeType {
-        // Another patch as one node (`NodeInst::sub`): its exposed knobs are
-        // this node's inputs ("{node}.{param}"), its Output is `out`. Inlined
-        // by `flatten` before validation and codegen; nothing downstream sees
-        // it, so it has no static ports or params.
+        // Another patch as one node (`NodeInst::sub`). Inlined by `flatten`
+        // before validation and codegen; nothing downstream sees it, so it has
+        // no static ports or params.
         id: "subpatch",
         label: "Sub-patch",
         category: Category::Combine,
+        description: "Another patch embedded as one node (its document lives in the node's `sub`): every param its document exposes becomes an input of this node named \"{inner node}.{param}\", and whatever feeds its Output is this node's `out`. It is inlined before validation, so it costs exactly what its contents cost; nesting is limited to four levels.",
         inputs: &[],
-        outputs: COLOR_OUT,
+        outputs: &[port(
+            "out",
+            Shape::FieldColor,
+            "The embedded patch's picture (what feeds its Output; black if nothing does).",
+        )],
         params: &[],
     },
     NodeType {
         // A Code node's ports and body live on the instance (`NodeInst::code`,
-        // see `code`): all Scalar/Event ports → interpreted on the CPU; a
-        // field output → pasted into the shader. No static ports or params.
+        // see `code`). No static ports or params.
         id: "code",
         label: "Code",
         category: Category::Code,
+        description: "A node whose ports and body you write (stored in the node's `code`). If every port is a Scalar or Event, the body (a WGSL subset) runs on the CPU every frame; if it outputs a field, the WGSL body is compiled into the patch shader and runs per pixel. Scalar inputs are knobs like a built-in node's params.",
         inputs: &[],
         outputs: &[],
         params: &[],
@@ -1496,15 +2749,10 @@ pub const TYPES: &[NodeType] = &[
         id: "blend",
         label: "Blend",
         category: Category::Combine,
+        description: "Combines two colour fields: Over is applied to Base with the chosen mode at Opacity. The result's alpha is Over's coverage composited over Base's.",
         inputs: &[
-            PortDef {
-                name: "base",
-                shape: Shape::FieldColor,
-            },
-            PortDef {
-                name: "over",
-                shape: Shape::FieldColor,
-            },
+            port("base", Shape::FieldColor, "The lower layer."),
+            port("over", Shape::FieldColor, "The layer applied on top."),
         ],
         outputs: COLOR_OUT,
         params: &[
@@ -1512,8 +2760,16 @@ pub const TYPES: &[NodeType] = &[
                 "mode",
                 "Mode",
                 &["add", "multiply", "screen", "alpha_over", "max"],
+                "add: sums the light (brightens); multiply: darkens Base by Over (white keeps it); screen: brightens without blowing out; alpha_over: Over replaces Base where its alpha (coverage) is high; max: the brighter of each channel.",
             ),
-            num("opacity", "Opacity", 0.0, 1.0, 1.0),
+            num(
+                "opacity",
+                "Opacity",
+                0.0,
+                1.0,
+                1.0,
+                "How much of Over applies: 0 Base alone, 1 full effect.",
+            ),
         ],
     },
     // -- Points -------------------------------------------------------------
@@ -1521,10 +2777,8 @@ pub const TYPES: &[NodeType] = &[
         id: "render_points",
         label: "Render points",
         category: Category::FieldOp,
-        inputs: &[PortDef {
-            name: "points",
-            shape: Shape::Points,
-        }],
+        description: "Draws a Points stream (Touch strokes) as glowing marks, each in its own pen or all in one Pen, scaled by Size and Intensity. Unwired, it is black.",
+        inputs: &[port("points", Shape::Points, "The strokes to draw.")],
         outputs: COLOR_OUT,
         params: &[
             // "as drawn" keeps each stroke's own pen; the rest override it.
@@ -1534,23 +2788,50 @@ pub const TYPES: &[NodeType] = &[
                 &[
                     "as drawn", "glow", "ripple", "sparkle", "comet", "ring", "beam", "ember",
                 ],
+                "as drawn: each stroke keeps the pen it was drawn with. Otherwise all use one: glow (soft blob), ripple (expanding ring), sparkle (glitter spray), comet (streak along the motion), ring (a hoop round the array at the dab's radius), beam (lights the dab's whole spoke), ember (glitter drifting inward).",
             ),
-            num("size", "Size ×", 0.1, 4.0, 1.0),
-            num("intensity", "Intensity ×", 0.0, 2.0, 1.0),
+            num(
+                "size",
+                "Size ×",
+                0.1,
+                4.0,
+                1.0,
+                "Multiplier on each mark's size.",
+            ),
+            num(
+                "intensity",
+                "Intensity ×",
+                0.0,
+                2.0,
+                1.0,
+                "Multiplier on each mark's brightness.",
+            ),
         ],
     },
     NodeType {
         id: "render_effects",
         label: "Render effects",
         category: Category::FieldOp,
-        inputs: &[PortDef {
-            name: "effects",
-            shape: Shape::Effects,
-        }],
+        description: "Draws an Effects stream (Triggered effects and/or Event effect chains) into a colour field, scaled by Size and Intensity. Only effects from the sources wired in are drawn; unwired, it is black.",
+        inputs: &[port("effects", Shape::Effects, "The effects to draw.")],
         outputs: COLOR_OUT,
         params: &[
-            num("size", "Size ×", 0.1, 4.0, 1.0),
-            num("intensity", "Intensity ×", 0.0, 2.0, 1.0),
+            num(
+                "size",
+                "Size ×",
+                0.1,
+                4.0,
+                1.0,
+                "Multiplier on each effect's size.",
+            ),
+            num(
+                "intensity",
+                "Intensity ×",
+                0.0,
+                2.0,
+                1.0,
+                "Multiplier on each effect's brightness.",
+            ),
         ],
     },
     // -- Texture ------------------------------------------------------------
@@ -1558,17 +2839,50 @@ pub const TYPES: &[NodeType] = &[
         id: "texture_sample",
         label: "Texture sample",
         category: Category::Texture,
-        inputs: &[PortDef {
-            name: "tex",
-            shape: Shape::Texture,
-        }],
+        description: "Maps a Texture (Video in, Still image in, Clip) onto the disc: the picture's square spans the ring, its edges touching the rim, with zoom, rotation and kaleidoscope plus saturation and brightness. Outside the picture is transparent; unwired, it is black.",
+        inputs: &[port("tex", Shape::Texture, "The texture to sample.")],
         outputs: COLOR_OUT,
         params: &[
-            num("zoom", "Zoom", 0.1, 8.0, 1.0),
-            num("rotate", "Rotate (turns)", -1.0, 1.0, 0.0),
-            num("kaleido", "Kaleidoscope", 0.0, 10.0, 0.0),
-            num("saturation", "Saturation", 0.0, 2.0, 1.0),
-            num("brightness", "Brightness", 0.0, 2.0, 1.0),
+            num(
+                "zoom",
+                "Zoom",
+                0.1,
+                8.0,
+                1.0,
+                "Magnification: above 1 enlarges the picture.",
+            ),
+            num(
+                "rotate",
+                "Rotate (turns)",
+                -1.0,
+                1.0,
+                0.0,
+                "Rotation in turns.",
+            ),
+            num(
+                "kaleido",
+                "Kaleidoscope",
+                0.0,
+                10.0,
+                0.0,
+                "Kaleidoscope segments (rounded): 2 or more folds the picture into that many mirrored wedges; 0 or 1 is off.",
+            ),
+            num(
+                "saturation",
+                "Saturation",
+                0.0,
+                2.0,
+                1.0,
+                "0 greyscale, 1 the picture's own colours, 2 boosted.",
+            ),
+            num(
+                "brightness",
+                "Brightness",
+                0.0,
+                2.0,
+                1.0,
+                "Brightness multiplier.",
+            ),
         ],
     },
     // -- Sink ---------------------------------------------------------------
@@ -1576,12 +2890,21 @@ pub const TYPES: &[NodeType] = &[
         id: "output",
         label: "Output",
         category: Category::Sink,
-        inputs: &[PortDef {
-            name: "in",
-            shape: Shape::FieldColor,
-        }],
+        description: "The patch's one sink: the colour field wired into `in` is what the gate shows. It is scaled by Master, then by the crew's master brightness and hue pull, soft-clipped above 0.8 and sent to the LEDs; nothing that is not wired here is drawn.",
+        inputs: &[port(
+            "in",
+            Shape::FieldColor,
+            "The final picture (its alpha is ignored).",
+        )],
         outputs: &[],
-        params: &[num("master", "Master", 0.0, 2.0, 1.0)],
+        params: &[num(
+            "master",
+            "Master",
+            0.0,
+            2.0,
+            1.0,
+            "Patch-level brightness, applied before the crew's master brightness.",
+        )],
     },
 ];
 
@@ -1644,5 +2967,43 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    /// Agents compose patches from these alone: nothing may be undocumented.
+    #[test]
+    fn every_node_port_and_param_is_described() {
+        for t in TYPES {
+            assert!(!t.description.trim().is_empty(), "{} needs a description", t.id);
+            for p in t.inputs.iter().chain(t.outputs) {
+                assert!(
+                    !p.description.trim().is_empty(),
+                    "port {}.{} needs a description",
+                    t.id,
+                    p.name
+                );
+            }
+            for p in t.params {
+                assert!(
+                    !p.description.trim().is_empty(),
+                    "param {}.{} needs a description",
+                    t.id,
+                    p.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn palette_json_carries_descriptions() {
+        let json = palette_json();
+        let solid = json
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == "solid")
+            .unwrap();
+        assert!(solid["description"].as_str().is_some_and(|s| !s.is_empty()));
+        assert!(solid["outputs"][0]["description"].is_string());
+        assert!(solid["params"][0]["description"].is_string());
     }
 }
