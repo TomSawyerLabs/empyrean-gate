@@ -41,6 +41,29 @@ export function nodeSummary(t: PatchNodeType) {
   };
 }
 
+/** JSON as a person would lay it out: a value on one line when it fits in
+ * `width`, otherwise one member per line. */
+export function pretty(value: unknown, indent = "", width = 100): string {
+  const flat = inline(value);
+  if (flat.length + indent.length <= width || value === null || typeof value !== "object") return flat;
+  const inner = indent + "  ";
+  if (Array.isArray(value)) {
+    return `[\n${value.map((v) => inner + pretty(v, inner, width)).join(",\n")}\n${indent}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined);
+  const lines = entries.map(([k, v]) => `${inner}${JSON.stringify(k)}: ${pretty(v, inner, width)}`);
+  return `{\n${lines.join(",\n")}\n${indent}}`;
+}
+
+function inline(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(inline).join(", ")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined);
+    return entries.length ? `{ ${entries.map(([k, v]) => `${JSON.stringify(k)}: ${inline(v)}`).join(", ")} }` : "{}";
+  }
+  return JSON.stringify(value);
+}
+
 /** Shader lib functions a body must not call (`finish` writes the frame
  * buffer) or has no use for (the noise's own internals). */
 const INTERNAL_HELPERS = new Set(["finish", "mod289v3", "mod289v4", "permute4", "taylor_inv_sqrt4"]);
@@ -142,7 +165,7 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
     "A patch is JSON (the same file the gate saves and opens). Minimal example:",
     "",
     "```json",
-    JSON.stringify(EXAMPLE, null, 2),
+    pretty(EXAMPLE),
     "```",
     "",
     `- \`format\`: ${limits.patchFormat} (current). Older documents are upgraded on the way in.`,
@@ -192,7 +215,7 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
       "When no node does what you want, write it: a `code` node declares its own ports and a body in **WGSL**.",
       "",
       "```json",
-      JSON.stringify(
+      pretty(
         {
           id: "swirl",
           kind: "code",
@@ -205,8 +228,6 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
             body: "let hue = fract(c.theta / TAU + c.r01 * twist + G.time * 0.05);\nout = vec4f(hsv2rgb(hue, 0.9, 1.0), 1.0);",
           },
         },
-        null,
-        2,
       ),
       "```",
       "",
