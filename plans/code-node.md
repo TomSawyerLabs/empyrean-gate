@@ -261,8 +261,13 @@ Steps:
    template matches the built-in frame by frame for 120 frames, events
    by fire count). 112 tests pass.
 2. [x] Hosts: wasm `convertToCode`, gate `POST /patch/convert-to-code`,
-   Patch.tsx, mock stub; `cargo check` clean. Site Playground: pending the
-   bump.
+   Patch.tsx, mock stub; `cargo check` clean. Site Playground passes
+   `core.convertToCode` (site `dev`, after the bump to web-dist `486a817`).
+   Rebased onto the agent-tools commits that landed meanwhile (registry
+   docs, schema, CLI); conflicts in `palette_json`, `core.ts` and the mock
+   registry were both-sides adds. The ISSUES.md entry about the reference
+   listing internals is closed: a `///` doc now makes a helper part of the
+   Code API, and the helpers a body wants got docs.
 3. [x] Editor: "Convert to Code" on convertible kinds, "rate" checkbox on
    GPU scalar inputs, reference card mentions `return;`, `master_speed`
    and the button; spec case. Found and fixed on the way: switching the
