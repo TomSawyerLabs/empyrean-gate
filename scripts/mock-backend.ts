@@ -342,6 +342,7 @@ const server = Bun.serve({
           label: "Blend",
           category: "combine",
           description: "Combines two colour fields: Over is applied to Base.",
+          layered: { names: ["over", "mode", "opacity"], max: 8 },
           inputs: [
             { name: "base", shape: "field_color" },
             { name: "over", shape: "field_color" },

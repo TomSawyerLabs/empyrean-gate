@@ -19,6 +19,7 @@ import { useGate, useThrottled } from "./state";
 import {
   codeParams,
   LAYER_LABELS,
+  nodeParams,
   type GameKind,
   type ShapeKind,
   type PatchDoc,
@@ -552,8 +553,9 @@ function PatchParamsPanel() {
       {doc.exposed.map((x) => {
         const node = doc.nodes.find((n) => n.id === x.node);
         const def = node && registry?.get(node.kind);
-        // A Code node's knobs are its own Scalar inputs.
-        const p = def?.params.find((q) => q.name === x.param) ?? codeParams(node).find((q) => q.name === x.param);
+        // A Code node's knobs are its own Scalar inputs; a Blend's layers
+        // have their own (`opacity2` …).
+        const p = (def && nodeParams(def, node).find((q) => q.name === x.param)) ?? codeParams(node).find((q) => q.name === x.param);
         if (!node || !p) return null;
         return (
           <PatchParamFader

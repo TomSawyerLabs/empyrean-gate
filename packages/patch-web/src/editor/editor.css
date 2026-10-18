@@ -1139,3 +1139,54 @@
   outline-offset: 2px;
 }
 
+
+/* A Blend's layers in the side panel, top layer first, the base last. */
+.patch-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.patch-layer {
+  padding: 6px 8px 0;
+  border: 1px solid #2a2445;
+  border-radius: 6px;
+}
+
+.patch-layer-base {
+  padding-bottom: 6px;
+  border-style: dashed;
+}
+
+.patch-layer-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.patch-layer-base .patch-layer-head {
+  margin-bottom: 0;
+}
+
+.patch-layer-from {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.patch-layer-tools {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.patch-layer-tools button {
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 18px;
+}

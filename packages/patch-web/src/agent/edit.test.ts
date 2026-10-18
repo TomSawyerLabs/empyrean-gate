@@ -25,6 +25,24 @@ describe("applyOps", () => {
     expect(d).toEqual(doc());
   });
 
+  test("a Blend's layers: added with it, and fewer drops the top ones", () => {
+    let next = applyOps(doc(), [
+      { op: "add_node", kind: "blend", id: "mix", layers: 3, params: { opacity3: 0.5, opacity: 0.2 } },
+      { op: "connect", from: "bow.out", to: "mix.over3" },
+      { op: "expose", node: "mix", param: "opacity3" },
+    ]);
+    expect(next.nodes.find((n) => n.id === "mix")?.layers).toBe(3);
+    next = applyOps(next, [{ op: "set_layers", node: "mix", layers: 2 }]);
+    const mix = next.nodes.find((n) => n.id === "mix")!;
+    expect(mix.layers).toBe(2);
+    expect(mix.params).toEqual({ opacity: 0.2 });
+    expect(next.edges.some((e) => e.to.node === "mix")).toBe(false);
+    expect(next.exposed.some((x) => x.node === "mix")).toBe(false);
+    next = applyOps(next, [{ op: "set_layers", node: "mix", layers: 1 }]);
+    expect("layers" in next.nodes.find((n) => n.id === "mix")!).toBe(false);
+    expect(() => applyOps(next, [{ op: "set_layers", node: "mix", layers: 9 }])).toThrow("1 to 8");
+  });
+
   test("adds a node and wires it in, replacing what fed that input", () => {
     const next = applyOps(doc(), [
       { op: "add_node", kind: "sparkle", id: "spark" },

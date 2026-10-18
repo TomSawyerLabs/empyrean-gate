@@ -1053,6 +1053,7 @@ export type ServerMsg =
 
 export {
   codeParams,
+  nodeParams,
   shapeAccepts,
   type CodeDef,
   type CodePort,

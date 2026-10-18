@@ -2815,7 +2815,7 @@ pub const TYPES: &[NodeType] = &[
         id: "blend",
         label: "Blend",
         category: Category::Combine,
-        description: "Combines two colour fields: Over is applied to Base with the chosen mode at Opacity. The result's alpha is Over's coverage composited over Base's.",
+        description: "Combines colour fields: Over is applied to Base with the chosen mode at Opacity. The result's alpha is Over's coverage composited over Base's. A Blend can stack more layers (`layers` on the node, up to 8): layer k adds Over k, Mode k and Opacity k, applied in turn on top; an unwired one is skipped.",
         inputs: &[
             port("base", Shape::FieldColor, "The lower layer."),
             port("over", Shape::FieldColor, "The layer applied on top."),
