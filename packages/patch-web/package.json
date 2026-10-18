@@ -13,7 +13,8 @@
     "./editor.css": "./src/editor/editor.css",
     "./files": "./src/editor/files.ts",
     "./runtime": "./src/runtime/index.ts",
-    "./types": "./src/types.ts"
+    "./types": "./src/types.ts",
+    "./agent": "./src/agent/index.ts"
   },
   "scripts": {
     "build:wasm": "bun scripts/build-wasm.ts",
