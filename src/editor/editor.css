@@ -960,3 +960,83 @@
   align-self: flex-end;
   padding-bottom: 2px;
 }
+
+/* The body in a large modal */
+
+.code-body-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.code-expand {
+  font-size: 11px;
+  padding: 1px 6px;
+}
+
+.code-body-away {
+  margin: 6px 0;
+}
+
+.code-modal {
+  width: min(96vw, 1200px);
+  height: min(90vh, 900px);
+  max-width: none;
+  max-height: none;
+  padding: 12px 14px;
+  border: 1px solid #2a2445;
+  border-radius: 8px;
+  background: var(--pe-bg2, #141024);
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+}
+
+.code-modal:not([open]) {
+  display: none;
+}
+
+.code-modal::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.code-modal-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.code-modal-head .hint {
+  flex: 1;
+  font-size: 12px;
+}
+
+.code-modal-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.code-modal-body .code-editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  margin: 0;
+}
+
+.code-modal-body .cm-editor {
+  flex: 1;
+  height: 100%;
+}
+
+.code-modal-body .cm-editor .cm-scroller {
+  max-height: none;
+  min-height: 0;
+  font-size: 13px;
+}
+
+.code-modal .code-minis {
+  margin-bottom: 0;
+}

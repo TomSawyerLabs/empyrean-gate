@@ -4,7 +4,7 @@
 // validates the result on every edit; what it refuses shows under the minis
 // and as a mark on the body's line. See plans/code-node.md.
 
-import { useContext, useMemo } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { CodeEditor, diagnosticsFor, type CodeScope } from "./CodeEditor";
 import { NodeContext } from "./context";
 import { MiniMeter, MiniRing } from "./minis";
@@ -202,6 +202,55 @@ export function CodePanel({
   );
   const principal = def.outputs.find((p) => p.name === "out") ?? def.outputs[0];
 
+  // The body in a large modal: the one editor instance moves there while it
+  // is open (two instances editing one body would fight over the caret).
+  const [expanded, setExpanded] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!expanded || !dialog || dialog.open) return;
+    dialog.showModal();
+  }, [expanded]);
+  const editor = (
+    <CodeEditor
+      value={def.body}
+      onChange={setBody}
+      readOnly={!canEdit}
+      scope={scope}
+      diagnostics={diagnostics}
+      ariaLabel="Body (WGSL)"
+    />
+  );
+  const minisRow = live && def.outputs.length > 0 && (
+    <div className="code-minis" aria-label="Live outputs">
+      {def.outputs.map((p) =>
+        p.shape === "field_color" || p.shape === "field_scalar" ? (
+          <div key={p.name} className="code-mini">
+            <div className="pnode-mini">
+              <MiniRing
+                source={minis!}
+                mini={p.name === principal?.name ? `node:${id}` : `node:${id}:${p.name}`}
+                label={p.name}
+              />
+            </div>
+            <span>{p.name}</span>
+          </div>
+        ) : (
+          <div key={p.name} className="code-mini">
+            <div className="pnode-meters">
+              <MiniMeter
+                source={minis!}
+                mini={`scalar:${id}:${p.name}`}
+                label={p.name}
+                kind={p.shape === "event" ? "event" : "scalar"}
+              />
+            </div>
+          </div>
+        ),
+      )}
+    </div>
+  );
+
   const portRows = (dir: "inputs" | "outputs") =>
     portList(dir).map((p, i) => (
       <div key={i} className={`code-port ${isPortName(p.name) ? "" : "invalid"}`}>
@@ -275,35 +324,7 @@ export function CodePanel({
   return (
     <div className="code-panel">
       <p className={`hint code-tier ${tier ? "" : "error"}`}>{tierText}</p>
-      {live && def.outputs.length > 0 && (
-        <div className="code-minis" aria-label="Live outputs">
-          {def.outputs.map((p) =>
-            p.shape === "field_color" || p.shape === "field_scalar" ? (
-              <div key={p.name} className="code-mini">
-                <div className="pnode-mini">
-                  <MiniRing
-                    source={minis!}
-                    mini={p.name === principal?.name ? `node:${id}` : `node:${id}:${p.name}`}
-                    label={p.name}
-                  />
-                </div>
-                <span>{p.name}</span>
-              </div>
-            ) : (
-              <div key={p.name} className="code-mini">
-                <div className="pnode-meters">
-                  <MiniMeter
-                    source={minis!}
-                    mini={`scalar:${id}:${p.name}`}
-                    label={p.name}
-                    kind={p.shape === "event" ? "event" : "scalar"}
-                  />
-                </div>
-              </div>
-            ),
-          )}
-        </div>
-      )}
+      {!expanded && minisRow}
       <div className="code-ports">
         <div className="code-ports-head">
           <span>Inputs</span>
@@ -327,17 +348,44 @@ export function CodePanel({
         {portRows("outputs")}
       </div>
       <div className="patch-field code-body">
-        <span>Body (WGSL)</span>
-        <CodeEditor
-          value={def.body}
-          onChange={setBody}
-          readOnly={!canEdit}
-          scope={scope}
-          diagnostics={diagnostics}
-          ariaLabel="Body (WGSL)"
-        />
+        <div className="code-body-head">
+          <span>Body (WGSL)</span>
+          <button
+            type="button"
+            className="code-expand"
+            title="Open the body in a bigger editor"
+            aria-label="Open the body in a bigger editor"
+            onClick={() => setExpanded(true)}
+          >
+            ⤢ Expand
+          </button>
+        </div>
+        {expanded ? <p className="hint code-body-away">Editing in the large view.</p> : editor}
       </div>
-      {mine && <p className="code-error">⚠ {mine}</p>}
+      {!expanded && mine && <p className="code-error">⚠ {mine}</p>}
+      {expanded && (
+        <dialog
+          ref={dialogRef}
+          className="code-modal"
+          aria-label={`${node.name || "Code"} body`}
+          onClose={() => setExpanded(false)}
+          onCancel={(e) => {
+            e.preventDefault();
+            setExpanded(false);
+          }}
+        >
+          <div className="code-modal-head">
+            <strong>{node.name || "Code"}</strong>
+            <span className="hint">{tierText}</span>
+            <button type="button" onClick={() => setExpanded(false)} title="Back to the panel (Esc)">
+              Done
+            </button>
+          </div>
+          {minisRow}
+          <div className="code-modal-body">{editor}</div>
+          {mine && <p className="code-error">⚠ {mine}</p>}
+        </dialog>
+      )}
       <details className="code-ref">
         <summary>What the body can use</summary>
         <ul>
