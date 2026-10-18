@@ -66,18 +66,19 @@ better way to do multiple blends?"
        hand: the 15-min schedule had not fired since 05:06Z); the playground shows
        − on every node and Blend/Plasma in the palette (2026-10-18).
 8. [ ] **Current:** Blend layer stack (design below, "Layer stack design").
-   1. [ ] Crate: `NodeInst.layers`; per-layer names resolved on the instance
+   1. [x] Crate: `NodeInst.layers`; per-layer names resolved on the instance
           (`input_shape`, `knob`, `knobs`, `shaped_inputs`, new `param_def`);
           validate (`layers` only on Blend, 1..=8); codegen folds the layers;
           convert-to-Code and eval's `has_param`/`sanitize` instance-aware;
           palette carries `layered`; tests.
-   2. [ ] TS: `PatchNode.layers`, `PatchNodeType.layered`; instance ports in
+   2. [x] TS: `PatchNode.layers`, `PatchNodeType.layered`; instance ports in
           the editor (node view, side panel, Control tab); pure
           `editor/layers.ts` (add / remove / move a layer, renaming wires,
           knob values and exposures), unit-tested.
-   3. [ ] Drop rules in combine.ts (below); side panel layer list with
+   3. [x] Drop rules in combine.ts (below); side panel layer list with
           add / remove / move up / move down.
-   4. [ ] Mock registry, behavior tests, agent guide, README; push; Preview.
+   4. [ ] Mock registry, behavior tests, agent guide (`layers` on add_node,
+          `set_layers`), README [done]; full suite, push, Preview [current].
 
 ## Layer stack design
 
@@ -101,6 +102,18 @@ better way to do multiple blends?"
   and exposed entries so the numbers stay 2..N with no gaps.
 
 ## Findings / gotchas
+
+- The Playwright mock backend serves the built `dist/`: run `bun run build`
+  before `test:behavior`, or the tests run the previous build (the first
+  layer test "failed" against an old dist).
+- Calling React Flow's `updateNodeInternals` from a node view's mount effect
+  cancels a wire being dragged (no drop lands at all). The node view
+  re-measures its handles only when its port set changes after mount.
+- An unwired Multiply layer would read `vec4f(0)` and blacken the picture,
+  so codegen leaves out unwired layers above the first (layer 1 is kept
+  as it always was, so existing patches render the same).
+- The side panel lists layers top first (as layer panels do), the node's dots
+  stay in declaration order (base, over, over2, …).
 
 - Port 9531 (the Playwright mock backend) may already be held by another
   checkout's `scripts/mock-backend.ts`; with `reuseExistingServer` Playwright
