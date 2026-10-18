@@ -1,8 +1,8 @@
 # Patch editor: drop-to-blend and minimized nodes (2026-10-17)
 
-Status: drop-to-combine and minimize on gate `master` (4e6af6d), on the
-Preview. **Now: the Blend layer stack** (Cameron, 2026-10-18: "get going on
-the blend layers"). Gate worktree
+Status: drop-to-combine, minimize and the Blend layer stack are all on gate
+`master` and on the Preview (layers: c0bf6cf, 5ac9032, test fix c2b1e79;
+site `dev` web-dist 5491885 from b21a707). Done unless Cameron wants more. Gate worktree
 `C:\Users\camer\.t3\worktrees\Empyrean\auto-blend`, branch `auto-blend`.
 
 ## Goal
@@ -65,7 +65,7 @@ better way to do multiple blends?"
 7. [x] On the Preview: site `dev` b0232e4 (web-dist 19b8830, bump dispatched by
        hand: the 15-min schedule had not fired since 05:06Z); the playground shows
        − on every node and Blend/Plasma in the palette (2026-10-18).
-8. [ ] **Current:** Blend layer stack (design below, "Layer stack design").
+8. [x] Blend layer stack (design below, "Layer stack design").
    1. [x] Crate: `NodeInst.layers`; per-layer names resolved on the instance
           (`input_shape`, `knob`, `knobs`, `shaped_inputs`, new `param_def`);
           validate (`layers` only on Blend, 1..=8); codegen folds the layers;
@@ -77,8 +77,10 @@ better way to do multiple blends?"
           knob values and exposures), unit-tested.
    3. [x] Drop rules in combine.ts (below); side panel layer list with
           add / remove / move up / move down.
-   4. [ ] Mock registry, behavior tests, agent guide (`layers` on add_node,
-          `set_layers`), README [done]; full suite, push, Preview [current].
+   4. [x] Mock registry, behavior tests, agent guide (`layers` on add_node,
+          `set_layers`), README; pushed; on the Preview (the deployed
+          Playground bundle has "Add layer" / "Raise layer" / `set_layers`,
+          checked 2026-10-18 by fetching it, the autosaved patch untouched).
 
 ## Layer stack design
 
@@ -127,6 +129,11 @@ better way to do multiple blends?"
   `aria-label`s (test renamed); the other ~30 `title=`s are logged in ISSUES.md.
 
 ## Progress log
+
+- [x] 2026-10-18, layer stack: crate 126 pass (after round 5), unit 58 pass,
+      typechecks clean, behavior 145/146 (a WebKit `live-controls` flake,
+      36/36 alone, logged in ISSUES.md). CI caught a race in the new panel
+      test (it read wires straight after a click); fixed with `expect.poll`.
 
 - [x] 2026-10-17: steps 1–5; crate tests 112 pass, patch-web unit 50 pass,
       typecheck clean (patch-web and app), patch-combine 3/3 + patch-connect pass.
