@@ -256,7 +256,8 @@ export class GateGpu {
       if (errors.length) {
         throw new ShaderError(
           `${label} shader failed to compile`,
-          errors.map((m) => `${m.lineNum}:${m.linePos} ${m.message}`),
+          // `wgsl:L:C`, the form the patch core's `relocateError` reads.
+          errors.map((m) => `wgsl:${m.lineNum}:${m.linePos} ${m.message}`),
         );
       }
       try {

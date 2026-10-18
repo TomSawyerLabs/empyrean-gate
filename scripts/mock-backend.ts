@@ -328,6 +328,15 @@ const server = Bun.serve({
           outputs: [{ name: "out", shape: "field_color" }],
           params: [],
         },
+        // Ports and body live on the instance (`code` on the node).
+        {
+          id: "code",
+          label: "Code",
+          category: "code",
+          inputs: [],
+          outputs: [],
+          params: [],
+        },
         {
           id: "output",
           label: "Output",

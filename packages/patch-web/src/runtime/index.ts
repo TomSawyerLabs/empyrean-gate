@@ -162,7 +162,12 @@ export class PatchRuntime implements MiniSource {
       } catch (e) {
         if (this.pendingGen === gen) this.pending = false;
         if (gen !== this.generation) return;
-        const detail = e instanceof ShaderError ? `${e.message}: ${e.details.join("; ")}` : errorText(e);
+        // Locations inside a Code node's body are reported against the
+        // user's own lines.
+        const detail =
+          e instanceof ShaderError
+            ? sim.relocateError(`${e.message}: ${e.details.join("; ")}`)
+            : errorText(e);
         this.setStatus({ active: false, touch: false, error: detail });
         return;
       }

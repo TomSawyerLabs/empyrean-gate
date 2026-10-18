@@ -17,6 +17,7 @@ import ClientRoster from "./ClientRoster";
 import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
 import {
+  codeParams,
   LAYER_LABELS,
   type GameKind,
   type ShapeKind,
@@ -551,7 +552,8 @@ function PatchParamsPanel() {
       {doc.exposed.map((x) => {
         const node = doc.nodes.find((n) => n.id === x.node);
         const def = node && registry?.get(node.kind);
-        const p = def?.params.find((q) => q.name === x.param);
+        // A Code node's knobs are its own Scalar inputs.
+        const p = def?.params.find((q) => q.name === x.param) ?? codeParams(node).find((q) => q.name === x.param);
         if (!node || !p) return null;
         return (
           <PatchParamFader

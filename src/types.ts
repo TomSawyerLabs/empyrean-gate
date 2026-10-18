@@ -1052,7 +1052,10 @@ export type ServerMsg =
 // --- node-graph patches: shared with the playground (packages/patch-web) ---
 
 export {
+  codeParams,
   shapeAccepts,
+  type CodeDef,
+  type CodePort,
   type PatchDoc,
   type PatchEdge,
   type PatchExposedParam,
