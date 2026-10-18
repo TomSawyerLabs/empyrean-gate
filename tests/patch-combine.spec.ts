@@ -123,13 +123,13 @@ test("the side panel lists the layers top first, and moves, removes and adds the
 
   // Lower the top layer: the two wires swap places.
   await layers.getByRole("button", { name: "Lower layer 2" }).click();
-  expect(await wireInto(page, "over")).toEqual([second, mix]);
-  expect(await wireInto(page, "over2")).toEqual([first, mix]);
+  await expect.poll(() => wireInto(page, "over")).toEqual([second, mix]);
+  await expect.poll(() => wireInto(page, "over2")).toEqual([first, mix]);
 
   // Remove the bottom one: its wire goes and the other closes the gap.
   await layers.getByRole("button", { name: "Remove layer 1" }).click();
   await expect(page.locator(".react-flow__edge")).toHaveCount(3);
-  expect(await wireInto(page, "over")).toEqual([first, mix]);
+  await expect.poll(() => wireInto(page, "over")).toEqual([first, mix]);
   await expect(layers.getByRole("region")).toHaveText([/^Layer 1/]);
   await expect(layers.getByRole("button", { name: "Remove layer 1" })).toHaveCount(0);
 
