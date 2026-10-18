@@ -67,10 +67,10 @@ test("dropping a wire on empty canvas offers what fits, and a pick adds it wired
   await expect(page.locator(".react-flow__edge")).toHaveCount(1);
 });
 
-test("ports carry their shape in a tooltip", async ({ page }) => {
+test("ports carry their shape in their accessible name", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await newPatch(page);
   await expect(
     page.locator(".pnode", { hasText: "Output" }).locator(".pnode-port.in"),
-  ).toHaveAttribute("title", /^in · field \((grey|colour)\) in$/);
+  ).toHaveAttribute("aria-label", /^in · field \((grey|colour)\) in$/);
 });

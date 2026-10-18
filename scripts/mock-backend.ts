@@ -326,6 +326,54 @@ const server = Bun.serve({
             },
           ],
         },
+        // A colour source and the two field combiners, shaped like the real
+        // ones, for drop-to-combine (a second wire into a taken input).
+        {
+          id: "plasma",
+          label: "Plasma",
+          category: "generator",
+          description: "Mock plasma: a colour field.",
+          inputs: [],
+          outputs: [{ name: "out", shape: "field_color" }],
+          params: [{ name: "speed", label: "Speed", min: 0, max: 4, default: 1, integrate: true, kind: "number" }],
+        },
+        {
+          id: "blend",
+          label: "Blend",
+          category: "combine",
+          description: "Combines two colour fields: Over is applied to Base.",
+          inputs: [
+            { name: "base", shape: "field_color" },
+            { name: "over", shape: "field_color" },
+          ],
+          outputs: [{ name: "out", shape: "field_color" }],
+          params: [
+            {
+              name: "mode",
+              label: "Mode",
+              min: 0,
+              max: 4,
+              default: 0,
+              integrate: false,
+              kind: { select: ["add", "multiply", "screen", "alpha_over", "max"] },
+            },
+            { name: "opacity", label: "Opacity", min: 0, max: 1, default: 1, integrate: false, kind: "number" },
+          ],
+        },
+        {
+          id: "field_math",
+          label: "Field math",
+          category: "field",
+          description: "Per-pixel arithmetic on two Field<f32> inputs.",
+          inputs: [
+            { name: "a", shape: "field_scalar" },
+            { name: "b", shape: "field_scalar" },
+          ],
+          outputs: [{ name: "out", shape: "field_scalar" }],
+          params: [
+            { name: "op", label: "Op", min: 0, max: 1, default: 0, integrate: false, kind: { select: ["add", "subtract"] } },
+          ],
+        },
         {
           id: "subpatch",
           label: "Sub-patch",
@@ -350,7 +398,7 @@ const server = Bun.serve({
           label: "Output",
           category: "sink",
           description: "The patch's one sink: what is wired into `in` is what the gate shows.",
-          inputs: [{ name: "in", shape: "field_scalar" }],
+          inputs: [{ name: "in", shape: "field_color" }],
           outputs: [],
           params: [],
         },

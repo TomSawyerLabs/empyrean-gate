@@ -268,6 +268,10 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   compile to a single WGSL dispatch; knob tweaks and scalar
   wires never recompile, and edits carry every timer and phase over. The
   editor has undo/redo (Ctrl+Z / Ctrl+Shift+Z) and duplicate (Ctrl+D).
+  Dropping a second wire on an input that already has one puts a combiner
+  between them (a Blend for colour fields, Field math for grey ones, Merge
+  events, Math for numbers; the old wire underneath), and any node minimizes
+  (− in its corner) to its mini with bare port dots (`plans/auto-blend.md`).
   Patches save as JSON files under the config dir and activate live (the layer
   stack renders when no patch is active); sixteen built-in presets seed the
   palette.
