@@ -22,10 +22,14 @@ export type PatchOp =
       code?: CodeDef;
       /** A Sub-patch node's document. */
       sub?: PatchDoc;
+      /** A Blend's number of layers (default 1). */
+      layers?: number;
       /** Default: placed right of the graph (or use `arrange`). */
       pos?: [number, number];
     }
   | { op: "remove_node"; node: string }
+  /** A Blend's number of layers; fewer drops the top ones, wires and all. */
+  | { op: "set_layers"; node: string; layers: number }
   | {
       op: "set_params";
       node: string;
@@ -47,6 +51,7 @@ export type PatchOp =
 export const OP_NAMES = [
   "add_node",
   "remove_node",
+  "set_layers",
   "set_params",
   "set_code",
   "rename_node",
@@ -73,6 +78,14 @@ function node(doc: PatchDoc, id: string): PatchNode {
   const n = doc.nodes.find((x) => x.id === id);
   if (!n) throw new Error(`no node "${id}" (nodes: ${doc.nodes.map((x) => x.id).join(", ") || "none"})`);
   return n;
+}
+
+/** A layer count as the core takes it: a whole number from 1 to 8. */
+function layers(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 8) {
+    throw new Error("layers must be a whole number from 1 to 8");
+  }
+  return value;
 }
 
 function freeId(doc: PatchDoc): string {
@@ -127,7 +140,24 @@ function applyOne(doc: PatchDoc, o: PatchOp, place: () => [number, number]) {
         pos: o.pos ?? place(),
         ...(o.code ? { code: structuredClone(o.code) } : {}),
         ...(o.sub ? { sub: structuredClone(o.sub) } : {}),
+        ...(o.layers !== undefined && layers(o.layers) > 1 ? { layers: layers(o.layers) } : {}),
       });
+      return;
+    }
+    case "set_layers": {
+      const n = node(doc, o.node);
+      const count = layers(o.layers);
+      // A layered type's only names ending in a number are its layer copies
+      // (`over3`, `opacity3`), so these are the layers past the new count.
+      const dropped = (name: string) => {
+        const k = /^[A-Za-z_]+?([0-9]+)$/.exec(name)?.[1];
+        return k !== undefined && Number(k) > count;
+      };
+      doc.edges = doc.edges.filter((e) => !(e.to.node === n.id && dropped(e.to.port)));
+      for (const k of Object.keys(n.params)) if (dropped(k)) delete n.params[k];
+      doc.exposed = doc.exposed.filter((x) => !(x.node === n.id && dropped(x.param)));
+      if (count > 1) n.layers = count;
+      else delete n.layers;
       return;
     }
     case "remove_node": {

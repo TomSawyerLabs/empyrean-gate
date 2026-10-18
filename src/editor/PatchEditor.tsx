@@ -35,6 +35,7 @@ import {
   type OnConnectStart,
   Panel,
   useReactFlow,
+  useUpdateNodeInternals,
   ReactFlowProvider,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -47,6 +48,7 @@ import { NodeContext, type WireDrag } from "./context";
 import { SHAPE_LABEL, suggestConnections, type Suggestion } from "./connect";
 import { imageFileToMedia } from "./files";
 import { History } from "./history";
+import { addLayer, layerFor, layerInput, moveLayer, removeLayer } from "./layers";
 import { MiniMeter, MiniRing, type MiniSource } from "./minis";
 import {
   CODE_KIND,
@@ -55,7 +57,12 @@ import {
   codeParams,
   codeTier,
   defaultCode,
+  layerCount,
+  layerName,
+  nodeInputs,
+  nodeParams,
   PATCH_FORMAT,
+  splitLayer,
   type CodeReference,
   SUBPATCH_KIND,
   shapeAccepts,
@@ -252,17 +259,18 @@ const CATEGORY_ORDER: PatchNodeType["category"][] = [
 
 type Registry = Map<string, PatchNodeType>;
 
-/** All connectable input ports of a node type: shaped inputs, then every
- * `number` param (knob doubles as a Scalar port). A Sub-patch's ports come
- * from the instance: one per exposed knob of its document. */
+/** All connectable input ports of a node: shaped inputs, then every
+ * `number` param (knob doubles as a Scalar port), a Blend's layers
+ * included. A Sub-patch's ports come from the instance: one per exposed
+ * knob of its document. */
 function inputPorts(def: PatchNodeType, node?: PatchNode): { name: string; shape: PatchShape }[] {
   if (def.id === SUBPATCH_KIND) {
     return subpatchPorts(node).map((p) => ({ name: p.name, shape: "scalar" as PatchShape }));
   }
   if (def.id === CODE_KIND) return codeInputs(node);
   return [
-    ...def.inputs,
-    ...def.params
+    ...nodeInputs(def, node),
+    ...nodeParams(def, node)
       .filter((p) => p.kind === "number")
       .map((p) => ({ name: p.name, shape: "scalar" as PatchShape })),
   ];
@@ -275,16 +283,17 @@ function outputPorts(def: PatchNodeType, node?: PatchNode): { name: string; shap
   return def.outputs;
 }
 
-/** The knobs a node's side panel shows: the type's params, or for a
- * Sub-patch one per exposed inner knob (its range from the inner node's
- * type, its default the inner node's current value); for a Code node its
- * Scalar inputs. */
+/** The knobs a node's side panel shows: the type's params (a Blend's
+ * layers included), or for a Sub-patch one per exposed inner knob (its range
+ * from the inner node's type, its default the inner node's current value);
+ * for a Code node its Scalar inputs. */
 function panelParams(def: PatchNodeType, node: PatchNode, registry: Registry): PatchParamDef[] {
   if (def.id === CODE_KIND) return codeParams(node);
-  if (def.id !== SUBPATCH_KIND) return def.params;
+  if (def.id !== SUBPATCH_KIND) return nodeParams(def, node);
   return subpatchPorts(node).map((port) => {
     const inner = node.sub?.nodes.find((n) => n.id === port.node);
-    const innerDef = inner && registry.get(inner.kind)?.params.find((p) => p.name === port.param);
+    const innerType = inner && registry.get(inner.kind);
+    const innerDef = innerType && nodeParams(innerType, inner).find((p) => p.name === port.param);
     return {
       name: port.name,
       label: port.label,
@@ -315,13 +324,15 @@ function portShape(
 function knobNames(def: PatchNodeType, node: PatchNode): Set<string> {
   if (def.id === SUBPATCH_KIND) return new Set(subpatchPorts(node).map((p) => p.name));
   if (def.id === CODE_KIND) return new Set(codeParams(node).map((p) => p.name));
-  return new Set(def.params.filter((p) => p.kind === "number").map((p) => p.name));
+  return new Set(nodeParams(def, node).filter((p) => p.kind === "number").map((p) => p.name));
 }
 
-/** A second wire, `from` → `to`, into an input that already has one: the
- * combiner that would go in between. Null when the input is free, the wire is
- * the one already there, or nothing combines that shape. */
-function combinerAt(d: PatchDoc, registry: Registry, from: PortRef, to: PortRef): Combiner | null {
+/** What a second wire, `from` → `to`, into an input that already has one
+ * does: become a new layer of the Blend there (see `layerFor`), or put a
+ * combiner in between. Null when the input is free, the wire is the one
+ * already there, or nothing combines that shape. */
+type Combine = { layer: { node: string; at: number } } | { combiner: Combiner };
+function combineAt(d: PatchDoc, registry: Registry, from: PortRef, to: PortRef): Combine | null {
   const existing = d.edges.find((e) => e.to.node === to.node && e.to.port === to.port);
   if (!existing) return null;
   if (existing.from.node === from.node && existing.from.port === from.port) return null;
@@ -332,7 +343,11 @@ function combinerAt(d: PatchDoc, registry: Registry, from: PortRef, to: PortRef)
   const into = shapeOf(to, "in");
   const old = shapeOf(existing.from, "out");
   const incoming = shapeOf(from, "out");
-  return into && old && incoming ? combinerFor(registry, into, old, incoming) : null;
+  if (!into || !old || !incoming) return null;
+  const layer = layerFor(d, registry, to, incoming);
+  if (layer) return { layer };
+  const combiner = combinerFor(registry, into, old, incoming);
+  return combiner && { combiner };
 }
 
 /** About what a minimized node measures (a mini ring, port dots, one line of
@@ -389,6 +404,20 @@ const RING_SHAPES: readonly PatchShape[] = [
 const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<PatchFlowNode>) {
   const { node, def } = data;
   const { activeId, minis, drag, combines, setCollapsed } = useContext(NodeContext);
+  // Ports come and go with the instance (a Blend's layers, a Code node's
+  // declared ports): React Flow re-reads the handles when the set changes,
+  // as a new layer's dot may not change the node's size. Not on mount: that
+  // would drop a wire being dragged.
+  const updateInternals = useUpdateNodeInternals();
+  const portKey = def
+    ? [...inputPorts(def, node), ...outputPorts(def, node)].map((p) => p.name).join(" ")
+    : "";
+  const measuredPorts = useRef(portKey);
+  useEffect(() => {
+    if (measuredPorts.current === portKey) return;
+    measuredPorts.current = portKey;
+    updateInternals(node.id);
+  }, [updateInternals, node.id, portKey]);
   if (!def) {
     return <div className="pnode pnode-unknown">unknown: {node.kind}</div>;
   }
@@ -464,10 +493,13 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
     const wiredOuts = outs.filter((p) => p === primary || data.wiredOut.includes(p.name));
     const shownOuts = wiredOuts.length > 0 ? wiredOuts : outs.slice(0, 1);
     const choice = def.params.find((p) => p.kind !== "number");
+    const layers = layerCount(def, node);
     const choiceLabel =
-      choice && choice.kind !== "number"
-        ? choice.kind.select[Math.round(node.params[choice.name] ?? choice.default)]
-        : undefined;
+      layers > 1
+        ? `${layers} layers`
+        : choice && choice.kind !== "number"
+          ? choice.kind.select[Math.round(node.params[choice.name] ?? choice.default)]
+          : undefined;
     // No thumbnail (a number or event output): its meter instead.
     const faceMeter = rings.length === 0 ? meterPorts.find((p) => shownOuts.includes(p)) : undefined;
     const named = drag !== null;
@@ -814,6 +846,88 @@ function ParamPanel({
     doc.edges.find((e) => e.to.node === node.id && e.to.port === param);
   const isExposed = (param: string) =>
     doc.exposed.some((x) => x.node === node.id && x.param === param);
+  // A layered node (Blend) lists its params by layer, top layer first.
+  const layers = def.layered && layerInput(def) ? layerCount(def, node) : 0;
+  const layerOf = (name: string) => (layers ? splitLayer(def, name, layers) : null);
+  /** Who a wire into this node comes from, as the canvas names it. */
+  const source = (port: string) => {
+    const wire = wiredInto(port);
+    const from = wire && doc.nodes.find((n) => n.id === wire.from.node);
+    if (!wire || !from) return null;
+    return from.name || registry.get(from.kind)?.label || from.kind;
+  };
+  /** One param's row; `label` overrides its own (a layer's rows say
+   * "Opacity", the layer heads say which layer). */
+  const renderParam = (p: PatchParamDef, label = p.label) => {
+    const value = node.params[p.name] ?? p.default;
+    const wire = wiredInto(p.name);
+    const set = (v: number) =>
+      onChange((d) => {
+        const n = d.nodes.find((x) => x.id === nodeId);
+        if (n) n.params[p.name] = v;
+      }, `${nodeId}.${p.name}`);
+    return (
+      <div key={p.name} className="patch-param">
+        <div className="patch-param-head">
+          <span>
+            {label}
+            {p.integrate && <span className="hint"> (rate)</span>}
+          </span>
+          {p.kind === "number" && (
+            <label className="expose-toggle">
+              <input
+                type="checkbox"
+                disabled={!canEdit}
+                checked={isExposed(p.name)}
+                onChange={(e) =>
+                  onChange((d) => {
+                    d.exposed = d.exposed.filter(
+                      (x) => !(x.node === nodeId && x.param === p.name),
+                    );
+                    if (e.target.checked) {
+                      d.exposed.push({ node: nodeId, param: p.name, label: p.label });
+                    }
+                  })
+                }
+              />
+              expose
+            </label>
+          )}
+        </div>
+        {p.description && <div className="hint patch-param-about">{p.description}</div>}
+        {wire ? (
+          <div className="hint wired-chip">
+            wired from {wire.from.node}.{wire.from.port}
+          </div>
+        ) : p.kind === "number" ? (
+          <div className="patch-param-row">
+            <input
+              type="range"
+              min={p.min}
+              max={p.max}
+              step={(p.max - p.min) / 200}
+              value={value}
+              disabled={!canEdit}
+              onChange={(e) => set(Number(e.target.value))}
+            />
+            <span className="patch-param-value">{value.toFixed(2)}</span>
+          </div>
+        ) : (
+          <select
+            value={Math.round(value)}
+            disabled={!canEdit}
+            onChange={(e) => set(Number(e.target.value))}
+          >
+            {p.kind.select.map((label, i) => (
+              <option key={label} value={i}>
+                {label}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+    );
+  };
 
   return (
     <aside
@@ -856,76 +970,71 @@ function ParamPanel({
           reference={codeReference ?? null}
         />
       )}
-      {params.map((p) => {
-        const value = node.params[p.name] ?? p.default;
-        const wire = wiredInto(p.name);
-        const set = (v: number) =>
-          onChange((d) => {
-            const n = d.nodes.find((x) => x.id === nodeId);
-            if (n) n.params[p.name] = v;
-          }, `${nodeId}.${p.name}`);
-        return (
-          <div key={p.name} className="patch-param">
-            <div className="patch-param-head">
-              <span>
-                {p.label}
-                {p.integrate && <span className="hint"> (rate)</span>}
-              </span>
-              {p.kind === "number" && (
-                <label className="expose-toggle">
-                  <input
-                    type="checkbox"
-                    disabled={!canEdit}
-                    checked={isExposed(p.name)}
-                    onChange={(e) =>
-                      onChange((d) => {
-                        d.exposed = d.exposed.filter(
-                          (x) => !(x.node === nodeId && x.param === p.name),
-                        );
-                        if (e.target.checked) {
-                          d.exposed.push({ node: nodeId, param: p.name, label: p.label });
-                        }
-                      })
-                    }
-                  />
-                  expose
-                </label>
-              )}
-            </div>
-            {p.description && <div className="hint patch-param-about">{p.description}</div>}
-            {wire ? (
-              <div className="hint wired-chip">
-                wired from {wire.from.node}.{wire.from.port}
+      {params.filter((p) => !layerOf(p.name)).map((p) => renderParam(p))}
+      {layers > 0 && (
+        <div className="patch-layers" role="group" aria-label="Layers">
+          {Array.from({ length: layers }, (_, i) => layers - i).map((k) => (
+            <section key={k} className="patch-layer" aria-label={`Layer ${k}`}>
+              <div className="patch-layer-head">
+                <span>Layer {k}</span>
+                <span className="hint patch-layer-from">
+                  {source(layerName(layerInput(def)!, k)) ?? "empty"}
+                </span>
+                {canEdit && (
+                  <span className="patch-layer-tools">
+                    <button
+                      type="button"
+                      aria-label={`Raise layer ${k}`}
+                      disabled={k === layers}
+                      onClick={() => onChange((d) => void moveLayer(d, def, nodeId, k, k + 1))}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Lower layer ${k}`}
+                      disabled={k === 1}
+                      onClick={() => onChange((d) => void moveLayer(d, def, nodeId, k, k - 1))}
+                    >
+                      ▼
+                    </button>
+                    {layers > 1 && (
+                      <button
+                        type="button"
+                        aria-label={`Remove layer ${k}`}
+                        onClick={() => onChange((d) => void removeLayer(d, def, nodeId, k))}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </span>
+                )}
               </div>
-            ) : p.kind === "number" ? (
-              <div className="patch-param-row">
-                <input
-                  type="range"
-                  min={p.min}
-                  max={p.max}
-                  step={(p.max - p.min) / 200}
-                  value={value}
-                  disabled={!canEdit}
-                  onChange={(e) => set(Number(e.target.value))}
-                />
-                <span className="patch-param-value">{value.toFixed(2)}</span>
+              {params
+                .filter((p) => layerOf(p.name)?.k === k)
+                .map((p) => renderParam(p, def.params.find((q) => q.name === layerOf(p.name)?.name)?.label))}
+            </section>
+          ))}
+          {def.inputs
+            .filter((p) => !def.layered!.names.includes(p.name))
+            .map((p) => (
+              <div key={p.name} className="patch-layer patch-layer-base">
+                <div className="patch-layer-head">
+                  <span>{p.name === "base" ? "Base" : p.name}</span>
+                  <span className="hint patch-layer-from">{source(p.name) ?? "empty"}</span>
+                </div>
               </div>
-            ) : (
-              <select
-                value={Math.round(value)}
-                disabled={!canEdit}
-                onChange={(e) => set(Number(e.target.value))}
-              >
-                {p.kind.select.map((label, i) => (
-                  <option key={label} value={i}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        );
-      })}
+            ))}
+          {canEdit && layers < def.layered!.max && (
+            <button
+              type="button"
+              onClick={() => onChange((d) => void addLayer(d, def, nodeId, layers + 1))}
+            >
+              ＋ Add layer
+            </button>
+          )}
+        </div>
+      )}
       {node.kind === "image_in" && (
         <ImagePicker node={node} canEdit={canEdit} onChange={onChange} />
       )}
@@ -1528,7 +1637,7 @@ function Editor({
       const taken = d.edges.some((e) => e.to.node === conn.target && e.to.port === conn.targetHandle);
       return (
         !taken ||
-        combinerAt(
+        combineAt(
           d,
           registry,
           { node: conn.source, port: conn.sourceHandle },
@@ -1565,20 +1674,33 @@ function Editor({
       if (!canEdit || !d || !registry || !conn.sourceHandle || !conn.targetHandle) return;
       const from = { node: conn.source, port: conn.sourceHandle };
       const to = { node: conn.target, port: conn.targetHandle };
-      const combiner = combinerAt(d, registry, from, to);
-      if (!combiner) {
+      const combine = combineAt(d, registry, from, to);
+      if (!combine) {
         mutateDoc((doc) => {
           doc.edges.push({ from, to });
         });
         return;
       }
-      // A second wire into a taken input: a combiner between the two, as one
-      // undo step, selected so its mode and amount are in the side panel.
-      const id = freshId(d);
-      const pos = combinerSpot(to);
-      mutateDoc((doc) => {
-        insertCombiner(doc, to, from, combiner, id, pos);
-      });
+      // A second wire into a taken input: a new layer of the Blend there, or
+      // a combiner between the two, as one undo step, selected so its modes
+      // and amounts are in the side panel.
+      let id: string;
+      if ("layer" in combine) {
+        const { node, at } = combine.layer;
+        const def = registry.get(d.nodes.find((n) => n.id === node)?.kind ?? "");
+        if (!def) return;
+        id = node;
+        mutateDoc((doc) => {
+          const port = addLayer(doc, def, node, at);
+          if (port) doc.edges.push({ from, to: { node, port } });
+        });
+      } else {
+        id = freshId(d);
+        const pos = combinerSpot(to);
+        mutateDoc((doc) => {
+          insertCombiner(doc, to, from, combine.combiner, id, pos);
+        });
+      }
       setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })));
       setSelectedNode(id);
     },
@@ -1590,7 +1712,7 @@ function Editor({
     (node: string, port: string) => {
       const d = docRef.current;
       if (!d || !registry || !drag || drag.dir !== "out") return false;
-      return combinerAt(d, registry, { node: drag.node, port: drag.port }, { node, port }) !== null;
+      return combineAt(d, registry, { node: drag.node, port: drag.port }, { node, port }) !== null;
     },
     [drag, registry],
   );

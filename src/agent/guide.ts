@@ -172,8 +172,10 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
     "- `id`: leave empty for a new patch; the store assigns one.",
     "- `nodes[]`: `id` (unique in the patch, short: `bow`, `n3`), `kind` (a node type), `name` (a label, may be empty), " +
       "`params` (knob values by param name; missing ones take the default), `pos` (canvas position; " +
-      "all `[0, 0]` or `arrange: true` lays the graph out for you), and `collapsed: true` to show it minimized " +
-      "in the editor (looks only).",
+      "all `[0, 0]` or `arrange: true` lays the graph out for you), `collapsed: true` to show it minimized " +
+      "in the editor (looks only), and on a Blend `layers` (1..8, default 1): layer k > 1 adds the input " +
+      "`over{k}`, the select `mode{k}` and the knob `opacity{k}`, each applied in turn on top of the layers " +
+      "below. Stack several pictures in one Blend rather than chaining Blends.",
     "- `edges[]`: `{ from: { node, port }, to: { node, port } }`, from an output port to an input port. " +
       "An input takes one wire.",
     "- `exposed[]`: knobs promoted to the gate's Control surface (phones on the dance floor can play them).",

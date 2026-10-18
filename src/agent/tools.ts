@@ -53,8 +53,9 @@ const OPS = {
   type: "array",
   description:
     "Operations, applied in order: " +
-    "add_node { kind, id?, name?, params?, code?, sub?, pos? }; " +
+    "add_node { kind, id?, name?, params?, code?, sub?, layers?, pos? }; " +
     "remove_node { node }; " +
+    "set_layers { node, layers } (a Blend's layer count, 1..8; fewer drops the top layers and their wires); " +
     "set_params { node, params: { name: number | null } } (null = back to the default); " +
     "set_code { node, code: { inputs?, outputs?, body? } } (Code nodes); " +
     "rename_node { node, name }; " +
@@ -75,6 +76,7 @@ const OPS = {
       params: { type: "object", additionalProperties: { type: ["number", "null"] } },
       code: { type: "object" },
       sub: { type: "object" },
+      layers: { type: "integer", minimum: 1, maximum: 8 },
       pos: { type: "array", items: { type: "number" }, minItems: 2, maxItems: 2 },
       from: PORT,
       to: PORT,

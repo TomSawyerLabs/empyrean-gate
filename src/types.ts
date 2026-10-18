@@ -54,6 +54,11 @@ export interface PatchNodeType {
   label: string;
   /** "Convert to Code" is offered for this kind (crate `convert::convertible`). */
   convertible?: boolean;
+  /** The inputs and params a node of this kind repeats per layer (crate
+   * `registry::layered`; only Blend has them): layer 1 uses the names as
+   * they are, layer k (2..`max`) the name followed by k (`over2`, `mode2`,
+   * `opacity2`). The instance's count is `PatchNode.layers`. */
+  layered?: { names: string[]; max: number };
   category: "input" | "scalar" | "generator" | "field" | "combine" | "texture" | "sink" | "code";
   /** What the node does, what its inputs mean, and when to use it (one to
    * three sentences). Optional: older gates send none. */
@@ -83,6 +88,9 @@ export interface PatchNode {
   /** Shown minimized in the editor: a mini with port dots, no labels or
    * knobs (purely presentational; left out when false). */
   collapsed?: boolean;
+  /** A Blend's number of layers (see `PatchNodeType.layered`); absent
+   * means 1, and the crate refuses it on other kinds. */
+  layers?: number;
 }
 
 /** One declared port of a Code node. `min`/`max`/`default` matter for a
@@ -266,4 +274,60 @@ export function shapeAccepts(into: PatchShape, from: PatchShape): boolean {
     (from === "scalar" && into === "field_scalar") ||
     (from === "field_scalar" && into === "field_color")
   );
+}
+
+/** The name layer `k` (1-based) gives one of a layered type's repeated
+ * inputs or params (crate `registry::layer_name`). */
+export function layerName(name: string, k: number): string {
+  return k <= 1 ? name : `${name}${k}`;
+}
+
+/** How many layers a node has: its `layers` on a layered type (held to
+ * 1..max), 1 on anything else (crate `NodeInst::layer_count`). */
+export function layerCount(def: PatchNodeType | undefined, node: PatchNode | undefined): number {
+  if (!def?.layered) return 1;
+  return Math.min(Math.max(Math.round(node?.layers ?? 1), 1), def.layered.max);
+}
+
+/** `{ name, k }` when `port` is layer k's copy of one of the type's repeated
+ * names (`over3` → `over`, 3; `over` → `over`, 1); null for anything else.
+ * Layers past `count` don't exist. */
+export function splitLayer(
+  def: PatchNodeType | undefined,
+  port: string,
+  count: number,
+): { name: string; k: number } | null {
+  for (const name of def?.layered?.names ?? []) {
+    if (port === name) return { name, k: 1 };
+    const digits = port.startsWith(name) ? port.slice(name.length) : "";
+    const k = Number(digits);
+    if (/^[1-9][0-9]*$/.test(digits) && k >= 2 && k <= count) return { name, k };
+  }
+  return null;
+}
+
+/** A built-in node's shaped inputs, layer by layer after the type's own
+ * (crate `NodeInst::shaped_inputs`). */
+export function nodeInputs(def: PatchNodeType, node: PatchNode | undefined): PatchPortDef[] {
+  const out = [...def.inputs];
+  for (let k = 2; k <= layerCount(def, node); k++) {
+    for (const name of def.layered?.names ?? []) {
+      const p = def.inputs.find((q) => q.name === name);
+      if (p) out.push({ ...p, name: layerName(name, k) });
+    }
+  }
+  return out;
+}
+
+/** A built-in node's params, layer by layer after the type's own, each
+ * labelled for its layer: "Opacity 2" (crate `NodeInst::params_of`). */
+export function nodeParams(def: PatchNodeType, node: PatchNode | undefined): PatchParamDef[] {
+  const out = [...def.params];
+  for (let k = 2; k <= layerCount(def, node); k++) {
+    for (const name of def.layered?.names ?? []) {
+      const p = def.params.find((q) => q.name === name);
+      if (p) out.push({ ...p, name: layerName(name, k), label: `${p.label} ${k}` });
+    }
+  }
+  return out;
 }

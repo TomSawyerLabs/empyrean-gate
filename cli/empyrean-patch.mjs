@@ -8040,6 +8040,7 @@ function arrangeDoc(doc, sizes = /* @__PURE__ */ new Map) {
 var OP_NAMES = [
   "add_node",
   "remove_node",
+  "set_layers",
   "set_params",
   "set_code",
   "rename_node",
@@ -8065,6 +8066,11 @@ function node(doc, id) {
   if (!n)
     throw Error(`no node "${id}" (nodes: ${doc.nodes.map((x) => x.id).join(", ") || "none"})`);
   return n;
+}
+function layers(value) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 8)
+    throw Error("layers must be a whole number from 1 to 8");
+  return value;
 }
 function freeId(doc) {
   let taken = new Set(doc.nodes.map((n) => n.id));
@@ -8110,8 +8116,24 @@ function applyOne(doc, o, place) {
         params: { ...o.params ?? {} },
         pos: o.pos ?? place(),
         ...o.code ? { code: structuredClone(o.code) } : {},
-        ...o.sub ? { sub: structuredClone(o.sub) } : {}
+        ...o.sub ? { sub: structuredClone(o.sub) } : {},
+        ...o.layers !== void 0 && layers(o.layers) > 1 ? { layers: layers(o.layers) } : {}
       });
+      return;
+    }
+    case "set_layers": {
+      let n = node(doc, o.node), count = layers(o.layers), dropped = (name) => {
+        let k = /^[A-Za-z_]+?([0-9]+)$/.exec(name)?.[1];
+        return k !== void 0 && Number(k) > count;
+      };
+      doc.edges = doc.edges.filter((e) => !(e.to.node === n.id && dropped(e.to.port)));
+      for (let k of Object.keys(n.params))
+        if (dropped(k))
+          delete n.params[k];
+      if (doc.exposed = doc.exposed.filter((x) => !(x.node === n.id && dropped(x.param))), count > 1)
+        n.layers = count;
+      else
+        delete n.layers;
       return;
     }
     case "remove_node": {
@@ -8276,7 +8298,7 @@ function agentGuide(core, options = {}) {
   let { limits } = core, out = [], add = (...s) => out.push(...s), code = core.codeReference;
   if (add("# Making patterns for the Empyrean Gate", "", "The Empyrean Gate is a ring of light hung over a dance floor: 64 spokes of 378 LEDs each (24,192 lights), arranged radially between an inner and an outer ring. A *pattern* is a **patch**: a graph of nodes whose wires carry numbers, events and whole fields of color, ending in one Output node whose input is the picture on the gate. The gate compiles a patch into a single GPU shader that runs once per LED every frame; the playground runs the very same compiler and shader in the browser, so a patch looks there as it will on the gate.", ""), options.access)
     add("## How you reach the tools", "", options.access, "");
-  add("## Workflow", "", "1. Read this guide; skim the node types (`list_node_types`) and the presets (`list_presets`).", "2. Start from a preset close to the idea (`open_preset`, or `get_preset` to read one), or write a patch from scratch.", "3. Apply it (`set_patch`, or small changes to the open patch with `edit_patch`). A patch without the open patch's `id` opens as a new one; one with it (from `get_patch`) replaces it. A patch that does not validate is *not* applied; the errors say why.", "4. Look at it (`snapshot`: several frames over time, as pictures and numbers). Patterns move: look at more than one frame.", "5. Refine, look again. Name it and describe it (`edit_patch` with `set_info`).", "6. Hand it over: a link (`share_link`) opens it in anyone's playground. Sending it to the crew is the person's", "   decision: they press **Submit** in the playground themselves. Never try to submit on their behalf.", "", "The person may be editing the same patch in the editor while you work; `get_patch` before an edit if time has passed.", "Every change you make is one undo step in their editor.", ""), add("## The patch document", "", "A patch is JSON (the same file the gate saves and opens). Minimal example:", "", "```json", pretty(EXAMPLE), "```", "", `- \`format\`: ${limits.patchFormat} (current). Older documents are upgraded on the way in.`, "- `id`: leave empty for a new patch; the store assigns one.", "- `nodes[]`: `id` (unique in the patch, short: `bow`, `n3`), `kind` (a node type), `name` (a label, may be empty), `params` (knob values by param name; missing ones take the default), `pos` (canvas position; all `[0, 0]` or `arrange: true` lays the graph out for you), and `collapsed: true` to show it minimized in the editor (looks only).", "- `edges[]`: `{ from: { node, port }, to: { node, port } }`, from an output port to an input port. An input takes one wire.", "- `exposed[]`: knobs promoted to the gate's Control surface (phones on the dance floor can play them).", "- A Still image or Clip node carries its picture in `media` (a data URL); a Sub-patch node its document in `sub`; a Code node its ports and body in `code`.", `- Limits: at most ${limits.maxNodes} nodes and ${limits.maxEdges} edges.`, "", "**Every Number param is also an input port of the same name** (shape `scalar`): wire a scalar into it and the wire drives it; unwired, the knob value is used. Select params (a list of options, by index) are not wirable. Params marked *a rate* are speeds: the gate integrates them over time, so changing one never makes the picture jump.", "", "A patch has one `output` node (at most one; without it nothing shows), and the picture is what reaches its `in`.", ""), add("## Wire shapes", "");
+  add("## Workflow", "", "1. Read this guide; skim the node types (`list_node_types`) and the presets (`list_presets`).", "2. Start from a preset close to the idea (`open_preset`, or `get_preset` to read one), or write a patch from scratch.", "3. Apply it (`set_patch`, or small changes to the open patch with `edit_patch`). A patch without the open patch's `id` opens as a new one; one with it (from `get_patch`) replaces it. A patch that does not validate is *not* applied; the errors say why.", "4. Look at it (`snapshot`: several frames over time, as pictures and numbers). Patterns move: look at more than one frame.", "5. Refine, look again. Name it and describe it (`edit_patch` with `set_info`).", "6. Hand it over: a link (`share_link`) opens it in anyone's playground. Sending it to the crew is the person's", "   decision: they press **Submit** in the playground themselves. Never try to submit on their behalf.", "", "The person may be editing the same patch in the editor while you work; `get_patch` before an edit if time has passed.", "Every change you make is one undo step in their editor.", ""), add("## The patch document", "", "A patch is JSON (the same file the gate saves and opens). Minimal example:", "", "```json", pretty(EXAMPLE), "```", "", `- \`format\`: ${limits.patchFormat} (current). Older documents are upgraded on the way in.`, "- `id`: leave empty for a new patch; the store assigns one.", "- `nodes[]`: `id` (unique in the patch, short: `bow`, `n3`), `kind` (a node type), `name` (a label, may be empty), `params` (knob values by param name; missing ones take the default), `pos` (canvas position; all `[0, 0]` or `arrange: true` lays the graph out for you), `collapsed: true` to show it minimized in the editor (looks only), and on a Blend `layers` (1..8, default 1): layer k > 1 adds the input `over{k}`, the select `mode{k}` and the knob `opacity{k}`, each applied in turn on top of the layers below. Stack several pictures in one Blend rather than chaining Blends.", "- `edges[]`: `{ from: { node, port }, to: { node, port } }`, from an output port to an input port. An input takes one wire.", "- `exposed[]`: knobs promoted to the gate's Control surface (phones on the dance floor can play them).", "- A Still image or Clip node carries its picture in `media` (a data URL); a Sub-patch node its document in `sub`; a Code node its ports and body in `code`.", `- Limits: at most ${limits.maxNodes} nodes and ${limits.maxEdges} edges.`, "", "**Every Number param is also an input port of the same name** (shape `scalar`): wire a scalar into it and the wire drives it; unwired, the knob value is used. Select params (a list of options, by index) are not wirable. Params marked *a rate* are speeds: the gate integrates them over time, so changing one never makes the picture jump.", "", "A patch has one `output` node (at most one; without it nothing shows), and the picture is what reaches its `in`.", ""), add("## Wire shapes", "");
   for (let s of core.shapes)
     add(`- **\`${s.id}\`** (${s.label}): ${s.description}`);
   if (add("", "A wire connects ports of the same shape, plus two automatic adapters: `scalar` → `field_scalar` (a constant " + "field) and `field_scalar` → `field_color` (grayscale).", ""), add("## Inputs the gate provides", "", "Music drives most patterns. On the gate, `audio` follows the sound system and `dj_link` the DJ's decks (Pioneer PRO DJ LINK). In the playground a synthetic groove (or the visitor's microphone) stands in for the music, and a stand-in deck for DJ link, so audio-driven nodes move there too. Taps and strokes on the gate's touch screens arrive through `effects_in` / `touch_dabs` (render them with `render_effects` / `render_points` and blend them over the picture, as most presets do, so people can play with the pattern).", ""), code) {
@@ -16781,7 +16803,7 @@ var text = (value) => ({
   ]
 }, OPS = {
   type: "array",
-  description: "Operations, applied in order: add_node { kind, id?, name?, params?, code?, sub?, pos? }; remove_node { node }; set_params { node, params: { name: number | null } } (null = back to the default); set_code { node, code: { inputs?, outputs?, body? } } (Code nodes); rename_node { node, name }; connect { from, to } (replaces what was wired into `to`); disconnect { to, from? }; set_info { name?, description? } (the patch's own); expose { node, param, label? } / unexpose { node, param }.",
+  description: "Operations, applied in order: add_node { kind, id?, name?, params?, code?, sub?, layers?, pos? }; remove_node { node }; set_layers { node, layers } (a Blend's layer count, 1..8; fewer drops the top layers and their wires); set_params { node, params: { name: number | null } } (null = back to the default); set_code { node, code: { inputs?, outputs?, body? } } (Code nodes); rename_node { node, name }; connect { from, to } (replaces what was wired into `to`); disconnect { to, from? }; set_info { name?, description? } (the patch's own); expose { node, param, label? } / unexpose { node, param }.",
   items: {
     type: "object",
     required: ["op"],
@@ -16795,6 +16817,7 @@ var text = (value) => ({
       params: { type: "object", additionalProperties: { type: ["number", "null"] } },
       code: { type: "object" },
       sub: { type: "object" },
+      layers: { type: "integer", minimum: 1, maximum: 8 },
       pos: { type: "array", items: { type: "number" }, minItems: 2, maxItems: 2 },
       from: PORT,
       to: PORT,
