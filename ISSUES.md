@@ -36,3 +36,14 @@ repeats on clean `master` (faee0ec), 3 in 12 on `patch-crate`, Windows
 (2026-10-15). Chromium passes. Looks timing-dependent (the drag router's
 swallow window vs WebKit's click delivery under load), not a behaviour change.
 
+## Hover-only `title=` tooltips across the app and the patch editor
+
+About 30 `title=` attributes carry information only a mouse hover reveals
+(`grep -rn 'title=' src packages/patch-web/src --include=*.tsx`): the patch
+editor's toolbar (Undo/Redo shortcuts, Arrange), the build error chip, the
+Sub-patch palette entries, the patch credit, and more in `Live.tsx`,
+`Settings.tsx`, `Games.tsx`, `PublicApp.tsx` and others. Cameron's rule: no
+`title=` tooltips anywhere, because touch devices (the iPads, phones) never
+show them; the information goes inline (a label, hint line or chip) or a
+tap-to-expand element, or is dropped. The editor's node view was converted
+on 2026-10-17 (ports now carry their shape in `aria-label`); the rest remain.
