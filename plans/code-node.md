@@ -1,0 +1,205 @@
+# Code node: a node whose body is text (2026-10-18)
+
+Status: **in progress** (gate worktree `C:\Users\camer\.t3\worktrees\Empyrean\playground`,
+branch `patch-crate`, fast-forwarded to gate `master`; the site picks the
+result up through the web-dist bump bot). Thread: "code node" (Claude Fable 5.1).
+
+## Goal
+
+Cameron (2026-10-18): "I want a 'node' type (for web and real gate) that
+gives some code/text API. So a 'function' body or something, that takes
+arbitrary inputs, and arbitrary outputs, that map to the types that already
+exist."
+
+One new node kind, `code`, whose ports and body live on the instance: the
+user declares inputs and outputs (any existing wire shape that makes sense
+for the tier it runs on), writes a function body, and the node behaves like
+any built-in node: wires, knobs, exposed params, thumbnails, meters,
+sub-patches, submissions.
+
+## Environment / context
+
+- Crate `crates/empyrean-patch` (pure Rust): `lib.rs` (document), `registry.rs`
+  (static palette), `validate.rs`, `codegen.rs` (graph → WGSL; field nodes are
+  WGSL functions `n{i}_f(c: Ctx)`), `eval.rs` (CPU Scalar/Event nodes, every
+  frame), `flatten.rs` (sub-patches), `migrate.rs`, `sim.rs` (browser host).
+- `crates/empyrean-patch-wasm`: the browser bindings; `packages/patch-web`:
+  editor (`src/editor/PatchEditor.tsx`, `types.ts`) + WebGPU runtime.
+- Desktop engine: `src-tauri/src/engine/mod.rs` compiles `Program.wgsl` with
+  an error scope; a failure becomes `RuntimeStatus.patch_error`, old pipeline
+  keeps rendering. Browser: `runtime/gpu.ts` throws `ShaderError` with
+  `getCompilationInfo()` lines.
+- Tests: `cargo test -p empyrean-patch` (codegen tests validate every shader
+  with naga, a dev-dependency), `bun test src` in packages/patch-web,
+  Playwright `tests/patch-*.spec.ts` against `scripts/mock-backend.ts`
+  (which serves its own tiny registry; needs a `code` entry).
+- Shared trees: `.agents.txt` in both checkouts; own hunks only;
+  `git commit --only <paths>`; never push the site's master; gate master OK.
+
+## Decisions (made in this thread; Cameron can overrule)
+
+1. **One language, two tiers.** The body is WGSL. A Code node whose ports
+   are all Scalar/Event runs on the CPU every frame, interpreted by a small
+   WGSL-subset interpreter in the crate (`script.rs`), so the same syntax
+   works everywhere and the gate never runs untrusted native code. A Code
+   node with a field output runs on the GPU: its body is pasted verbatim
+   into a generated WGSL function, with the lib's helpers (`hsv2rgb`,
+   `snoise3`, `fbm3`, `hash01`, `Ctx`, `G`, `TAU`...) in scope.
+   Rejected: Rhai / a bespoke expression language (two languages to learn,
+   or a wasm bundle several times larger).
+2. **Ports are per-instance data** (`NodeInst.code`), like a Sub-patch's
+   ports come from `NodeInst.sub`. The registry entry `code` has no static
+   ports. Scalar inputs are knobs too (min/max/default on the port), exactly
+   like a built-in node's Number params.
+3. **Outputs are assigned, not returned.** The body sets `out = ...;` (and
+   any other output by name); unassigned outputs are 0. `return;` ends the
+   body early on the CPU tier; on the GPU it would leave the generated
+   function, so it is rejected there by the WGSL compiler (documented).
+4. **Safety by construction.** Port names are validated identifiers (not a
+   WGSL keyword, reserved word, builtin, lib global, or generated name;
+   validation runs on both hosts). Bodies are size-capped (8 KB), ports
+   capped (16 each way). The CPU interpreter is total: loose numeric/bool
+   coercion, no runtime errors, a per-frame step budget (10 000), finite
+   outputs. A GPU body can still hang the GPU (`loop {}`); the crew reviews
+   submissions before they reach the gate, and both hosts already survive a
+   failed shader (TDR recovery is the OS's, noted as a known risk).
+5. **Format 5.** The field is new and optional (migration 4→5 is a no-op),
+   but an older app would otherwise fail with "unknown kind" instead of
+   "update the app"; Sub-patches set the precedent.
+6. **Field inputs come in two forms**: `name` (the upstream field sampled at
+   this pixel) and `name_at(ctx)` (resample anywhere: warps, offsets). The
+   `_at` form is rewritten to a mangled per-node function by a token pass
+   over the body, so two Code nodes with the same port names cannot
+   collide.
+7. **Shader errors point at the body.** `Program.code_lines` records where
+   each node's body starts in the module; both hosts rewrite `wgsl:L:C`
+   into "Code node <name> line N".
+
+## Design
+
+### Document
+
+```jsonc
+{ "id": "n5", "kind": "code", "params": { "shift": 0.25 },
+  "code": {
+    "inputs":  [{ "name": "shift", "shape": "scalar", "min": 0, "max": 1, "default": 0 },
+                { "name": "img",   "shape": "field_color" }],
+    "outputs": [{ "name": "out", "shape": "field_color" }],
+    "body": "let s = img_at(ctx_transform(c, shift * TAU, 1.0, 0.0, 0.0));\nout = s;" } }
+```
+
+Tier: CPU when every port is Scalar or Event; GPU when every output is a
+field and every input is Scalar or a field. Anything else is a validation
+error (Points/Effects/Texture ports are a follow-up).
+
+### GPU codegen (per Code node `i`)
+
+```wgsl
+struct N5Out { out: vec4f, mask: f32 }
+fn n5_in_img(c: Ctx) -> vec4f { return n3_f(c); }      // one per field input
+fn n5_all(c: Ctx) -> N5Out {
+    var out: vec4f = vec4f(0.0); var mask: f32 = 0.0;    // outputs, zeroed
+    let shift = P[7u];                                   // scalar inputs (slab)
+    let img = n5_in_img(c);                              // field inputs, here
+    { /* body, `img_at` → `n5_in_img` */ }
+    return N5Out(out, mask);
+}
+fn n5_f(c: Ctx) -> vec4f { return n5_all(c).out; }      // principal output
+fn n5_o_mask(c: Ctx) -> f32 { return n5_all(c).mask; }  // every output
+```
+
+Consumers of a Code node's port use `n{i}_o_{port}`; `n{i}_f` is the
+principal (`out`, else the first output) so previews and the Output work.
+
+### CPU interpreter (`script.rs`)
+
+WGSL subset: `let`/`var`, assignment and `+= -= *= /= %=`, `++`/`--`,
+`if`/`else if`/`else`, `for`, `while`, `loop`, `break`, `continue`,
+`return`, blocks, `// /* */` comments; literals `1`, `1.5`, `1e-3`, `2u`,
+`true`; operators with WGSL precedence; builtins by their WGSL names (abs,
+floor, ceil, round, fract, trunc, sign, sqrt, inverseSqrt, exp, exp2, log,
+log2, pow, sin, cos, tan, asin, acos, atan, atan2, sinh, cosh, tanh, min,
+max, clamp, mix, step, smoothstep, saturate, fma, degrees, radians,
+select, f32, i32, u32, bool). Values are f32 or bool, coerced loosely.
+Scope: each input (Scalar → f32, Event → bool "fired this frame"), each
+output (f32 / bool, zero each frame), `dt` (seconds), `PI`, `TAU`, and
+`state.<name>`: f32 slots that persist across frames (and across edits,
+through `adopt_state`). Step budget per eval; a loop that runs out just
+stops.
+
+### Editor
+
+Side panel for a Code node: tier hint, inputs table (name, shape, and for
+scalars min/max/default), outputs table (name, shape), the body in a
+monospace textarea (Tab indents; edits coalesce in undo), a short
+reference under `<details>`, then the scalar inputs as sliders (expose
+works). Renaming a port follows its wires; changing a shape drops wires
+that no longer fit. The node shows its ports from the instance and a
+one-line summary.
+
+## Plan / steps
+
+1. [x] Read the crate, editor, hosts; write this plan.
+2. [x] Crate: `code.rs` (CodeDef, tier, identifier rules, lib-global scan,
+   body token pass), `script.rs` (lexer, parser, interpreter), lib.rs
+   (`NodeInst.code`, format 5, instance-aware port/knob helpers), registry
+   entry + Category::Code, validate, codegen (slab from instance knobs,
+   `slot_of` keyed by String, Code node functions, `code_lines`,
+   `relocate_error`), eval (scripts, state, String events), migrate, sim.
+   104 crate tests pass, new shaders naga-validated. Presets bumped to
+   format 5 (format number only; the updater's pretty-print was reverted).
+3. [x] wasm: `codeLines()` and `relocateError()` on PatchSim.
+4. [x] patch-web: types (CodeDef, PATCH_FORMAT 5, `codeInputs/Outputs/
+   Params`, `codeTier`, `defaultCode`), editor (ports from the instance,
+   `CodePanel.tsx`, node summary line, "Code" palette group), runtime
+   relocates shader errors, css.
+5. [x] Desktop: `cargo check` clean (minis' scalar list owns its names, the
+   engine relocates pipeline errors, the server clamps Code knobs through
+   `eval::sanitize`); Control tab plays Code knobs; mock-backend registry
+   entry; `tests/patch-code.spec.ts` (3 cases, Chromium) + the other
+   patch specs pass. ← current: end-to-end render check, commit, push
+6. [ ] Preset using a Code node (optional, not started).
+7. [ ] Commit (crate / web / app in logical commits), push gate master; the
+   site's web-dist bump bot lands it on `dev`. README notes in both repos
+   (written, uncommitted).
+
+## Findings / gotchas
+
+- `codegen::leak()` interned port names as `&'static str` for `slot_of`;
+  user port names cannot be leaked (unbounded), so `slot_of`,
+  `preview_scalars`, `events` and `event_counts` move to `String`.
+- `is_cpu_kind`/`is_gpu_kind` take a kind string; a Code node's tier is
+  per instance, so they become `is_cpu(node)`/`is_gpu(node)`.
+- naga's reserved list (`keywords/wgsl.rs`) includes surprises: `smooth`,
+  `active`, `patch`, `common`, `filter`, `target`, `set`, `get`, `type`.
+  Builtins (`mix`, `step`, `length`...) are shadowable in WGSL but a port
+  named `mix` would break the body's own `mix()` calls, so both lists are
+  refused as port names.
+- The preview module is a text fork after the node functions, so body line
+  numbers are the same in `wgsl` and `preview_wgsl`.
+- `EMPYREAN_UPDATE_PRESETS=1 cargo test presets` rewrites the preset files
+  pretty-printed (a 6000-line diff for a format bump). For a bump that
+  changes nothing else, `sed 's/"format": 4,/"format": 5,/'` instead.
+- The mock backend's registry (`scripts/mock-backend.ts`) is tiny and its
+  Output takes a *grey* field; a UI spec that wires a colour-field Code node
+  into it must first make the output grey (and drop the Noise wire).
+- End-to-end (headless Chrome with WebGPU, `bun run demo` in patch-web,
+  `rt.setPatch`): a patch with a CPU Code node feeding a GPU Code node
+  renders; a bad GPU body reports `Code node "warp" line 2:13 unresolved
+  value 'nope'`; a bad CPU body reports `Code node "cpu": line 1:14:
+  expected a value, found ';'`.
+
+## Open questions for the user
+
+1. Points / Effects / Texture ports on Code nodes (GPU tier): worth a
+   follow-up? Recommendation: yes, once the field form has been used for a
+   while; each needs its own binding idiom in the body.
+2. Should the CPU tier get `master_speed`? Not exposed now (a Time node
+   already integrates with it).
+
+## Things not to do
+
+- Do not let user strings reach WGSL unvalidated: port names go through
+  `code::check_ident`, bodies only through `code::rewrite_body`.
+- Do not key anything on `&'static str` for per-instance ports.
+- Do not bump `bun.lock` in the site by hand (bot does it).
