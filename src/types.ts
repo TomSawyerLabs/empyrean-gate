@@ -1056,6 +1056,7 @@ export {
   shapeAccepts,
   type CodeDef,
   type CodePort,
+  type CodeReference,
   type PatchDoc,
   type PatchEdge,
   type PatchExposedParam,

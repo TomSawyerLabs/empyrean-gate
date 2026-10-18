@@ -10,6 +10,7 @@ import {
   savePatchToDisk,
   type GlobalControl,
   type PatchDoc,
+  type CodeReference,
   type PatchNodeType,
   type PatchStore,
 } from "@empyrean-gate/patch-web/editor";
@@ -42,6 +43,8 @@ export default function Patch() {
   const store = useMemo(() => gateStore(client), [client]);
   const [registry, setRegistry] = useState<PatchNodeType[] | null>(null);
   const [presets, setPresets] = useState<PatchDoc[]>([]);
+  // What a Code node body may use (the editor's completion and hover docs).
+  const [codeReference, setCodeReference] = useState<CodeReference | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   // The playground's queue (empyreangate.org), as a drawer beside the editor.
   // Opening a submission goes through the editor's own `open`, which the
@@ -68,6 +71,12 @@ export default function Patch() {
       .then((r) => r.json())
       .then((docs: PatchDoc[]) => {
         if (!stale) setPresets(docs);
+      })
+      .catch(() => {});
+    void fetch(`${client.httpBase}/patch/code-reference`)
+      .then((r) => r.json())
+      .then((ref: CodeReference) => {
+        if (!stale) setCodeReference(ref);
       })
       .catch(() => {});
     return () => {
@@ -128,6 +137,7 @@ export default function Patch() {
       store={store}
       registry={registry}
       presets={presets}
+      codeReference={codeReference}
       ready={connected}
       activeId={config?.active_patch ?? null}
       status={status ? { active: status.patch_active, error: status.patch_error ?? null } : null}

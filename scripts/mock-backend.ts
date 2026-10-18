@@ -348,6 +348,16 @@ const server = Bun.serve({
       ]);
     }
     if (url.pathname === "/patch/presets") return Response.json([MOCK_PRESET]);
+    // The Code node's reference (the real one is read off the shader lib);
+    // enough for the editor's completion to have something to offer.
+    if (url.pathname === "/patch/code-reference") {
+      return Response.json({
+        helpers: [{ name: "hsv2rgb", signature: "hsv2rgb(h: f32, s: f32, v: f32) -> vec3f", doc: "HSV to RGB, hue in turns." }],
+        structs: [{ name: "Ctx", fields: [{ name: "theta", type: "f32", doc: "spoke angle, radians" }] }],
+        globals: [{ name: "G", type: "Globals", doc: "" }, { name: "TAU", type: "f32", doc: "" }],
+        cpu_builtins: [{ name: "mix", signature: "mix(a, b, t)", doc: "a + (b - a) * t." }],
+      });
+    }
     if (url.pathname === "/patch/submissions") {
       return Response.json({ submissions: mockSubmissions.map(submissionSummary) });
     }

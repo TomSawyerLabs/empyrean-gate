@@ -3,7 +3,7 @@
 // its JSON answers into types.
 
 import init, * as wasm from "../../wasm/patch.js";
-import type { PatchDoc, PatchNodeType } from "../types";
+import type { CodeReference, PatchDoc, PatchNodeType } from "../types";
 
 export type { PatchSim } from "../../wasm/patch.js";
 
@@ -35,6 +35,8 @@ export interface Limits {
 
 export interface PatchCore {
   registry: PatchNodeType[];
+  /** What a Code node body may use (helpers, structs, globals, CPU builtins). */
+  codeReference: CodeReference;
   presets: PatchDoc[];
   limits: Limits;
   /** Effect kinds by wire name, in GPU-id order. */
@@ -55,6 +57,7 @@ let loading: Promise<PatchCore> | null = null;
 export function loadPatchCore(): Promise<PatchCore> {
   loading ??= init().then(() => ({
     registry: JSON.parse(wasm.registry()) as PatchNodeType[],
+    codeReference: JSON.parse(wasm.codeReference()) as CodeReference,
     presets: JSON.parse(wasm.presets()) as PatchDoc[],
     limits: JSON.parse(wasm.limits()) as Limits,
     effectKinds: JSON.parse(wasm.effect_kinds()) as string[],

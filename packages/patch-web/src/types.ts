@@ -129,6 +129,30 @@ export function subpatchPorts(
   }));
 }
 
+/** A function a Code node body may call (crate `reference::FnRef`). */
+export interface CodeFnRef {
+  name: string;
+  /** `name(params) -> ret`, as written in the shader lib. */
+  signature: string;
+  doc: string;
+}
+
+export interface CodeFieldRef {
+  name: string;
+  type: string;
+  doc: string;
+}
+
+/** What a Code node body may use, read off the shader lib and the CPU
+ * interpreter by the patch core (`codeReference()` in the wasm build,
+ * `GET /patch/code-reference` on the gate). Feeds completion and hover docs. */
+export interface CodeReference {
+  helpers: CodeFnRef[];
+  structs: { name: string; fields: CodeFieldRef[] }[];
+  globals: { name: string; type: string; doc: string }[];
+  cpu_builtins: CodeFnRef[];
+}
+
 /** The node kind whose ports and body live on the instance (crate `code::KIND`). */
 export const CODE_KIND = "code";
 

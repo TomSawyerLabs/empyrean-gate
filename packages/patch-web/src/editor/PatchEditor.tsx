@@ -6,7 +6,6 @@
 // the live node thumbnails and meters.
 
 import {
-  createContext,
   memo,
   useCallback,
   useContext,
@@ -41,7 +40,8 @@ import "./editor.css";
 import { arrangeDoc, type NodeSize } from "./arrange";
 import { ClipPicker } from "./ClipPicker";
 import { CodePanel } from "./CodePanel";
-import { SHAPE_LABEL, suggestConnections, type DragFrom, type Suggestion } from "./connect";
+import { NodeContext, type WireDrag } from "./context";
+import { SHAPE_LABEL, suggestConnections, type Suggestion } from "./connect";
 import { imageFileToMedia } from "./files";
 import { History } from "./history";
 import { MiniMeter, MiniRing, type MiniSource } from "./minis";
@@ -53,6 +53,7 @@ import {
   codeTier,
   defaultCode,
   PATCH_FORMAT,
+  type CodeReference,
   SUBPATCH_KIND,
   shapeAccepts,
   subpatchPorts,
@@ -92,6 +93,10 @@ export interface PatchEditorProps {
   /** The node palette; null while loading. */
   registry: PatchNodeType[] | null;
   presets: PatchDoc[];
+  /** What a Code node body may use (`core.codeReference` in the playground,
+   * `GET /patch/code-reference` on the gate): completion and hover docs.
+   * Without it the body editor still completes ports, keywords and WGSL. */
+  codeReference?: CodeReference | null;
   /** The store is reachable (the gate: WebSocket connected). */
   ready: boolean;
   /** The patch rendering right now: its nodes get live thumbnails/meters. */
@@ -196,20 +201,6 @@ function GlobalsCard({
   );
 }
 
-/** A wire being dragged: where it started, so every port can say whether it
- * would take the other end. */
-type WireDrag = DragFrom & { node: string };
-
-/** What node views need from the editor without threading it through data. */
-const NodeContext = createContext<{
-  activeId: string | null;
-  minis: MiniSource | null;
-  drag: WireDrag | null;
-}>({
-  activeId: null,
-  minis: null,
-  drag: null,
-});
 
 const CATEGORY_LABELS: Record<PatchNodeType["category"], string> = {
   input: "Inputs",
@@ -359,6 +350,19 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
   const outs = outputPorts(def, node);
   const primary = outs.find((p) => p.name === "out") ?? (outs.length === 1 ? outs[0] : undefined);
   const showRing = live && primary !== undefined && RING_SHAPES.includes(primary.shape);
+  // A Code node thumbnails every field output: the principal one as the
+  // node's own cell, the others by port (`node:<id>:<port>`).
+  const rings: { mini: string; label: string }[] =
+    live && node.kind === CODE_KIND
+      ? outs
+          .filter((p) => p.shape === "field_color" || p.shape === "field_scalar")
+          .map((p) => ({
+            mini: p.name === primary?.name ? `node:${node.id}` : `node:${node.id}:${p.name}`,
+            label: p.name,
+          }))
+      : showRing
+        ? [{ mini: `node:${node.id}`, label: node.name || def.label }]
+        : [];
   const meterable = outs.filter((p) => p.shape === "scalar" || p.shape === "event");
   const meterPorts = live
     ? meterable.filter(
@@ -381,9 +385,19 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
         {def.label}
         {node.name && <span className="pnode-name"> · {node.name}</span>}
       </div>
-      {showRing && (
+      {rings.length === 1 && (
         <div className="pnode-mini">
-          <MiniRing source={minis!} mini={`node:${node.id}`} label={node.name || def.label} />
+          <MiniRing source={minis!} mini={rings[0].mini} label={rings[0].label} />
+        </div>
+      )}
+      {rings.length > 1 && (
+        <div className="pnode-minis">
+          {rings.map((r) => (
+            <div key={r.mini} className="pnode-mini">
+              <MiniRing source={minis!} mini={r.mini} label={r.label} />
+              <span className="pnode-mini-label">{r.label}</span>
+            </div>
+          ))}
         </div>
       )}
       {meterPorts.length > 0 && (
@@ -623,6 +637,8 @@ function ParamPanel({
   onDuplicate,
   extras,
   onClose,
+  status,
+  codeReference,
 }: {
   doc: PatchDoc;
   nodeId: string;
@@ -634,6 +650,9 @@ function ParamPanel({
   extras?: (node: PatchNode) => ReactNode;
   /** Set when the panel is a sheet (compact layout): shows Done. */
   onClose?: () => void;
+  /** The renderer's verdict, for a Code node's error marks. */
+  status?: { active: boolean; error: string | null } | null;
+  codeReference?: CodeReference | null;
 }) {
   const sheet = useSheet(onClose);
   const node = doc.nodes.find((n) => n.id === nodeId);
@@ -676,7 +695,16 @@ function ParamPanel({
             : "An empty sub-patch renders black. Insert a saved patch or a preset from the palette's Sub-patches group instead."}
         </p>
       )}
-      {node.kind === CODE_KIND && <CodePanel node={node} canEdit={canEdit} onChange={onChange} />}
+      {node.kind === CODE_KIND && (
+        <CodePanel
+          node={node}
+          doc={doc}
+          canEdit={canEdit}
+          onChange={onChange}
+          error={status?.error ?? null}
+          reference={codeReference ?? null}
+        />
+      )}
       {params.map((p) => {
         const value = node.params[p.name] ?? p.default;
         const wire = wiredInto(p.name);
@@ -964,6 +992,7 @@ function Editor({
   store,
   registry: registryList,
   presets,
+  codeReference = null,
   ready,
   activeId,
   status,
@@ -1793,6 +1822,8 @@ function Editor({
             onDuplicate={() => duplicateNodes([selectedNode])}
             extras={nodeExtras}
             onClose={compact ? () => setSheet(null) : undefined}
+            status={status}
+            codeReference={codeReference}
           />
         )}
 

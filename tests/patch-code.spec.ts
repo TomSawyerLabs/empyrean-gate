@@ -1,6 +1,7 @@
 // A Code node: its ports and body live on the instance (plans/code-node.md).
 // The palette offers it under "Code"; the side panel edits its ports and
-// body; renaming a port carries its wires along.
+// body (a CodeMirror editor with completion); renaming a port carries its
+// wires along.
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -35,7 +36,7 @@ test("a Code node starts as a colour field with one knob, and saves its code", a
   await expect(panel.locator("h3")).toHaveText("Code");
   await expect(panel.locator(".code-tier")).toContainText("GPU");
   const body = panel.getByLabel("Body (WGSL)");
-  await expect(body).toHaveValue(/hsv2rgb/);
+  await expect(body).toContainText("hsv2rgb");
   // The knob is a slider like any other, and can be exposed.
   await expect(panel.locator(".patch-param-head").filter({ hasText: "twist" })).toBeVisible();
 
@@ -101,7 +102,37 @@ test("ports are edited in the panel and renaming one keeps its wire", async ({ p
   await expect(panel.locator(".code-tier")).toContainText("CPU");
 });
 
-test("the body takes a Tab as two spaces", async ({ page }) => {
+test("the body editor completes the node's own ports and the lib's helpers", async ({ page }) => {
+  const sent: string[] = [];
+  const node = await newPatchWithCode(page, sent);
+  await node.click();
+  const panel = page.locator(".patch-side");
+  const body = panel.getByLabel("Body (WGSL)");
+  // Replace the body; typing a prefix offers the input port, Enter takes it.
+  await body.fill("out = vec4f(tw");
+  await body.press("End");
+  await body.pressSequentially("i");
+  const list = page.locator(".cm-tooltip-autocomplete");
+  const selected = list.locator('[aria-selected="true"]');
+  await expect(selected).toContainText("twist");
+  // CodeMirror ignores Enter for 75 ms after a list opens (a typist's guard).
+  await page.waitForTimeout(150);
+  await page.keyboard.press("Enter");
+  await expect(body).toContainText("vec4f(twist");
+  // A helper from the reference (the mock serves hsv2rgb), applied with
+  // its parentheses.
+  await body.pressSequentially(" + hsv2");
+  await expect(selected).toContainText("hsv2rgb");
+  await page.waitForTimeout(150);
+  await page.keyboard.press("Enter");
+  await expect(body).toContainText("hsv2rgb()");
+  // The edit reached the patch (and so the save), coalesced.
+  await expect
+    .poll(() => sent.some((m) => m.includes('"patch_save"') && m.includes("vec4f(twist + hsv2rgb()")))
+    .toBe(true);
+});
+
+test("the body takes a Tab as an indent", async ({ page }) => {
   const sent: string[] = [];
   const node = await newPatchWithCode(page, sent);
   await node.click();
@@ -109,5 +140,5 @@ test("the body takes a Tab as two spaces", async ({ page }) => {
   await body.fill("out = vec4f(1.0);");
   await body.press("Home");
   await body.press("Tab");
-  await expect(body).toHaveValue("  out = vec4f(1.0);");
+  await expect(body).toHaveText("  out = vec4f(1.0);");
 });
