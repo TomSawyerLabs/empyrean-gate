@@ -20,10 +20,13 @@ export const NodeContext = createContext<{
   combines: (node: string, port: string) => boolean;
   /** Minimize or expand a node; null when the patch can't be edited. */
   setCollapsed: ((node: string, collapsed: boolean) => void) | null;
+  /** Remove a wire by its flow edge id; null when the patch can't be edited. */
+  deleteWire: ((edge: string) => void) | null;
 }>({
   activeId: null,
   minis: null,
   drag: null,
   combines: () => false,
   setCollapsed: null,
+  deleteWire: null,
 });
