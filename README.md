@@ -246,7 +246,15 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   the event tools Counter, Toggle, Threshold, Delay, Merge, Step sequencer)
   into a typed dataflow whose sink is the array. A saved patch or a preset can
   be dropped into another as a **Sub-patch** node whose inputs are its exposed
-  knobs. Graphs compile to a single WGSL dispatch; knob tweaks and scalar
+  knobs. A **Code** node is written rather than wired up: declare its inputs
+  and outputs (scalars, events, grey or colour fields) and type a WGSL body
+  that sets the outputs by name. With a field output it is pasted into the
+  shader (scalar inputs are knobs, field inputs can be resampled with
+  `name_at(ctx)`); with scalar/event ports only it runs on the CPU every
+  frame through a small, bounded WGSL-subset interpreter (`state.x` keeps a
+  value across frames), so a submitted patch never runs native code. Shader
+  errors inside a body are reported against its own line numbers
+  (`plans/code-node.md`). Graphs compile to a single WGSL dispatch; knob tweaks and scalar
   wires never recompile, and edits carry every timer and phase over. The
   editor has undo/redo (Ctrl+Z / Ctrl+Shift+Z) and duplicate (Ctrl+D).
   Patches save as JSON files under the config dir and activate live (the layer

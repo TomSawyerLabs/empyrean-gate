@@ -100,6 +100,7 @@ fn add_node(doc: &mut PatchDoc, base: &str, kind: &str, pos: [f32; 2], params: &
             .collect::<BTreeMap<_, _>>(),
         pos,
         media: None,
+        code: None,
         sub: None,
     });
     id

@@ -13,9 +13,10 @@
 //! and `P[<n>]`. User strings never reach WGSL — a node named `active` (a WGSL
 //! reserved word that once killed the engine thread) cannot hurt us.
 
-use super::registry::{self, ParamKind};
+use super::code;
+use super::registry;
 use super::validate::{self, Validated};
-use super::{PatchDoc, Shape};
+use super::{NodeInst, PatchDoc, Shape};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
@@ -56,7 +57,11 @@ pub struct Program {
     /// Doc node index rendered by each preview cell slot.
     pub preview_nodes: Vec<usize>,
     /// CPU node scalar outputs (doc node index, port) for amplitude meters.
-    pub preview_scalars: Vec<(usize, &'static str)>,
+    pub preview_scalars: Vec<(usize, String)>,
+    /// Where each GPU Code node's body sits in `wgsl` (and `preview_wgsl`,
+    /// which shares the node functions), so a shader error can point at the
+    /// user's own lines (see [`Program::relocate_error`]).
+    pub code_lines: Vec<CodeLines>,
     /// Still image nodes and their media cell (1..=MAX_PATCH_IMAGES), in
     /// document order; the host uploads each node's image to its cell.
     pub images: Vec<(usize, u32)>,
@@ -83,81 +88,71 @@ pub struct SlabSlot {
     pub integrate: bool,
 }
 
-fn is_cpu_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "time"
-            | "slider"
-            | "globals"
-            | "audio"
-            | "imu"
-            | "tap"
-            | "touch"
-            | "dj_link"
-            | "event_effect"
-            | "scalar_math"
-            | "lfo"
-            | "smooth"
-            | "envelope"
-            | "map_range"
-            | "mix"
-            | "clamp"
-            | "random"
-            | "counter"
-            | "toggle"
-            | "threshold"
-            | "delay"
-            | "event_merge"
-            | "sequence"
-    )
+/// Where a GPU Code node's body landed in the generated module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeLines {
+    /// Doc node index (into `Program::doc`).
+    pub node: usize,
+    /// 1-based line of `wgsl` holding the body's first line.
+    pub first: usize,
+    /// Lines in the body.
+    pub count: usize,
 }
 
-fn is_gpu_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "solid"
-            | "gradient"
-            | "gradient_radial"
-            | "noise_field"
-            | "noise_color"
-            | "radial_waves"
-            | "spiral"
-            | "plasma"
-            | "spoke_chase"
-            | "sparkle"
-            | "touch_mask"
-            | "touch_glow"
-            | "beat_rings"
-            | "breathe"
-            | "rainbow"
-            | "wedges"
-            | "interference"
-            | "fire"
-            | "cosmic_drift"
-            | "earth_current"
-            | "meteors"
-            | "warp"
-            | "waveform"
-            | "spectrum"
-            | "transform"
-            | "colorize"
-            | "blend"
-            | "effects_in"
-            | "render_effects"
-            | "touch_dabs"
-            | "render_points"
-            | "video_in"
-            | "image_in"
-            | "clip"
-            | "coordinate"
-            | "feedback"
-            | "field_math"
-            | "luminance"
-            | "color_adjust"
-            | "palette"
-            | "texture_sample"
-            | "output"
-    )
+impl Program {
+    /// For a 1-based line of `wgsl`, the Code node whose body holds it and
+    /// the 1-based line within that body.
+    pub fn code_line(&self, line: usize) -> Option<(usize, usize)> {
+        self.code_lines
+            .iter()
+            .find(|c| line >= c.first && line < c.first + c.count)
+            .map(|c| (c.node, line - c.first + 1))
+    }
+
+    /// `msg` with every `wgsl:L:C` location (naga's and WebGPU's habit) that
+    /// falls inside a Code node's body rewritten as `Code node "<name>" line
+    /// N:C`, so the error reads against what the user typed. Locations
+    /// elsewhere in the module are left alone.
+    pub fn relocate_error(&self, msg: &str) -> String {
+        const KEY: &str = "wgsl:";
+        let mut out = String::with_capacity(msg.len());
+        let mut rest = msg;
+        while let Some(at) = rest.find(KEY) {
+            out.push_str(&rest[..at]);
+            let after = &rest[at + KEY.len()..];
+            let digits = |s: &str| s.bytes().take_while(u8::is_ascii_digit).count();
+            let l = digits(after);
+            let (line, col, consumed) = match (l > 0, after[l..].strip_prefix(':')) {
+                (true, Some(tail)) => {
+                    let c = digits(tail);
+                    if c > 0 {
+                        (after[..l].parse::<usize>().ok(), tail[..c].parse::<usize>().ok(), l + 1 + c)
+                    } else {
+                        (None, None, 0)
+                    }
+                }
+                _ => (None, None, 0),
+            };
+            match (line, col, consumed) {
+                (Some(line), Some(col), consumed) if consumed > 0 => {
+                    if let Some((node, body_line)) = self.code_line(line) {
+                        let n = &self.doc.nodes[node];
+                        let name = if n.name.is_empty() { n.id.as_str() } else { n.name.as_str() };
+                        let _ = write!(out, "Code node \"{name}\" line {body_line}:{col}");
+                    } else {
+                        out.push_str(&rest[at..at + KEY.len() + consumed]);
+                    }
+                    rest = &after[consumed..];
+                }
+                _ => {
+                    out.push_str(KEY);
+                    rest = after;
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
 }
 
 /// How a node's principal output thumbnails. Field nodes render their own
@@ -175,24 +170,29 @@ enum PreviewStyle {
     Texture,
 }
 
-fn preview_style(kind: &str) -> Option<PreviewStyle> {
-    match kind {
+fn preview_style(node: &NodeInst) -> Option<PreviewStyle> {
+    match node.kind.as_str() {
         "output" => return None,
         "touch_dabs" => return Some(PreviewStyle::Points),
         "effects_in" | "event_effect" => return Some(PreviewStyle::Effects),
         "video_in" | "image_in" | "clip" => return Some(PreviewStyle::Texture),
         _ => {}
     }
-    match registry::lookup(kind)?.output_shape("out") {
+    // A Code node previews its principal output; built-ins their `out`.
+    let shape = match node.code() {
+        Some(def) => def.principal().map(|p| p.shape),
+        None => registry::lookup(&node.kind)?.output_shape("out"),
+    };
+    match shape {
         Some(Shape::FieldColor) => Some(PreviewStyle::Color),
         Some(Shape::FieldScalar) => Some(PreviewStyle::Gray),
         _ => None,
     }
 }
 
-/// Whether a node of this kind gets a mini-preview cell.
-pub fn previewable(kind: &str) -> bool {
-    preview_style(kind).is_some()
+/// Whether this node gets a mini-preview cell.
+pub fn previewable(node: &NodeInst) -> bool {
+    preview_style(node).is_some()
 }
 
 /// Node kinds that read raw touch. A patch containing any of them owns the
@@ -225,7 +225,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         .ok_or_else(|| "patch has no Output node".to_string())?;
 
     for n in &doc.nodes {
-        if !is_cpu_kind(&n.kind) && !is_gpu_kind(&n.kind) {
+        if !n.is_cpu() && !n.is_gpu() {
             return Err(format!(
                 "node kind \"{}\" is not renderable yet (planned for a later step)",
                 n.kind
@@ -251,45 +251,41 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         .order
         .iter()
         .copied()
-        .filter(|i| is_cpu_kind(&doc.nodes[*i].kind))
+        .filter(|i| doc.nodes[*i].is_cpu())
         .collect();
     let gpu_order: Vec<usize> = validated
         .order
         .iter()
         .copied()
-        .filter(|i| is_gpu_kind(&doc.nodes[*i].kind))
+        .filter(|i| doc.nodes[*i].is_gpu())
         .collect();
 
     // -- Slab allocation ----------------------------------------------------
     let mut slots: Vec<SlabSlot> = Vec::new();
     // (node, param-or-port name) → slot index, for expression generation.
-    let mut slot_of: HashMap<(usize, &str), usize> = HashMap::new();
+    let mut slot_of: HashMap<(usize, String), usize> = HashMap::new();
     for &i in &gpu_order {
-        let ty = registry::lookup(&doc.nodes[i].kind).expect("validated kind");
-        for p in ty.params {
-            if !matches!(p.kind, ParamKind::Number) {
-                continue;
-            }
+        let node = &doc.nodes[i];
+        for (name, knob) in node.knobs() {
             let slot = slots.len();
-            slot_of.insert((i, p.name), slot);
             slots.push(SlabSlot {
                 slot,
                 node: i,
-                param: Some(p.name.to_string()),
-                wired: wires.get(&(i, p.name.to_string())).cloned(),
-                integrate: p.integrate,
+                param: Some(name.clone()),
+                wired: wires.get(&(i, name.clone())).cloned(),
+                integrate: knob.integrate,
             });
+            slot_of.insert((i, name), slot);
         }
         // Scalar wires adapted into shaped field inputs (e.g. LFO → Colorize.in).
-        for inp in ty.inputs {
-            if inp.shape != Shape::FieldScalar {
+        for (name, shape) in node.shaped_inputs() {
+            if shape != Shape::FieldScalar {
                 continue;
             }
-            if let Some((from, port)) = wires.get(&(i, inp.name.to_string()))
-                && is_cpu_kind(&doc.nodes[*from].kind)
+            if let Some((from, port)) = wires.get(&(i, name.clone()))
+                && doc.nodes[*from].is_cpu()
             {
                 let slot = slots.len();
-                slot_of.insert((i, inp.name), slot);
                 slots.push(SlabSlot {
                     slot,
                     node: i,
@@ -297,6 +293,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
                     wired: Some((*from, port.clone())),
                     integrate: false,
                 });
+                slot_of.insert((i, name), slot);
             }
         }
     }
@@ -326,11 +323,16 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
     let mut code = String::new();
     code.push_str(PATCH_LIB_WGSL);
     code.push_str("\n// ---- generated from the patch graph ----\n");
+    let mut code_lines = Vec::new();
     for &i in &gpu_order {
         if i == output {
             continue;
         }
-        g.node_fn(&mut code, i)?;
+        if doc.nodes[i].kind == code::KIND {
+            code_lines.push(g.code_fn(&mut code, i)?);
+        } else {
+            g.node_fn(&mut code, i)?;
+        }
     }
     // Fork before the entry point: the preview module reuses the same node
     // functions (and therefore the same parameter-slab layout) with a per-node
@@ -350,7 +352,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
                 .copied()
                 .filter(|&i| doc.nodes[i].kind == "event_effect"),
         )
-        .filter(|&i| previewable(&doc.nodes[i].kind))
+        .filter(|&i| previewable(&doc.nodes[i]))
         .take(MAX_PREVIEW_NODES)
         .collect();
     let preview_wgsl = if preview_nodes.is_empty() {
@@ -359,16 +361,16 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         g.preview_main_fn(&mut preview_code, &preview_nodes)?;
         preview_code
     };
-    let preview_scalars: Vec<(usize, &'static str)> = cpu_order
+    let preview_scalars: Vec<(usize, String)> = cpu_order
         .iter()
         .copied()
         .flat_map(|i| {
-            let ty = registry::lookup(&doc.nodes[i].kind).expect("validated kind");
             // Events meter too: the runtime reports a fire count for them.
-            ty.outputs
-                .iter()
-                .filter(|p| matches!(p.shape, Shape::Scalar | Shape::Event))
-                .map(move |p| (i, p.name))
+            doc.nodes[i]
+                .outputs()
+                .into_iter()
+                .filter(|(_, shape)| matches!(shape, Shape::Scalar | Shape::Event))
+                .map(move |(name, _)| (i, name))
         })
         .take(MAX_PREVIEW_SCALARS)
         .collect();
@@ -382,6 +384,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         preview_wgsl,
         preview_nodes,
         preview_scalars,
+        code_lines,
         images,
         doc: PatchDoc::default(),
         aliases: HashMap::new(),
@@ -392,7 +395,7 @@ struct Gen<'a> {
     doc: &'a PatchDoc,
     images: &'a [(usize, u32)],
     wires: &'a HashMap<(usize, String), (usize, String)>,
-    slot_of: &'a HashMap<(usize, &'static str), usize>,
+    slot_of: &'a HashMap<(usize, String), usize>,
 }
 
 impl Gen<'_> {
@@ -463,15 +466,26 @@ impl Gen<'_> {
         out
     }
 
-    /// `P[..]` reference for a Number param of a GPU node.
+    /// `P[..]` reference for a knob (Number param, or a Code node's Scalar
+    /// input) of a GPU node.
     fn p(&self, node: usize, param: &str) -> String {
         let slot = self
             .slot_of
-            .iter()
-            .find(|(k, _)| k.0 == node && k.1 == param)
-            .map(|(_, s)| *s)
+            .get(&(node, param.to_string()))
+            .copied()
             .expect("param slot allocated");
         format!("P[{slot}u]")
+    }
+
+    /// The function that evaluates `from`'s `port`, for a field consumer.
+    /// Built-ins have one output, `n{from}_f`; a Code node has one accessor
+    /// per declared output.
+    fn field_fn(&self, from: usize, port: &str) -> String {
+        if self.doc.nodes[from].code().is_some() {
+            format!("n{from}_o_{port}")
+        } else {
+            format!("n{from}_f")
+        }
     }
 
     /// Baked value of a Select param (a compile-time constant).
@@ -489,12 +503,11 @@ impl Gen<'_> {
     fn color_input(&self, node: usize, port: &str, ctx: &str) -> String {
         match self.upstream(node, port) {
             None => "vec4f(0.0)".into(),
-            Some((from, _)) => {
-                let from_kind = &self.doc.nodes[*from].kind;
-                let ty = registry::lookup(from_kind).expect("kind");
-                match ty.output_shape("out") {
-                    Some(Shape::FieldColor) => format!("n{from}_f({ctx})"),
-                    Some(Shape::FieldScalar) => format!("gray(n{from}_f({ctx}))"),
+            Some((from, from_port)) => {
+                let f = self.field_fn(*from, from_port);
+                match self.doc.nodes[*from].output_shape(from_port) {
+                    Some(Shape::FieldColor) => format!("{f}({ctx})"),
+                    Some(Shape::FieldScalar) => format!("gray({f}({ctx}))"),
                     _ => "vec4f(0.0)".into(),
                 }
             }
@@ -505,20 +518,104 @@ impl Gen<'_> {
     fn scalar_field_input(&self, node: usize, port: &str, ctx: &str) -> String {
         match self.upstream(node, port) {
             None => "0.0".into(),
-            Some((from, _)) => {
-                if is_cpu_kind(&self.doc.nodes[*from].kind) {
+            Some((from, from_port)) => {
+                if self.doc.nodes[*from].is_cpu() {
                     // Scalar → uniform-field adapter: the slab slot allocated
                     // for this wire.
-                    let slot = self.slot_of.get(&(node, leak(port))).copied();
+                    let slot = self.slot_of.get(&(node, port.to_string())).copied();
                     match slot {
                         Some(s) => format!("P[{s}u]"),
                         None => "0.0".into(),
                     }
                 } else {
-                    format!("n{from}_f({ctx})")
+                    format!("{}({ctx})", self.field_fn(*from, from_port))
                 }
             }
         }
+    }
+
+    /// A Code node: its body inside a function that binds every port by
+    /// name (see `code`). Scalar inputs read the slab; field inputs are
+    /// sampled at `c` and also offered as `<name>_at(ctx)` for resampling;
+    /// outputs are `var`s zeroed first and gathered into a record, read
+    /// through one accessor per port (`n{i}_o_<port>`) and `n{i}_f` for the
+    /// principal one. Returns where the body's lines landed.
+    fn code_fn(&self, code: &mut String, i: usize) -> Result<CodeLines, String> {
+        let node = &self.doc.nodes[i];
+        let def = node.code().ok_or("Code node without code")?;
+        let ty = |s: Shape| if s == Shape::FieldColor { "vec4f" } else { "f32" };
+        let zero = |s: Shape| if s == Shape::FieldColor { "vec4f(0.0)" } else { "0.0" };
+        let fields: Vec<&str> = def
+            .inputs
+            .iter()
+            .filter(|p| p.shape != Shape::Scalar)
+            .map(|p| p.name.as_str())
+            .collect();
+
+        writeln!(code, "\nstruct N{i}Out {{").unwrap();
+        for p in &def.outputs {
+            writeln!(code, "    {}: {},", p.name, ty(p.shape)).unwrap();
+        }
+        code.push_str("}\n");
+        for p in def.inputs.iter().filter(|p| p.shape != Shape::Scalar) {
+            let expr = match p.shape {
+                Shape::FieldColor => self.color_input(i, &p.name, "c"),
+                _ => self.scalar_field_input(i, &p.name, "c"),
+            };
+            writeln!(
+                code,
+                "fn n{i}_in_{name}(c: Ctx) -> {ty} {{\n    let _unused = c.rn;\n    return {expr};\n}}",
+                name = p.name,
+                ty = ty(p.shape),
+            )
+            .unwrap();
+        }
+        writeln!(code, "fn n{i}_all(c: Ctx) -> N{i}Out {{").unwrap();
+        writeln!(code, "    let _unused = c.rn;").unwrap();
+        for p in &def.outputs {
+            writeln!(code, "    var {}: {} = {};", p.name, ty(p.shape), zero(p.shape)).unwrap();
+        }
+        for p in &def.inputs {
+            if p.shape == Shape::Scalar {
+                writeln!(code, "    let {} = {};", p.name, self.p(i, &p.name)).unwrap();
+            } else {
+                writeln!(code, "    let {name} = n{i}_in_{name}(c);", name = p.name).unwrap();
+            }
+        }
+        code.push_str("    {\n");
+        let first = code.matches('\n').count() + 1;
+        let count = def.body.split('\n').count();
+        code.push_str(&code::rewrite_body(&def.body, i, &fields));
+        code.push_str("\n    }\n");
+        let record = def
+            .outputs
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(code, "    return N{i}Out({record});\n}}").unwrap();
+        for p in &def.outputs {
+            writeln!(
+                code,
+                "fn n{i}_o_{name}(c: Ctx) -> {ty} {{\n    return n{i}_all(c).{name};\n}}",
+                name = p.name,
+                ty = ty(p.shape),
+            )
+            .unwrap();
+        }
+        let principal = def.principal().ok_or("Code node without outputs")?;
+        writeln!(
+            code,
+            "fn n{i}_f(c: Ctx) -> {ty} {{\n    return n{i}_all(c).{name};\n}}",
+            name = principal.name,
+            ty = ty(principal.shape),
+        )
+        .unwrap();
+        Ok(CodeLines {
+            node: i,
+            first,
+            count,
+        })
     }
 
     fn node_fn(&self, code: &mut String, i: usize) -> Result<(), String> {
@@ -1251,15 +1348,15 @@ impl Gen<'_> {
     fn preview_main_fn(&self, code: &mut String, nodes: &[usize]) -> Result<(), String> {
         let mut cases = String::new();
         for (slot, &i) in nodes.iter().enumerate() {
-            let kind = self.doc.nodes[i].kind.as_str();
-            let expr = match preview_style(kind) {
+            let node = &self.doc.nodes[i];
+            let expr = match preview_style(node) {
                 Some(PreviewStyle::Color) => format!("n{i}_f(ctx).rgb"),
                 Some(PreviewStyle::Gray) => format!("vec3f(clamp(n{i}_f(ctx), 0.0, 1.0))"),
                 Some(style) => {
                     self.preview_stream_fn(code, i, style);
                     format!("n{i}_pv(ctx)")
                 }
-                None => return Err(format!("node kind \"{kind}\" is not previewable")),
+                None => return Err(format!("node kind \"{}\" is not previewable", node.kind)),
             };
             let _ = writeln!(cases, "        case {slot}u: {{ acc = {expr}; }}");
         }
@@ -1354,26 +1451,6 @@ impl Gen<'_> {
         writeln!(code, "{body}").unwrap();
         code.push_str("}\n");
     }
-}
-
-/// Interns short, registry-defined port names so `slot_of` can key on
-/// `&'static str`. Only ever called with registry port names (a small fixed
-/// set), so the "leak" is bounded.
-fn leak(s: &str) -> &'static str {
-    for t in registry::TYPES {
-        for p in t.inputs {
-            if p.name == s {
-                return p.name;
-            }
-        }
-        for p in t.params {
-            if p.name == s {
-                return p.name;
-            }
-        }
-    }
-    // Unreachable for validated docs; a stable fallback beats a panic.
-    "in"
 }
 
 #[cfg(test)]
@@ -1476,13 +1553,14 @@ mod tests {
         // Integrated params (speed/spin) are flagged.
         assert!(prog.slots.iter().any(|s| s.integrate));
         // CPU order excludes GPU nodes and is topo-consistent (env after aud).
-        let names: Vec<&str> = prog
+        let names: Vec<String> = prog
             .cpu_order
             .iter()
             .map(|i| valid_demo().nodes[*i].id.clone())
-            .map(|s| leak(&s))
             .collect();
-        let _ = names;
+        let env = names.iter().position(|n| n == "env").unwrap();
+        let aud = names.iter().position(|n| n == "aud").unwrap();
+        assert!(aud < env, "audio before the envelope it triggers: {names:?}");
     }
 
     #[test]
@@ -1508,7 +1586,7 @@ mod tests {
         for &i in &prog.preview_nodes {
             let kind = &doc.nodes[i].kind;
             assert!(
-                previewable(kind) && kind != "output",
+                previewable(&doc.nodes[i]) && kind != "output",
                 "cell for non-previewable node {kind}"
             );
         }
@@ -1642,12 +1720,177 @@ mod tests {
             if ty.id == "output" {
                 continue;
             }
+            let mut n = node("n", ty.id);
+            if ty.id == code::KIND {
+                // A Code node is nothing without its definition.
+                n.code = Some(Box::new(code_def(&[], &[("out", Shape::FieldColor)], "out = vec4f(c.r01);")));
+            }
             let doc = PatchDoc {
-                nodes: vec![node("n", ty.id), node("o", "output")],
+                nodes: vec![n, node("o", "output")],
                 ..Default::default()
             };
             compile(&doc).unwrap_or_else(|e| panic!("{}: {e}", ty.id));
         }
+    }
+
+    fn code_def(inputs: &[(&str, Shape)], outputs: &[(&str, Shape)], body: &str) -> code::CodeDef {
+        let port = |(name, shape): &(&str, Shape)| code::CodePort {
+            name: name.to_string(),
+            shape: *shape,
+            min: 0.0,
+            max: 2.0,
+            default: 1.0,
+        };
+        code::CodeDef {
+            inputs: inputs.iter().map(port).collect(),
+            outputs: outputs.iter().map(port).collect(),
+            body: body.to_string(),
+        }
+    }
+
+    fn validate_wgsl(label: &str, wgsl: &str) {
+        let module = naga::front::wgsl::parse_str(wgsl)
+            .unwrap_or_else(|e| panic!("{label} failed to parse: {e}\n{wgsl}"));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .unwrap_or_else(|e| panic!("{label} failed validation: {e:?}\n{wgsl}"));
+    }
+
+    /// A GPU Code node: scalar inputs from the slab (one wired from a CPU
+    /// node), a colour and a grey field input (the latter from a CPU node,
+    /// through the uniform-field adapter), `_at` resampling, two outputs
+    /// read by two consumers, a thumbnail, and body lines on record.
+    #[test]
+    fn gpu_code_node_compiles_and_validates() {
+        let mut c = node("c", code::KIND);
+        c.code = Some(Box::new(code_def(
+            &[
+                ("gain", Shape::Scalar),
+                ("spin", Shape::Scalar),
+                ("img", Shape::FieldColor),
+                ("mask", Shape::FieldScalar),
+            ],
+            &[("out", Shape::FieldColor), ("edge", Shape::FieldScalar)],
+            "// resample the image a quarter turn on, scaled by the grey input\n\
+             let turned = img_at(ctx_transform(c, spin * TAU, 1.0, 0.0, 0.0));\n\
+             out = vec4f(turned.rgb * gain * mask, 1.0);\n\
+             edge = step(0.5, c.r01) * mask_at(c);",
+        )));
+        let doc = PatchDoc {
+            nodes: vec![
+                node("lfo", "lfo"),
+                node("noise", "noise_color"),
+                c,
+                node("tint", "colorize"),
+                node("mix", "blend"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("lfo", "out", "c", "spin"),
+                edge("lfo", "out", "c", "mask"),
+                edge("noise", "out", "c", "img"),
+                edge("c", "out", "mix", "base"),
+                edge("c", "edge", "tint", "in"),
+                edge("tint", "out", "mix", "over"),
+                edge("mix", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let prog = compile(&doc).unwrap_or_else(|e| panic!("{e}"));
+        validate_wgsl("main", &prog.wgsl);
+        validate_wgsl("preview", &prog.preview_wgsl);
+        assert!(prog.wgsl.contains("fn n2_in_img(c: Ctx) -> vec4f"));
+        assert!(prog.wgsl.contains("n2_in_img(ctx_transform("), "img_at was rewritten");
+        assert!(prog.wgsl.contains("n2_o_edge(ctx)") || prog.wgsl.contains("n2_o_edge(c)"), "Colorize reads the edge port");
+        assert!(prog.wgsl.contains("n2_f("), "Blend reads the principal output");
+        // Both scalar inputs are knobs in the slab; spin is wired.
+        let gain = prog.slots.iter().find(|s| s.node == 2 && s.param.as_deref() == Some("gain")).unwrap();
+        assert!(gain.wired.is_none());
+        let spin = prog.slots.iter().find(|s| s.node == 2 && s.param.as_deref() == Some("spin")).unwrap();
+        assert_eq!(spin.wired, Some((0, "out".to_string())));
+        // The grey field input wired from the LFO got an adapter slot.
+        assert!(prog.slots.iter().any(|s| s.node == 2 && s.param.is_none() && s.wired.is_some()));
+        assert!(prog.preview_nodes.contains(&2), "the code node thumbnails");
+        // Body lines are on record and resolve back to the body.
+        let lines = &prog.code_lines;
+        assert_eq!(lines.len(), 1);
+        assert_eq!((lines[0].node, lines[0].count), (2, 4));
+        let wgsl_lines: Vec<&str> = prog.wgsl.lines().collect();
+        assert!(wgsl_lines[lines[0].first - 1].starts_with("// resample"), "{}", wgsl_lines[lines[0].first - 1]);
+        assert_eq!(prog.code_line(lines[0].first + 2), Some((2, 3)));
+        assert_eq!(prog.code_line(lines[0].first + 4), None);
+        let msg = format!("error: no such thing\n ┌─ wgsl:{}:12\n │ and wgsl:3:1 elsewhere", lines[0].first + 1);
+        let moved = prog.relocate_error(&msg);
+        assert!(moved.contains("Code node \"c\" line 2:12"), "{moved}");
+        assert!(moved.contains("wgsl:3:1"), "{moved}");
+    }
+
+    /// A CPU Code node sits in the evaluator order, meters its outputs, and
+    /// its scalar output reaches the shader like any CPU node's would.
+    #[test]
+    fn cpu_code_node_is_a_cpu_node() {
+        let mut c = node("c", code::KIND);
+        c.code = Some(Box::new(code_def(
+            &[("beat", Shape::Event), ("level", Shape::Scalar)],
+            &[("out", Shape::Scalar), ("tick", Shape::Event)],
+            "if beat { state.n += 1.0; } out = level * state.n; tick = beat;",
+        )));
+        let doc = PatchDoc {
+            nodes: vec![node("aud", "audio"), c, node("sol", "solid"), node("o", "output")],
+            edges: vec![
+                edge("aud", "beat", "c", "beat"),
+                edge("aud", "bass", "c", "level"),
+                edge("c", "out", "sol", "brightness"),
+                edge("sol", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let prog = compile(&doc).unwrap_or_else(|e| panic!("{e}"));
+        validate_wgsl("main", &prog.wgsl);
+        assert_eq!(prog.cpu_order, vec![0, 1]);
+        assert!(prog.code_lines.is_empty());
+        assert!(prog.preview_scalars.contains(&(1, "out".to_string())));
+        assert!(prog.preview_scalars.contains(&(1, "tick".to_string())));
+        assert!(!prog.preview_nodes.contains(&1));
+        let slot = prog.slots.iter().find(|s| s.node == 2 && s.param.as_deref() == Some("brightness")).unwrap();
+        assert_eq!(slot.wired, Some((1, "out".to_string())));
+    }
+
+    /// Bad Code nodes are refused with a message naming the node.
+    #[test]
+    fn broken_code_nodes_are_refused() {
+        let refuse = |def: code::CodeDef, what: &str| {
+            let mut c = node("c", code::KIND);
+            c.code = Some(Box::new(def));
+            let doc = PatchDoc {
+                nodes: vec![c, node("o", "output")],
+                ..Default::default()
+            };
+            let err = compile(&doc).expect_err(what);
+            assert!(err.contains("Code node \"c\""), "{what}: {err}");
+            err
+        };
+        let e = refuse(code_def(&[], &[("out", Shape::Scalar)], "out = ;"), "syntax");
+        assert!(e.contains("line 1:7"), "{e}");
+        refuse(code_def(&[("let", Shape::Scalar)], &[("out", Shape::Scalar)], ""), "keyword port");
+        refuse(code_def(&[], &[], ""), "no outputs");
+        refuse(code_def(&[("img", Shape::FieldColor)], &[("out", Shape::Scalar)], ""), "field into cpu");
+        // No definition at all, and a definition on the wrong kind.
+        let doc = PatchDoc {
+            nodes: vec![node("c", code::KIND), node("o", "output")],
+            ..Default::default()
+        };
+        assert!(compile(&doc).unwrap_err().contains("no code"));
+        let mut s = node("s", "solid");
+        s.code = Some(Box::new(code_def(&[], &[("out", Shape::Scalar)], "")));
+        let doc = PatchDoc {
+            nodes: vec![s, node("o", "output")],
+            ..Default::default()
+        };
+        assert!(compile(&doc).unwrap_err().contains("only Code nodes"));
     }
 
     #[test]

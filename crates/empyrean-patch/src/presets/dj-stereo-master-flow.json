@@ -1,5 +1,5 @@
 {
-  "format": 4,
+  "format": 5,
   "id": "builtin-dj-stereo-master-flow",
   "name": "DJ Stereo Master Flow",
   "description": "DJ Loop Tunnel rebuilt for a smoothed stereo Scarlett master. Spiral and spoke motion stay primary; channel handoffs add a restrained physical left-to-right trail. Set Audio Source 1 to Scarlett channel 1 and Source 2 to channel 2.",

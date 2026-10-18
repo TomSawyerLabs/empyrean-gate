@@ -2013,16 +2013,13 @@ pub(crate) fn apply_patch_param(
     {
         return Err(format!("param {node}.{param} is not exposed"));
     }
+    // Held to the knob's range, a Code node's declared inputs included.
     let clamped = doc
         .nodes
         .iter()
         .find(|n| n.id == node)
-        .and_then(|n| patch::registry::lookup(&n.kind))
-        .and_then(|t| t.param(&param))
-        .map(|p| {
-            let finite = if value.is_finite() { value } else { p.default };
-            finite.clamp(p.min, p.max)
-        })
+        .filter(|n| patch::eval::has_param(n, &param))
+        .map(|n| patch::eval::sanitize(n, &param, value))
         .unwrap_or(value);
     if let Some(n) = doc.nodes.iter_mut().find(|n| n.id == node) {
         n.params.insert(param.clone(), clamped);

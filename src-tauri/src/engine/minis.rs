@@ -41,7 +41,7 @@ pub struct PatchPreviewInfo {
     /// (node id, port) per scalar-meter slot.
     pub scalar_refs: Vec<(String, String)>,
     /// (doc node index, port) matching `scalar_refs`, for value lookup.
-    pub scalar_nodes: Vec<(usize, &'static str)>,
+    pub scalar_nodes: Vec<(usize, String)>,
 }
 
 /// What the previous mini dispatch rendered — the ping-pong readback is one

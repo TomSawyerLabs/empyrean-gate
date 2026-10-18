@@ -195,9 +195,32 @@ impl PatchSim {
             .program()
             .preview_scalars
             .iter()
-            .map(|(i, port)| (doc.nodes[*i].id.as_str(), *port))
+            .map(|(i, port)| (doc.nodes[*i].id.as_str(), port.as_str()))
             .collect();
         serde_json::to_string(&list).expect("scalars serialize")
+    }
+
+    /// Where each GPU Code node's body sits in `wgsl()` (and `previewWgsl()`):
+    /// `[{"node": id, "first": line, "count": lines}, ...]`, 1-based.
+    #[wasm_bindgen(js_name = codeLines)]
+    pub fn code_lines(&self) -> String {
+        let doc = self.sim.flat_doc();
+        let list: Vec<serde_json::Value> = self
+            .sim
+            .program()
+            .code_lines
+            .iter()
+            .map(|c| json!({ "node": doc.nodes[c.node].id, "first": c.first, "count": c.count }))
+            .collect();
+        serde_json::to_string(&list).expect("code lines serialize")
+    }
+
+    /// `msg` with every `wgsl:L:C` location inside a Code node's body
+    /// rewritten as `Code node "<name>" line N:C` (see the crate's
+    /// `Program::relocate_error`).
+    #[wasm_bindgen(js_name = relocateError)]
+    pub fn relocate_error(&self, msg: &str) -> String {
+        self.sim.program().relocate_error(msg)
     }
 
     /// Floats in the parameter slab (binding 8).

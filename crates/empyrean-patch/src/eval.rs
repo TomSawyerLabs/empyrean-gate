@@ -5,9 +5,10 @@
 //! layer phases, integration state lives here so live edits never cause
 //! visual discontinuities.
 
-use super::PatchDoc;
 use super::codegen::Program;
 use super::registry::{self, ParamKind};
+use super::script;
+use super::{NodeInst, PatchDoc, Shape};
 use crate::abi::{AudioUniform, MAX_AUDIO_SOURCES};
 use crate::effects::{EffectCfg, EffectKind};
 use crate::touch::{FingerState, TouchView};
@@ -122,6 +123,9 @@ struct NodeState {
     latch: Option<bool>,
     /// Seconds until each pending delayed event fires (delay).
     pending: Vec<f32>,
+    /// A Code node's `state.<name>` slots, by name so they survive an edit
+    /// that reorders the body's uses of them.
+    code_state: HashMap<String, f32>,
 }
 
 impl Default for NodeState {
@@ -144,6 +148,7 @@ impl Default for NodeState {
             glide_t: 0.0,
             latch: None,
             pending: Vec::new(),
+            code_state: HashMap::new(),
         }
     }
 }
@@ -161,14 +166,18 @@ pub struct Runtime {
     /// Per-node scalar outputs of the current frame, port name → value.
     outputs: Vec<HashMap<String, f32>>,
     /// Event ports that fired this frame.
-    events: Vec<Vec<&'static str>>,
+    events: Vec<Vec<String>>,
     /// How many times each event port has fired since the runtime (or the one
     /// it adopted state from) started: what an event's meter shows, since a
     /// one-frame pulse is invisible at the meters' sample rate.
-    event_counts: Vec<HashMap<&'static str, u32>>,
+    event_counts: Vec<HashMap<String, u32>>,
     /// One-shot effects emitted by Event effect nodes during the latest eval,
     /// with each node's `effects::effect_source`.
     emitted_effects: Vec<(EffectCfg, u32)>,
+    /// The compiled body of every CPU Code node (`None` elsewhere). A
+    /// validated document always compiles; a body that somehow does not
+    /// simply outputs zeros.
+    scripts: Vec<Option<script::Script>>,
 }
 
 impl Runtime {
@@ -179,6 +188,15 @@ impl Runtime {
         let n = doc.nodes.len();
         let slab = vec![0.0; prog.slab_len];
         let slot_acc = vec![0.0; prog.slots.len()];
+        let scripts = doc
+            .nodes
+            .iter()
+            .map(|n| {
+                n.code()
+                    .filter(|_| n.is_cpu())
+                    .and_then(|def| script::compile(def).ok())
+            })
+            .collect();
         Self {
             doc,
             prog,
@@ -189,6 +207,7 @@ impl Runtime {
             events: vec![Vec::new(); n],
             event_counts: vec![HashMap::new(); n],
             emitted_effects: Vec::new(),
+            scripts,
         }
     }
 
@@ -273,20 +292,20 @@ impl Runtime {
             Some((n, p)) => (n.as_str(), p.as_str()),
             None => (node_id, param),
         };
-        if let Some(n) = self.doc.nodes.iter_mut().find(|n| n.id == node_id) {
-            if let Some(def) = registry::lookup(&n.kind).and_then(|ty| ty.param(param)) {
-                n.params
-                    .insert(param.to_string(), sanitize_param(def, value));
-            }
+        if let Some(n) = self.doc.nodes.iter_mut().find(|n| n.id == node_id)
+            && has_param(n, param)
+        {
+            let v = sanitize(n, param, value);
+            n.params.insert(param.to_string(), v);
         }
     }
 
     fn param(&self, node: usize, param: &str) -> f32 {
         let inst = &self.doc.nodes[node];
-        let Some(def) = registry::lookup(&inst.kind).and_then(|ty| ty.param(param)) else {
+        if !has_param(inst, param) {
             return 0.0;
-        };
-        sanitize_param(def, inst.param(param))
+        }
+        sanitize(inst, param, inst.param(param))
     }
 
     /// A CPU node's input: the wired upstream output, else the knob value.
@@ -297,9 +316,7 @@ impl Runtime {
             // Nodes that need a hard limit apply it themselves.
             Some((from, from_port)) => {
                 let raw = self.outputs[*from].get(from_port).copied().unwrap_or(0.0);
-                let fallback = registry::lookup(&self.doc.nodes[node].kind)
-                    .and_then(|ty| ty.param(port))
-                    .map_or(0.0, |def| def.default);
+                let fallback = self.doc.nodes[node].knob(port).map_or(0.0, |k| k.default);
                 finite_or(raw, fallback)
             }
             None => self.param(node, port),
@@ -308,7 +325,7 @@ impl Runtime {
 
     fn event_fired(&self, node: usize, port: &str) -> bool {
         match self.prog.wires.get(&(node, port.to_string())) {
-            Some((from, from_port)) => self.events[*from].iter().any(|p| *p == from_port.as_str()),
+            Some((from, from_port)) => self.events[*from].iter().any(|p| p == from_port),
             None => false,
         }
     }
@@ -373,7 +390,7 @@ impl Runtime {
                         w
                     };
                     if wrapped {
-                        self.events[node].push("wrap");
+                        self.events[node].push("wrap".into());
                     }
                     let o = &mut self.outputs[node];
                     o.insert("out".into(), value as f32);
@@ -398,7 +415,7 @@ impl Runtime {
                     o.insert("tempo".into(), a.bpm / 120.0);
                     let st = &mut self.state[node];
                     if a.bpm > 0.0 && a.beat_phase < st.prev_beat - 0.5 {
-                        self.events[node].push("beat");
+                        self.events[node].push("beat".into());
                     }
                     st.prev_beat = a.beat_phase;
                 }
@@ -425,7 +442,7 @@ impl Runtime {
                 "tap" => {
                     let st = &mut self.state[node];
                     if st.prev_seq != u64::MAX && inp.effect_seq > st.prev_seq {
-                        self.events[node].push("tap");
+                        self.events[node].push("tap".into());
                     }
                     st.prev_seq = inp.effect_seq;
                 }
@@ -450,17 +467,17 @@ impl Runtime {
                             // The first finger lands / the last one lifts. A
                             // whole tap inside one frame still gives both.
                             if downs && st.prev_held == 0 {
-                                self.events[node].push("down");
+                                self.events[node].push("down".into());
                             }
                             if ups && held == 0 {
-                                self.events[node].push("up");
+                                self.events[node].push("up".into());
                             }
                         } else {
                             if downs {
-                                self.events[node].push("down");
+                                self.events[node].push("down".into());
                             }
                             if ups {
-                                self.events[node].push("up");
+                                self.events[node].push("up".into());
                             }
                         }
                     }
@@ -506,7 +523,7 @@ impl Runtime {
                         if st.prev_dj_seq[event] != u64::MAX
                             && dj.event_seq[event] > st.prev_dj_seq[event]
                         {
-                            self.events[node].push(port);
+                            self.events[node].push((*port).into());
                         }
                         st.prev_dj_seq[event] = dj.event_seq[event];
                     }
@@ -676,7 +693,7 @@ impl Runtime {
                         st.from = current(st);
                         st.target = lo + (hi - lo) * next_unit(&mut st.rng);
                         st.glide_t = 0.0;
-                        self.events[node].push("changed");
+                        self.events[node].push("changed".into());
                     } else {
                         st.glide_t += dt;
                     }
@@ -698,7 +715,7 @@ impl Runtime {
                         // Also covers Steps turned down below the count.
                         st.count = 0;
                         if count {
-                            self.events[node].push("wrap");
+                            self.events[node].push("wrap".into());
                         }
                     }
                     let n = st.count;
@@ -727,7 +744,7 @@ impl Runtime {
                         now = false;
                     }
                     if now != was {
-                        self.events[node].push(if now { "on" } else { "off" });
+                        self.events[node].push((if now { "on" } else { "off" }).into());
                     }
                     st.latch = Some(now);
                     self.outputs[node].insert("out".into(), f32::from(now));
@@ -745,7 +762,7 @@ impl Runtime {
                     if let Some(was) = st.latch
                         && was != now
                     {
-                        self.events[node].push(if now { "rise" } else { "fall" });
+                        self.events[node].push((if now { "rise" } else { "fall" }).into());
                     }
                     st.latch = Some(now);
                     self.outputs[node].insert("out".into(), f32::from(now));
@@ -775,13 +792,13 @@ impl Runtime {
                         }
                     }
                     if fire {
-                        self.events[node].push("out");
+                        self.events[node].push("out".into());
                     }
                 }
                 "event_merge" => {
                     let open = self.input(node, "open") > 0.5;
                     if open && ["a", "b", "c", "d"].iter().any(|p| self.event_fired(node, p)) {
-                        self.events[node].push("out");
+                        self.events[node].push("out".into());
                     }
                 }
                 "sequence" => {
@@ -799,7 +816,7 @@ impl Runtime {
                         if st.count >= steps {
                             st.count = 0;
                             if step {
-                                self.events[node].push("wrap");
+                                self.events[node].push("wrap".into());
                             }
                         }
                         st.count
@@ -809,10 +826,47 @@ impl Runtime {
                     o.insert("out".into(), v);
                     o.insert("index".into(), index as f32);
                 }
+                "code" => {
+                    // The body sees its inputs (a Scalar's wire or knob, an
+                    // Event's "fired this frame"), runs with its persistent
+                    // slots, and hands back one value per output.
+                    let Some(def) = self.doc.nodes[node].code() else { continue };
+                    let Some(script) = self.scripts[node].as_ref() else { continue };
+                    let inputs: Vec<script::Value> = def
+                        .inputs
+                        .iter()
+                        .map(|p| match p.shape {
+                            Shape::Event => script::Value::Bool(self.event_fired(node, &p.name)),
+                            _ => script::Value::Num(self.input(node, &p.name)),
+                        })
+                        .collect();
+                    let names = script.state_names();
+                    let mut state: Vec<f32> = names
+                        .iter()
+                        .map(|n| self.state[node].code_state.get(n).copied().unwrap_or(0.0))
+                        .collect();
+                    let outputs = script.run(&inputs, dt, &mut state);
+                    let st = &mut self.state[node];
+                    for (name, v) in names.iter().zip(state) {
+                        st.code_state.insert(name.clone(), finite_or(v, 0.0));
+                    }
+                    for (p, v) in def.outputs.iter().zip(outputs) {
+                        match p.shape {
+                            Shape::Event => {
+                                if v.truth() {
+                                    self.events[node].push(p.name.clone());
+                                }
+                            }
+                            _ => {
+                                self.outputs[node].insert(p.name.clone(), finite_or(v.num(), 0.0));
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
             for port in &self.events[node] {
-                *self.event_counts[node].entry(port).or_insert(0) += 1;
+                *self.event_counts[node].entry(port.clone()).or_insert(0) += 1;
             }
         }
 
@@ -828,9 +882,7 @@ impl Runtime {
             // WGSL, so an out-of-range value can look odd but never hang.
             let v = match (&slot.wired, &slot.param) {
                 (Some(_), Some(param)) => {
-                    let fallback = registry::lookup(&self.doc.nodes[slot.node].kind)
-                        .and_then(|ty| ty.param(param))
-                        .map_or(0.0, |def| def.default);
+                    let fallback = self.doc.nodes[slot.node].knob(param).map_or(0.0, |k| k.default);
                     finite_or(raw, fallback)
                 }
                 _ => finite_or(raw, 0.0),
@@ -873,11 +925,28 @@ fn finite_or(value: f32, fallback: f32) -> f32 {
     if value.is_finite() { value } else { fallback }
 }
 
-fn sanitize_param(def: &registry::ParamDef, value: f32) -> f32 {
-    let value = finite_or(value, def.default).clamp(def.min, def.max);
-    match def.kind {
-        ParamKind::Number => value,
-        ParamKind::Select(_) => value.round(),
+/// Whether `name` is something this node stores a value for: a knob, or a
+/// Select param of a built-in node.
+pub fn has_param(node: &NodeInst, name: &str) -> bool {
+    node.knob(name).is_some()
+        || registry::lookup(&node.kind).and_then(|t| t.param(name)).is_some()
+}
+
+/// `value` held to the param's range: a knob's, or a Select's (rounded to
+/// an option index).
+pub fn sanitize(node: &NodeInst, name: &str, value: f32) -> f32 {
+    if let Some(k) = node.knob(name) {
+        return finite_or(value, k.default).clamp(k.min, k.max);
+    }
+    match registry::lookup(&node.kind).and_then(|t| t.param(name)) {
+        Some(def) => {
+            let value = finite_or(value, def.default).clamp(def.min, def.max);
+            match def.kind {
+                ParamKind::Number => value,
+                ParamKind::Select(_) => value.round(),
+            }
+        }
+        None => 0.0,
     }
 }
 
@@ -962,7 +1031,7 @@ mod tests {
             t.apply(1, 0.0, at(1, TouchPhase::Down, 1.0), c);
             assert_eq!(frame(&t, &mut rt), vec!["down"]);
             t.apply(1, 0.0, at(2, TouchPhase::Down, 2.0), c);
-            assert_eq!(frame(&t, &mut rt).contains(&"down"), expect_second_down);
+            assert_eq!(frame(&t, &mut rt).iter().any(|e| e == "down"), expect_second_down);
             assert_eq!(rt.scalar_value(0, "angle"), expect_angle);
             assert_eq!(rt.scalar_value(0, "count"), 2.0);
             t.apply(1, 0.0, at(1, TouchPhase::Up, 1.0), c);
@@ -1096,7 +1165,7 @@ mod tests {
             let mut wraps = 0;
             for _ in 0..steps {
                 rt.eval(&inp);
-                wraps += rt.events[0].iter().filter(|e| **e == "wrap").count();
+                wraps += rt.events[0].iter().filter(|e| e.as_str() == "wrap").count();
             }
             (rt.scalar_value(0, "out"), rt.scalar_value(0, "phase"), wraps)
         };
@@ -1134,7 +1203,7 @@ mod tests {
 
     fn fired(rt: &Runtime, id: &str, port: &str) -> bool {
         let i = rt.doc.nodes.iter().position(|n| n.id == id).unwrap();
-        rt.events[i].contains(&port)
+        rt.events[i].iter().any(|p| p == port)
     }
 
     fn value(rt: &Runtime, id: &str, port: &str) -> f32 {
@@ -1579,7 +1648,7 @@ mod tests {
         };
         let mut rt = runtime(doc.clone());
         let ti = rt.doc.nodes.iter().position(|n| n.id == "t").unwrap();
-        assert!(rt.prog.preview_scalars.contains(&(ti, "wrap")), "events are metered");
+        assert!(rt.prog.preview_scalars.contains(&(ti, "wrap".to_string())), "events are metered");
         let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
         assert_eq!(rt.scalar_value(ti, "wrap"), 0.0);
         for _ in 0..10 {

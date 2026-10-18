@@ -1,5 +1,5 @@
 {
-  "format": 4,
+  "format": 5,
   "id": "builtin-ember-canvas",
   "name": "Ember Canvas",
   "description": "Slow breathing fire beneath live finger painting and show effects, each routed as an independent layer with its own scale and gain.",

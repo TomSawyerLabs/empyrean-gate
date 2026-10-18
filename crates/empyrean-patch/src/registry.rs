@@ -55,6 +55,89 @@ pub enum Category {
     Texture,
     /// The one required end of every renderable patch.
     Sink,
+    /// Nodes whose ports and body are written by the user (see `code`).
+    Code,
+}
+
+/// Node kinds the evaluator runs on the CPU every frame (Scalar/Event
+/// tier). A Code node's tier is per instance: see `NodeInst::is_cpu`.
+pub fn is_cpu_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "time"
+            | "slider"
+            | "globals"
+            | "audio"
+            | "imu"
+            | "tap"
+            | "touch"
+            | "dj_link"
+            | "event_effect"
+            | "scalar_math"
+            | "lfo"
+            | "smooth"
+            | "envelope"
+            | "map_range"
+            | "mix"
+            | "clamp"
+            | "random"
+            | "counter"
+            | "toggle"
+            | "threshold"
+            | "delay"
+            | "event_merge"
+            | "sequence"
+    )
+}
+
+/// Node kinds codegen compiles into the patch shader. A Code node's tier is
+/// per instance: see `NodeInst::is_gpu`.
+pub fn is_gpu_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "solid"
+            | "gradient"
+            | "gradient_radial"
+            | "noise_field"
+            | "noise_color"
+            | "radial_waves"
+            | "spiral"
+            | "plasma"
+            | "spoke_chase"
+            | "sparkle"
+            | "touch_mask"
+            | "touch_glow"
+            | "beat_rings"
+            | "breathe"
+            | "rainbow"
+            | "wedges"
+            | "interference"
+            | "fire"
+            | "cosmic_drift"
+            | "earth_current"
+            | "meteors"
+            | "warp"
+            | "waveform"
+            | "spectrum"
+            | "transform"
+            | "colorize"
+            | "blend"
+            | "effects_in"
+            | "render_effects"
+            | "touch_dabs"
+            | "render_points"
+            | "video_in"
+            | "image_in"
+            | "clip"
+            | "coordinate"
+            | "feedback"
+            | "field_math"
+            | "luminance"
+            | "color_adjust"
+            | "palette"
+            | "texture_sample"
+            | "output"
+    )
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -112,6 +195,7 @@ pub fn palette_json() -> serde_json::Value {
         Category::Combine => "combine",
         Category::Texture => "texture",
         Category::Sink => "sink",
+        Category::Code => "code",
     };
     json!(
         TYPES
@@ -1395,6 +1479,17 @@ pub const TYPES: &[NodeType] = &[
         category: Category::Combine,
         inputs: &[],
         outputs: COLOR_OUT,
+        params: &[],
+    },
+    NodeType {
+        // A Code node's ports and body live on the instance (`NodeInst::code`,
+        // see `code`): all Scalar/Event ports → interpreted on the CPU; a
+        // field output → pasted into the shader. No static ports or params.
+        id: "code",
+        label: "Code",
+        category: Category::Code,
+        inputs: &[],
+        outputs: &[],
         params: &[],
     },
     NodeType {

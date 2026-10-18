@@ -1899,7 +1899,12 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                                 live_patch_id = Some(id.clone());
                             }
                             Err(e) => {
-                                patch_error = Some(format!("patch pipeline failed: {e:#}"));
+                                // Shader errors inside a Code node's body point at the
+                                // user's own lines.
+                                patch_error = Some(format!(
+                                    "patch pipeline failed: {}",
+                                    prog.relocate_error(&format!("{e:#}"))
+                                ));
                                 if !retain_last_good {
                                     patch_rt = None;
                                     patch_wgsl = None;

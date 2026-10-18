@@ -1,5 +1,5 @@
 {
-  "format": 4,
+  "format": 5,
   "id": "builtin-touch-ripples",
   "name": "Touch Ripples",
   "description": "A patch that owns touch, with nothing hidden: every finger glows in its toucher's color and grows while held, and each touchdown fires a burst where it landed, over a dim plasma. The burst shows because its effects are wired through Render effects into the blend; rewire the Touch node to make touch do anything else.",

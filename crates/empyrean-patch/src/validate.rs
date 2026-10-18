@@ -2,6 +2,7 @@
 //! editor needs to refuse bad wires at drag time is expressed here once, and
 //! the engine re-checks on activation — the backend never trusts a client.
 
+use super::code;
 use super::registry::{self, NodeType};
 use super::{MAX_MEDIA_BYTES, MAX_PATCH_EDGES, MAX_PATCH_IMAGES, MAX_PATCH_NODES, PATCH_FORMAT, PatchDoc};
 use std::collections::{HashMap, HashSet};
@@ -76,6 +77,11 @@ pub enum PatchError {
         node: String,
         detail: String,
     },
+    /// A Code node's ports or body are unusable (see `code::CodeDef::check`).
+    Code {
+        node: String,
+        detail: String,
+    },
 }
 
 impl fmt::Display for PatchError {
@@ -113,6 +119,7 @@ impl fmt::Display for PatchError {
                 "a patch may carry at most {MAX_PATCH_IMAGES} Still images ({count} here)"
             ),
             Self::BadMedia { node, detail } => write!(f, "node \"{node}\": {detail}"),
+            Self::Code { node, detail } => write!(f, "Code node \"{node}\": {detail}"),
             Self::Subpatch { detail } => f.write_str(detail),
             Self::Cycle { nodes } => write!(f, "dependency cycle through: {}", nodes.join(", ")),
             Self::ExposedUnknown { node, param } => {
@@ -169,9 +176,27 @@ pub fn validate(doc: &PatchDoc) -> Result<Validated, Vec<PatchError>> {
                 errors.push(PatchError::BadMedia { node: n.id.clone(), detail });
             }
         }
+        // A Code node's interface is data: refuse what the generator or the
+        // interpreter could not take before any wire is judged against it.
+        if n.kind == code::KIND {
+            let detail = match &n.code {
+                None => Some("it has no code (ports and body)".to_string()),
+                Some(def) => def.check().err(),
+            };
+            if let Some(detail) = detail {
+                errors.push(PatchError::Code { node: n.id.clone(), detail });
+            }
+        } else if n.code.is_some() {
+            errors.push(PatchError::Code {
+                node: n.id.clone(),
+                detail: "only Code nodes carry code".to_string(),
+            });
+        }
     }
 
-    // Node ids -> index, kinds resolved.
+    // Node ids -> index, kinds resolved. Port shapes are read from the
+    // instance (`NodeInst::input_shape` …) so Code nodes' declared ports
+    // count; `types` only says whether the kind exists.
     let mut index: HashMap<&str, usize> = HashMap::new();
     let mut types: Vec<Option<&'static NodeType>> = Vec::with_capacity(doc.nodes.len());
     for (i, n) in doc.nodes.iter().enumerate() {
@@ -212,18 +237,18 @@ pub fn validate(doc: &PatchDoc) -> Result<Validated, Vec<PatchError>> {
         let (Some(fi), Some(ti)) = (from_idx, to_idx) else {
             continue;
         };
-        let (Some(ft), Some(tt)) = (types[fi], types[ti]) else {
+        if types[fi].is_none() || types[ti].is_none() {
             continue;
-        };
+        }
 
-        let from_shape = ft.output_shape(&e.from.port);
+        let from_shape = doc.nodes[fi].output_shape(&e.from.port);
         if from_shape.is_none() {
             errors.push(PatchError::UnknownOutput {
                 node: e.from.node.clone(),
                 port: e.from.port.clone(),
             });
         }
-        let to_shape = tt.input_shape(&e.to.port);
+        let to_shape = doc.nodes[ti].input_shape(&e.to.port);
         if to_shape.is_none() {
             errors.push(PatchError::BadInput {
                 node: e.to.node.clone(),
@@ -254,11 +279,12 @@ pub fn validate(doc: &PatchDoc) -> Result<Validated, Vec<PatchError>> {
     }
 
     for x in &doc.exposed {
-        let known = index
-            .get(x.node.as_str())
-            .and_then(|i| types[*i])
-            .and_then(|t| t.param(&x.param))
-            .is_some();
+        // Any param of a built-in node (Selects included), or a knob of a
+        // Code node.
+        let known = index.get(x.node.as_str()).is_some_and(|&i| {
+            let n = &doc.nodes[i];
+            types[i].is_some_and(|t| t.param(&x.param).is_some()) || n.knob(&x.param).is_some()
+        });
         if !known {
             errors.push(PatchError::ExposedUnknown {
                 node: x.node.clone(),

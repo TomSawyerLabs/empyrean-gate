@@ -188,7 +188,9 @@ impl Sim {
                 .nodes
                 .iter()
                 .zip(&doc.nodes)
-                .all(|(a, b)| a.id == b.id && a.kind == b.kind);
+                // A CPU Code node's body is not in the shader or the wires:
+                // an edit to it must rebuild the evaluator.
+                .all(|(a, b)| a.id == b.id && a.kind == b.kind && a.code == b.code);
         if same_graph {
             for node in &doc.nodes {
                 for (param, value) in &node.params {

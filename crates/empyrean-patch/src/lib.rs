@@ -11,6 +11,7 @@
 
 pub mod abi;
 pub mod audio;
+pub mod code;
 pub mod codegen;
 pub mod effects;
 pub mod eval;
@@ -18,6 +19,7 @@ pub mod flatten;
 pub mod migrate;
 pub mod presets;
 pub mod registry;
+pub mod script;
 pub mod sim;
 pub mod touch;
 pub mod validate;
@@ -30,9 +32,9 @@ use std::collections::BTreeMap;
 /// 2: the Output adds nothing that isn't wired (effects and pen strokes are
 /// streams). 3: Still image nodes carry their own image ([`NodeInst::media`]).
 /// 4: Sub-patch nodes carry another document ([`NodeInst::sub`]; Clips carry
-/// a sprite sheet in `media`). Older files are upgraded by
-/// [`migrate::migrate`].
-pub const PATCH_FORMAT: u32 = 4;
+/// a sprite sheet in `media`). 5: Code nodes carry their ports and body
+/// ([`NodeInst::code`]). Older files are upgraded by [`migrate::migrate`].
+pub const PATCH_FORMAT: u32 = 5;
 
 /// Pictures a patch may carry (Still image and Clip nodes), each its own
 /// media cell on the GPU.
@@ -142,18 +144,141 @@ pub struct NodeInst {
     /// are this node's inputs, its Output this node's `out`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub: Option<Box<PatchDoc>>,
+    /// A Code node's own ports and body (see [`code`]): its declared inputs
+    /// are this node's input ports (Scalar ones are knobs too), its declared
+    /// outputs its output ports.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<Box<code::CodeDef>>,
+}
+
+/// A knob: the range of a Number param of a built-in node, or of a Scalar
+/// input of a Code node. The knob value is the fallback when nothing is
+/// wired in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Knob {
+    pub min: f32,
+    pub max: f32,
+    pub default: f32,
+    /// The engine integrates this value over time (× master speed).
+    pub integrate: bool,
 }
 
 impl NodeInst {
-    /// The effective value of a param: the stored knob, or the registry default.
+    /// The effective value of a param: the stored knob, or the default.
     pub fn param(&self, name: &str) -> f32 {
         if let Some(v) = self.params.get(name) {
             return *v;
         }
+        self.knob(name).map(|k| k.default).unwrap_or(0.0)
+    }
+
+    /// A Code node's definition, when this is a Code node that has one.
+    pub fn code(&self) -> Option<&code::CodeDef> {
+        if self.kind == code::KIND { self.code.as_deref() } else { None }
+    }
+
+    /// Whether this node runs on the CPU (Scalar/Event tier). A Code node
+    /// follows its ports; a Code node whose ports make no sense counts as
+    /// CPU, so validation (which refuses it) is the only place it matters.
+    pub fn is_cpu(&self) -> bool {
+        match self.code() {
+            Some(def) => def.tier().unwrap_or(code::Tier::Cpu) == code::Tier::Cpu,
+            None => registry::is_cpu_kind(&self.kind),
+        }
+    }
+
+    /// Whether this node is compiled into the patch shader (field tier).
+    pub fn is_gpu(&self) -> bool {
+        match self.code() {
+            Some(def) => def.tier() == Ok(code::Tier::Gpu),
+            None => registry::is_gpu_kind(&self.kind),
+        }
+    }
+
+    /// The knob behind `name`: a Number param (not a Select) of a built-in
+    /// node, or a Scalar input of a Code node.
+    pub fn knob(&self, name: &str) -> Option<Knob> {
+        if let Some(def) = self.code() {
+            let p = def.input(name).filter(|p| p.shape == Shape::Scalar)?;
+            return Some(Knob {
+                min: p.min,
+                max: p.max,
+                default: p.default,
+                integrate: false,
+            });
+        }
+        let p = registry::lookup(&self.kind)?.param(name)?;
+        match p.kind {
+            registry::ParamKind::Number => Some(Knob {
+                min: p.min,
+                max: p.max,
+                default: p.default,
+                integrate: p.integrate,
+            }),
+            registry::ParamKind::Select(_) => None,
+        }
+    }
+
+    /// Every knob of this node, in declaration order, with its name.
+    pub fn knobs(&self) -> Vec<(String, Knob)> {
+        if let Some(def) = self.code() {
+            return def
+                .inputs
+                .iter()
+                .filter(|p| p.shape == Shape::Scalar)
+                .filter_map(|p| self.knob(&p.name).map(|k| (p.name.clone(), k)))
+                .collect();
+        }
         registry::lookup(&self.kind)
-            .and_then(|t| t.param(name))
-            .map(|p| p.default)
-            .unwrap_or(0.0)
+            .map(|t| {
+                t.params
+                    .iter()
+                    .filter_map(|p| self.knob(p.name).map(|k| (p.name.to_string(), k)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Shape of an input port: a shaped input, a Number param's implicit
+    /// Scalar port, or a Code node's declared input. `None` for unknown
+    /// ports and for Select params (which cannot be wired).
+    pub fn input_shape(&self, name: &str) -> Option<Shape> {
+        if let Some(def) = self.code() {
+            return def.input(name).map(|p| p.shape);
+        }
+        registry::lookup(&self.kind)?.input_shape(name)
+    }
+
+    pub fn output_shape(&self, name: &str) -> Option<Shape> {
+        if let Some(def) = self.code() {
+            return def.output(name).map(|p| p.shape);
+        }
+        registry::lookup(&self.kind)?.output_shape(name)
+    }
+
+    /// The shaped inputs (not knobs) of this node, in declaration order.
+    pub fn shaped_inputs(&self) -> Vec<(String, Shape)> {
+        if let Some(def) = self.code() {
+            return def
+                .inputs
+                .iter()
+                .filter(|p| p.shape != Shape::Scalar)
+                .map(|p| (p.name.clone(), p.shape))
+                .collect();
+        }
+        registry::lookup(&self.kind)
+            .map(|t| t.inputs.iter().map(|p| (p.name.to_string(), p.shape)).collect())
+            .unwrap_or_default()
+    }
+
+    /// The output ports of this node, in declaration order.
+    pub fn outputs(&self) -> Vec<(String, Shape)> {
+        if let Some(def) = self.code() {
+            return def.outputs.iter().map(|p| (p.name.clone(), p.shape)).collect();
+        }
+        registry::lookup(&self.kind)
+            .map(|t| t.outputs.iter().map(|p| (p.name.to_string(), p.shape)).collect())
+            .unwrap_or_default()
     }
 }
 
