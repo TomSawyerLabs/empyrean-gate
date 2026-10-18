@@ -36,6 +36,17 @@ repeats on clean `master` (faee0ec), 3 in 12 on `patch-crate`, Windows
 (2026-10-15). Chromium passes. Looks timing-dependent (the drag router's
 swallow window vs WebKit's click delivery under load), not a behaviour change.
 
+## `live-controls` brightness-to-0 test flakes on WebKit under a full run
+
+`tests/live-controls.spec.ts` "brightness can be driven to 0 and back up"
+failed once on WebKit in a full `test:behavior` run (Windows, 2026-10-18,
+gate 282f593 + a test fix): after dragging the master brightness slider
+40 px past its left end, the readout stayed at "0.05" where "0.00" was
+expected (`expect(readout).toHaveText("0.00")`, line 62). It passed 36/36
+run alone (`--project=webkit --repeat-each=6`). Probably the same
+load-dependent drag timing as the `multitouch` flake above; seen while
+working on the patch editor, unrelated to it.
+
 ## Hover-only `title=` tooltips across the app and the patch editor
 
 About 30 `title=` attributes carry information only a mouse hover reveals
