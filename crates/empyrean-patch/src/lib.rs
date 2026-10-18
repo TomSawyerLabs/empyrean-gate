@@ -13,6 +13,7 @@ pub mod abi;
 pub mod audio;
 pub mod code;
 pub mod codegen;
+pub mod convert;
 pub mod effects;
 pub mod eval;
 pub mod flatten;
@@ -284,7 +285,7 @@ impl NodeInst {
                 min: p.min,
                 max: p.max,
                 default: p.default,
-                integrate: false,
+                integrate: p.integrate,
             });
         }
         let p = registry::lookup(&self.kind)?.param(name)?;

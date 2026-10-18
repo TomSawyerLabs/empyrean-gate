@@ -133,6 +133,17 @@ pub fn code_reference() -> String {
     empyrean_patch::reference::code_reference_json().to_string()
 }
 
+/// "Convert to Code": node `id` of the patch becomes a Code node with the
+/// same wires and knob values and a body that reproduces it (see the
+/// crate's `convert`). Returns the new document; throws when the node
+/// cannot be converted.
+#[wasm_bindgen(js_name = convertToCode)]
+pub fn convert_to_code(doc: &str, id: &str) -> Result<String, JsError> {
+    let mut doc = parse_doc(doc)?;
+    empyrean_patch::convert::convert(&mut doc, id).map_err(|e| JsError::new(&e))?;
+    Ok(serde_json::to_string(&doc).expect("patch serializes"))
+}
+
 /// Effect kinds in GPU-id order, by their serde (wire) names.
 #[wasm_bindgen]
 pub fn effect_kinds() -> String {

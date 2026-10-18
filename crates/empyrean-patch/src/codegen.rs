@@ -346,6 +346,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         images: &images,
         wires: &wires,
         slot_of: &slot_of,
+        symbolic: false,
     };
     let mut code = String::new();
     code.push_str(PATCH_LIB_WGSL);
@@ -443,6 +444,25 @@ struct Gen<'a> {
     images: &'a [(usize, u32)],
     wires: &'a HashMap<(usize, String), (usize, String)>,
     slot_of: &'a HashMap<(usize, String), usize>,
+    /// "Convert to Code" mode: knob refs are the knob's (port) name, field
+    /// inputs the port's name (`name_at(ctx)` when sampled elsewhere), so a
+    /// node's body reads as a Code node body. See `convert`.
+    symbolic: bool,
+}
+
+/// A built-in GPU node's body as a Code node body would write it: knobs and
+/// inputs by port name (see `Gen::symbolic`), one `return` at the end.
+pub fn builtin_body(doc: &PatchDoc, node: usize) -> Result<String, String> {
+    let wires = HashMap::new();
+    let slot_of = HashMap::new();
+    let g = Gen {
+        doc,
+        images: &[],
+        wires: &wires,
+        slot_of: &slot_of,
+        symbolic: true,
+    };
+    g.body_of(node)
 }
 
 impl Gen<'_> {
@@ -516,6 +536,9 @@ impl Gen<'_> {
     /// `P[..]` reference for a knob (Number param, or a Code node's Scalar
     /// input) of a GPU node.
     fn p(&self, node: usize, param: &str) -> String {
+        if self.symbolic {
+            return crate::convert::port_name(param);
+        }
         let slot = self
             .slot_of
             .get(&(node, param.to_string()))
@@ -546,8 +569,18 @@ impl Gen<'_> {
         self.wires.get(&(node, port.to_string()))
     }
 
+    /// In symbolic mode, a field input by its port name: its value here, or
+    /// its `_at` form sampled at `ctx`.
+    fn symbolic_input(&self, port: &str, ctx: &str) -> String {
+        let name = crate::convert::port_name(port);
+        if ctx == "c" { name } else { format!("{name}_at({ctx})") }
+    }
+
     /// Expression for a Field<color> input port, sampling at `ctx`.
     fn color_input(&self, node: usize, port: &str, ctx: &str) -> String {
+        if self.symbolic {
+            return self.symbolic_input(port, ctx);
+        }
         match self.upstream(node, port) {
             None => "vec4f(0.0)".into(),
             Some((from, from_port)) => {
@@ -563,6 +596,9 @@ impl Gen<'_> {
 
     /// Expression for a Field<f32> input port, sampling at `ctx`.
     fn scalar_field_input(&self, node: usize, port: &str, ctx: &str) -> String {
+        if self.symbolic {
+            return self.symbolic_input(port, ctx);
+        }
         match self.upstream(node, port) {
             None => "0.0".into(),
             Some((from, from_port)) => {
@@ -629,10 +665,14 @@ impl Gen<'_> {
                 writeln!(code, "    let {name} = n{i}_in_{name}(c);", name = p.name).unwrap();
             }
         }
+        let record = format!(
+            "N{i}Out({})",
+            def.outputs.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+        );
         code.push_str("    {\n");
         let first = code.matches('\n').count() + 1;
         let count = def.body.split('\n').count();
-        code.push_str(&code::rewrite_body(&def.body, i, &fields));
+        code.push_str(&code::rewrite_body(&def.body, i, &fields, &record));
         code.push_str("\n    }\n");
         let record = def
             .outputs
@@ -666,6 +706,36 @@ impl Gen<'_> {
     }
 
     fn node_fn(&self, code: &mut String, i: usize) -> Result<(), String> {
+        let kind = self.doc.nodes[i].kind.as_str();
+        let body = self.body_of(i)?;
+        if body.is_empty() {
+            // A stream/texture source: no function of its own.
+            return Ok(());
+        }
+        let ret = match registry::lookup(kind).and_then(|t| t.output_shape("out")) {
+            Some(Shape::FieldScalar) => "f32",
+            _ => "vec4f",
+        };
+        // Transform/texture_sample rename their ctx arg (they derive a
+        // transformed copy).
+        let arg = if kind == "transform" || kind == "texture_sample" {
+            "c0"
+        } else {
+            "c"
+        };
+        writeln!(code, "\nfn n{i}_f({arg}: Ctx) -> {ret} {{").unwrap();
+        // A node with no ctx-dependent body (e.g. solid) leaves `c` unused;
+        // keep naga quiet about it.
+        writeln!(code, "    let _unused = {arg}.rn;").unwrap();
+        writeln!(code, "{body}").unwrap();
+        code.push_str("}\n");
+        Ok(())
+    }
+
+    /// The WGSL body of a built-in GPU node (the statements inside its
+    /// `n<i>_f`), or an empty string for the stream/texture sources, which
+    /// have no function of their own.
+    fn body_of(&self, i: usize) -> Result<String, String> {
         let kind = self.doc.nodes[i].kind.as_str();
         let body = match kind {
             "solid" => format!(
@@ -1155,18 +1225,18 @@ impl Gen<'_> {
             }
             // No function of its own: it marks the live-draw dab stream as a
             // Points source for Render points (which reads DABS directly).
-            "touch_dabs" => return Ok(()),
+            "touch_dabs" => return Ok(String::new()),
             // Marker for the live triggered-effect stream. Render effects reads
             // the bounded FX buffer directly.
-            "effects_in" => return Ok(()),
+            "effects_in" => return Ok(String::new()),
             // Likewise: marks the live video frame as a Texture source.
-            "video_in" => return Ok(()),
+            "video_in" => return Ok(String::new()),
             // Still images use that same browser-decoded RGBA texture, but a
             // separate source node makes the patch's media contract explicit.
-            "image_in" => return Ok(()),
+            "image_in" => return Ok(String::new()),
             // A Clip is a Still image whose sheet holds frames; sampled by
             // Texture sample through `clip_at`.
-            "clip" => return Ok(()),
+            "clip" => return Ok(String::new()),
             "coordinate" => {
                 let which = match self.select(i, "which") {
                     // rn runs inner_over_outer..1; after a Transform it is the
@@ -1331,26 +1401,7 @@ impl Gen<'_> {
             }
             other => return Err(format!("no GPU codegen for node kind \"{other}\"")),
         };
-
-        // Scalar fields are `f32`, colour fields `vec4f` (rgb, coverage).
-        let ret = match registry::lookup(kind).and_then(|t| t.output_shape("out")) {
-            Some(Shape::FieldScalar) => "f32",
-            _ => "vec4f",
-        };
-        // Transform/texture_sample rename their ctx arg (they derive a
-        // transformed copy).
-        let arg = if kind == "transform" || kind == "texture_sample" {
-            "c0"
-        } else {
-            "c"
-        };
-        writeln!(code, "\nfn n{i}_f({arg}: Ctx) -> {ret} {{").unwrap();
-        // A node with no ctx-dependent body (e.g. solid) leaves `c` unused;
-        // keep naga quiet about it.
-        writeln!(code, "    let _unused = {arg}.rn;").unwrap();
-        writeln!(code, "{body}").unwrap();
-        code.push_str("}\n");
-        Ok(())
+        Ok(body)
     }
 
     fn main_fn(&self, code: &mut String, output: usize) -> Result<(), String> {
@@ -1802,6 +1853,7 @@ mod tests {
             min: 0.0,
             max: 2.0,
             default: 1.0,
+            integrate: false,
         };
         code::CodeDef {
             inputs: inputs.iter().map(port).collect(),

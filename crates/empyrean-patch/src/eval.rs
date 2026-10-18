@@ -845,7 +845,7 @@ impl Runtime {
                         .iter()
                         .map(|n| self.state[node].code_state.get(n).copied().unwrap_or(0.0))
                         .collect();
-                    let outputs = script.run(&inputs, dt, &mut state);
+                    let outputs = script.run(&inputs, dt, ms, &mut state);
                     let st = &mut self.state[node];
                     for (name, v) in names.iter().zip(state) {
                         st.code_state.insert(name.clone(), finite_or(v, 0.0));

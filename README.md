@@ -258,7 +258,12 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   `GET /patch/code-reference`, Tab indents, Ctrl+Space), shader errors
   inside a body are marked on its own lines, and every output of a Code
   node gets a live mini (a ring per field output, a meter per scalar or
-  event) on the node and beside the editor (`plans/code-node.md`). Graphs
+  event) on the node and beside the editor. Any built-in node's panel has
+  **Convert to Code**: the node becomes a Code node in place, wires and
+  knobs kept, with the body the engine itself generates for it (GPU
+  kinds) or a script written to match it (CPU kinds; checked against the
+  real node in tests), Select choices baked in and named, rate knobs
+  flagged as rates (`plans/code-node.md`). Graphs
   compile to a single WGSL dispatch; knob tweaks and scalar
   wires never recompile, and edits carry every timer and phase over. The
   editor has undo/redo (Ctrl+Z / Ctrl+Shift+Z) and duplicate (Ctrl+D).

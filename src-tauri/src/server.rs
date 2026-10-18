@@ -104,6 +104,7 @@ async fn serve(state: Arc<SharedState>, remote: RemoteChains) {
         .route("/patch/registry", get(patch_registry))
         .route("/patch/presets", get(patch_presets))
         .route("/patch/code-reference", get(patch_code_reference))
+        .route("/patch/convert-to-code", post(patch_convert_to_code))
         .route("/patch/migrate", post(patch_migrate))
         .route("/patch/submissions", get(patch_submissions))
         .route("/patch/submissions/record", get(patch_submission_record))
@@ -827,6 +828,28 @@ async fn patch_registry() -> Response {
 /// interpreter (`empyrean_patch::reference`): the editor's completion.
 async fn patch_code_reference() -> Response {
     axum::Json(patch::reference::code_reference_json()).into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct ConvertToCodeBody {
+    patch: patch::PatchDoc,
+    node: String,
+}
+
+/// "Convert to Code": the node of the given patch becomes a Code node with
+/// the same wires and a body that reproduces it (`empyrean_patch::convert`).
+/// Pure: nothing is stored; the editor saves the result as an edit.
+async fn patch_convert_to_code(axum::Json(body): axum::Json<ConvertToCodeBody>) -> Response {
+    let mut doc = body.patch;
+    patch::migrate::migrate(&mut doc);
+    match patch::convert::convert(&mut doc, &body.node) {
+        Ok(()) => axum::Json(doc).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
+    }
 }
 
 /// Built-in starter patches (immutable templates; the editor copies them).

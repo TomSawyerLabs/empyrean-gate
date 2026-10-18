@@ -46,6 +46,12 @@ pub struct CodePort {
     pub max: f32,
     /// Scalar inputs only: the knob's value until it is set or wired.
     pub default: f32,
+    /// A Scalar input that is a rate: the engine integrates it over time
+    /// (× master speed) and the body sees the accumulated phase, like a
+    /// built-in node's `speed` knob. Only meaningful on the GPU tier (a CPU
+    /// body integrates for itself with `dt`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub integrate: bool,
 }
 
 impl Default for CodePort {
@@ -56,6 +62,7 @@ impl Default for CodePort {
             min: 0.0,
             max: 1.0,
             default: 0.0,
+            integrate: false,
         }
     }
 }
@@ -225,7 +232,7 @@ fn lib_globals() -> &'static HashSet<&'static str> {
 }
 
 /// Names the generated code and the interpreter use around the body.
-const OURS: &[&str] = &["c", "c0", "ctx", "dt", "state", "PI", "TAU", "out_"];
+const OURS: &[&str] = &["c", "c0", "ctx", "dt", "master_speed", "state", "PI", "TAU", "out_"];
 
 /// Whether `name` may be a port: a plain identifier that is not a WGSL
 /// keyword, reserved word or builtin, not one of the lib's globals, not
@@ -278,11 +285,13 @@ fn generated_name(name: &str) -> bool {
 }
 
 /// The body with every `<field input>_at` identifier replaced by that
-/// node's resampling function `n<node>_in_<field input>`. Comments are copied
+/// node's resampling function `n<node>_in_<field input>`, and every bare
+/// `return;` replaced by `return <record>;` so a body can end early (the
+/// generated function returns its outputs as a record). Comments are copied
 /// through untouched; nothing else in the text changes. WGSL has no string
 /// literals, so identifiers and comments are the only lexical structure
 /// that matters.
-pub fn rewrite_body(body: &str, node: usize, field_inputs: &[&str]) -> String {
+pub fn rewrite_body(body: &str, node: usize, field_inputs: &[&str], record: &str) -> String {
     let mut out = String::with_capacity(body.len() + 64);
     let bytes = body.as_bytes();
     let mut i = 0;
@@ -302,14 +311,19 @@ pub fn rewrite_body(body: &str, node: usize, field_inputs: &[&str]) -> String {
                 .take_while(|c| c.is_ascii_alphanumeric() || *c == b'_')
                 .count();
             let ident = &body[i..end];
-            match ident
-                .strip_suffix("_at")
-                .filter(|base| field_inputs.contains(base))
-            {
-                Some(base) => {
-                    out.push_str(&format!("n{node}_in_{base}"));
+            if ident == "return" && body[end..].trim_start().starts_with(';') {
+                out.push_str("return ");
+                out.push_str(record);
+            } else {
+                match ident
+                    .strip_suffix("_at")
+                    .filter(|base| field_inputs.contains(base))
+                {
+                    Some(base) => {
+                        out.push_str(&format!("n{node}_in_{base}"));
+                    }
+                    None => out.push_str(ident),
                 }
-                None => out.push_str(ident),
             }
             i = end;
         } else if b.is_ascii_digit() {
@@ -476,7 +490,7 @@ mod tests {
         };
         assert!(huge.check().is_err());
         let bad_range = CodeDef {
-            inputs: vec![CodePort { name: "a".into(), shape: Shape::Scalar, min: 2.0, max: 1.0, default: 0.0 }],
+            inputs: vec![CodePort { name: "a".into(), shape: Shape::Scalar, min: 2.0, max: 1.0, default: 0.0, integrate: false }],
             outputs: vec![port("out", Shape::Scalar)],
             body: String::new(),
         };
@@ -486,14 +500,20 @@ mod tests {
     #[test]
     fn body_rewrite_touches_only_resample_calls() {
         let body = "// img_at in a comment stays\nlet s = img_at(ctx_transform(c, 0.1, 1.0, 0.0, 0.0));\n/* mask_at */ out = s * mask_at(c).x + 1e5 + img;";
-        let got = rewrite_body(body, 7, &["img", "mask"]);
+        let got = rewrite_body(body, 7, &["img", "mask"], "N7Out(out)");
         assert_eq!(
             got,
             "// img_at in a comment stays\nlet s = n7_in_img(ctx_transform(c, 0.1, 1.0, 0.0, 0.0));\n/* mask_at */ out = s * n7_in_mask(c).x + 1e5 + img;"
         );
         // A port that is not a field input is left alone.
-        assert_eq!(rewrite_body("x_at(c)", 1, &["img"]), "x_at(c)");
+        assert_eq!(rewrite_body("x_at(c)", 1, &["img"], "R"), "x_at(c)");
         // Unicode in a comment survives.
-        assert_eq!(rewrite_body("// héllo\nout = 1.0;", 1, &[]), "// héllo\nout = 1.0;");
+        assert_eq!(rewrite_body("// héllo\nout = 1.0;", 1, &[], "R"), "// héllo\nout = 1.0;");
+        // A bare return becomes a return of the record; `return x;` is left
+        // for the compiler to refuse; a `returned` identifier is untouched.
+        assert_eq!(
+            rewrite_body("if a { return; }\nreturn ;\nreturn x;\nlet returned = 1.0;", 3, &[], "N3Out(out)"),
+            "if a { return N3Out(out); }\nreturn N3Out(out) ;\nreturn x;\nlet returned = 1.0;"
+        );
     }
 }

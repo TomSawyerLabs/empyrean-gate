@@ -236,6 +236,8 @@ pub fn palette_json() -> serde_json::Value {
                     "label": t.label,
                     "category": category(t.category),
                     "description": t.description,
+                    // Whether "Convert to Code" is offered (see `convert`).
+                    "convertible": crate::convert::convertible(t.id),
                     "inputs": ports(t.inputs),
                     "outputs": ports(t.outputs),
                     "params": t.params.iter().map(|p| json!({

@@ -13,8 +13,10 @@
 //!
 //! In scope inside a body: every input by name (Scalar → number, Event →
 //! "fired this frame"), every output by name (written; number or bool, zero
-//! at the start of each frame), `dt` (seconds since the last frame), `PI`,
-//! `TAU`, and `state.<name>`: numbers that persist across frames.
+//! at the start of each frame), `dt` (seconds since the last frame),
+//! `master_speed` (the crew's speed multiplier, what every built-in rate is
+//! scaled by), `PI`, `TAU`, and `state.<name>`: numbers that persist across
+//! frames.
 //! Design: `plans/code-node.md`.
 
 use crate::Shape;
@@ -72,6 +74,7 @@ enum Slot {
     Local(usize),
     State(usize),
     Dt,
+    MasterSpeed,
     Pi,
     Tau,
 }
@@ -239,7 +242,7 @@ impl Script {
     /// `Bool(fired)`), `state` the slots named by [`Script::state_names`].
     /// Returns the declared outputs in order: a Scalar as `Num`, an Event
     /// as `Bool`.
-    pub fn run(&self, inputs: &[Value], dt: f32, state: &mut [f32]) -> Vec<Value> {
+    pub fn run(&self, inputs: &[Value], dt: f32, master_speed: f32, state: &mut [f32]) -> Vec<Value> {
         debug_assert_eq!(inputs.len(), self.n_inputs);
         debug_assert_eq!(state.len(), self.state_names.len());
         let mut outputs: Vec<Value> = self
@@ -252,6 +255,7 @@ impl Script {
             outputs: &mut outputs,
             state,
             dt,
+            master_speed,
             locals: vec![Value::Num(0.0); self.n_locals],
             steps: MAX_STEPS,
         };
@@ -537,7 +541,7 @@ impl Parser {
     }
 
     fn declare(&mut self, name: String, mutable: bool) -> Result<Slot, Error> {
-        if matches!(name.as_str(), "dt" | "PI" | "TAU" | "state" | "true" | "false") {
+        if matches!(name.as_str(), "dt" | "master_speed" | "PI" | "TAU" | "state" | "true" | "false") {
             return self.error(format!("`{name}` cannot be redeclared"));
         }
         if self.scopes.last().unwrap().contains_key(&name) {
@@ -881,6 +885,7 @@ impl Parser {
                     "true" => return Ok(Expr::Lit(Value::Bool(true))),
                     "false" => return Ok(Expr::Lit(Value::Bool(false))),
                     "dt" => return Ok(Expr::Var(Slot::Dt)),
+                    "master_speed" => return Ok(Expr::Var(Slot::MasterSpeed)),
                     "PI" => return Ok(Expr::Var(Slot::Pi)),
                     "TAU" => return Ok(Expr::Var(Slot::Tau)),
                     "state" => {
@@ -962,6 +967,7 @@ struct Vm<'a> {
     outputs: &'a mut [Value],
     state: &'a mut [f32],
     dt: f32,
+    master_speed: f32,
     locals: Vec<Value>,
     /// Statements left this frame; at zero the body ends.
     steps: usize,
@@ -975,6 +981,7 @@ impl Vm<'_> {
             Slot::Local(i) => self.locals[i],
             Slot::State(i) => Value::Num(self.state[i]),
             Slot::Dt => Value::Num(self.dt),
+            Slot::MasterSpeed => Value::Num(self.master_speed),
             Slot::Pi => Value::Num(PI),
             Slot::Tau => Value::Num(TAU),
         }
@@ -985,7 +992,7 @@ impl Vm<'_> {
             Slot::Output(i) => self.outputs[i] = v,
             Slot::Local(i) => self.locals[i] = v,
             Slot::State(i) => self.state[i] = v.num(),
-            Slot::Input(_) | Slot::Dt | Slot::Pi | Slot::Tau => {}
+            Slot::Input(_) | Slot::Dt | Slot::MasterSpeed | Slot::Pi | Slot::Tau => {}
         }
     }
 
@@ -1220,7 +1227,7 @@ mod tests {
         let s = compile(&d).unwrap_or_else(|e| panic!("{e}"));
         let vals: Vec<Value> = inputs.iter().map(|(_, v)| Value::Num(*v)).collect();
         let mut state = vec![0.0; s.state_names().len()];
-        s.run(&vals, 1.0 / 60.0, &mut state)[0].num()
+        s.run(&vals, 1.0 / 60.0, 1.0, &mut state)[0].num()
     }
 
     #[test]
@@ -1280,15 +1287,16 @@ mod tests {
     fn runaway_loops_stop() {
         let d = def(&[], &[("out", Shape::Scalar)], "var n = 0.0; loop { n++; } out = 5.0;");
         let s = compile(&d).unwrap();
-        let out = s.run(&[], 0.016, &mut []);
+        let out = s.run(&[], 0.016, 1.0, &mut []);
         // The loop ate the budget; the body ended before `out = 5.0`.
         assert_eq!(out[0], Value::Num(0.0));
         let d = def(&[], &[("out", Shape::Scalar)], "var n = 0.0; while true { n++; } out = n;");
         let s = compile(&d).unwrap();
-        let out = s.run(&[], 0.016, &mut []);
+        let out = s.run(&[], 0.016, 1.0, &mut []);
         assert_eq!(out[0], Value::Num(0.0));
         let d = def(&[], &[("out", Shape::Scalar)], "var n = 0.0; for (var i = 0.0; i < 20.0; i += 1.0) { n += 1.0; } out = n;");
-        assert_eq!(compile(&d).unwrap().run(&[], 0.016, &mut [])[0], Value::Num(20.0));
+        assert_eq!(compile(&d).unwrap().run(&[], 0.016, 1.0, &mut [])[0], Value::Num(20.0));
+        assert_eq!(run1("out = master_speed * 2.0;", &[]), 2.0);
     }
 
     #[test]
@@ -1302,7 +1310,7 @@ mod tests {
         assert_eq!(s.state_names(), ["n", "t"]);
         let mut state = vec![0.0; 2];
         let frame = |fired: bool, state: &mut Vec<f32>| {
-            s.run(&[Value::Bool(fired), Value::Num(2.0)], 0.5, state)
+            s.run(&[Value::Bool(fired), Value::Num(2.0)], 0.5, 1.0, state)
         };
         let o = frame(true, &mut state);
         assert_eq!(o, vec![Value::Num(2.0), Value::Bool(false)]);
