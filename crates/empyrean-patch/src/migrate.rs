@@ -102,6 +102,7 @@ fn add_node(doc: &mut PatchDoc, base: &str, kind: &str, pos: [f32; 2], params: &
         media: None,
         code: None,
         sub: None,
+        collapsed: false,
     });
     id
 }

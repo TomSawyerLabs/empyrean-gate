@@ -230,6 +230,10 @@ pub struct NodeInst {
     /// outputs its output ports. Required on a Code node, refused elsewhere.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<Box<code::CodeDef>>,
+    /// Shown minimized in the editor: a mini with port dots, no labels or
+    /// knobs (purely presentational).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub collapsed: bool,
 }
 
 /// A knob: the range of a Number param of a built-in node, or of a Scalar
@@ -485,6 +489,21 @@ mod tests {
     }
 
     #[test]
+    fn collapsed_is_kept_and_left_out_when_false() {
+        let mut node = NodeInst {
+            id: "n1".into(),
+            kind: "blend".into(),
+            ..Default::default()
+        };
+        assert!(!serde_json::to_string(&node).unwrap().contains("collapsed"));
+        node.collapsed = true;
+        let json = serde_json::to_string(&node).unwrap();
+        assert!(json.contains(r#""collapsed":true"#));
+        let back: NodeInst = serde_json::from_str(&json).unwrap();
+        assert!(back.collapsed);
+    }
+
+    #[test]
     fn minimal_json_gets_defaults() {
         let doc: PatchDoc = serde_json::from_str(r#"{"name":"x"}"#).unwrap();
         assert_eq!(doc.format, PATCH_FORMAT);
@@ -513,7 +532,7 @@ mod tests {
         for def in ["NodeInst", "Edge", "PortRef", "ExposedParam", "CodeDef", "CodePort", "Shape"] {
             assert!(defs[def].is_object(), "schema lacks $defs/{def}");
         }
-        for key in ["id", "kind", "params", "pos", "media", "sub", "code"] {
+        for key in ["id", "kind", "params", "pos", "media", "sub", "code", "collapsed"] {
             assert!(defs["NodeInst"]["properties"][key]["description"].is_string(), "NodeInst.{key}");
         }
         assert_eq!(defs["Edge"]["required"], serde_json::json!(["from", "to"]));
