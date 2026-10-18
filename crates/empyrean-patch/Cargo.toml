@@ -9,9 +9,13 @@ publish = false
 [dependencies]
 bytemuck = { version = "1.25.2", features = ["derive"] }
 rustfft = "6.4.1"
+# JSON Schema for patch documents, derived from the serde types (`patch_schema`).
+schemars = "1.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 
 [dev-dependencies]
+# Every built-in preset validates against that schema (no remote $ref fetching).
+jsonschema = { version = "0.59", default-features = false }
 # The codegen tests parse and validate every generated shader, as wgpu would.
 naga = { version = "29", features = ["wgsl-in"] }

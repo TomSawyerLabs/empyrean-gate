@@ -48,6 +48,14 @@ pub fn shapes() -> String {
     empyrean_patch::registry::shapes_json().to_string()
 }
 
+/// The JSON Schema (draft 2020-12) of a patch document, as a JSON string:
+/// the structure `validate` and `PatchSim` accept, with a `description` on
+/// every field. Which node kinds, ports and params exist is `registry()`'s.
+#[wasm_bindgen]
+pub fn schema() -> String {
+    empyrean_patch::patch_schema().to_string()
+}
+
 /// The built-in starter patches (`GET /patch/presets`), as a JSON array.
 #[wasm_bindgen]
 pub fn presets() -> String {

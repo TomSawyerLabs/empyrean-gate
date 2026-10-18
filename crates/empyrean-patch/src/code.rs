@@ -12,6 +12,7 @@
 //! Design: `plans/code-node.md`.
 
 use crate::Shape;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -28,13 +29,22 @@ pub const MAX_IDENT_LEN: usize = 32;
 /// One declared port. `min`/`max`/`default` only mean something for a
 /// Scalar input, where they make the port a knob like a built-in node's
 /// Number param (the knob value is the unwired fallback).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct CodePort {
+    /// The port's name, also its identifier in the body: a letter, then
+    /// letters, digits and underscores (at most 32), no `__`, not ending in
+    /// `_at`, and not a WGSL keyword or builtin or a name the patch shader
+    /// already uses.
     pub name: String,
+    /// scalar or event (a CPU-tier node), field_scalar or field_color (a
+    /// GPU-tier node, which takes no event inputs and has only field outputs).
     pub shape: Shape,
+    /// Scalar inputs only: the knob's lowest value.
     pub min: f32,
+    /// Scalar inputs only: the knob's highest value.
     pub max: f32,
+    /// Scalar inputs only: the knob's value until it is set or wired.
     pub default: f32,
 }
 
@@ -51,11 +61,18 @@ impl Default for CodePort {
 }
 
 /// A Code node's interface and body.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct CodeDef {
+    /// Declared input ports, at most 16.
     pub inputs: Vec<CodePort>,
+    /// Declared output ports, 1 to 16; `out` (else the first) is the one the
+    /// node's thumbnail shows.
     pub outputs: Vec<CodePort>,
+    /// The body (at most 8192 bytes): WGSL statements that read the inputs
+    /// and assign every output by name. A GPU-tier body runs per pixel with
+    /// the patch shader's helpers in scope; a CPU-tier body is a scalar WGSL
+    /// subset run every frame (see the Code reference, `codeReference()`).
     pub body: String,
 }
 

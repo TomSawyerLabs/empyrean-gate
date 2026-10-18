@@ -25,6 +25,7 @@ pub mod sim;
 pub mod touch;
 pub mod validate;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -48,9 +49,9 @@ pub const MAX_PATCH_EDGES: usize = 1024;
 
 /// The data type flowing on a wire — the whole type system. Wires connect only
 /// matching shapes, plus two blessed adapters (see [`Shape::accepts`]).
-/// [`Shape::description`] says the same for agents and the editor
-/// ([`registry::shapes_json`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// `Shape::description` says more, for agents and the editor
+/// (`registry::shapes_json`, `shapes()` in the wasm build).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Shape {
     /// Control-rate f32, evaluated on the CPU every frame: audio bands, sliders,
@@ -146,25 +147,36 @@ impl Shape {
     }
 }
 
-/// One saved graph. The file is the unit of composition: a patch that exposes
-/// ports becomes a node in other patches (sub-patches, plan step 6).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// One saved graph: an Empyrean Gate patch document. Nodes (instances of the
+/// registry's node types) joined by edges (wires from an output port to an
+/// input port) into an acyclic graph; it renders when exactly one `output`
+/// node has a colour field wired into it. The file is the unit of
+/// composition: a patch that exposes params becomes a Sub-patch node in other
+/// patches. Every field is optional on input (missing ones take defaults).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct PatchDoc {
+    /// Patch format version (currently 5). Older documents are upgraded on
+    /// load; a newer one is refused rather than misread.
     pub format: u32,
     /// Stable identity (UUID string); filenames may change with renames.
     pub id: String,
+    /// Display name.
     pub name: String,
+    /// What the patch looks like or does, in a sentence or two.
     pub description: String,
     /// Who made it, when that is not the crew: a playground submission
     /// carries the sender's name here, and the public floor's `/health`
     /// shows it next to the patch on air. Empty for the crew's own patches.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub credit: String,
+    /// The operator instances (at most 256). Ids must be unique.
     pub nodes: Vec<NodeInst>,
+    /// The wires (at most 1024). An input takes at most one wire, shapes must
+    /// be compatible (see the shapes table), and the graph must be acyclic.
     pub edges: Vec<Edge>,
-    /// Params promoted to remote play surfaces (Control tab) and, later, to
-    /// sub-patch input ports.
+    /// Params promoted to remote play surfaces (the Control tab) and, when
+    /// this patch is used as a Sub-patch, to that node's input ports.
     pub exposed: Vec<ExposedParam>,
 }
 
@@ -184,31 +196,37 @@ impl Default for PatchDoc {
 }
 
 /// One operator instance in a patch.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct NodeInst {
     /// Unique within the patch (editor-assigned, e.g. "n17").
     pub id: String,
-    /// A node type id from [`registry::TYPES`].
+    /// A node type id from the registry (`registry::TYPES`; `registry()` in
+    /// the wasm build), e.g. "noise_field" or "output".
     pub kind: String,
     /// Optional user label shown on the node.
     pub name: String,
-    /// Knob values by param name; missing entries use the registry default.
+    /// Knob values by param name; missing entries use the registry default,
+    /// and values are held to the param's min..max. A Select param stores
+    /// its 0-based option index. A Sub-patch node keys its inner knobs as
+    /// "{inner node}.{param}"; a Code node keys its knobs by Scalar input name.
     pub params: BTreeMap<String, f32>,
-    /// Editor canvas position (purely presentational).
+    /// Editor canvas position, [x, y] (purely presentational).
     pub pos: [f32; 2],
-    /// A Still image node's own image: a `data:image/...;base64,` URL of a
-    /// 256×256 picture (editors resize before storing). Carried in the patch
-    /// so a file or a submission is self-contained.
+    /// A Still image node's own image, or a Clip node's sprite sheet: a
+    /// `data:image/...;base64,` URL of a 256×256 picture (editors resize
+    /// before storing; at most 600000 bytes). Carried in the patch so a file
+    /// or a submission is self-contained. Only those two kinds may carry one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media: Option<String>,
-    /// A Sub-patch node's own document (see [`flatten`]): its exposed knobs
-    /// are this node's inputs, its Output this node's `out`.
+    /// A Sub-patch node's own document (see `flatten`): its exposed knobs
+    /// are this node's inputs, its Output this node's `out`. Nested at most
+    /// four deep.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub: Option<Box<PatchDoc>>,
-    /// A Code node's own ports and body (see [`code`]): its declared inputs
+    /// A Code node's own ports and body (see `code`): its declared inputs
     /// are this node's input ports (Scalar ones are knobs too), its declared
-    /// outputs its output ports.
+    /// outputs its output ports. Required on a Code node, refused elsewhere.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<Box<code::CodeDef>>,
 }
@@ -344,26 +362,71 @@ impl NodeInst {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// One end of a wire: a port on a node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PortRef {
+    /// The node's `id`.
     pub node: String,
+    /// The port's name: an output port at the `from` end; at the `to` end a
+    /// shaped input, or the name of a Number param (every Number param is
+    /// also a Scalar input).
     pub port: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A wire from one node's output port to another node's input port.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Edge {
+    /// The output end.
     pub from: PortRef,
+    /// The input end.
     pub to: PortRef,
 }
 
 /// A param promoted out of the graph: playable from the Control tab on any
-/// client, and (later) a port when this patch is used as a sub-patch block.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// client, and a port when this patch is used as a sub-patch block.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct ExposedParam {
+    /// The node's `id`.
     pub node: String,
+    /// The param's name (any param of a built-in node, Selects included, or a
+    /// Code node's Scalar input).
     pub param: String,
+    /// What the Control tab and a Sub-patch port call it; empty falls back
+    /// to "{node}.{param}".
     pub label: String,
+}
+
+/// The JSON Schema (draft 2020-12) of a patch document ([`PatchDoc`] and
+/// everything nested in it, sub-patches included), generated from the serde
+/// types so it follows their renames and defaults; field doc comments become
+/// its `description`s (re-flowed: a doc comment's line wrapping is dropped,
+/// its paragraph breaks kept). Structure only: which kinds, ports and params
+/// exist is the registry's business, and `validate` checks the graph.
+pub fn patch_schema() -> serde_json::Value {
+    fn reflow(v: &mut serde_json::Value) {
+        match v {
+            serde_json::Value::Object(map) => {
+                for (k, x) in map.iter_mut() {
+                    match x {
+                        serde_json::Value::String(s) if k == "description" => {
+                            *s = s
+                                .split("\n\n")
+                                .map(|para| para.split_whitespace().collect::<Vec<_>>().join(" "))
+                                .collect::<Vec<_>>()
+                                .join("\n\n");
+                        }
+                        _ => reflow(x),
+                    }
+                }
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(reflow),
+            _ => {}
+        }
+    }
+    let mut schema = schemars::schema_for!(PatchDoc).to_value();
+    reflow(&mut schema);
+    schema
 }
 
 impl Default for ExposedParam {
@@ -425,6 +488,93 @@ mod tests {
         let doc: PatchDoc = serde_json::from_str(r#"{"name":"x"}"#).unwrap();
         assert_eq!(doc.format, PATCH_FORMAT);
         assert!(doc.nodes.is_empty());
+    }
+
+    fn schema_validator() -> jsonschema::Validator {
+        jsonschema::validator_for(&patch_schema()).expect("the patch schema is a valid JSON Schema")
+    }
+
+    fn schema_errors(v: &jsonschema::Validator, doc: &serde_json::Value) -> Vec<String> {
+        v.iter_errors(doc).map(|e| format!("{} at {}", e, e.instance_path())).collect()
+    }
+
+    #[test]
+    fn schema_describes_the_document() {
+        let schema = patch_schema();
+        assert_eq!(schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
+        assert_eq!(schema["type"], "object");
+        for key in ["format", "id", "name", "description", "credit", "nodes", "edges", "exposed"] {
+            let p = &schema["properties"][key];
+            assert!(p.is_object(), "schema lacks `{key}`");
+            assert!(p["description"].is_string(), "`{key}` has no description");
+        }
+        let defs = &schema["$defs"];
+        for def in ["NodeInst", "Edge", "PortRef", "ExposedParam", "CodeDef", "CodePort", "Shape"] {
+            assert!(defs[def].is_object(), "schema lacks $defs/{def}");
+        }
+        for key in ["id", "kind", "params", "pos", "media", "sub", "code"] {
+            assert!(defs["NodeInst"]["properties"][key]["description"].is_string(), "NodeInst.{key}");
+        }
+        assert_eq!(defs["Edge"]["required"], serde_json::json!(["from", "to"]));
+        // Doc-comment wrapping is gone.
+        assert!(!defs["NodeInst"]["properties"]["params"]["description"]
+            .as_str()
+            .unwrap()
+            .contains('\n'));
+    }
+
+    /// The shipped presets, as stored and as the core writes them back, are
+    /// what the schema promises a patch looks like.
+    #[test]
+    fn every_preset_validates_against_the_schema() {
+        let v = schema_validator();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/presets");
+        let mut files = 0;
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "json") {
+                continue;
+            }
+            let doc: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let errors = schema_errors(&v, &doc);
+            assert!(errors.is_empty(), "{}: {errors:?}", path.display());
+            files += 1;
+        }
+        assert!(files > 0);
+        for doc in presets::presets() {
+            let json = serde_json::to_value(doc).unwrap();
+            let errors = schema_errors(&v, &json);
+            assert!(errors.is_empty(), "{} as serialized: {errors:?}", doc.name);
+        }
+    }
+
+    #[test]
+    fn schema_accepts_nested_documents_and_refuses_malformed_ones() {
+        let v = schema_validator();
+        let ok = serde_json::json!({
+            "name": "nested",
+            "nodes": [
+                { "id": "s", "kind": "subpatch", "sub": { "nodes": [{ "id": "o", "kind": "output" }] } },
+                { "id": "c", "kind": "code", "code": {
+                    "inputs": [{ "name": "k", "shape": "scalar", "min": 0, "max": 2, "default": 1 }],
+                    "outputs": [{ "name": "out", "shape": "field_color" }],
+                    "body": "out = vec4f(k);"
+                } },
+                { "id": "o", "kind": "output", "params": { "master": 0.5 }, "pos": [1, 2] }
+            ],
+            "edges": [{ "from": { "node": "s", "port": "out" }, "to": { "node": "o", "port": "in" } }]
+        });
+        assert_eq!(schema_errors(&v, &ok), Vec::<String>::new());
+        for bad in [
+            serde_json::json!({ "nodes": [{ "id": "a", "params": { "x": "loud" } }] }),
+            serde_json::json!({ "nodes": [{ "id": "a", "pos": [1] }] }),
+            serde_json::json!({ "edges": [{ "from": { "node": "a", "port": "out" } }] }),
+            serde_json::json!({ "nodes": [{ "id": "c", "code": { "outputs": [{ "name": "o", "shape": "colour" }] } }] }),
+            serde_json::json!({ "nodes": [{ "id": "s", "sub": { "nodes": "none" } }] }),
+        ] {
+            assert!(!v.is_valid(&bad), "accepted {bad}");
+        }
     }
 
     #[test]
