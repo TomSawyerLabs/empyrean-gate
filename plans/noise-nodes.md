@@ -1,6 +1,6 @@
 # Noise nodes
 
-Status: **built and tested; shipping (2026-10-18)**, worktree
+Status: **done (2026-10-18)**: on gate `master` and the site's dev Preview., worktree
 `C:\Users\camer\.t3\worktrees\Empyrean\noise-nodes`, branch `noise-nodes`
 → gate `master`.
 
@@ -65,7 +65,7 @@ Color noise), but nothing that is plain noise you can wire into anything.
 3. [x] patch_lib.wgsl `perlin3`, `perlin_fbm`; codegen bodies; rendered in Chrome.
 4. [x] Convert templates for the three CPU kinds; `check_template` for Smooth noise.
 5. [x] Preset "Noise Garden" (`presets/noise-garden.json`).
-6. [ ] **Current:** push to master, CI, web-dist bump on the site, Preview check.
+6. [x] Pushed (gate `81f8724`, Checks green), web-dist `2522ca8`, site bump `fa7c389` on `dev`; the Preview's palette lists all five and the preset.
 
 ## Findings / gotchas
 
@@ -95,6 +95,7 @@ Color noise), but nothing that is plain noise you can wire into anything.
       tests, 1 new convert test, Smooth noise in `check_template`), patch-web
       unit 58/58, typecheck clean; all nine field variants and the preset
       rendered in headless Chrome (WebGPU).
+- [x] 2026-10-18: shipped; Preview palette and preset menu checked.
 
 ## Open questions for the user
 
