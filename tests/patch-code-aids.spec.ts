@@ -12,7 +12,7 @@ async function codeNode(page: Page) {
   await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
   await page.getByRole("button", { name: "＋ New" }).click();
   await expect(page.locator(".pnode")).toHaveCount(2);
-  const group = page.locator(".palette-group", { has: page.locator("h4", { hasText: "Code" }) });
+  const group = page.locator(".palette-group", { has: page.locator("h4", { hasText: "Structure" }) });
   await group.getByRole("button", { name: "Code" }).click();
   const node = page.locator(".pnode.cat-code");
   await node.click();
