@@ -17859,7 +17859,7 @@ async function serveMcp(core, headless, file) {
   ];
   if (headless)
     fileTools.push(djTool(headless.groove));
-  let tools = patchTools(api, fileTools), byName = new Map(tools.map((t) => [t.name, t])), server = new Server({ name: "empyrean-patch", title: "Empyrean Gate patches", version: "0.15.0" }, {
+  let tools = patchTools(api, fileTools), byName = new Map(tools.map((t) => [t.name, t])), server = new Server({ name: "empyrean-patch", title: "Empyrean Gate patches", version: "0.16.0" }, {
     capabilities: { tools: {}, resources: {} },
     instructions: "Tools for making light patterns (patches) for the Empyrean Gate, a 64-spoke ring of LEDs. Start with get_guide. Apply with set_patch or edit_patch, look with snapshot, share with share_link."
   });
