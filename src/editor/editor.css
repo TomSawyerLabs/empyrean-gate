@@ -1052,17 +1052,29 @@
 }
 
 .code-expand {
-  font-size: 11px;
-  padding: 1px 6px;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+@media (pointer: coarse) {
+  .code-expand {
+    min-height: 32px;
+    padding: 4px 12px;
+  }
 }
 
 .code-body-away {
   margin: 6px 0;
 }
 
+/* margin: auto is what centres a modal dialog; it is spelled out because a
+   host page's reset (the site's `* { margin: 0 }`) otherwise pins the
+   dialog to the top-left corner. */
 .code-modal {
-  width: min(96vw, 1200px);
-  height: min(90vh, 900px);
+  margin: auto;
+  width: min(96vw, 1400px);
+  height: 94vh;
+  height: 94dvh;
   max-width: none;
   max-height: none;
   padding: 12px 14px;
@@ -1116,11 +1128,31 @@
 .code-modal-body .cm-editor .cm-scroller {
   max-height: none;
   min-height: 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .code-modal .code-minis {
   margin-bottom: 0;
+}
+
+/* On a phone (the width the editor goes compact at, or a phone on its side)
+   the modal is the whole screen. A media query, not the editor's measured
+   width: the dialog covers the window, whatever share the editor has. */
+@media (max-width: 640px), (max-height: 500px) {
+  .code-modal {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  }
+
+  .code-modal-head button {
+    min-height: 36px;
+    padding: 4px 14px;
+  }
 }
 
 /* A minimized node: barely bigger than its mini, bare port dots on its
