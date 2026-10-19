@@ -87,14 +87,16 @@ groove.ts's DJ part.
 ## Plan / steps
 
 1. ✅ Survey, worktree, `.agents.txt` entries, this plan.
-2. ◀ Registry `group` + TS type + `GROUPS`; tests.
-3. Icons (`editor/icons.tsx`) for every kind and group; coverage test.
-4. `Palette.tsx`: filter + keyboard, Recent, collapsible groups (remembered),
+2. ✅ Registry `group` + TS type + `GROUPS`; tests (fd27af6).
+3. ✅ Icons (`editor/icons.tsx`) for every kind and group; coverage test.
+4. ✅ `Palette.tsx`: filter + keyboard, Recent, collapsible groups (remembered),
    details strip, Patterns/Blocks thumbnail grid, Sub-patches group; icons on
-   canvas nodes, wire-drop popover, node panel.
-5. Thumbnail generator (`scripts/thumbnails.ts`): atlas + scalar traces;
+   canvas nodes, wire-drop popover, node panel; drag onto the canvas
+   (21070d2). Spec `patch-palette`.
+5. ◀ Stand-ins (moved before thumbnails: the showcase patches for Video in,
+   Touch strokes, Triggered effects need them).
+6. Thumbnail generator (`scripts/thumbnails.ts`): atlas + scalar traces;
    showcase params/inputs per kind.
-6. Stand-ins: hue pull, video stand-in, simulated visitors (runtime + site).
 7. Merges: Random family → Random (Mode), Gradient + Radial → Gradient
    (Shape); format 7 migration; presets, convert, docs.
 8. Docs (READMEs, agent guide), behaviour spec, push, site README/plan,
@@ -104,6 +106,15 @@ groove.ts's DJ part.
 
 - Local `master` in the main gate checkout is stale (faee0ec); work from
   `origin/master`.
+- Recent chips must not carry `.palette-item`: a dozen specs (gate and site)
+  click `.palette-item` by text, and a chip repeating an entry made those
+  strict-mode violations. Sub-patch entries stay `.palette-sub` only, too.
+- Inline descriptions (phone sheet) are `aria-describedby` + `aria-hidden`,
+  so a button's accessible name stays its label.
+- Under 3 Playwright workers plus other load, 28 patch specs failed by
+  timeout; serially (or 2 workers) they pass. Re-run alone before believing.
+- `demo/editor.html` (`bun run demo` in patch-web) is the editor over the real
+  registry with SwiftShader WebGPU: the quickest visual check.
 - `cli/host.ts loadWebGpu` resolves `webgpu` next to the bundle or from the
   cwd: run the bundled generator with cwd = a dir that has `webgpu`
   installed (scratch: `%TEMP%\empyrean-dawn`).
@@ -111,9 +122,9 @@ groove.ts's DJ part.
 ## Progress log
 
 - [x] Survey + plan
-- [ ] Groups
-- [ ] Icons
-- [ ] Palette UI
+- [x] Groups (fd27af6)
+- [x] Icons (21070d2)
+- [x] Palette UI (21070d2)
 - [ ] Thumbnails
 - [ ] Stand-ins
 - [ ] Merges
