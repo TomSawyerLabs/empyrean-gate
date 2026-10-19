@@ -426,17 +426,39 @@ Design:
   batches, the web runtime) already carries `scalar:<node>:<port>`. The
   editor draws the latest value at the end of each declaring line.
 
-Steps (current: A):
-- [ ] A search / multi-select
-- [ ] B snippets
-- [ ] C signature help
-- [ ] D quick fixes
-- [ ] E modal reference column + text size
+Steps (current: F):
+- [x] A search / multi-select (`4467409`)
+- [x] B snippets (`bb3c226`): every snippet, at its defaults, is run by
+  the core in `code-snippets.test.ts` and compiled by Chrome in the
+  browser shader check (`snippetDocs` in the corpus)
+- [x] C signature help (`8e525c8`; `51230e0` lets clicks through it)
+- [x] D quick fixes (`248cccd`): `code-fixes.ts` + unit tests; buttons
+  under the error too (no hover on a phone)
+- [x] E modal reference column + text size (`3c03c70`); the caret now
+  survives the move into and out of the large view
 - [ ] F number scrubbing
 - [ ] G colour swatches
 - [ ] H phone key row
 - [ ] I live values
 - [ ] README (gate + site), web-dist on the Preview
+
+Round 6 gotchas:
+- Git Bash's `sed -i` rewrites a CRLF file as LF; normalize with
+  `sed -i 's/*$//'` before committing (the index is LF either way).
+- CodeMirror ignores Enter for 75 ms after a completion list opens; specs
+  wait 150 ms (as the older completion spec does).
+- The search panel commits its query on keyup/change, so a spec types
+  into it (`pressSequentially`), not `fill`.
+- A tooltip above the body's first line covers the panel's head (⤢
+  Expand): the signature tooltip is `pointer-events: none`.
+- The large view mounts a second CodeEditor; without `caret` (kept in
+  CodePanel) it opened with the caret at 0 and inserts went there.
+- No naga in the wasm build: a bad GPU body passes `createSim`; only the
+  browser (Tint) or the desktop app's naga catches WGSL errors. The
+  core's `validate` does run the GPU body checks and the CPU interpreter.
+- The mock backend compiles nothing; a spec stages a body error with
+  `POST /mock/status?client=…` (`patch_error`), applied at hello.
+- The palette overhaul moved Code into the "Structure" group.
 
 ## Findings / gotchas
 
