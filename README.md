@@ -398,7 +398,13 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   AlphaTheta decks can also drive the clock directly over PRO DJ LINK: Gate is a
   passive UDP listener (never a virtual deck and never a sync-command sender),
   follows the reported tempo master or an explicitly selected player, and retains
-  audio fallback through a deck/network outage.
+  audio fallback through a deck/network outage. With no CDJs to hand, **Simulated
+  CDJs** (Settings → Lighting clock) plays a set on two virtual players in-process
+  instead of listening to the network (`src-tauri/src/prolink_sim.rs`, the same
+  set the playground plays): their status, beat and keepalive packets go through
+  the real handlers and their tracks arrive with rekordbox phrases and a waveform,
+  so the clock, the deck effects, phrase and waveform energy and patches' DJ LINK
+  node can all be checked at home.
 - **Audio hardware can come and go.** A missing or unplugged device never crashes or
   degrades the show: the source goes quiet (visuals decay calmly), reports "waiting
   for device", and is retried every 2 s until *that* device returns — a selected

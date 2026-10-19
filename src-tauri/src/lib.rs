@@ -21,6 +21,7 @@ pub mod peer;
 pub mod display;
 pub mod power;
 pub mod prolink_analysis;
+pub mod prolink_sim;
 pub mod protocol;
 pub mod public;
 pub mod public_server;

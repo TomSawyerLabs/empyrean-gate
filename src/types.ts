@@ -393,6 +393,8 @@ export interface RhythmConfig {
   pro_dj_link_metadata_player: number;
   pro_dj_link_interface: string;
   pro_dj_link_passive: boolean;
+  /** Two virtual CDJs play a simulated set instead of the network. */
+  pro_dj_link_simulated: boolean;
   latency_ms: number;
   fallback_to_audio: boolean;
   fallback_audio_source: number;

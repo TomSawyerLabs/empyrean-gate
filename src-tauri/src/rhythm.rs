@@ -2,6 +2,7 @@
 //! owns authoritative timing signals that can be overlaid on every layer.
 
 use crate::config::RhythmSource;
+use crate::prolink_sim::{ProlinkSim, SIM_REKORDBOX_ID_BASE, SimPacket};
 use crate::protocol::{
     ProDjLinkBeatGridEntry, ProDjLinkCueInfo, ProDjLinkPhraseAnalysis, ProDjLinkTrackInfo,
 };
@@ -1229,9 +1230,11 @@ fn pioneer_thread(state: Arc<SharedState>, metadata_tx: Sender<MetadataRequest>)
     let mut metadata_refs: HashMap<u8, (u8, u8, u32, Ipv4Addr)> = HashMap::new();
     let mut last_bind_attempt = Instant::now() - RESCAN_EVERY;
     let mut buffer = [0u8; 2048];
+    let mut simulator: Option<ProlinkSim> = None;
+    let mut last_sim_step = Instant::now();
 
     while !state.shutdown.load(Ordering::Relaxed) {
-        let (enabled, configured_player, interface, passive, observer_id) = {
+        let (enabled, configured_player, interface, passive, observer_id, simulated) = {
             let cfg = state.config.read();
             (
                 cfg.rhythm.source == RhythmSource::ProDjLink,
@@ -1239,8 +1242,12 @@ fn pioneer_thread(state: Arc<SharedState>, metadata_tx: Sender<MetadataRequest>)
                 cfg.rhythm.pro_dj_link_interface.clone(),
                 cfg.rhythm.pro_dj_link_passive,
                 cfg.rhythm.pro_dj_link_metadata_player,
+                cfg.rhythm.pro_dj_link_simulated,
             )
         };
+        if (!enabled || !simulated) && simulator.take().is_some() {
+            end_simulation(&state);
+        }
         if !enabled {
             discovery_sockets.clear();
             beat_sockets.clear();
@@ -1248,6 +1255,53 @@ fn pioneer_thread(state: Arc<SharedState>, metadata_tx: Sender<MetadataRequest>)
             announce_sockets.clear();
             state.pioneer_clock.lock().disconnect();
             std::thread::sleep(Duration::from_millis(100));
+            continue;
+        }
+        if simulated {
+            // Simulated players instead of the network: no sockets, no
+            // announcement, their packets through the same handlers.
+            discovery_sockets.clear();
+            beat_sockets.clear();
+            status_sockets.clear();
+            announce_sockets.clear();
+            announce_config = (String::new(), 0, true);
+            let now = Instant::now();
+            let sim = simulator.get_or_insert_with(|| {
+                *state.pioneer_clock.lock() = PioneerClockState::default();
+                last_sim_step = now;
+                ProlinkSim::new()
+            });
+            let dt = now.duration_since(last_sim_step);
+            if dt >= SIM_STEP {
+                last_sim_step = now;
+                let out = sim.step(dt.as_secs_f64().min(0.25));
+                for (deck, info) in out.tracks {
+                    let mut tracks = state.pioneer_tracks.lock();
+                    match info {
+                        Some(info) => tracks.insert(deck, info),
+                        None => tracks.remove(&deck),
+                    };
+                }
+                for packet in out.packets {
+                    match packet {
+                        SimPacket::Discovery(p) => ingest_discovery(&state, &p),
+                        SimPacket::Beat(p) => {
+                            ingest_beat_port(&state, &p, configured_player, &mut last_debug_beat)
+                        }
+                        SimPacket::Status(p) => {
+                            ingest_status(&state, &p, &mut debug_status_signatures)
+                        }
+                    }
+                }
+            }
+            let pending_events = state
+                .pioneer_clock
+                .lock()
+                .take_due_visual_events(Instant::now());
+            for event in pending_events {
+                trigger_pioneer_visual(&state, event);
+            }
+            std::thread::sleep(Duration::from_millis(2));
             continue;
         }
 
@@ -1322,33 +1376,13 @@ fn pioneer_thread(state: Arc<SharedState>, metadata_tx: Sender<MetadataRequest>)
             }
         }
 
-        discovery_sockets.retain(|socket| loop {
-            match socket.recv_from(&mut buffer) {
-                Ok((length, _)) => {
-                    let now = Instant::now();
-                    let mut clock = state.pioneer_clock.lock();
-                    if clock.receive_keepalive(&buffer[..length], now) {
-                        let device = clock
-                            .network_devices(now)
-                            .into_iter()
-                            .find(|device| device.number == buffer[0x24]);
-                        drop(clock);
-                        if let Some(device) = device {
-                            state.push_pioneer_debug(
-                                "device",
-                                device.number,
-                                format!("{} · {} · {}", device.name, device.kind, device.ip),
-                                BTreeMap::from([
-                                    ("kind".into(), device.kind),
-                                    ("ip".into(), device.ip.to_string()),
-                                    ("mac".into(), device.mac),
-                                ]),
-                            );
-                        }
-                    }
+        discovery_sockets.retain(|socket| {
+            loop {
+                match socket.recv_from(&mut buffer) {
+                    Ok((length, _)) => ingest_discovery(&state, &buffer[..length]),
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => return true,
+                    Err(_) => return false,
                 }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => return true,
-                Err(_) => return false,
             }
         });
 
@@ -1356,51 +1390,12 @@ fn pioneer_thread(state: Arc<SharedState>, metadata_tx: Sender<MetadataRequest>)
         beat_sockets.retain(|socket| {
             loop {
                 match socket.recv_from(&mut buffer) {
-                    Ok((length, _)) => {
-                        let on_air_events = state
-                            .pioneer_clock
-                            .lock()
-                            .receive_channels_on_air(&buffer[..length], Instant::now());
-                        for event in on_air_events {
-                            trigger_pioneer_visual(&state, event);
-                        }
-                        state
-                            .pioneer_clock
-                            .lock()
-                            .receive_absolute_position(&buffer[..length], Instant::now());
-                        if let Some(beat) = parse_link_beat(&buffer[..length]) {
-                            let now = Instant::now();
-                            let duplicate = last_debug_beat.get(&beat.player).is_some_and(|last| {
-                                now.duration_since(*last) < Duration::from_millis(35)
-                            });
-                            if !duplicate {
-                                last_debug_beat.insert(beat.player, now);
-                                state.push_pioneer_debug(
-                                    "beat",
-                                    beat.player,
-                                    format!(
-                                        "{} · beat {} · {:.2} BPM",
-                                        beat.name, beat.beat_within_bar, beat.bpm
-                                    ),
-                                    BTreeMap::from([
-                                        ("packet_type".into(), "0x28 beat".into()),
-                                        ("packet_length".into(), length.to_string()),
-                                        ("name".into(), beat.name.clone()),
-                                        ("effective_bpm".into(), format!("{:.3}", beat.bpm)),
-                                        ("beat_in_bar".into(), beat.beat_within_bar.to_string()),
-                                    ]),
-                                );
-                            }
-                        }
-                        let event = state.pioneer_clock.lock().receive_beat(
-                            &buffer[..length],
-                            configured_player,
-                            Instant::now(),
-                        );
-                        if let Some(event) = event {
-                            trigger_pioneer_visual(&state, event);
-                        }
-                    }
+                    Ok((length, _)) => ingest_beat_port(
+                        &state,
+                        &buffer[..length],
+                        configured_player,
+                        &mut last_debug_beat,
+                    ),
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => return true,
                     Err(e) => {
                         beat_error = Some(e);
@@ -1432,24 +1427,7 @@ fn pioneer_thread(state: Arc<SharedState>, metadata_tx: Sender<MetadataRequest>)
                                 *source.ip(),
                             );
                         }
-                        if let Some((category, device, summary, fields, signature)) =
-                            debug_status_packet(&buffer[..length])
-                        {
-                            let changed = debug_status_signatures
-                                .get(&device)
-                                .is_none_or(|previous| previous != &signature);
-                            if changed {
-                                debug_status_signatures.insert(device, signature);
-                                state.push_pioneer_debug(category, device, summary, fields);
-                            }
-                        }
-                        let events = state
-                            .pioneer_clock
-                            .lock()
-                            .receive_status(&buffer[..length], Instant::now());
-                        for event in events {
-                            trigger_pioneer_visual(&state, event);
-                        }
+                        ingest_status(&state, &buffer[..length], &mut debug_status_signatures);
                     }
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => return true,
                     Err(_) => return false,
@@ -1465,6 +1443,123 @@ fn pioneer_thread(state: Arc<SharedState>, metadata_tx: Sender<MetadataRequest>)
         }
         std::thread::sleep(Duration::from_millis(2));
     }
+}
+
+/// What the simulator ticks at (its packets carry their own rates).
+const SIM_STEP: Duration = Duration::from_millis(10);
+
+/// A packet for UDP 50000 (keepalives), from the network or the simulator.
+fn ingest_discovery(state: &SharedState, packet: &[u8]) {
+    let now = Instant::now();
+    let mut clock = state.pioneer_clock.lock();
+    if clock.receive_keepalive(packet, now) {
+        let device = clock
+            .network_devices(now)
+            .into_iter()
+            .find(|device| device.number == packet[0x24]);
+        drop(clock);
+        if let Some(device) = device {
+            state.push_pioneer_debug(
+                "device",
+                device.number,
+                format!("{} · {} · {}", device.name, device.kind, device.ip),
+                BTreeMap::from([
+                    ("kind".into(), device.kind),
+                    ("ip".into(), device.ip.to_string()),
+                    ("mac".into(), device.mac),
+                ]),
+            );
+        }
+    }
+}
+
+/// A packet for UDP 50001 (channels on air, absolute position, beats), from
+/// the network or the simulator.
+fn ingest_beat_port(
+    state: &SharedState,
+    packet: &[u8],
+    configured_player: u8,
+    last_debug_beat: &mut HashMap<u8, Instant>,
+) {
+    let on_air_events = state
+        .pioneer_clock
+        .lock()
+        .receive_channels_on_air(packet, Instant::now());
+    for event in on_air_events {
+        trigger_pioneer_visual(state, event);
+    }
+    state
+        .pioneer_clock
+        .lock()
+        .receive_absolute_position(packet, Instant::now());
+    if let Some(beat) = parse_link_beat(packet) {
+        let now = Instant::now();
+        let duplicate = last_debug_beat
+            .get(&beat.player)
+            .is_some_and(|last| now.duration_since(*last) < Duration::from_millis(35));
+        if !duplicate {
+            last_debug_beat.insert(beat.player, now);
+            state.push_pioneer_debug(
+                "beat",
+                beat.player,
+                format!(
+                    "{} · beat {} · {:.2} BPM",
+                    beat.name, beat.beat_within_bar, beat.bpm
+                ),
+                BTreeMap::from([
+                    ("packet_type".into(), "0x28 beat".into()),
+                    ("packet_length".into(), packet.len().to_string()),
+                    ("name".into(), beat.name.clone()),
+                    ("effective_bpm".into(), format!("{:.3}", beat.bpm)),
+                    ("beat_in_bar".into(), beat.beat_within_bar.to_string()),
+                ]),
+            );
+        }
+    }
+    let event = state
+        .pioneer_clock
+        .lock()
+        .receive_beat(packet, configured_player, Instant::now());
+    if let Some(event) = event {
+        trigger_pioneer_visual(state, event);
+    }
+}
+
+/// A packet for UDP 50002 (CDJ and mixer status), from the network or the
+/// simulator. (Metadata requests stay with the network path: simulated
+/// players bring their own track info.)
+fn ingest_status(
+    state: &SharedState,
+    packet: &[u8],
+    debug_status_signatures: &mut HashMap<u8, Vec<u8>>,
+) {
+    if let Some((category, device, summary, fields, signature)) = debug_status_packet(packet) {
+        let changed = debug_status_signatures
+            .get(&device)
+            .is_none_or(|previous| previous != &signature);
+        if changed {
+            debug_status_signatures.insert(device, signature);
+            state.push_pioneer_debug(category, device, summary, fields);
+        }
+    }
+    let events = state
+        .pioneer_clock
+        .lock()
+        .receive_status(packet, Instant::now());
+    for event in events {
+        trigger_pioneer_visual(state, event);
+    }
+}
+
+/// The simulator is off: forget its players at once (real ones would age
+/// out over seconds) and their tracks.
+fn end_simulation(state: &SharedState) {
+    *state.pioneer_clock.lock() = PioneerClockState::default();
+    let sims = SIM_REKORDBOX_ID_BASE..SIM_REKORDBOX_ID_BASE + 0x1_0000;
+    state
+        .pioneer_tracks
+        .lock()
+        .retain(|_, track| !sims.contains(&track.rekordbox_id));
 }
 
 fn link_device_number(packet: &[u8]) -> Option<u8> {
@@ -2705,5 +2800,87 @@ mod tests {
             assert_eq!(effects.len(), 1, "{event:?} created extra effects");
             assert_eq!(effects[0].cfg.kind, crate::layers::EffectKind::Ring);
         }
+    }
+
+    /// The simulated players (prolink_sim.rs) through the real handlers, at
+    /// real-time spacing: a few minutes of the set fire every transport event
+    /// the gate knows, and the followed deck hands over between players.
+    #[test]
+    fn simulated_players_drive_the_real_link_handlers() {
+        use crate::prolink_sim::{ProlinkSim, SIM_PLAYER_NAME, SimPacket};
+        let mut sim = ProlinkSim::new();
+        let mut clock = PioneerClockState::default();
+        let start = Instant::now();
+        let mut seen = HashSet::new();
+        let mut followed = HashSet::new();
+        let step = 0.01;
+        for n in 1..=(8.0 * 60.0 / step) as u64 {
+            let now = start + Duration::from_secs_f64(n as f64 * step);
+            let mut events = Vec::new();
+            for packet in sim.step(step).packets {
+                match packet {
+                    SimPacket::Discovery(p) => {
+                        clock.receive_keepalive(&p, now);
+                    }
+                    SimPacket::Beat(p) => {
+                        events.extend(clock.receive_channels_on_air(&p, now));
+                        clock.receive_absolute_position(&p, now);
+                        events.extend(clock.receive_beat(&p, 0, now));
+                    }
+                    SimPacket::Status(p) => events.extend(clock.receive_status(&p, now)),
+                }
+            }
+            events.extend(clock.take_due_visual_events(now));
+            for event in events {
+                seen.insert(match event {
+                    PioneerVisualEvent::PlayStarted(_) => "play",
+                    PioneerVisualEvent::CueStarted(_) | PioneerVisualEvent::CuePlayStarted(_) => {
+                        "cue"
+                    }
+                    PioneerVisualEvent::CueEnded(_) => "cue_release",
+                    PioneerVisualEvent::OnAirChanged(_, true) => "on_air",
+                    PioneerVisualEvent::OnAirChanged(_, false) => "off_air",
+                    PioneerVisualEvent::LoopStarted(_) => "loop_start",
+                    PioneerVisualEvent::LoopWrap(_) => "loop_wrap",
+                    PioneerVisualEvent::LoopEnded(_) => "loop_end",
+                    PioneerVisualEvent::Jump(_) => "jump",
+                });
+            }
+            let visual = clock.visual_snapshot(now);
+            if n > 100 {
+                assert!(
+                    visual.active,
+                    "the LINK reads active at {:.2} s",
+                    sim.time()
+                );
+            }
+            followed.insert(visual.player);
+        }
+        let mut seen: Vec<_> = seen.into_iter().collect();
+        seen.sort_unstable();
+        assert_eq!(
+            seen,
+            vec![
+                "cue",
+                "cue_release",
+                "jump",
+                "loop_end",
+                "loop_start",
+                "loop_wrap",
+                "off_air",
+                "on_air",
+                "play"
+            ]
+        );
+        assert!(
+            followed.contains(&1) && followed.contains(&2),
+            "followed {followed:?}"
+        );
+        let names: Vec<_> = clock
+            .network_devices(start + Duration::from_secs(480))
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
+        assert_eq!(names, vec![SIM_PLAYER_NAME, SIM_PLAYER_NAME]);
     }
 }

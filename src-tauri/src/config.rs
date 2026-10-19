@@ -593,6 +593,10 @@ pub struct RhythmConfig {
     /// Disable peer announcements. This is stricter but misses unicast status on
     /// hardware that only sends rich state to announced peers.
     pub pro_dj_link_passive: bool,
+    /// Play a simulated set on two virtual CDJs (players 1 and 2) instead of
+    /// listening to the network: for testing a gate with no CDJs. Its packets
+    /// go through the same handlers as real ones (`prolink_sim.rs`).
+    pub pro_dj_link_simulated: bool,
     /// Shift the lighting clock relative to the external input to compensate for LED/audio
     /// transport latency. Positive values make the visual beat happen later.
     pub latency_ms: f32,
@@ -614,6 +618,7 @@ impl Default for RhythmConfig {
             pro_dj_link_metadata_player: 3,
             pro_dj_link_interface: String::new(),
             pro_dj_link_passive: false,
+            pro_dj_link_simulated: false,
             latency_ms: 0.0,
             fallback_to_audio: true,
             fallback_audio_source: 0,

@@ -429,27 +429,48 @@ function RhythmPanel({ config }: { config: AppConfig }) {
       )}
       {rhythm.source === "pro_dj_link" && (
         <>
-          <label className="field-row">
-            <span>DJ network interface</span>
-            <select
-              value={rhythm.pro_dj_link_interface}
-              onChange={(e) => commit({ pro_dj_link_interface: e.target.value })}
-            >
-              <option value="">All wired IPv4 interfaces</option>
-              {(status?.interfaces ?? []).map((entry) => {
-                const ip = entry.split("—").pop()?.trim() ?? entry;
-                return <option key={entry} value={ip}>{entry}</option>;
-              })}
-            </select>
-          </label>
           <label className="toggle-row">
             <input
               type="checkbox"
-              checked={rhythm.pro_dj_link_passive}
-              onChange={(e) => commit({ pro_dj_link_passive: e.target.checked })}
+              checked={rhythm.pro_dj_link_simulated}
+              onChange={(e) => commit({ pro_dj_link_simulated: e.target.checked })}
             />
-            Strictly passive mode (may miss deck status and metadata)
+            Simulated CDJs (no hardware)
           </label>
+          {rhythm.pro_dj_link_simulated && (
+            <p className="hint">
+              Two virtual players, 1 and 2, play a simulated set at 122 BPM in place of the network:
+              an Auto DJ mixing a crate of invented tracks with rekordbox phrases, fill-ins, loops and
+              hot-cue jumps. Their packets go through the same code as real CDJs', so the clock, the
+              deck effects, the waveform energy and patches' DJ LINK node all see what they would on
+              the night. The gate does not listen to the network while this is on.
+            </p>
+          )}
+          {!rhythm.pro_dj_link_simulated && (
+            <>
+              <label className="field-row">
+                <span>DJ network interface</span>
+                <select
+                  value={rhythm.pro_dj_link_interface}
+                  onChange={(e) => commit({ pro_dj_link_interface: e.target.value })}
+                >
+                  <option value="">All wired IPv4 interfaces</option>
+                  {(status?.interfaces ?? []).map((entry) => {
+                    const ip = entry.split("—").pop()?.trim() ?? entry;
+                    return <option key={entry} value={ip}>{entry}</option>;
+                  })}
+                </select>
+              </label>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={rhythm.pro_dj_link_passive}
+                  onChange={(e) => commit({ pro_dj_link_passive: e.target.checked })}
+                />
+                Strictly passive mode (may miss deck status and metadata)
+              </label>
+            </>
+          )}
           <label className="field-row">
             <span>Deck</span>
             <select
@@ -470,19 +491,21 @@ function RhythmPanel({ config }: { config: AppConfig }) {
               ))}
             </select>
           </label>
-          <label className="field-row">
-            <span>Metadata identity</span>
-            <select
-              value={rhythm.pro_dj_link_metadata_player}
-              onChange={(e) => commit({ pro_dj_link_metadata_player: Number(e.target.value) })}
-            >
-              {[3, 4, 5, 6].map((player) => (
-                <option key={player} value={player}>
-                  Player {player}{status?.pro_dj_link_devices.some((deck) => deck.number === player) ? " — IN USE" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
+          {!rhythm.pro_dj_link_simulated && (
+            <label className="field-row">
+              <span>Metadata identity</span>
+              <select
+                value={rhythm.pro_dj_link_metadata_player}
+                onChange={(e) => commit({ pro_dj_link_metadata_player: Number(e.target.value) })}
+              >
+                {[3, 4, 5, 6].map((player) => (
+                  <option key={player} value={player}>
+                    Player {player}{status?.pro_dj_link_devices.some((deck) => deck.number === player) ? " — IN USE" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {(status?.pro_dj_link_devices ?? []).length > 0 && (
             <p className="hint">
               {(status?.pro_dj_link_devices ?? []).map((deck) => (

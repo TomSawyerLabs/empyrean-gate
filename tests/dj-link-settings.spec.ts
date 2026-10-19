@@ -78,3 +78,25 @@ test("the expanded event controls stay usable on a phone", async ({ page }) => {
   }));
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1);
 });
+
+test("simulated CDJs replace the network settings and say what they are", async ({ page }) => {
+  const sent = await openSettingsWithWire(page);
+  await expect(page.getByLabel("DJ network interface")).toBeVisible();
+  await expect(page.getByLabel("Metadata identity")).toBeVisible();
+
+  // A controlled checkbox: it follows the config the backend sends back.
+  const simulated = page.getByLabel("Simulated CDJs (no hardware)");
+  await simulated.click();
+  await expect.poll(() => lastConfig(sent)?.rhythm?.pro_dj_link_simulated).toBe(true);
+  await expect(simulated).toBeChecked();
+  await expect(page.getByText("Two virtual players, 1 and 2")).toBeVisible();
+  // Nothing about the network applies to simulated players.
+  await expect(page.getByLabel("DJ network interface")).toHaveCount(0);
+  await expect(page.getByLabel("Metadata identity")).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: /^Deck/ })).toBeVisible();
+
+  await simulated.click();
+  await expect.poll(() => lastConfig(sent)?.rhythm?.pro_dj_link_simulated).toBe(false);
+  await expect(simulated).not.toBeChecked();
+  await expect(page.getByLabel("DJ network interface")).toBeVisible();
+});

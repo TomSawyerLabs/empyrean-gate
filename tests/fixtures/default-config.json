@@ -89,6 +89,7 @@
     "pro_dj_link_metadata_player": 3,
     "pro_dj_link_interface": "",
     "pro_dj_link_passive": false,
+    "pro_dj_link_simulated": false,
     "latency_ms": 0.0,
     "fallback_to_audio": true,
     "fallback_audio_source": 0
