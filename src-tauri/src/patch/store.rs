@@ -4,8 +4,9 @@
 //! renamed to follow patch renames. `EMPYREAN_CONFIG` relocates the config
 //! file and therefore this directory too (tests, isolated instances).
 
-use super::{PATCH_FORMAT, PatchDoc};
+use super::{PATCH_FORMAT, PatchDoc, flatten, links};
 use serde::Serialize;
+use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -17,6 +18,65 @@ pub struct PatchSummary {
     pub name: String,
     pub description: String,
     pub nodes: usize,
+    /// Every node kind it uses, its sub-patches' insides included (the
+    /// patch browser's topics).
+    pub kinds: Vec<String>,
+    /// Its Sub-patch nodes (the patch browser's tree).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub subpatches: Vec<SubpatchSummary>,
+}
+
+/// A Sub-patch node, as the patch browser lists it.
+#[derive(Debug, Clone, Serialize)]
+pub struct SubpatchSummary {
+    pub node: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub linked: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub subpatches: Vec<SubpatchSummary>,
+}
+
+fn summary(doc: PatchDoc) -> PatchSummary {
+    let mut kinds = BTreeSet::new();
+    collect_kinds(&doc, &mut kinds);
+    PatchSummary {
+        subpatches: subpatches(&doc),
+        kinds: kinds.into_iter().collect(),
+        nodes: doc.nodes.len(),
+        id: doc.id,
+        name: doc.name,
+        description: doc.description,
+    }
+}
+
+fn collect_kinds(doc: &PatchDoc, kinds: &mut BTreeSet<String>) {
+    for n in &doc.nodes {
+        kinds.insert(n.kind.clone());
+        if let Some(sub) = &n.sub {
+            collect_kinds(sub, kinds);
+        }
+    }
+}
+
+fn subpatches(doc: &PatchDoc) -> Vec<SubpatchSummary> {
+    doc.nodes
+        .iter()
+        .filter(|n| n.kind == flatten::KIND)
+        .map(|n| SubpatchSummary {
+            node: n.id.clone(),
+            name: if !n.name.is_empty() {
+                n.name.clone()
+            } else {
+                n.sub.as_ref().map(|s| s.name.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| "Sub-patch".into())
+            },
+            source: n.source.clone(),
+            linked: n.linked,
+            subpatches: n.sub.as_deref().map(subpatches).unwrap_or_default(),
+        })
+        .collect()
 }
 
 pub fn patches_dir() -> PathBuf {
@@ -30,15 +90,7 @@ pub fn patches_dir() -> PathBuf {
 /// All readable patches, sorted by name. Unparseable files are skipped with a
 /// warning — one hand-edited broken file must not hide the rest.
 pub fn list(dir: &Path) -> Vec<PatchSummary> {
-    let mut out: Vec<PatchSummary> = read_all(dir)
-        .into_iter()
-        .map(|(_, doc)| PatchSummary {
-            id: doc.id,
-            name: doc.name,
-            description: doc.description,
-            nodes: doc.nodes.len(),
-        })
-        .collect();
+    let mut out: Vec<PatchSummary> = read_all(dir).into_iter().map(|(_, doc)| summary(doc)).collect();
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     out
 }
@@ -85,6 +137,34 @@ pub fn save(dir: &Path, doc: &mut PatchDoc) -> Result<PathBuf, String> {
         }
     }
     Ok(path)
+}
+
+/// After `saved` was stored: refresh its linked copies in every other patch,
+/// and theirs in turn when that changes them (see [`links`]). Returns the
+/// ids of the patches rewritten.
+pub fn propagate_links(dir: &Path, saved: &PatchDoc) -> Vec<String> {
+    let mut changed = Vec::new();
+    let mut seen = HashSet::from([saved.id.clone()]);
+    let mut queue = vec![saved.clone()];
+    while let Some(source) = queue.pop() {
+        for (_, mut doc) in read_all(dir) {
+            if doc.id == source.id || !links::links_to(&doc, &source.id) || !links::sync_links(&mut doc, &source) {
+                continue;
+            }
+            match save(dir, &mut doc) {
+                Ok(_) => {
+                    if !changed.contains(&doc.id) {
+                        changed.push(doc.id.clone());
+                    }
+                    if seen.insert(doc.id.clone()) {
+                        queue.push(doc);
+                    }
+                }
+                Err(e) => log::warn!("refreshing the links in {}: {e}", doc.id),
+            }
+        }
+    }
+    changed
 }
 
 pub fn delete(dir: &Path, id: &str) -> Result<(), String> {
@@ -196,6 +276,48 @@ mod tests {
         assert!(doc.nodes.iter().any(|n| n.kind == "render_effects"));
         assert!(doc.nodes.iter().any(|n| n.kind == "render_points"));
         crate::patch::codegen::compile(&doc).expect("compiles");
+    }
+
+    #[test]
+    fn saving_a_patch_refreshes_its_linked_copies_down_the_chain() {
+        use crate::patch::NodeInst;
+        let tmp = TempDir::new("links");
+        let dir = &tmp.0;
+        let solid = |id: &str| NodeInst { id: id.into(), kind: "solid".into(), ..Default::default() };
+        let link = |id: &str, to: &PatchDoc| NodeInst {
+            id: id.into(),
+            kind: flatten::KIND.into(),
+            sub: Some(Box::new(links::snapshot(to))),
+            source: Some(to.id.clone()),
+            linked: true,
+            ..Default::default()
+        };
+        let mut a = PatchDoc { nodes: vec![solid("x")], ..sample("A") };
+        save(dir, &mut a).unwrap();
+        let mut b = PatchDoc { nodes: vec![link("sa", &a)], ..sample("B") };
+        save(dir, &mut b).unwrap();
+        let mut c = PatchDoc { nodes: vec![link("sb", &b)], ..sample("C") };
+        save(dir, &mut c).unwrap();
+        let mut d = sample("Unrelated");
+        save(dir, &mut d).unwrap();
+
+        a.nodes.push(solid("y"));
+        save(dir, &mut a).unwrap();
+        let mut changed = propagate_links(dir, &a);
+        changed.sort();
+        let mut want = vec![b.id.clone(), c.id.clone()];
+        want.sort();
+        assert_eq!(changed, want);
+        let c = load(dir, &c.id).unwrap();
+        let inner_a = c.nodes[0].sub.as_ref().unwrap().nodes[0].sub.as_ref().unwrap();
+        assert_eq!(inner_a.nodes.len(), 2, "C sees A's new node through B");
+
+        let listed = list(dir);
+        let c_sum = listed.iter().find(|s| s.id == c.id).unwrap();
+        assert_eq!(c_sum.subpatches[0].name, "B");
+        assert!(c_sum.subpatches[0].linked);
+        assert_eq!(c_sum.subpatches[0].subpatches[0].source.as_deref(), Some(a.id.as_str()));
+        assert_eq!(c_sum.kinds, vec!["solid".to_string(), flatten::KIND.to_string()]);
     }
 
     #[test]

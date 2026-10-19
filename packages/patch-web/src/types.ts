@@ -100,6 +100,15 @@ export interface PatchNode {
    * inputs (named `"{node}.{param}"`, knob values in `params` under the same
    * keys), its Output this node's `out`. */
   sub?: PatchDoc;
+  /** Where a Sub-patch's `sub` came from: a saved patch's id or a built-in's
+   * (`builtin-…`). Absent on an older sub-patch, which is its own copy. */
+  source?: string;
+  /** The `sub` follows `source` (stores refresh it when that patch is
+   * saved) and is read-only here; absent/false: a clone this patch owns. */
+  linked?: boolean;
+  /** On a clone: `sourceRev` of the source as it was copied, so the editor
+   * can offer "Update from …" once the source has moved on. */
+  source_rev?: string;
   /** A Code node's own ports and body (crate `code::CodeDef`): the declared
    * inputs are its input ports (Scalar ones are knobs too, values in
    * `params`), the declared outputs its output ports. */
@@ -168,6 +177,20 @@ export interface PatchSummary {
   name: string;
   description: string;
   nodes: number;
+  /** Every node kind it uses, sub-patches' insides included (the patch
+   * browser's topics). Older gates send none. */
+  kinds?: string[];
+  /** Its Sub-patch nodes (the patch browser's tree). */
+  subpatches?: SubpatchSummary[];
+}
+
+/** A Sub-patch node, as the patch browser lists it. */
+export interface SubpatchSummary {
+  node: string;
+  name: string;
+  source?: string;
+  linked?: boolean;
+  subpatches?: SubpatchSummary[];
 }
 
 /** The node kind that embeds another document (crate `flatten::KIND`). */

@@ -2711,9 +2711,12 @@ async fn handle_msg(
             // is legitimate state to persist. Activation is where validity bites.
             match patch::store::save(&dir, &mut doc) {
                 Ok(_) => {
+                    // Patches that link this one as a Sub-patch follow it.
+                    let relinked = patch::store::propagate_links(&dir, &doc);
                     // Only the active patch needs an engine rebuild. Saving a
                     // different draft must not interrupt the live renderer.
-                    if state.config.read().active_patch.as_deref() == Some(doc.id.as_str()) {
+                    let active = state.config.read().active_patch.clone();
+                    if active.as_deref().is_some_and(|a| a == doc.id || relinked.iter().any(|r| r == a)) {
                         state.patch_epoch.fetch_add(1, Ordering::SeqCst);
                     }
                     // Echo (the editor learns an assigned id), then refresh

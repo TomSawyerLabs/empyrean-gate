@@ -17,6 +17,7 @@ pub mod convert;
 pub mod effects;
 pub mod eval;
 pub mod flatten;
+pub mod links;
 pub mod migrate;
 pub mod presets;
 pub mod reference;
@@ -226,6 +227,21 @@ pub struct NodeInst {
     /// four deep.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub: Option<Box<PatchDoc>>,
+    /// Where a Sub-patch node's `sub` came from: the id of a saved patch or
+    /// of a built-in (`builtin-…`). Absent on a sub-patch older than links,
+    /// which is simply its own copy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The `sub` follows `source`: saving that patch refreshes this copy
+    /// everywhere it is linked (see [`links`]), and editors show it
+    /// read-only. False: a clone this patch owns and may edit.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub linked: bool,
+    /// On a clone: the editor's digest of `source` as it was copied, so the
+    /// editor can tell when the source has moved on and offer an update.
+    /// Opaque to the crate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_rev: Option<String>,
     /// A Code node's own ports and body (see `code`): its declared inputs
     /// are this node's input ports (Scalar ones are knobs too), its declared
     /// outputs its output ports. Required on a Code node, refused elsewhere.

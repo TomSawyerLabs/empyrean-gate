@@ -12,6 +12,8 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { linksTo, summarize, syncLinks } from "../packages/patch-web/src/editor/links";
+import type { PatchDoc } from "../packages/patch-web/src/types";
 
 const ROOT = join(import.meta.dir, "..");
 const DIST = join(ROOT, "dist");
@@ -224,7 +226,23 @@ const library = (ws: object) => {
   return lib;
 };
 const patchSummaries = (ws: object) =>
-  [...library(ws).values()].map((p) => ({ id: p.id, name: p.name, description: p.description, nodes: p.nodes.length }));
+  [...library(ws).values()].map((p) => summarize(p as unknown as PatchDoc));
+/** As the gate's `patch::store::propagate_links`: patches linking `saved`
+ * as a Sub-patch follow it, and so do the ones linking those. */
+const propagateLinks = (ws: object, saved: MockPatch) => {
+  const queue = [saved as unknown as PatchDoc];
+  const seen = new Set([saved.id]);
+  for (let source = queue.pop(); source; source = queue.pop()) {
+    for (const p of library(ws).values()) {
+      const doc = p as unknown as PatchDoc;
+      if (doc.id === source.id || !linksTo(doc, source.id) || !syncLinks(doc, source)) continue;
+      if (!seen.has(doc.id)) {
+        seen.add(doc.id);
+        queue.push(doc);
+      }
+    }
+  }
+};
 
 // The public floor page (public.html) speaks the allowlisted half of the
 // protocol and receives `public_state` instead of config/status. One snapshot
@@ -665,6 +683,7 @@ const server = Bun.serve({
           const doc = { ...(msg.patch as MockPatch) };
           if (!doc.id) doc.id = `mock-patch-${++mintedPatches}`;
           library(ws).set(doc.id, doc);
+          propagateLinks(ws, doc);
           ws.send(JSON.stringify({ type: "patch", patch: doc }));
           ws.send(JSON.stringify({ type: "patches", patches: patchSummaries(ws) }));
           break;

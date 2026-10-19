@@ -29,3 +29,4 @@ export {
   patchFileName,
   savePatchToDisk,
 } from "./files";
+export { BUILTIN_PREFIX, isBuiltin, linksTo, snapshot, sourceRev, summarize, syncLinks } from "./links";
