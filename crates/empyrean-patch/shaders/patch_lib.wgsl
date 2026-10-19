@@ -264,22 +264,16 @@ fn lattice_hash(i: vec3i, seed: u32) -> u32 {
     return wang_hash(u.x ^ wang_hash(u.y ^ wang_hash(u.z ^ wang_hash(seed))));
 }
 
-/// One of Perlin's twelve cube-edge gradients, chosen by `h`, dotted with `d`.
+/// One of Perlin's twelve cube-edge gradients, chosen by `h`, dotted with `d`:
+/// ±x±y for 0..3, ±x±z for 4..7, ±y±z for 8..11 (bit 0 negates the first
+/// term, bit 1 the second). Branchless on purpose: as a twelve-case `switch`,
+/// eight inlined copies kept SwiftShader (Chrome's software WebGPU) building
+/// the pipeline for minutes.
 fn perlin_grad(h: u32, d: vec3f) -> f32 {
-    switch h % 12u {
-        case 0u: { return d.x + d.y; }
-        case 1u: { return -d.x + d.y; }
-        case 2u: { return d.x - d.y; }
-        case 3u: { return -d.x - d.y; }
-        case 4u: { return d.x + d.z; }
-        case 5u: { return -d.x + d.z; }
-        case 6u: { return d.x - d.z; }
-        case 7u: { return -d.x - d.z; }
-        case 8u: { return d.y + d.z; }
-        case 9u: { return -d.y + d.z; }
-        case 10u: { return d.y - d.z; }
-        default: { return -d.y - d.z; }
-    }
+    let k = h % 12u;
+    let a = select(d.y, d.x, k < 8u);
+    let b = select(d.z, d.y, k < 4u);
+    return select(a, -a, (k & 1u) != 0u) + select(b, -b, (k & 2u) != 0u);
 }
 
 /// Classic (improved) Perlin gradient noise at `p`, about -1..1; `seed`
