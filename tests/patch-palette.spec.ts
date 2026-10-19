@@ -18,7 +18,15 @@ test("kinds are grouped by purpose, and a folded group stays folded", async ({ p
   const palette = await open(page);
   const heads = palette.locator(".palette-group-label");
   // The mock registry's kinds, in palette order (Sub-patches last).
-  await expect(heads).toHaveText(["Live input", "Media", "Patterns", "Color & space", "Structure", "Sub-patches"]);
+  await expect(heads).toHaveText([
+    "Live input",
+    "Media",
+    "Building blocks",
+    "Patterns",
+    "Color & space",
+    "Structure",
+    "Sub-patches",
+  ]);
 
   const patterns = palette.locator(".palette-group-patterns");
   await expect(patterns.locator(".palette-grid-item")).toHaveCount(2);
