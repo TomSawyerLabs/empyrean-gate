@@ -215,3 +215,26 @@ test("Alt-drag scrubs a number live, and one undo puts it back", async ({ page }
   await page.keyboard.up("Alt");
   await expect(page.locator(".patch-side .cm-cursor")).toHaveCount(2);
 });
+
+test("a colour in literals gets a swatch, and picking rewrites it as one step", async ({ page }) => {
+  const { panel, body } = await codeNode(page);
+  await body.fill("out = vec4f(1.0, 0.5, 0.0, 1.0);");
+  const swatch = panel.locator(".code-swatch");
+  await expect(swatch).toHaveCount(1);
+  await expect(swatch).toHaveCSS("background-color", "rgb(255, 128, 0)");
+  await swatch.click();
+  // The platform picker stands in for a person: the hidden input it serves.
+  const input = page.locator(".code-swatch-input");
+  await expect(input).toHaveValue("#ff8000");
+  await input.evaluate((el: HTMLInputElement) => {
+    for (const hex of ["#00ff00", "#0000ff"]) {
+      el.value = hex;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect(body).toHaveText("out = vec4f(0.0, 0.0, 1.0, 1.0);");
+  await expect(swatch).toHaveCSS("background-color", "rgb(0, 0, 255)");
+  await body.press("ControlOrMeta+z");
+  await expect(body).toHaveText("out = vec4f(1.0, 0.5, 0.0, 1.0);");
+});

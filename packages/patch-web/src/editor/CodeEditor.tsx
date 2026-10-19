@@ -1,7 +1,7 @@
 // The Code node's body editor: CodeMirror 6 with a WGSL mode, completion and
 // hover docs fed by the patch core's reference (and the node's own ports),
 // snippets, signature help, search and multiple selections, number
-// scrubbing, and the host's errors as marks on the body's lines (with quick
+// scrubbing, colour swatches, and the host's errors as marks on the body's lines (with quick
 // fixes). One instance per
 // panel; the document is kept in sync with the patch (undo in the patch
 // replaces the text here, edits here go to the patch coalesced).
@@ -46,6 +46,7 @@ import { tags as t } from "@lezer/highlight";
 import type { CodeFnRef, CodePort, CodeReference, PatchShape } from "../types";
 import { fixesFor, type BodyEdit, type FixContext } from "./code-fixes";
 import { scrubbing } from "./code-scrub";
+import { colourSwatches } from "./code-swatches";
 import { signatureHelp } from "./code-signature";
 import { snippetsFor } from "./code-snippets";
 
@@ -707,6 +708,7 @@ export function CodeEditor({
           indentUnit.of("  "),
           wgsl,
           syntaxHighlighting(highlight),
+          colourSwatches(),
           autocompletion({ override: [makeCompletions(getScope)], activateOnTyping: true, maxRenderedOptions: 40 }),
           makeHover(getScope),
           signatureHelp((name) => fnFor(getScope(), name)),
