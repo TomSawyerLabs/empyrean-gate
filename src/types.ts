@@ -224,6 +224,62 @@ export function subpatchPorts(
   }));
 }
 
+/** A Sub-patch's inlet and outlet (crate `registry::PATCH_IN_KIND` …):
+ * pass-throughs whose shape their `shape` select picks. */
+export const PATCH_IN_KIND = "patch_in";
+export const PATCH_OUT_KIND = "patch_out";
+
+/** What a Patch in / Patch out's `shape` select picks, by index (crate
+ * `registry::BOUNDARY_SHAPES`). */
+export const BOUNDARY_SHAPES: readonly PatchShape[] = [
+  "field_color",
+  "field_scalar",
+  "scalar",
+  "event",
+  "led_color",
+  "led_scalar",
+];
+
+/** A Patch in or Patch out's shape (both its ports carry it); null for any
+ * other node. Mirrors crate `NodeInst::boundary_shape`. */
+export function boundaryShape(node: PatchNode | undefined): PatchShape | null {
+  if (node?.kind !== PATCH_IN_KIND && node?.kind !== PATCH_OUT_KIND) return null;
+  const i = Math.max(0, Math.round(node.params.shape ?? 0));
+  return BOUNDARY_SHAPES[Math.min(i, BOUNDARY_SHAPES.length - 1)];
+}
+
+/** One port a Sub-patch gains from a Patch in or Patch out inside it: named
+ * by that node's id, labelled by its name. */
+export interface BoundaryPort {
+  name: string;
+  label: string;
+  shape: PatchShape;
+}
+
+function boundaryPorts(node: PatchNode | undefined, kind: string): BoundaryPort[] {
+  return (node?.sub?.nodes ?? [])
+    .filter((n) => n.kind === kind)
+    .map((n) => ({ name: n.id, label: n.name || n.id, shape: boundaryShape(n)! }));
+}
+
+/** A Sub-patch node's typed inputs: one per Patch in of its document. */
+export function subpatchInlets(node: PatchNode | undefined): BoundaryPort[] {
+  return boundaryPorts(node, PATCH_IN_KIND);
+}
+
+/** A Sub-patch node's typed outputs: one per Patch out of its document. */
+export function subpatchOutlets(node: PatchNode | undefined): BoundaryPort[] {
+  return boundaryPorts(node, PATCH_OUT_KIND);
+}
+
+/** Whether a Sub-patch offers its picture, `out`: unless its document is a
+ * block with Patch outs and no Output (every sub-patch from before Patch
+ * outs keeps it). */
+export function subpatchHasOut(node: PatchNode | undefined): boolean {
+  const nodes = node?.sub?.nodes ?? [];
+  return nodes.some((n) => n.kind === "output") || !nodes.some((n) => n.kind === PATCH_OUT_KIND);
+}
+
 /** A function a Code node body may call (crate `reference::FnRef`). */
 export interface CodeFnRef {
   name: string;

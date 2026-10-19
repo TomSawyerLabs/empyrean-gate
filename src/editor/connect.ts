@@ -8,6 +8,9 @@
 import { fitsInput } from "./domains";
 import {
   applies,
+  BOUNDARY_SHAPES,
+  PATCH_IN_KIND,
+  PATCH_OUT_KIND,
   SUBPATCH_KIND,
   onLeds,
   type PatchNodeType,
@@ -23,6 +26,9 @@ export interface Suggestion {
   exact: boolean;
   /** The port is a knob (a Number param) rather than a shaped input. */
   viaParam: boolean;
+  /** Params the new node starts with: a Patch in / Patch out takes the
+   * wire's shape. */
+  params?: Record<string, number>;
 }
 
 export interface DragFrom {
@@ -95,6 +101,17 @@ export function suggestConnections(registry: Iterable<PatchNodeType>, from: Drag
   const order = from.dir === "out" ? CONSUMERS[from.shape] : PRODUCERS[from.shape];
   for (const t of registry) {
     if (t.id === SUBPATCH_KIND) continue;
+    // A Patch out takes a wire from an output, a Patch in hands one to an
+    // input, each shaped to the wire (any shape it can carry). Last in the
+    // list: they fit every wire, so they would otherwise crowd out the
+    // nodes that do something with it.
+    if (t.id === PATCH_OUT_KIND || t.id === PATCH_IN_KIND) {
+      const shape = BOUNDARY_SHAPES.indexOf(from.shape);
+      if (shape < 0 || from.dir !== (t.id === PATCH_OUT_KIND ? "out" : "in")) continue;
+      const port = from.dir === "out" ? "in" : "out";
+      out.push({ type: t, port, exact: true, viaParam: false, params: { shape }, score: 1000 });
+      continue;
+    }
     const candidates =
       from.dir === "out"
         ? inputsOf(t)

@@ -65,7 +65,10 @@ import { cloneAlong, crumbs, docAt, flatId, lockAt, sameLocation, unlink, validP
 import { PatchBrowser } from "./PatchBrowser";
 import {
   applies,
+  boundaryShape,
   CODE_KIND,
+  PATCH_IN_KIND,
+  PATCH_OUT_KIND,
   NOTE_KIND,
   codeInputs,
   codeOutputs,
@@ -82,6 +85,9 @@ import {
   splitLayer,
   type CodeReference,
   SUBPATCH_KIND,
+  subpatchHasOut,
+  subpatchInlets,
+  subpatchOutlets,
   subpatchPorts,
   type PatchDoc,
   type PatchNode,
@@ -269,11 +275,22 @@ type Registry = Map<string, PatchNodeType>;
  * `number` param (knob doubles as a Scalar port), a Blend's layers
  * included. A Sub-patch's ports come from the instance: one per exposed
  * knob of its document. */
-function inputPorts(def: PatchNodeType, node?: PatchNode): { name: string; shape: PatchShape }[] {
+type Port = { name: string; shape: PatchShape; label?: string };
+
+function inputPorts(def: PatchNodeType, node?: PatchNode): Port[] {
   if (def.id === SUBPATCH_KIND) {
-    return subpatchPorts(node).map((p) => ({ name: p.name, shape: "scalar" as PatchShape }));
+    // Its Patch ins (typed, by id), then its exposed knobs.
+    return [
+      ...subpatchInlets(node),
+      ...subpatchPorts(node).map((p) => ({ name: p.name, shape: "scalar" as PatchShape })),
+    ];
   }
   if (def.id === CODE_KIND) return codeInputs(node);
+  // A Patch in's `in` is fed from outside the patch, and a Patch out's
+  // `default` and `shape` are its panel's: each shows only what is wired
+  // inside.
+  if (def.id === PATCH_IN_KIND) return [];
+  if (def.id === PATCH_OUT_KIND) return [{ name: "in", shape: boundaryShape(node) ?? "field_color" }];
   return [
     ...nodeInputs(def, node),
     ...nodeParams(def, node)
@@ -294,8 +311,12 @@ function portApplies(def: PatchNodeType, node: PatchNode, name: string): boolean
 
 /** The output ports of a node: the type's, or for a Code node the instance's
  * declared outputs. */
-function outputPorts(def: PatchNodeType, node?: PatchNode): { name: string; shape: PatchShape }[] {
+function outputPorts(def: PatchNodeType, node?: PatchNode): Port[] {
   if (def.id === CODE_KIND) return codeOutputs(node);
+  if (def.id === SUBPATCH_KIND) return [...(subpatchHasOut(node) ? def.outputs : []), ...subpatchOutlets(node)];
+  // A Patch out's `out` is read from outside the patch.
+  if (def.id === PATCH_IN_KIND) return [{ name: "out", shape: boundaryShape(node) ?? "field_color" }];
+  if (def.id === PATCH_OUT_KIND) return [];
   return def.outputs;
 }
 
@@ -505,8 +526,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
     if (!data.wiredIn.includes(name)) return " port-fit";
     return combines(node.id, name) ? " port-fit port-combine" : " port-nofit";
   };
-  const portLabel = (p: { name: string; shape: PatchShape }, dir: "in" | "out") =>
-    `${p.name} · ${SHAPE_LABEL[p.shape]} ${dir}`;
+  const portLabel = (p: Port, dir: "in" | "out") => `${p.label ?? p.name} · ${SHAPE_LABEL[p.shape]} ${dir}`;
   const collapseButton = setCollapsed && (
     <button
       type="button"
@@ -560,7 +580,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
                 aria-label={portLabel(p, "in")}
               >
                 <Handle type="target" position={Position.Left} id={p.name} className={`port-dot shape-${p.shape}`} />
-                {named && <span>{p.name}</span>}
+                {named && <span>{p.label ?? p.name}</span>}
               </div>
             ))}
           </div>
@@ -587,7 +607,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
                 className={`pnode-port out${fitClass(p.shape, "out", p.name)}`}
                 aria-label={portLabel(p, "out")}
               >
-                {named && <span>{p.name}</span>}
+                {named && <span>{p.label ?? p.name}</span>}
                 <Handle type="source" position={Position.Right} id={p.name} className={`port-dot shape-${p.shape}`} />
               </div>
             ))}
@@ -675,7 +695,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
                 id={p.name}
                 className={`port-dot shape-${p.shape}`}
               />
-              <span>{p.name}</span>
+              <span>{p.label ?? p.name}</span>
             </div>
           ))}
         </div>
@@ -686,7 +706,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
               className={`pnode-port out${fitClass(p.shape, "out", p.name)}`}
               aria-label={portLabel(p, "out")}
             >
-              <span>{p.name}</span>
+              <span>{p.label ?? p.name}</span>
               <Handle
                 type="source"
                 position={Position.Right}
@@ -2175,7 +2195,7 @@ function Editor({
         // Land the node so the wire meets it where the pointer let go: its
         // left edge for an input, roughly its right edge for an output.
         const x = Math.round(c.from.dir === "out" ? c.flow.x : c.flow.x - 180);
-        d.nodes.push({ id, kind: s.type.id, name: "", params: {}, pos: [x, Math.round(c.flow.y - 20)] });
+        d.nodes.push({ id, kind: s.type.id, name: "", params: { ...s.params }, pos: [x, Math.round(c.flow.y - 20)] });
         d.edges.push(
           c.from.dir === "out"
             ? { from: { node: c.from.node, port: c.from.port }, to: { node: id, port: s.port } }
