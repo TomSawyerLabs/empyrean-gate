@@ -1475,6 +1475,17 @@ function Editor({
   /** A saved patch asked for to be inserted as a Sub-patch, not opened. */
   const insertRequestedId = useRef<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The edit the save timer holds: opening another patch, or leaving,
+   * writes it at once instead of letting the next edit's timer drop it. */
+  const pendingSave = useRef<PatchDoc | null>(null);
+  const flushSave = useCallback(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    const d = pendingSave.current;
+    pendingSave.current = null;
+    if (d) store.save(d);
+  }, [store]);
+  useEffect(() => flushSave, [flushSave]);
   const history = useRef(new History<PatchDoc>());
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
@@ -1566,6 +1577,7 @@ function Editor({
   // Stable (ref-based) so the long-lived message subscription never goes stale.
   const openDoc = useCallback(
     (d: PatchDoc, at: string[] = [], how: NavHow = "push") => {
+      flushSave();
       history.current.clear();
       const p = validPath(d, at);
       rootRef.current = d;
@@ -1583,7 +1595,7 @@ function Editor({
       if (d.id) announce({ patch: d.id, path: p }, how);
       else unsavedHow.current = how;
     },
-    [announce, fitSoon, showAt],
+    [announce, fitSoon, flushSave, showAt],
   );
 
   /** Go to a location: inside the open patch, a built-in, or a saved patch
@@ -1717,12 +1729,10 @@ function Editor({
     (d: PatchDoc) => {
       if (!canEdit) return;
       if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
-        saveTimer.current = null;
-        store.save(d);
-      }, 600);
+      pendingSave.current = d;
+      saveTimer.current = setTimeout(flushSave, 600);
     },
-    [canEdit, store],
+    [canEdit, flushSave],
   );
 
   /** All document mutations funnel through here: clone, mutate, sync, save.
