@@ -99,6 +99,7 @@ describe("the connect chooser", () => {
     const out = fromLeds.find((s) => s.type.id === "patch_out")!;
     expect(out).toMatchObject({ port: "in", params: { shape: 4 } });
     expect(fromLeds.some((s) => s.type.id === "patch_in")).toBe(false);
+    expect(fromLeds.at(-1)?.type.id).toBe("patch_out");
 
     const intoNumber = suggestConnections(kinds.values(), { shape: "scalar", dir: "in" });
     expect(intoNumber.find((s) => s.type.id === "patch_in")).toMatchObject({ port: "out", params: { shape: 2 } });

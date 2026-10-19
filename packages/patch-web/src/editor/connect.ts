@@ -102,12 +102,14 @@ export function suggestConnections(registry: Iterable<PatchNodeType>, from: Drag
   for (const t of registry) {
     if (t.id === SUBPATCH_KIND) continue;
     // A Patch out takes a wire from an output, a Patch in hands one to an
-    // input, each shaped to the wire (any shape it can carry).
+    // input, each shaped to the wire (any shape it can carry). Last in the
+    // list: they fit every wire, so they would otherwise crowd out the
+    // nodes that do something with it.
     if (t.id === PATCH_OUT_KIND || t.id === PATCH_IN_KIND) {
       const shape = BOUNDARY_SHAPES.indexOf(from.shape);
       if (shape < 0 || from.dir !== (t.id === PATCH_OUT_KIND ? "out" : "in")) continue;
       const port = from.dir === "out" ? "in" : "out";
-      out.push({ type: t, port, exact: true, viaParam: false, params: { shape }, score: rank(order, t.category) * 2 });
+      out.push({ type: t, port, exact: true, viaParam: false, params: { shape }, score: 1000 });
       continue;
     }
     const candidates =

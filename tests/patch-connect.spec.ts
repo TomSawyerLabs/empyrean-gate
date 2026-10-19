@@ -54,9 +54,12 @@ test("dropping a wire on empty canvas offers what fits, and a pick adds it wired
   // a Still image in (no inputs that take a field) is not.
   await expect(chooser.getByRole("button", { name: /^Output/ })).toBeVisible();
   await expect(chooser.getByRole("button", { name: /Still image/ })).toHaveCount(0);
-  // The filter box narrows the list.
-  await chooser.getByLabel("Filter node types").fill("outpu");
-  await expect(chooser.locator(".palette-item")).toHaveCount(1);
+  // The filter box narrows the list, best match first (descriptions count
+  // too, so Patch out, "an output of this patch", stays below Output).
+  const before = await chooser.locator(".palette-item").count();
+  await chooser.getByLabel("Filter node types").fill("outp");
+  await expect(chooser.locator(".palette-item").first()).toContainText("Output");
+  expect(await chooser.locator(".palette-item").count()).toBeLessThan(before);
   await chooser.getByRole("button", { name: /^Output/ }).click();
   await expect(chooser).toHaveCount(0);
   await expect(page.locator(".react-flow__node")).toHaveCount(3);

@@ -6,7 +6,7 @@
 
 import type { PatchCore } from "../src/runtime/core";
 import { snippetDocs } from "../src/editor/code-snippets";
-import { applies, CODE_KIND, type PatchDoc, type PatchNode, type PatchNodeType, type PatchShape } from "../src/types";
+import { applies, boundaryShape, CODE_KIND, type PatchDoc, type PatchNode, type PatchNodeType, type PatchShape } from "../src/types";
 
 export interface CorpusEntry {
   label: string;
@@ -57,13 +57,15 @@ export function shaderCorpus(core: PatchCore): CorpusEntry[] {
     const n = node("n", t.id, params);
     const nodes = [n, node("o", "output")];
     const edges: PatchDoc["edges"] = [];
-    const out = t.outputs[0];
+    // A Patch in / Patch out's ports carry the shape its select picks.
+    const shapeOf = (p: { shape: PatchShape }) => boundaryShape(n) ?? p.shape;
+    const out = t.outputs[0] && { name: t.outputs[0].name, shape: shapeOf(t.outputs[0]) };
     if (out && accepts.get(into.shape)?.includes(out.shape)) {
       edges.push({ from: { node: "n", port: out.name }, to: { node: "o", port: into.name } });
     }
     if (fed) {
       // Only the inputs of the node's mode (Random's `when`).
-      const inputs = t.inputs.filter((p) => applies(p, t, n)).map((p) => ({ name: p.name, shape: p.shape }));
+      const inputs = t.inputs.filter((p) => applies(p, t, n)).map((p) => ({ name: p.name, shape: shapeOf(p) }));
       if (t.layered) {
         n.layers = layers;
         for (let k = 2; k <= layers; k++) {
