@@ -1184,12 +1184,15 @@ type SubpatchChoice = { id: string; name: string; nodes: number; preset: boolean
 function Palette({
   grouped,
   subpatches,
+  hasOutput,
   onPick,
   onPickSubpatch,
   onClose,
 }: {
   grouped: PaletteGroup[];
   subpatches: SubpatchChoice[];
+  /** The open patch already has its one Output: the palette's is disabled. */
+  hasOutput: boolean;
   onPick: (kind: string) => void;
   onPickSubpatch: (choice: SubpatchChoice) => void;
   /** Set when the palette is a sheet (compact layout): shows Done. */
@@ -1209,16 +1212,21 @@ function Palette({
         <div key={g.category} className="palette-group">
           <h4>{g.label}</h4>
           <div className="palette-items">
-            {g.types.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className={`palette-item cat-${t.category}`}
-                onClick={() => onPick(t.id)}
-              >
-                {t.label}
-              </button>
-            ))}
+            {g.types.map((t) => {
+              const placed = t.id === "output" && hasOutput;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`palette-item cat-${t.category}`}
+                  disabled={placed}
+                  onClick={() => onPick(t.id)}
+                >
+                  {t.label}
+                  {placed && <span className="hint"> · one per patch</span>}
+                </button>
+              );
+            })}
           </div>
         </div>
       ))}
@@ -1935,6 +1943,8 @@ function Editor({
 
   const addNode = useCallback(
     (kind: string) => {
+      // A patch has one sink; the palette disables Output while it has it.
+      if (kind === "output" && docRef.current?.nodes.some((n) => n.kind === "output")) return;
       const pos = canvasCenter();
       mutateDoc((d) => {
         const node: PatchNode = { id: freshId(d), kind, name: "", params: {}, pos };
@@ -2186,6 +2196,7 @@ function Editor({
           <Palette
             grouped={grouped}
             subpatches={subpatchChoices}
+            hasOutput={doc.nodes.some((n) => n.kind === "output")}
             onPick={(kind) => {
               addNode(kind);
               if (compact) setSheet(null);

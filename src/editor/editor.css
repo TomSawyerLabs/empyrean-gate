@@ -551,6 +551,7 @@
   font-size: 11px;
 }
 
+.palette-item .hint,
 .palette-sub .hint {
   font-size: 10px;
 }
