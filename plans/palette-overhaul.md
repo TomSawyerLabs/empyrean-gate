@@ -1,7 +1,9 @@
 # Palette overhaul — fewer, better-sorted node types, with pictures
 
-Status: **gate side done and on master (55b85c8); site stand-in UI waiting
-on the web-dist bump** (started 2026-10-18).
+Status: **done** (2026-10-19). Gate master up to 43aa016; site dev
+4d486cb + bot bump 840f077; checked on the dev Preview (groups, thumbnails,
+People, Hue pull, no sideways scroll). Waiting only on Cameron's review of
+the calls listed under "Open questions".
 
 ## Goal
 
@@ -109,14 +111,13 @@ groove.ts's DJ part.
 6. ✅ Thumbnails: `bun run thumbnails`, 44 rings + 20 traces, test, review
    page `demo/thumbs.html`.
 7. ✅ Merges, format 7, `When`, option search (55b85c8).
-8. ◀ Site: People fieldset (simulated visitors), Video in source buttons
+8. ✅ Site: People fieldset (simulated visitors), Video in source buttons
    (film / camera / file), Hue pull + Pull toward in the globals card,
-   site motion.ts replaced by patch-web's; specs. Written in the site
-   worktree `.t3/worktrees/empyreangate.org/palette-overhaul` (branch
-   `palette-overhaul`), **not committed yet**: it needs a web-dist with
-   1ddc1fa (node placement) or two site specs fail, so wait for the bot's
-   bump on `dev`, rebase, run `tests/playground.spec.ts`, push to `dev`.
-9. Site README + `plans/pattern-playground.md` line; Preview check.
+   site motion.ts replaced by patch-web's; specs (site 411bb39). The site's
+   palette has a classic scrollbar: grid columns and rows now shrink
+   (gate e585a21, ae897ac; spec "a narrow palette never scrolls sideways").
+9. ✅ Site README + `plans/pattern-playground.md` (4d486cb); Preview checked
+   in Chrome after the 840f077 bump.
 
 ## Findings / gotchas
 
@@ -160,12 +161,23 @@ groove.ts's DJ part.
 - [x] Thumbnails
 - [x] Merges (format 7)
 - [x] Gate READMEs
-- [ ] Site UI for the stand-ins (written, waiting on the web-dist bump)
-- [ ] Site README, plan line, Preview check
+- [x] Site UI for the stand-ins (411bb39)
+- [x] Site README, plan line, Preview check (4d486cb, 840f077)
 
 ## Open questions for the user
 
-(none yet)
+1. Calls I made inside "do 4": Radial gradient folded into Rainbow (Turns 0)
+   instead of into Gradient (they differ: colour bands vs a grey ramp); the
+   Randomness group went once Random was one kind. Keep? (Recommend yes.)
+2. Simulated visitors start **off** on the site, so presets that render
+   effects look as on a quiet night. On by default instead? (Recommend off.)
+3. Format 7: the released gate (v0.15.0) refuses patches saved by the
+   playground now, until the next release. Cut one when convenient?
+4. The shared cargo build dir race (gate ISSUES.md): fix per workspace, or
+   keep the workaround?
+
+Cosmetic, not done: in the site's narrower palette, a few long names break
+mid-word in the thumbnail grid ("Interferen-ce").
 
 ## Things not to do
 
