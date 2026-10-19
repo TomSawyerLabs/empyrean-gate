@@ -8328,7 +8328,7 @@ function agentGuide(core, options = {}) {
   add("## Workflow", "", "1. Read this guide; skim the node types (`list_node_types`) and the presets (`list_presets`).", "2. Start from a preset close to the idea (`open_preset`, or `get_preset` to read one), or write a patch from scratch.", "3. Apply it (`set_patch`, or small changes to the open patch with `edit_patch`). A patch without the open patch's `id` opens as a new one; one with it (from `get_patch`) replaces it. A patch that does not validate is *not* applied; the errors say why.", "4. Look at it (`snapshot`: several frames over time, as pictures and numbers). Patterns move: look at more than one frame.", "5. Refine, look again. Name it and describe it (`edit_patch` with `set_info`).", "6. Hand it over: a link (`share_link`) opens it in anyone's playground. Sending it to the crew is the person's", "   decision: they press **Submit** in the playground themselves. Never try to submit on their behalf.", "", "The person may be editing the same patch in the editor while you work; `get_patch` before an edit if time has passed.", "Every change you make is one undo step in their editor.", ""), add("## The patch document", "", "A patch is JSON (the same file the gate saves and opens). Minimal example:", "", "```json", pretty(EXAMPLE), "```", "", `- \`format\`: ${limits.patchFormat} (current). Older documents are upgraded on the way in.`, "- `id`: leave empty for a new patch; the store assigns one.", "- `nodes[]`: `id` (unique in the patch, short: `bow`, `n3`), `kind` (a node type), `name` (a label, may be empty), `params` (knob values by param name; missing ones take the default), `pos` (canvas position; all `[0, 0]` or `arrange: true` lays the graph out for you), `collapsed: true` to show it minimized in the editor (looks only), and on a Blend `layers` (1..8, default 1): layer k > 1 adds the input `over{k}`, the select `mode{k}` and the knob `opacity{k}`, each applied in turn on top of the layers below. Stack several pictures in one Blend rather than chaining Blends.", "- `edges[]`: `{ from: { node, port }, to: { node, port } }`, from an output port to an input port. An input takes one wire.", "- `exposed[]`: knobs promoted to the gate's Control surface (phones on the dance floor can play them).", "- A Still image or Clip node carries its picture in `media` (a data URL); a Sub-patch node its document in `sub`; a Code node its ports and body in `code`.", `- Limits: at most ${limits.maxNodes} nodes and ${limits.maxEdges} edges.`, "", "**Every Number param is also an input port of the same name** (shape `scalar`): wire a scalar into it and the wire drives it; unwired, the knob value is used. Select params (a list of options, by index) are not wirable. Params marked *a rate* are speeds: the gate integrates them over time, so changing one never makes the picture jump.", "", "A patch has one `output` node (at most one; without it nothing shows), and the picture is what reaches its `in`.", ""), add("## Wire shapes", "");
   for (let s of core.shapes)
     add(`- **\`${s.id}\`** (${s.label}): ${s.description}`);
-  if (add("", "A wire connects ports of the same shape, plus two automatic adapters: `scalar` → `field_scalar` (a constant " + "field) and `field_scalar` → `field_color` (grayscale).", ""), add("## Inputs the gate provides", "", "Music drives most patterns. On the gate, `audio` follows the sound system and `dj_link` the DJ's decks (Pioneer PRO DJ LINK). In the playground a synthetic groove (or the visitor's microphone) stands in for the music, and a stand-in deck for DJ link, so audio-driven nodes move there too. Taps and strokes on the gate's touch screens arrive through `effects_in` / `touch_dabs` (render them with `render_effects` / `render_points` and blend them over the picture, as most presets do, so people can play with the pattern).", ""), code) {
+  if (add("", "A wire connects ports of the same shape, plus two automatic adapters: `scalar` → `field_scalar` (a constant " + "field) and `field_scalar` → `field_color` (grayscale).", ""), add("## Inputs the gate provides", "", "Music drives most patterns. On the gate, `audio` follows the sound system and `dj_link` the DJ's decks (Pioneer PRO DJ LINK). In the playground (and in `snapshot`) a simulated DJ set stands in for both: two decks at 122 BPM mixing a crate of tracks, with rekordbox phrases (intro, up, chorus, down, outro, verse, bridge), fill-ins, loops, hot-cue jumps and crossfades, every `dj_link` output and event moving as the gate would read them, and a synthetic groove on `audio` that follows the set (a breakdown drops the kick; the visitor's microphone can replace it). Off the gate's network `dj_link.active` is 0 and the rest reads 0 (`mix` holds 0.5): fall back to `audio` there. Taps and strokes on the gate's touch screens arrive through `effects_in` / `touch_dabs` (render them with `render_effects` / `render_points` and blend them over the picture, as most presets do, so people can play with the pattern).", ""), code) {
     add("## The Code node", "", "When no node does what you want, write it: a `code` node declares its own ports and a body in **WGSL**.", "", "```json", pretty({
       id: "swirl",
       kind: "code",
@@ -9006,70 +9006,595 @@ function loadPatchCore(wasmBytes) {
   })), loading;
 }
 
-// src/runtime/groove.ts
-function grooveAt(t) {
-  let beatPhase = t * 122 / 60 % 1, bar = t * 122 / 240 % 1, kick = Math.exp(-beatPhase * 7), swell = 0.5 + 0.5 * Math.sin(t * 0.21), bass = 0.18 + 0.75 * kick * (0.7 + 0.3 * swell), mid = 0.35 + 0.25 * Math.sin(t * 1.7 + 1) + 0.15 * Math.sin(t * 4.3), treble = 0.25 + 0.3 * Math.abs(Math.sin(t * 9.1)) * (bar > 0.5 ? 1 : 0.6) + 0.2 * kick, level = 0.3 + 0.3 * bass + 0.2 * mid + 0.1 * treble;
+// src/runtime/djlink.ts
+var DJ_EVENTS = [
+  "play",
+  "cue",
+  "cue_release",
+  "on_air_event",
+  "off_air_event",
+  "loop_start",
+  "loop_wrap",
+  "loop_end",
+  "jump",
+  "phrase_change",
+  "fill_in"
+], DJ_SCALARS = [
+  "active",
+  "energy",
+  "deck",
+  "deck_side",
+  "event_deck",
+  "event_side",
+  "playing",
+  "on_air",
+  "deck_1_on_air",
+  "deck_2_on_air",
+  "looping",
+  "mix",
+  "mix_activity",
+  "beat_in_bar",
+  "phrase_active",
+  "phrase_kind",
+  "phrase_progress",
+  "phrase_fill"
+], PHRASE_CODES = {
+  intro: 1,
+  up: 2,
+  down: 3,
+  chorus: 4,
+  outro: 5,
+  verse: 6,
+  bridge: 7
+}, CRATE = [
+  {
+    title: "Ember Theory",
+    artist: "Halcyon Static",
+    mood: "high",
+    phrases: [
+      { kind: "intro", beats: 32 },
+      { kind: "up", beats: 16, fill: 4 },
+      { kind: "chorus", beats: 32 },
+      { kind: "down", beats: 16 },
+      { kind: "up", beats: 16, fill: 4 },
+      { kind: "chorus", beats: 32 },
+      { kind: "outro", beats: 32 }
+    ],
+    moves: [{ at: 109, loop: { beats: 4, laps: 3 } }]
+  },
+  {
+    title: "Tidewater",
+    artist: "The Lantern Choir",
+    mood: "mid",
+    phrases: [
+      { kind: "intro", beats: 32 },
+      { kind: "verse", beats: 32 },
+      { kind: "bridge", beats: 16, fill: 4 },
+      { kind: "chorus", beats: 32 },
+      { kind: "verse", beats: 16 },
+      { kind: "chorus", beats: 32, fill: 4 },
+      { kind: "outro", beats: 32 }
+    ],
+    moves: [{ at: 129, jumpTo: 81 }]
+  },
+  {
+    title: "Low Orbit",
+    artist: "Cassini Drift",
+    mood: "low",
+    phrases: [
+      { kind: "intro", beats: 32 },
+      { kind: "verse", beats: 32 },
+      { kind: "bridge", beats: 16, fill: 4 },
+      { kind: "chorus", beats: 32 },
+      { kind: "outro", beats: 32 }
+    ],
+    moves: [{ at: 77, loop: { beats: 2, laps: 3 } }]
+  },
+  {
+    title: "Night Market",
+    artist: "Paper Tigers Club",
+    mood: "high",
+    phrases: [
+      { kind: "intro", beats: 32 },
+      { kind: "up", beats: 32, fill: 8 },
+      { kind: "chorus", beats: 32 },
+      { kind: "down", beats: 32 },
+      { kind: "up", beats: 16, fill: 4 },
+      { kind: "chorus", beats: 32 },
+      { kind: "outro", beats: 32 }
+    ],
+    moves: [{ at: 113, jumpTo: 129 }]
+  },
+  {
+    title: "Glasswing",
+    artist: "Mirror Pilots",
+    mood: "mid",
+    phrases: [
+      { kind: "intro", beats: 32 },
+      { kind: "verse", beats: 32 },
+      { kind: "chorus", beats: 32 },
+      { kind: "bridge", beats: 16, fill: 4 },
+      { kind: "chorus", beats: 32, fill: 4 },
+      { kind: "outro", beats: 32 }
+    ],
+    moves: [{ at: 137, loop: { beats: 8, laps: 2 } }]
+  }
+], layouts = /* @__PURE__ */ new WeakMap;
+function trackLayout(track) {
+  let l = layouts.get(track);
+  if (l)
+    return l;
+  let phrases = [], start = 1;
+  track.phrases.forEach((p, i) => {
+    let beats = Math.max(1, Math.round(p.beats)), end = start + beats - 1, fill = p.fill ? Math.min(beats, Math.max(1, Math.round(p.fill))) : 0;
+    phrases.push({ number: i + 1, kind: p.kind, start, end, fillFrom: fill ? end - fill + 1 : null }), start = end + 1;
+  });
+  let beats = start - 1, outro = [...phrases].reverse().find((p) => p.kind === "outro");
+  return l = { phrases, beats, mixAt: outro ? outro.start : Math.max(1, beats - 31) }, layouts.set(track, l), l;
+}
+function phraseAt(layout, beat, phase) {
+  let phrase = layout.phrases.find((p) => beat >= p.start && beat <= p.end);
+  if (!phrase)
+    return null;
+  let length = Math.max(1, phrase.end - phrase.start + 1), elapsed = beat - phrase.start + Math.min(Math.max(phase, 0), 0.999999);
   return {
-    level: Math.min(1, level),
-    bass: Math.min(1, bass),
-    mid: Math.min(1, Math.max(0, mid)),
-    treble: Math.min(1, treble),
-    beatPhase,
-    onset: Math.exp(-beatPhase * 24)
+    phrase,
+    progress: Math.min(1, Math.max(0, elapsed / length)),
+    fill: phrase.fillFrom !== null && beat >= phrase.fillFrom
   };
 }
-function grooveAudio(t) {
-  let a = grooveAt(t);
-  return new Float32Array([
-    a.level,
-    a.bass,
-    a.mid,
-    a.treble,
-    a.onset,
-    a.beatPhase,
-    122,
-    1,
-    a.bass,
-    a.mid,
-    a.treble
-  ]);
+var CHARACTER = {
+  intro: { kick: 1, bass: 0.45, mid: 0.3, treble: [0.4, 0.5], level: [0.5, 0.6] },
+  up: { kick: 1, bass: 0.6, mid: 0.5, treble: [0.4, 0.9], level: [0.6, 0.88] },
+  chorus: { kick: 1, bass: 1, mid: 0.7, treble: [0.7, 0.75], level: [0.95, 0.95] },
+  down: { kick: 0, bass: 0.15, mid: 0.65, treble: [0.25, 0.35], level: [0.42, 0.45] },
+  outro: { kick: 1, bass: 0.6, mid: 0.3, treble: [0.45, 0.3], level: [0.6, 0.35] },
+  verse: { kick: 1, bass: 0.75, mid: 0.55, treble: [0.5, 0.55], level: [0.72, 0.75] },
+  bridge: { kick: 0.5, bass: 0.4, mid: 0.6, treble: [0.35, 0.45], level: [0.5, 0.6] }
+}, clamp01 = (v) => Math.min(1, Math.max(0, v)), lerp = (a, b, t) => a + (b - a) * t;
+function trackSound(layout, pos, t) {
+  let beat = Math.floor(pos) + 1, phase = pos - Math.floor(pos), at = phraseAt(layout, beat, phase);
+  if (!at)
+    return { level: 0, bass: 0, mid: 0, treble: 0, onset: 0 };
+  let c = CHARACTER[at.phrase.kind], p = at.progress, kickOn = c.kick >= 1 || c.kick > 0 && beat % 2 === 1 ? 1 : 0, kick = at.fill ? 0 : Math.exp(-phase * 7) * kickOn, sixteenth = pos * 4 % 1, roll = at.fill ? Math.exp(-sixteenth * 14) * (0.6 + 0.4 * phase) : 0, swell = 0.5 + 0.5 * Math.sin(t * 0.21), bass = clamp01(c.bass * (0.3 + 0.7 * kick * (0.7 + 0.3 * swell))), mid = clamp01(c.mid + 0.18 * Math.sin(t * 1.7 + 1) + 0.1 * Math.sin(t * 4.3) + 0.25 * roll), treble = clamp01(lerp(c.treble[0], c.treble[1], p) * (0.7 + 0.3 * Math.abs(Math.sin(t * 9.1))) + 0.2 * kick + 0.3 * roll);
+  return { level: clamp01(lerp(c.level[0], c.level[1], p) * (0.82 + 0.18 * kick + 0.12 * roll)), bass, mid, treble, onset: Math.max(Math.exp(-phase * 24) * kickOn * (at.fill ? 0 : 1), roll) };
 }
-function grooveDjLink(t, mix = 0.5) {
-  let beat = Math.floor(t * 122 / 60), phrase = t * 122 / 60 / 32 % 1;
-  return new Float32Array([
-    1,
-    grooveAt(t).level,
-    1,
-    -1,
-    1,
-    -1,
-    1,
-    1,
-    1,
-    0,
-    0,
-    mix,
-    0,
-    beat % 4 + 1,
-    1,
-    1,
-    phrase,
-    0
-  ]);
+var PLAY_MODES = { empty: 0, playing: 3, looping: 4, paused: 5, cued: 6, cuePlaying: 7, ended: 17 };
+
+class Deck {
+  player;
+  track = null;
+  pos = 0;
+  cuePoint = 0;
+  mode = "empty";
+  loop = null;
+  fader = 0;
+  startedAt = -1 / 0;
+  loadedAt = -1 / 0;
+  laps = 0;
+  movesDone = /* @__PURE__ */ new Set;
+  autoLoopLaps = null;
+  previewUntil = null;
+  previewed = !1;
+  prevBeat = 0;
+  ticks = 0;
+  constructor(player) {
+    this.player = player;
+  }
+  get playing() {
+    return this.mode === "playing" || this.mode === "cuePlaying";
+  }
+  get cued() {
+    return this.mode === "cued" || this.mode === "cuePlaying";
+  }
+  get looping() {
+    return this.mode === "playing" && this.loop !== null;
+  }
+  get played() {
+    return this.startedAt > this.loadedAt;
+  }
+  layout(crate) {
+    let t = this.track === null ? void 0 : crate[this.track];
+    return t ? trackLayout(t) : null;
+  }
+  beat(crate) {
+    let l = this.layout(crate);
+    return l ? Math.min(l.beats, Math.floor(this.pos) + 1) : 0;
+  }
 }
+
+class GateView {
+  seen = /* @__PURE__ */ new Map;
+  beatInBar = /* @__PURE__ */ new Map;
+  phraseKey = null;
+  fadePos = 0.5;
+  fadeActivity = 0;
+  lastPlayer = 0;
+  seq = Array(DJ_EVENTS.length).fill(0);
+  update(cdjs, followed, now, dt, out) {
+    let events = [], record = (event, player) => {
+      let i = DJ_EVENTS.indexOf(event);
+      this.seq[i]++, this.lastPlayer = player, events.push([i, player]);
+    };
+    for (let s of cdjs) {
+      let d = this.seen.get(s.player);
+      if (!d) {
+        let { playing, cued, cuePlaying, onAir, looping, beat, ticks } = s;
+        this.seen.set(s.player, { playing, cued, cuePlaying, onAir, looping, beat, ticks, lastWrap: -1 / 0 });
+        continue;
+      }
+      if (!d.playing && s.playing)
+        record("play", s.player);
+      if (!d.cued && s.cued)
+        record("cue", s.player);
+      if (!d.cuePlaying && s.cuePlaying)
+        record("cue", s.player);
+      if (d.cued && !s.cued)
+        record("cue_release", s.player);
+      if (d.onAir !== s.onAir)
+        record(s.onAir ? "on_air_event" : "off_air_event", s.player);
+      if (!d.looping && s.looping)
+        record("loop_start", s.player);
+      else if (d.looping && !s.looping)
+        record("loop_end", s.player);
+      if (d.playing && s.playing && d.beat > 0 && s.beat > 0) {
+        if (d.looping && s.looping && s.beat < d.beat) {
+          if (now - d.lastWrap > 0.35)
+            record("loop_wrap", s.player), d.lastWrap = now;
+        } else if (!s.looping && (s.beat + 1 < d.beat || s.beat > d.beat + 8))
+          record("jump", s.player);
+      }
+      if (s.playing && s.beat > 0 && s.ticks !== d.ticks) {
+        let bar = (s.beat - 1) % 4 + 1, hadBeat = this.beatInBar.has(s.player);
+        if (this.beatInBar.set(s.player, bar), s.player === followed && d.looping && hadBeat && bar === 1 && now - d.lastWrap > 0.5)
+          record("loop_wrap", s.player), d.lastWrap = now;
+      }
+      d.playing = s.playing, d.cued = s.cued, d.cuePlaying = s.cuePlaying, d.onAir = s.onAir, d.looping = s.looping, d.beat = s.beat, d.ticks = s.ticks;
+    }
+    let by = (n) => cdjs.find((s) => s.player === n), sel = by(followed), d1 = by(1)?.onAir ?? !1, d2 = by(2)?.onAir ?? !1, target = d1 && !d2 ? 0 : !d1 && d2 ? 1 : d1 && d2 ? 0.5 : this.fadePos, previous = this.fadePos;
+    this.fadePos += (target - this.fadePos) * Math.min(dt / 0.9, 1);
+    let motion = clamp01(Math.abs(this.fadePos - previous) / Math.max(dt, 0.001));
+    this.fadeActivity = Math.max(this.fadeActivity * Math.exp(-dt / 0.55), motion);
+    let at = sel?.layout && sel.track !== null ? phraseAt(sel.layout, sel.beat, sel.phase) : null, key = at && sel ? [sel.player, sel.track, at.phrase.number, at.fill] : null, prev = this.phraseKey;
+    if (key) {
+      if (prev && (prev[0] !== key[0] || prev[1] !== key[1] || prev[2] !== key[2]))
+        record("phrase_change", key[0]);
+      else if (prev && !prev[3] && key[3])
+        record("fill_in", key[0]);
+      else if (!prev)
+        record("phrase_change", key[0]);
+    }
+    this.phraseKey = key;
+    let active = cdjs.length > 0, candidates = cdjs.filter((s) => s.playing && (followed > 0 && followed < 32 ? s.player === followed : s.onAir));
+    if (candidates.length === 0)
+      candidates = cdjs.filter((s) => s.playing);
+    let energy = active ? clamp01(candidates.reduce((m, s) => Math.max(m, s.level), 0)) : 0, side = (p) => p === 1 ? -1 : p === 2 ? 1 : 0, player = active ? followed : 0, values = {
+      active: active ? 1 : 0,
+      energy,
+      deck: player,
+      deck_side: side(player),
+      event_deck: this.lastPlayer,
+      event_side: side(this.lastPlayer),
+      playing: sel?.playing ? 1 : 0,
+      on_air: sel?.onAir ? 1 : 0,
+      deck_1_on_air: d1 ? 1 : 0,
+      deck_2_on_air: d2 ? 1 : 0,
+      looping: cdjs.some((s) => (s.player === 1 || s.player === 2) && s.looping) ? 1 : 0,
+      mix: this.fadePos,
+      mix_activity: this.fadeActivity,
+      beat_in_bar: sel ? this.beatInBar.get(sel.player) ?? 0 : 0,
+      phrase_active: at ? 1 : 0,
+      phrase_kind: at ? PHRASE_CODES[at.phrase.kind] : 0,
+      phrase_progress: at ? at.progress : 0,
+      phrase_fill: at?.fill ? 1 : 0
+    };
+    return DJ_SCALARS.forEach((name, i) => out[i] = values[name]), events;
+  }
+}
+var FRAME = 0.016666666666666666;
+
+class DjLinkSim {
+  crate;
+  bpm;
+  connected = !0;
+  auto = !0;
+  crossfader = 0.5;
+  master = 1;
+  decks = [new Deck(1), new Deck(2)];
+  t = 0;
+  clock = 0;
+  nextTrack = 0;
+  view = new GateView;
+  out = new Float32Array(DJ_SCALARS.length);
+  last = blankFired();
+  constructor(options = {}) {
+    this.crate = options.crate?.length ? options.crate : CRATE, this.bpm = options.bpm ?? 122, this.reset(0);
+  }
+  get time() {
+    return this.t;
+  }
+  reset(at = 0) {
+    let { connected, auto } = this;
+    this.t = 0, this.clock = 0, this.crossfader = 0.5, this.master = 1, this.decks = [new Deck(1), new Deck(2)], this.view = new GateView, this.view.fadePos = 0, this.nextTrack = 0;
+    let [a, b] = this.decks;
+    this.loadDeck(a, this.takeNext()), a.fader = 1, a.mode = "playing", a.startedAt = 0, this.loadDeck(b, this.takeNext()), b.previewed = !0, this.connected = !0, this.auto = !0;
+    for (let n = Math.round(Math.max(0, at) / FRAME);n > 0; n--)
+      this.step(FRAME);
+    this.step(0), this.connected = connected, this.auto = auto, this.step(0), this.last = blankFired();
+  }
+  step(dt) {
+    dt = Math.max(0, dt), this.t += dt;
+    let beats = dt * this.bpm / 60;
+    this.clock += beats;
+    for (let d of this.decks)
+      d.prevBeat = d.beat(this.crate), this.advance(d, beats);
+    if (this.auto)
+      this.autoDj(beats);
+    let cdjs = this.connected ? this.decks.map((d) => this.status(d)) : [], followed = this.connected ? this.master : 0, events = this.view.update(cdjs, followed, this.t, dt, this.out);
+    for (let [i, player] of events)
+      this.last[DJ_EVENTS[i]] = { at: this.t, player };
+    return events;
+  }
+  scalars() {
+    return this.out;
+  }
+  audio() {
+    let level = 0, bass = 0, mid = 0, treble = 0, onset = 0, heard = 0;
+    for (let d of this.decks) {
+      let g = this.gain(d), l = d.layout(this.crate);
+      if (!d.playing || g < 0.02 || !l)
+        continue;
+      let s = trackSound(l, d.pos, this.t);
+      level += s.level * g, bass += s.bass * g, mid += s.mid * g, treble += s.treble * g, onset = Math.max(onset, s.onset * g), heard = Math.max(heard, g);
+    }
+    if (heard === 0)
+      return new Float32Array(11);
+    let phase = this.clock - Math.floor(this.clock);
+    return [level, bass, mid, treble] = [level, bass, mid, treble].map(clamp01), new Float32Array([level, bass, mid, treble, onset, phase, this.bpm, 1, bass, mid, treble]);
+  }
+  state() {
+    let outputs = {};
+    return DJ_SCALARS.forEach((name, i) => outputs[name] = this.out[i]), {
+      connected: this.connected,
+      auto: this.auto,
+      time: this.t,
+      clock: this.clock,
+      bpm: this.bpm,
+      crossfader: this.crossfader,
+      decks: [this.deckState(this.decks[0]), this.deckState(this.decks[1])],
+      followed: this.connected ? this.master : 0,
+      outputs,
+      lastFired: { ...this.last }
+    };
+  }
+  act(player, a) {
+    this.auto = !1;
+    let d = this.decks[player - 1];
+    switch (a.action) {
+      case "play":
+        return this.playDeck(d);
+      case "cue":
+        return this.cueDown(d);
+      case "cue_release":
+        return this.cueUp(d);
+      case "loop":
+        return this.setLoop(d, a.beats);
+      case "exit_loop":
+        d.loop = null;
+        return;
+      case "beat_jump":
+        return this.jumpTo(d, d.beat(this.crate) + Math.round(a.beats));
+      case "hot_cue":
+        return this.jumpTo(d, Math.round(a.beat));
+      case "load":
+        return this.loadDeck(d, Math.round(a.track));
+      case "fader":
+        d.fader = clamp01(a.value);
+        return;
+      case "master":
+        this.master = player;
+        return;
+    }
+  }
+  setCrossfader(x) {
+    this.auto = !1, this.crossfader = clamp01(x);
+  }
+  advance(d, beats) {
+    if (!d.playing)
+      return;
+    let l = d.layout(this.crate);
+    if (!l)
+      return;
+    let p = d.pos + beats;
+    if (Math.floor(p) !== Math.floor(d.pos))
+      d.ticks++;
+    if (d.looping && d.loop && d.pos < d.loop.end && p >= d.loop.end)
+      p = d.loop.start + (p - d.loop.end) % (d.loop.end - d.loop.start), d.laps++;
+    if (p >= l.beats)
+      p = l.beats - 0.000001, d.mode = "ended", d.loop = null;
+    d.pos = p;
+  }
+  phase() {
+    return this.clock - Math.floor(this.clock);
+  }
+  playDeck(d) {
+    if (d.track === null)
+      return;
+    switch (d.mode) {
+      case "playing":
+        d.mode = "paused";
+        return;
+      case "cuePlaying":
+        d.mode = "playing", d.startedAt = this.clock;
+        return;
+      case "ended":
+        return;
+      default:
+        d.pos = Math.floor(d.pos) + this.phase(), d.mode = "playing", d.startedAt = this.clock;
+    }
+  }
+  cueDown(d) {
+    if (d.track === null)
+      return;
+    if (d.mode === "playing")
+      d.pos = d.cuePoint, d.loop = null, d.mode = "cued";
+    else if (d.mode === "cued")
+      d.pos = d.cuePoint + this.phase(), d.mode = "cuePlaying";
+    else if (d.mode === "paused" || d.mode === "ended")
+      d.cuePoint = Math.round(d.pos), d.pos = d.cuePoint, d.mode = "cued";
+  }
+  cueUp(d) {
+    if (d.mode !== "cuePlaying")
+      return;
+    d.pos = d.cuePoint, d.mode = "cued";
+  }
+  setLoop(d, beats) {
+    let l = d.layout(this.crate);
+    if (!l)
+      return;
+    let n = Math.max(1, Math.round(beats)), start = Math.floor(d.pos);
+    d.loop = { start, end: Math.min(l.beats, start + n) }, d.laps = 0, d.autoLoopLaps = null;
+  }
+  jumpTo(d, beat) {
+    let l = d.layout(this.crate);
+    if (!l)
+      return;
+    let b = Math.min(l.beats, Math.max(1, beat));
+    if (d.pos = b - 1 + (d.pos - Math.floor(d.pos)), d.loop = null, d.mode === "ended")
+      d.mode = "paused";
+  }
+  loadDeck(d, track) {
+    if (track < 0 || track >= this.crate.length)
+      return;
+    d.track = track, d.pos = 0, d.cuePoint = 0, d.mode = "cued", d.loop = null, d.laps = 0, d.loadedAt = this.clock, d.startedAt = -1 / 0, d.movesDone = /* @__PURE__ */ new Set, d.autoLoopLaps = null, d.previewUntil = null, d.previewed = !1;
+  }
+  takeNext() {
+    let n = this.nextTrack % this.crate.length;
+    return this.nextTrack = n + 1, n;
+  }
+  gain(d) {
+    let x = d.player === 1 ? Math.min(1, 2 * (1 - this.crossfader)) : Math.min(1, 2 * this.crossfader);
+    return d.fader * x;
+  }
+  status(d) {
+    let l = d.layout(this.crate), beat = d.beat(this.crate);
+    return {
+      player: d.player,
+      playing: d.playing,
+      cued: d.cued,
+      cuePlaying: d.mode === "cuePlaying",
+      onAir: this.gain(d) > 0.02,
+      looping: d.looping,
+      beat,
+      phase: d.pos - Math.floor(d.pos),
+      ticks: d.ticks,
+      track: d.track,
+      layout: l,
+      level: l && d.playing ? trackSound(l, d.pos, this.t).level : 0
+    };
+  }
+  deckState(d) {
+    let l = d.layout(this.crate), beat = d.beat(this.crate), at = l ? phraseAt(l, beat, d.pos - Math.floor(d.pos)) : null, track = d.track === null ? null : this.crate[d.track] ?? null;
+    return {
+      player: d.player,
+      track: d.track,
+      title: track?.title ?? null,
+      artist: track?.artist ?? null,
+      mode: d.mode,
+      playMode: d.looping ? PLAY_MODES.looping : PLAY_MODES[d.mode],
+      looping: d.looping,
+      loopBeats: d.loop ? d.loop.end - d.loop.start : null,
+      beat,
+      beats: l?.beats ?? 0,
+      beatInBar: beat > 0 ? (beat - 1) % 4 + 1 : 0,
+      phrase: at ? { number: at.phrase.number, kind: at.phrase.kind, progress: at.progress, fill: at.fill } : null,
+      phrases: l?.phrases ?? [],
+      onAir: this.gain(d) > 0.02,
+      master: this.master === d.player,
+      fader: d.fader,
+      gain: this.gain(d)
+    };
+  }
+  autoDj(beats) {
+    let m = this.decks[this.master - 1], o = this.decks[2 - this.master], ramp = (d, target, perBeat) => {
+      let step = perBeat * beats;
+      d.fader = d.fader < target ? Math.min(target, d.fader + step) : Math.max(target, d.fader - step);
+    };
+    if (!m.playing && o.playing)
+      this.master = o.player, [m, o] = [o, m];
+    if (!m.playing && !o.playing) {
+      let ready = (d) => d.track !== null && d.mode !== "ended", d = ready(m) ? m : ready(o) ? o : m;
+      if (!ready(d))
+        this.loadDeck(d, this.takeNext());
+      if (d.mode === "cuePlaying")
+        this.cueUp(d);
+      if (this.playDeck(d), d.fader = 1, this.master = d.player, d !== m)
+        [m, o] = [o, m];
+    }
+    let ml = m.layout(this.crate), beat = m.beat(this.crate), crossed = (at) => m.prevBeat < at && beat >= at;
+    if (ml && m.playing && this.gain(m) > 0.02 && m.track !== null)
+      this.crate[m.track].moves?.forEach((move, i) => {
+        if (m.movesDone.has(i) || !crossed(move.at))
+          return;
+        if (m.movesDone.add(i), move.loop)
+          this.setLoop(m, move.loop.beats), m.autoLoopLaps = move.loop.laps;
+        else if (move.jumpTo !== void 0)
+          this.jumpTo(m, move.jumpTo);
+      });
+    for (let d of this.decks)
+      if (d.loop && d.autoLoopLaps !== null && d.laps >= d.autoLoopLaps && d.pos >= (d.loop.start + d.loop.end) / 2)
+        d.loop = null, d.autoLoopLaps = null;
+    if (!o.playing && o.fader < 0.01 && (o.track === null || o.mode === "ended" || o.played))
+      this.loadDeck(o, this.takeNext());
+    if (o.mode === "cued" && !o.previewed && this.clock - o.loadedAt >= 8)
+      o.previewed = !0, this.cueDown(o), o.previewUntil = this.clock + 4;
+    if (o.mode === "cuePlaying" && o.previewUntil !== null && this.clock >= o.previewUntil)
+      this.cueUp(o), o.previewUntil = null;
+    if (ml && m.playing && o.mode === "cued" && o.pos === o.cuePoint && beat > m.prevBeat && beat >= ml.mixAt && (beat - ml.mixAt) % 16 === 0)
+      this.playDeck(o);
+    if (m.playing)
+      ramp(m, 1, 0.5);
+    if (o.mode === "cuePlaying")
+      ramp(o, 0, 0.25);
+    else if (o.playing && o.startedAt > m.startedAt) {
+      if (this.clock - o.startedAt >= 8)
+        ramp(o, 1, 0.125);
+      if (o.fader >= 1 && this.clock - o.startedAt >= 16)
+        this.master = o.player;
+    } else if (o.playing) {
+      ramp(o, 0, 0.08333333333333333);
+      let ol = o.layout(this.crate);
+      if (o.fader === 0 && ol && ol.beats - o.pos > 33)
+        this.playDeck(o);
+    } else
+      ramp(o, 0, 0.25);
+    let x = this.crossfader;
+    this.crossfader = x < 0.5 ? Math.min(0.5, x + beats / 8) : Math.max(0.5, x - beats / 8);
+  }
+}
+function blankFired() {
+  return Object.fromEntries(DJ_EVENTS.map((e) => [e, null]));
+}
+
+// src/runtime/groove.ts
 function attachGroove(runtime, initial = {}) {
-  let settings = { audio: "groove", djMix: 0.5, ...initial }, t = 0, offFrame = runtime.onFrame((dt) => {
-    if (t += dt, settings.audio === "groove")
-      runtime.setAudio(0, grooveAudio(t));
+  let settings = { audio: "groove", startAt: 0, ...initial }, dj = new DjLinkSim;
+  if (settings.startAt > 0)
+    dj.reset(settings.startAt);
+  let offFrame = runtime.onFrame((dt) => {
+    let fired = dj.step(dt);
+    if (settings.audio === "groove")
+      runtime.setAudio(0, dj.audio());
     else if (settings.audio === "silent")
       runtime.setAudio(0, new Float32Array(11));
-    runtime.setDjLink(grooveDjLink(t, settings.djMix));
-  }), offRestart = runtime.onRestart(() => {
-    t = 0;
-  });
+    runtime.setDjLink(dj.scalars());
+    for (let [event] of fired)
+      runtime.fireDjEvent(event);
+  }), offRestart = runtime.onRestart(() => dj.reset(settings.startAt));
   return {
     settings,
-    time: () => t,
+    dj,
+    time: () => dj.time,
     stop: () => {
       offFrame(), offRestart();
     }
@@ -9957,7 +10482,7 @@ async function headlessRuntime() {
   if (!gpu)
     return null;
   let runtime = await PatchRuntime.create(GATE_GEOMETRY, { gpu, wasm: wasmBytes() });
-  return attachGroove(runtime), runtime;
+  return { runtime, groove: attachGroove(runtime) };
 }
 function fileHost(core, runtime, file) {
   let doc = file && existsSync(file) ? parsePatchFile(readFileSync(file, "utf8")) : null, run = async (d) => {
@@ -9981,7 +10506,7 @@ function fileHost(core, runtime, file) {
     linkBase: PLAYGROUND,
     guide: {
       playground: PLAYGROUND,
-      access: "You are talking to the `empyrean-patch` MCP server: the gate's own patch compiler and evaluator, on this machine. It holds one open patch" + (file ? `, saved to \`${file}\` on every change` : "") + " (save_patch writes it anywhere; open_file reads one). " + (runtime ? "snapshot renders it with WebGPU, driven by a synthetic 122 BPM groove standing in for the music." : "Nothing renders here (no WebGPU): " + WEBGPU_HINT)
+      access: "You are talking to the `empyrean-patch` MCP server: the gate's own patch compiler and evaluator, on this machine. It holds one open patch" + (file ? `, saved to \`${file}\` on every change` : "") + " (save_patch writes it anywhere; open_file reads one). " + (runtime ? "snapshot renders it with WebGPU, driven by a simulated 122 BPM DJ set standing in for the music and the DJ's decks (dj_deck works them)." : "Nothing renders here (no WebGPU): " + WEBGPU_HINT)
     },
     async open(d) {
       if (doc = d, file)
@@ -16881,6 +17406,117 @@ class StdioServerTransport {
   }
 }
 
+// src/agent/dj.ts
+var ACTIONS = ["play", "cue", "cue_release", "loop", "exit_loop", "beat_jump", "hot_cue", "load", "fader", "master"], round2 = (v, places = 3) => Math.round(v * 10 ** places) / 10 ** places;
+function describeDj(state, startAt = 0) {
+  let recent = {};
+  for (let e of DJ_EVENTS) {
+    let f = state.lastFired[e];
+    if (f && state.time - f.at < 30)
+      recent[e] = `${round2(state.time - f.at, 1)} s ago, deck ${f.player}`;
+  }
+  let outputs = {};
+  for (let name of DJ_SCALARS)
+    outputs[name] = round2(state.outputs[name]);
+  return {
+    connected: state.connected,
+    auto: state.auto,
+    time: round2(state.time, 2),
+    start_at: startAt,
+    bpm: state.bpm,
+    crossfader: round2(state.crossfader, 2),
+    followed: state.followed,
+    decks: state.decks.map((d) => ({
+      deck: d.player,
+      track: d.track === null ? null : `#${d.track} ${d.title} — ${d.artist}`,
+      mode: d.mode,
+      beat: d.track === null ? null : `${d.beat} of ${d.beats} (bar beat ${d.beatInBar})`,
+      phrase: d.phrase ? `${d.phrase.kind} (phrase ${d.phrase.number}), ${Math.round(d.phrase.progress * 100)}%${d.phrase.fill ? ", fill-in" : ""}` : null,
+      loop: d.loopBeats === null ? null : `${d.loopBeats} beats${d.looping ? "" : " (set, not playing)"}`,
+      fader: round2(d.fader, 2),
+      on_air: d.onAir,
+      master: d.master
+    })),
+    dj_link_outputs: outputs,
+    recent_events: recent
+  };
+}
+function djTool(host) {
+  let { dj } = host, crate = dj.crate.map((t, i) => `#${i} ${t.title} (${t.mood})`).join(", ");
+  return {
+    name: "dj_deck",
+    title: "Work the DJ decks",
+    description: `The simulated PRO DJ LINK set that drives \`dj_link\` nodes here (on the gate it is the DJ's real CDJs): two decks and a mixer at ${dj.bpm} BPM, an Auto DJ playing a crate (${crate}) with phrases, fill-ins, loops, hot-cue jumps and mixes, and the room's sound following it (the audio source 0 groove). With no input it reports the decks and the node's outputs now. connected false unplugs the LINK (every output reads as on a gate without CDJs: test a patch's \`active\` fallback). auto turns the Auto DJ on or off. start_at (seconds) starts the set there now and on every snapshot restart, so captures repeat (a mix starts about 77 s in). deck (1 or 2) with action works a deck like a CDJ, and turns Auto off: play (toggles), cue / cue_release (the CUE button held and let go: back to the cue point while playing, cue-play while held there), loop { beats }, exit_loop, beat_jump { beats }, hot_cue { beat }, load { track }, fader { value 0..1 }, master. crossfader 0..1 (0 = deck 1). Events fire as on the gate: e.g. cue-play fires play and cue, play from the cue point fires play and cue_release. The decks change at once; dj_link_outputs and recent_events catch up on the next frame, so snapshot (no restart) after an action to see the patch respond.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        connected: { type: "boolean" },
+        auto: { type: "boolean" },
+        start_at: { type: "number", minimum: 0, maximum: 3600 },
+        deck: { enum: [1, 2] },
+        action: { enum: [...ACTIONS] },
+        beats: { type: "number" },
+        beat: { type: "integer", minimum: 1 },
+        track: { type: "integer", minimum: 0, maximum: dj.crate.length - 1 },
+        value: { type: "number", minimum: 0, maximum: 1 },
+        crossfader: { type: "number", minimum: 0, maximum: 1 }
+      }
+    },
+    async execute(i) {
+      let num = (v) => typeof v === "number" && Number.isFinite(v) ? v : void 0, startAt = num(i.start_at);
+      if (startAt !== void 0)
+        host.settings.startAt = Math.min(3600, Math.max(0, startAt)), dj.reset(host.settings.startAt);
+      if (typeof i.connected === "boolean")
+        dj.connected = i.connected;
+      if (typeof i.auto === "boolean")
+        dj.auto = i.auto;
+      if (i.action !== void 0) {
+        let deck = i.deck === 1 || i.deck === 2 ? i.deck : null;
+        if (!deck)
+          throw Error("action needs deck: 1 or 2.");
+        let action = String(i.action);
+        if (!ACTIONS.includes(action))
+          throw Error(`no action "${action}" (actions: ${ACTIONS.join(", ")})`);
+        let need = (name, v) => {
+          if (v === void 0)
+            throw Error(`${action} needs ${name}.`);
+          return v;
+        }, a;
+        switch (action) {
+          case "loop":
+            a = { action, beats: need("beats", num(i.beats)) };
+            break;
+          case "beat_jump":
+            a = { action, beats: need("beats", num(i.beats)) };
+            break;
+          case "hot_cue":
+            a = { action, beat: need("beat", num(i.beat)) };
+            break;
+          case "load": {
+            let track = need("track", num(i.track));
+            if (track < 0 || track >= dj.crate.length)
+              throw Error(`no track #${track} (the crate is #0–#${dj.crate.length - 1}).`);
+            a = { action, track };
+            break;
+          }
+          case "fader":
+            a = { action, value: need("value", num(i.value)) };
+            break;
+          default:
+            a = { action };
+        }
+        dj.act(deck, a);
+      }
+      let x = num(i.crossfader);
+      if (x !== void 0)
+        dj.setCrossfader(x);
+      return {
+        content: [{ type: "text", text: JSON.stringify(describeDj(dj.state(), host.settings.startAt), null, 2) }]
+      };
+    }
+  };
+}
+
 // src/agent/tools.ts
 var text = (value) => ({
   content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }]
@@ -17081,8 +17717,8 @@ function num(v) {
 }
 
 // cli/mcp.ts
-async function serveMcp(core, runtime, file) {
-  let host = fileHost(core, runtime, file), api = createPatchApi(host), tools = patchTools(api, [
+async function serveMcp(core, headless, file) {
+  let runtime = headless?.runtime ?? null, host = fileHost(core, runtime, file), api = createPatchApi(host), fileTools = [
     {
       name: "save_patch",
       title: "Save the patch to a file",
@@ -17108,7 +17744,10 @@ async function serveMcp(core, runtime, file) {
         };
       }
     }
-  ]), byName = new Map(tools.map((t) => [t.name, t])), server = new Server({ name: "empyrean-patch", title: "Empyrean Gate patches", version: "0.15.0" }, {
+  ];
+  if (headless)
+    fileTools.push(djTool(headless.groove));
+  let tools = patchTools(api, fileTools), byName = new Map(tools.map((t) => [t.name, t])), server = new Server({ name: "empyrean-patch", title: "Empyrean Gate patches", version: "0.15.0" }, {
     capabilities: { tools: {}, resources: {} },
     instructions: "Tools for making light patterns (patches) for the Empyrean Gate, a 64-spoke ring of LEDs. Start with get_guide. Apply with set_patch or edit_patch, look with snapshot, share with share_link."
   });
@@ -17153,6 +17792,8 @@ Usage: empyrean-patch <command> [options]
   link <file|-> [--base url]   A playground link that opens the patch
   render <file|-> [-o out.png] Pictures of the patch over time (needs: npm i webgpu)
         [--frames 4] [--interval 0.5] [--warmup 1] [--size 384] [--separate]
+        [--at 0] [--no-link]   start the simulated DJ set at a time (s);
+                               or with the PRO DJ LINK unplugged
   mcp [file]                   An MCP server on stdio with the playground's tools;
                                with a file, it opens it and saves every change to it
 
@@ -17172,6 +17813,8 @@ async function main(argv) {
       warmup: { type: "string" },
       size: { type: "string" },
       separate: { type: "boolean" },
+      at: { type: "string" },
+      "no-link": { type: "boolean" },
       help: { type: "boolean", short: "h" }
     }
   });
@@ -17218,9 +17861,11 @@ async function main(argv) {
           console.error(e);
         return 1;
       }
-      let runtime = await headlessRuntime();
-      if (!runtime)
+      let headless = await headlessRuntime();
+      if (!headless)
         return console.error(WEBGPU_HINT), 2;
+      let { runtime, groove } = headless;
+      groove.settings.startAt = Math.max(0, Number(values.at ?? 0) || 0), groove.dj.connected = !values["no-link"];
       let api = createPatchApi(fileHost(core, runtime)), set = await api.setPatch(doc);
       if (!set.ok)
         return console.error(set.runtimeError ?? set.errors.join(`

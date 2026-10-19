@@ -195,8 +195,12 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
     "## Inputs the gate provides",
     "",
     "Music drives most patterns. On the gate, `audio` follows the sound system and `dj_link` the DJ's decks " +
-      "(Pioneer PRO DJ LINK). In the playground a synthetic groove (or the visitor's microphone) stands in for the " +
-      "music, and a stand-in deck for DJ link, so audio-driven nodes move there too. Taps and strokes on the gate's " +
+      "(Pioneer PRO DJ LINK). In the playground (and in `snapshot`) a simulated DJ set stands in for both: two " +
+      "decks at 122 BPM mixing a crate of tracks, with rekordbox phrases (intro, up, chorus, down, outro, verse, " +
+      "bridge), fill-ins, loops, hot-cue jumps and crossfades, every `dj_link` output and event moving as the gate " +
+      "would read them, and a synthetic groove on `audio` that follows the set (a breakdown drops the kick; the " +
+      "visitor's microphone can replace it). Off the gate's network `dj_link.active` is 0 and the rest reads 0 " +
+      "(`mix` holds 0.5): fall back to `audio` there. Taps and strokes on the gate's " +
       "touch screens arrive through `effects_in` / `touch_dabs` (render them with `render_effects` / `render_points` " +
       "and blend them over the picture, as most presets do, so people can play with the pattern).",
     "",
