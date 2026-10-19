@@ -8,7 +8,9 @@
 import {
   CODE_KIND,
   RESAMPLE_KIND,
+  PATCH_OUT_KIND,
   SUBPATCH_KIND,
+  boundaryShape,
   codeTier,
   isFieldShape,
   isLedShape,
@@ -65,22 +67,31 @@ export function fitsInput(into: PatchShape, sampled: boolean, from: PatchShape):
 
 function outputShape(def: PatchNodeType | undefined, node: PatchNode, port: string): PatchShape | undefined {
   if (node.code) return node.code.outputs.find((p) => p.name === port)?.shape;
+  const boundary = boundaryShape(node);
+  if (boundary) return port === "out" ? boundary : undefined;
   return def?.outputs.find((p) => p.name === port)?.shape;
 }
 
 function declaresLed(def: PatchNodeType | undefined, node: PatchNode): boolean {
+  const boundary = boundaryShape(node);
+  if (boundary) return isLedShape(boundary);
   const outs = node.code ? node.code.outputs : (def?.outputs ?? []);
   return outs.some((p) => isLedShape(p.shape));
 }
 
-/** A Sub-patch hands on LED data when what feeds its inner Output does (the
- * core judges it inlined; its other inputs are knobs, which carry none). */
+/** A Sub-patch hands on LED data when what feeds its inner Output does, or
+ * any Patch out inside carries it. (The core judges it inlined, port by
+ * port; here a node's outputs share one domain, as everywhere.) */
 function subpatchLed(node: PatchNode, kinds: Kinds): boolean {
   const inner = node.sub;
   if (!inner) return false;
+  const led = ledNodes(inner, kinds);
   const output = inner.nodes.find((n) => n.kind === "output");
   const feed = output && inner.edges.find((e) => e.to.node === output.id && e.to.port === "in");
-  return feed !== undefined && ledNodes(inner, kinds).has(feed.from.node);
+  return (
+    (feed !== undefined && led.has(feed.from.node)) ||
+    inner.nodes.some((n) => n.kind === PATCH_OUT_KIND && led.has(n.id))
+  );
 }
 
 /** The ids of the nodes that hand on LED data: crate `validate::led_nodes`.

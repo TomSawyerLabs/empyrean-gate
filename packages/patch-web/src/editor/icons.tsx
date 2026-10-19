@@ -182,6 +182,9 @@ const NODE_ICONS: Record<string, Icon> = {
 
   // -- Structure
   subpatch: [rect(2.5, 2.5, 19, 19, 2), rect(7, 7, 10, 10, 1), line(2.5, 12, 7, 12), line(17, 12, 21.5, 12)],
+  // A wire entering the patch's frame, and one leaving it.
+  patch_in: [rect(10, 3, 11.5, 18, 2), line(2, 12, 14, 12), poly(10.5, 8.5, 14, 12, 10.5, 15.5)],
+  patch_out: [rect(2.5, 3, 11.5, 18, 2), line(10, 12, 22, 12), poly(18.5, 8.5, 22, 12, 18.5, 15.5)],
   code: [poly(8, 6, 2, 12, 8, 18), poly(16, 6, 22, 12, 16, 18), line(14, 4, 10, 20)],
   note: [p("M4 3h12l4 4v14H4Z"), poly(16, 3, 16, 7, 20, 7), line(7.5, 11, 16.5, 11), line(7.5, 14.5, 16.5, 14.5), line(7.5, 18, 13, 18)],
   output: [circle(12, 12, 9.5), circle(12, 12, 4.5), line(1, 12, 9, 12), poly(6.5, 9.5, 9, 12, 6.5, 14.5)],

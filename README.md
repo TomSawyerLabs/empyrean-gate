@@ -254,7 +254,10 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   (Transform's input) until Resample turns it into the plane. Design notes:
   `plans/field-domains.md`. A saved patch or a preset can
   be dropped into another as a **Sub-patch** node whose inputs are its exposed
-  knobs. It arrives *linked*: it follows its source, so saving that patch
+  knobs and its **Patch in** nodes, and whose outputs are its picture (what
+  feeds its Output) and its **Patch out** nodes: a colour or grey field, a
+  number, an event or LED data each, so a patch can be a block that takes a
+  field and hands on several results (`plans/subpatch-ports.md`). It arrives *linked*: it follows its source, so saving that patch
   updates every patch using it, until **Clone for this project** makes it
   this patch's own copy (which offers **Update from …** once the source has
   moved on). Double-click a Sub-patch to open it, with a breadcrumb back

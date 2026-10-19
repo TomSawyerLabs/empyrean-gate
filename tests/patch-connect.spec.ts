@@ -55,7 +55,7 @@ test("dropping a wire on empty canvas offers what fits, and a pick adds it wired
   await expect(chooser.getByRole("button", { name: /^Output/ })).toBeVisible();
   await expect(chooser.getByRole("button", { name: /Still image/ })).toHaveCount(0);
   // The filter box narrows the list.
-  await chooser.getByLabel("Filter node types").fill("outp");
+  await chooser.getByLabel("Filter node types").fill("outpu");
   await expect(chooser.locator(".palette-item")).toHaveCount(1);
   await chooser.getByRole("button", { name: /^Output/ }).click();
   await expect(chooser).toHaveCount(0);

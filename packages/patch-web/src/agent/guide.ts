@@ -198,6 +198,14 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
     "",
     "A patch has one `output` node (at most one; without it nothing shows), and the picture is what reaches its `in`.",
     "",
+    "**Blocks.** A patch used as a Sub-patch can take and hand on more than a picture: each `patch_in` node inside " +
+      "it is an input port of the Sub-patch, and each `patch_out` an output port, named by that node's `id` (its " +
+      "`name` is only the label). Their `shape` select (0 colour field, 1 grey field, 2 number, 3 event, 4 colour " +
+      "LEDs, 5 grey LEDs) sets what the port carries. Inside, wire from a `patch_in`'s `out` and into a " +
+      "`patch_out`'s `in`; outside, wire to and from the Sub-patch's ports by those ids. An unwired `patch_in` hands " +
+      "on its `default` (number or grey), black or no events, so the patch also runs on its own. A block with " +
+      "`patch_out`s needs no `output`.",
+    "",
   );
 
   add("## Wire shapes", "");

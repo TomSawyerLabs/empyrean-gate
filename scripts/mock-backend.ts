@@ -181,6 +181,20 @@ const MOCK_PRESET: MockPatch = {
   // Exposed so the preset offers a port when inserted as a Sub-patch.
   exposed: [{ node: "n1", param: "scale", label: "Scale" }],
 };
+// A block rather than a picture: a Patch in handed straight to a Patch out,
+// so a Sub-patch of it has a typed input and output and no `out`.
+const MOCK_BLOCK: MockPatch = {
+  format: 7,
+  id: "builtin-mock-pass",
+  name: "Mock Pass",
+  description: "",
+  nodes: [
+    { id: "img", kind: "patch_in", name: "Picture", params: {}, pos: [40, 60] },
+    { id: "same", kind: "patch_out", name: "Same", params: {}, pos: [320, 60] },
+  ],
+  edges: [{ from: { node: "img", port: "out" }, to: { node: "same", port: "in" } }],
+  exposed: [],
+};
 // Two playground submissions as the backend hands them on from the site
 // (empyreangate.org, worker/index.ts there): the Patch tab's Submissions
 // drawer lists them and opens their patches. Deciding one answers ok and
@@ -464,6 +478,50 @@ const server = Bun.serve({
           outputs: [{ name: "out", shape: "field_color" }],
           params: [],
         },
+        // A Sub-patch's inlet and outlet: pass-throughs whose shape follows
+        // `shape` (the editor resolves it per instance).
+        {
+          id: "patch_in",
+          label: "Patch in",
+          category: "combine",
+          group: "structure",
+          description: "An input of this patch when it is used as a Sub-patch.",
+          inputs: [{ name: "in", shape: "field_color" }],
+          outputs: [{ name: "out", shape: "field_color" }],
+          params: [
+            {
+              name: "shape",
+              label: "Shape",
+              min: 0,
+              max: 5,
+              default: 0,
+              integrate: false,
+              kind: { select: ["Colour field", "Grey field", "Number", "Event", "Colour LEDs", "Grey LEDs"] },
+            },
+            { name: "default", label: "Default", min: -1000, max: 1000, default: 0, integrate: false, kind: "number" },
+          ],
+        },
+        {
+          id: "patch_out",
+          label: "Patch out",
+          category: "combine",
+          group: "structure",
+          description: "An output of this patch when it is used as a Sub-patch.",
+          inputs: [{ name: "in", shape: "field_color" }],
+          outputs: [{ name: "out", shape: "field_color" }],
+          params: [
+            {
+              name: "shape",
+              label: "Shape",
+              min: 0,
+              max: 5,
+              default: 0,
+              integrate: false,
+              kind: { select: ["Colour field", "Grey field", "Number", "Event", "Colour LEDs", "Grey LEDs"] },
+            },
+            { name: "default", label: "Default", min: -1000, max: 1000, default: 0, integrate: false, kind: "number" },
+          ],
+        },
         {
           id: "output",
           label: "Output",
@@ -476,7 +534,7 @@ const server = Bun.serve({
         },
       ]);
     }
-    if (url.pathname === "/patch/presets") return Response.json([MOCK_PRESET]);
+    if (url.pathname === "/patch/presets") return Response.json([MOCK_PRESET, MOCK_BLOCK]);
     // "Convert to Code" (the real one reproduces the node's body): here the
     // node becomes a Code node with a stand-in body, keeping its id.
     if (url.pathname === "/patch/convert-to-code" && req.method === "POST") {
