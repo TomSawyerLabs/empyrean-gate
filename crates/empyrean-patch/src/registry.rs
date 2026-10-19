@@ -19,6 +19,41 @@ pub struct PortDef {
     pub shape: Shape,
     /// What the port carries, with units and ranges where they matter.
     pub description: &'static str,
+    /// Only in some modes of its kind (see [`When`]); `None`: always.
+    pub when: Option<When>,
+}
+
+/// A port or param that only means something while a Select param of its
+/// node has one of `values` (Random's Hold / Every frame / Walk / Smooth).
+/// The editor shows it only then (or while it is wired); the evaluator
+/// ignores it otherwise. Serialized as `"when": {"param", "values"}`.
+#[derive(Debug, Clone, Copy)]
+pub struct When {
+    pub param: &'static str,
+    pub values: &'static [u32],
+}
+
+impl When {
+    /// Whether it applies, given the node's value of `param`.
+    pub fn applies(&self, select: f32) -> bool {
+        self.values.contains(&(select.round().max(0.0) as u32))
+    }
+}
+
+impl PortDef {
+    /// The same port, only while `param` is one of `values`.
+    pub const fn when(mut self, param: &'static str, values: &'static [u32]) -> Self {
+        self.when = Some(When { param, values });
+        self
+    }
+}
+
+impl ParamDef {
+    /// The same param, only while `param` is one of `values`.
+    pub const fn when(mut self, param: &'static str, values: &'static [u32]) -> Self {
+        self.when = Some(When { param, values });
+        self
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -44,6 +79,8 @@ pub struct ParamDef {
     /// What the param does: units, what the ends of the range mean, and for a
     /// Select what each option does.
     pub description: &'static str,
+    /// Only in some modes of its kind (see [`When`]); `None`: always.
+    pub when: Option<When>,
 }
 
 /// Palette groups. Serialized as the snake-ish ids in [`palette_json`].
@@ -87,10 +124,9 @@ pub enum Group {
     Media,
     /// `shape`: arithmetic and shaping of a Scalar.
     Shape,
-    /// `motion`: Scalars that move on their own (LFO, envelope, sequencer).
+    /// `motion`: Scalars that move on their own (LFO, envelope, sequencer,
+    /// random).
     Motion,
-    /// `random`: random Scalars.
-    Random,
     /// `events`: counting, latching, delaying and merging events, and
     /// turning them into effects.
     Events,
@@ -108,13 +144,12 @@ pub enum Group {
 }
 
 impl Group {
-    pub const ALL: [Group; 12] = [
+    pub const ALL: [Group; 11] = [
         Group::Controls,
         Group::Live,
         Group::Media,
         Group::Shape,
         Group::Motion,
-        Group::Random,
         Group::Events,
         Group::Blocks,
         Group::Patterns,
@@ -130,7 +165,6 @@ impl Group {
             Group::Media => "media",
             Group::Shape => "shape",
             Group::Motion => "motion",
-            Group::Random => "random",
             Group::Events => "events",
             Group::Blocks => "blocks",
             Group::Patterns => "patterns",
@@ -166,9 +200,6 @@ pub fn is_cpu_kind(kind: &str) -> bool {
             | "mix"
             | "clamp"
             | "random"
-            | "full_random"
-            | "random_walk"
-            | "smooth_noise"
             | "counter"
             | "toggle"
             | "threshold"
@@ -185,7 +216,6 @@ pub fn is_gpu_kind(kind: &str) -> bool {
         kind,
         "solid"
             | "gradient"
-            | "gradient_radial"
             | "noise_field"
             | "noise_color"
             | "perlin_noise"
@@ -273,6 +303,27 @@ impl NodeType {
     }
 }
 
+/// The evaluator body a node of `kind` runs, given its Select values. Random's
+/// modes (format 7) are the four kinds it was merged from, and keep those
+/// names inside the crate (eval, convert); every other kind is its own.
+pub fn body<'a>(kind: &'a str, select: impl Fn(&str) -> f32) -> &'a str {
+    match kind {
+        "random" => match select("mode").round() as i64 {
+            1 => "full_random",
+            2 => "random_walk",
+            3 => "smooth_noise",
+            _ => "random",
+        },
+        other => other,
+    }
+}
+
+/// Whether a port or param with this `when` applies to a node whose Select
+/// values `select` gives (always, without one).
+pub fn applies(when: Option<When>, select: impl Fn(&str) -> f32) -> bool {
+    when.is_none_or(|w| w.applies(select(w.param)))
+}
+
 pub fn lookup(id: &str) -> Option<&'static NodeType> {
     TYPES.iter().find(|t| t.id == id)
 }
@@ -325,7 +376,8 @@ pub fn split_layer(kind: &str, name: &str) -> Option<(&'static str, u32)> {
 /// The palette serialized for the editor (`GET /patch/registry`). Shapes use
 /// the same snake_case names as patch JSON; `kind` is `"number"` or
 /// `{"select": [labels…]}`. Nodes, ports and params each carry a
-/// `description`; nodes also their palette `group` ([`Group::id`]).
+/// `description`; nodes also their palette `group` ([`Group::id`]), and
+/// ports and params that only apply in some modes their `when` ([`When`]).
 pub fn palette_json() -> serde_json::Value {
     use serde_json::json;
     let shape = |s: Shape| serde_json::to_value(s).expect("shape serializes");
@@ -343,11 +395,15 @@ pub fn palette_json() -> serde_json::Value {
         ports
             .iter()
             .map(|p| {
-                json!({
+                let mut port = json!({
                     "name": p.name,
                     "shape": shape(p.shape),
                     "description": p.description,
-                })
+                });
+                if let Some(w) = p.when {
+                    port["when"] = json!({ "param": w.param, "values": w.values });
+                }
+                port
             })
             .collect::<Vec<_>>()
     };
@@ -365,19 +421,25 @@ pub fn palette_json() -> serde_json::Value {
                     "convertible": crate::convert::convertible(t.id),
                     "inputs": ports(t.inputs),
                     "outputs": ports(t.outputs),
-                    "params": t.params.iter().map(|p| json!({
-                        "name": p.name,
-                        "label": p.label,
-                        "min": p.min,
-                        "max": p.max,
-                        "default": p.default,
-                        "integrate": p.integrate,
-                        "kind": match p.kind {
-                            ParamKind::Number => json!("number"),
-                            ParamKind::Select(options) => json!({ "select": options }),
-                        },
-                        "description": p.description,
-                    })).collect::<Vec<_>>(),
+                    "params": t.params.iter().map(|p| {
+                        let mut param = json!({
+                            "name": p.name,
+                            "label": p.label,
+                            "min": p.min,
+                            "max": p.max,
+                            "default": p.default,
+                            "integrate": p.integrate,
+                            "kind": match p.kind {
+                                ParamKind::Number => json!("number"),
+                                ParamKind::Select(options) => json!({ "select": options }),
+                            },
+                            "description": p.description,
+                        });
+                        if let Some(w) = p.when {
+                            param["when"] = json!({ "param": w.param, "values": w.values });
+                        }
+                        param
+                    }).collect::<Vec<_>>(),
                 });
                 // The inputs and params repeated per layer (see `layered`);
                 // absent on kinds that have no layers.
@@ -439,6 +501,7 @@ const fn num(
         default,
         integrate: false,
         description,
+        when: None,
     }
 }
 
@@ -460,6 +523,7 @@ const fn rate(
         default,
         integrate: true,
         description,
+        when: None,
     }
 }
 
@@ -478,6 +542,7 @@ const fn sel(
         default: 0.0,
         integrate: false,
         description,
+        when: None,
     }
 }
 
@@ -486,6 +551,7 @@ const fn port(name: &'static str, shape: Shape, description: &'static str) -> Po
         name,
         shape,
         description,
+        when: None,
     }
 }
 
@@ -1479,27 +1545,39 @@ pub const TYPES: &[NodeType] = &[
         ],
     },
     NodeType {
-        // The sequence is seeded from the node id, so a saved patch replays
-        // the same values.
+        // Seeded from the node id, so a saved patch replays the same values.
+        // One kind since format 7: Full random, Random walk and Smooth noise
+        // are its modes (see `migrate::v6_to_v7`).
         id: "random",
         label: "Random",
         category: Category::ScalarOp,
-        group: Group::Random,
-        description: "A random value in Min..Max, drawn anew on every `trigger` and also Rate times a second when Rate > 0 (× master speed); Glide eases from one value to the next. Seeded from the node id, so a saved patch replays the same sequence.",
-        inputs: &[port("trigger", Shape::Event, "Draws a new value now.")],
+        group: Group::Motion,
+        description: "A random value in Min..Max, in one of four ways (Mode). Hold: a value drawn anew on every `trigger`, and Rate times a second when Rate > 0, gliding over Glide seconds. Every frame: white noise, a fresh value each frame (Bell piles them toward the middle), for jitter and flicker. Walk: tiny random steps every frame (Brownian motion), optionally pulled back toward the middle, plus a bigger jump on each `step`; good for slow, natural drift. Smooth: Perlin noise over time, smooth swells built from Harmonics layers (the scalar sibling of Perlin noise). Seeded from the node id, so a saved patch replays the same values.",
+        inputs: &[
+            port("trigger", Shape::Event, "Hold: draws a new value now.").when("mode", &[0]),
+            port("step", Shape::Event, "Walk: jumps by a random amount up to ±Jump now.").when("mode", &[2]),
+            port("reset", Shape::Event, "Walk: back to the middle of the range.").when("mode", &[2]),
+        ],
         outputs: &[
             port(
                 "out",
                 Shape::Scalar,
-                "The current value (gliding toward the latest draw).",
+                "The current value (in Hold, gliding toward the latest draw).",
             ),
             port(
                 "changed",
                 Shape::Event,
-                "Fires each time a new value is drawn.",
-            ),
+                "Hold: fires each time a new value is drawn.",
+            )
+            .when("mode", &[0]),
         ],
         params: &[
+            sel(
+                "mode",
+                "Mode",
+                &["Hold", "Every frame", "Walk", "Smooth"],
+                "Hold: a value held until the next draw (trigger or Rate). Every frame: white noise. Walk: Brownian drift with jumps on `step`. Smooth: Perlin noise over time.",
+            ),
             num(
                 "rate",
                 "Rate (Hz, 0 = trigger only)",
@@ -1507,9 +1585,8 @@ pub const TYPES: &[NodeType] = &[
                 20.0,
                 0.0,
                 "Automatic draws per second (× master speed); 0 draws only on trigger.",
-            ),
-            num("min", "Min", -8.0, 8.0, 0.0, "Lowest value drawn."),
-            num("max", "Max", -8.0, 8.0, 1.0, "Highest value drawn."),
+            )
+            .when("mode", &[0]),
             num(
                 "glide",
                 "Glide (s)",
@@ -1517,42 +1594,15 @@ pub const TYPES: &[NodeType] = &[
                 5.0,
                 0.0,
                 "Seconds to ease from the old value to the new one (0 = jump).",
-            ),
-        ],
-    },
-    NodeType {
-        // Seeded from the node id, like Random.
-        id: "full_random",
-        label: "Full random",
-        category: Category::ScalarOp,
-        group: Group::Random,
-        description: "White noise: a fresh random value in Min..Max on every frame, uncorrelated with the last. Bell piles the values toward the middle. For jitter and flicker; Random holds a value, Random walk and Smooth noise wander.",
-        inputs: &[],
-        outputs: &[port("out", Shape::Scalar, "This frame's value.")],
-        params: &[
-            num("min", "Min", -8.0, 8.0, 0.0, "Lowest value."),
-            num("max", "Max", -8.0, 8.0, 1.0, "Highest value."),
+            )
+            .when("mode", &[0]),
             sel(
                 "distribution",
                 "Distribution",
                 &["Uniform", "Bell"],
                 "Uniform: every value in range equally likely. Bell: a normal curve centred on the middle, ±3 standard deviations reaching the ends (clamped).",
-            ),
-        ],
-    },
-    NodeType {
-        // Seeded from the node id, like Random.
-        id: "random_walk",
-        label: "Random walk",
-        category: Category::ScalarOp,
-        group: Group::Random,
-        description: "A value that wanders by tiny random steps every frame (Brownian motion), kept within Min..Max, optionally pulled back toward the middle; a `step` event also makes one bigger random jump. Starts in the middle. Good for slow, natural drift of any knob.",
-        inputs: &[
-            port("step", Shape::Event, "Jumps by a random amount up to ±Jump now."),
-            port("reset", Shape::Event, "Back to the middle of the range."),
-        ],
-        outputs: &[port("out", Shape::Scalar, "The current position.")],
-        params: &[
+            )
+            .when("mode", &[1]),
             num(
                 "wander",
                 "Wander",
@@ -1560,7 +1610,8 @@ pub const TYPES: &[NodeType] = &[
                 2.0,
                 0.25,
                 "How far it typically drifts in one second, as a fraction of the range (× master speed); 0 moves only on `step`.",
-            ),
+            )
+            .when("mode", &[2]),
             num(
                 "jump",
                 "Jump",
@@ -1568,7 +1619,8 @@ pub const TYPES: &[NodeType] = &[
                 1.0,
                 0.2,
                 "Largest jump a `step` event makes, as a fraction of the range.",
-            ),
+            )
+            .when("mode", &[2]),
             num(
                 "pull",
                 "Pull",
@@ -1576,27 +1628,15 @@ pub const TYPES: &[NodeType] = &[
                 4.0,
                 0.0,
                 "Pull back toward the middle, per second (× master speed): 0 roams freely, higher stays closer to the centre.",
-            ),
-            num("min", "Min", -8.0, 8.0, 0.0, "One edge of the range."),
-            num("max", "Max", -8.0, 8.0, 1.0, "The other edge."),
+            )
+            .when("mode", &[2]),
             sel(
                 "edges",
                 "Edges",
                 &["Bounce", "Wrap", "Stick"],
                 "At an edge, Bounce reflects back in, Wrap comes in from the other side (for hues and angles), Stick holds at the edge until it wanders away.",
-            ),
-        ],
-    },
-    NodeType {
-        // Offset in the noise by the node id, so two of them differ.
-        id: "smooth_noise",
-        label: "Smooth noise",
-        category: Category::ScalarOp,
-        group: Group::Random,
-        description: "Perlin noise over time: a smooth, never-repeating wander in Min..Max, built from Harmonics layers of noise at rising speeds. Roughness sets how much the faster layers add (low = lazy swells, high = nervous detail). The scalar sibling of Perlin noise.",
-        inputs: &[],
-        outputs: &[port("out", Shape::Scalar, "The current value.")],
-        params: &[
+            )
+            .when("mode", &[2]),
             num(
                 "speed",
                 "Speed (Hz)",
@@ -1604,7 +1644,8 @@ pub const TYPES: &[NodeType] = &[
                 10.0,
                 0.5,
                 "Swells per second of the first harmonic (× master speed); 0 freezes it.",
-            ),
+            )
+            .when("mode", &[3]),
             num(
                 "harmonics",
                 "Harmonics",
@@ -1612,7 +1653,8 @@ pub const TYPES: &[NodeType] = &[
                 8.0,
                 3.0,
                 "Layers of noise summed, each faster than the last (1 = one smooth wave).",
-            ),
+            )
+            .when("mode", &[3]),
             num(
                 "roughness",
                 "Roughness",
@@ -1620,7 +1662,8 @@ pub const TYPES: &[NodeType] = &[
                 1.0,
                 0.5,
                 "Each harmonic's strength relative to the one before it.",
-            ),
+            )
+            .when("mode", &[3]),
             num(
                 "spacing",
                 "Spacing",
@@ -1628,9 +1671,10 @@ pub const TYPES: &[NodeType] = &[
                 4.0,
                 2.0,
                 "Each harmonic's speed relative to the one before it.",
-            ),
-            num("min", "Min", -8.0, 8.0, 0.0, "Lowest value."),
-            num("max", "Max", -8.0, 8.0, 1.0, "Highest value."),
+            )
+            .when("mode", &[3]),
+            num("min", "Min", -8.0, 8.0, 0.0, "Lowest value (in Walk, one edge of the range)."),
+            num("max", "Max", -8.0, 8.0, 1.0, "Highest value (in Walk, the other edge)."),
         ],
     },
     NodeType {
@@ -1967,36 +2011,6 @@ pub const TYPES: &[NodeType] = &[
                 "Narrows the arms (0 = wide soft arms).",
             ),
             HUE,
-            SATURATION,
-            BRIGHTNESS,
-        ],
-    },
-    NodeType {
-        id: "gradient_radial",
-        label: "Radial gradient",
-        category: Category::Generator,
-        group: Group::Blocks,
-        description: "Fully lit hue bands from the centre to the rim, scrolling toward the centre over time (Drift). The simplest colourful background.",
-        inputs: &[],
-        outputs: COLOR_OUT,
-        params: &[
-            rate(
-                "drift",
-                "Drift",
-                0.0,
-                4.0,
-                0.5,
-                "Scroll rate of the bands, integrated (× master speed); 0 holds still.",
-            ),
-            HUE,
-            num(
-                "hue_range",
-                "Hue range",
-                0.0,
-                1.0,
-                0.2,
-                "Hue change per array radius, in turns (0 = one flat hue).",
-            ),
             SATURATION,
             BRIGHTNESS,
         ],
@@ -2358,17 +2372,17 @@ pub const TYPES: &[NodeType] = &[
         label: "Rainbow",
         category: Category::Generator,
         group: Group::Patterns,
-        description: "A hue wheel around the ring (repeated Turns times), optionally shifting toward the rim by Hue range; Speed rotates the colours. Fully opaque.",
+        description: "A hue wheel around the ring (repeated Turns times), optionally shifting toward the rim by Hue range; Speed rotates the colours. With Turns at 0 there is no wheel, only hue bands from the centre to the rim (the simplest colourful background). Fully opaque.",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
             num(
                 "turns",
                 "Turns",
-                1.0,
+                0.0,
                 4.0,
                 1.0,
-                "Times the hue wheel repeats around the ring (rounded).",
+                "Times the hue wheel repeats around the ring (rounded); 0: no wheel, only the bands Hue range makes toward the rim.",
             ),
             rate(
                 "speed",

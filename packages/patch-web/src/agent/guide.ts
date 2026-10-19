@@ -6,7 +6,7 @@
 
 import { grouped, groupOf } from "../groups";
 import type { PatchCore } from "../runtime/core";
-import { MAX_CODE_BYTES, MAX_CODE_PORTS, type PatchNodeType, type PatchParamDef } from "../types";
+import { MAX_CODE_BYTES, MAX_CODE_PORTS, type PatchNodeType, type PatchParamDef, type PatchWhen } from "../types";
 
 export interface GuideOptions {
   /** How the reader reaches the tools, in one paragraph of markdown (the
@@ -70,23 +70,41 @@ function range(p: PatchParamDef): string {
   return `${p.min} … ${p.max}`;
 }
 
+/** "(only in Walk)": which modes of `t` a port or param belongs to. */
+function modeNote(t: PatchNodeType, p: { when?: PatchWhen }): string {
+  if (!p.when) return "";
+  const select = t.params.find((q) => q.name === p.when!.param);
+  const options = select && typeof select.kind === "object" ? select.kind.select : [];
+  const names = p.when.values.map((v) => options[v] ?? String(v));
+  return `(only when \`${p.when.param}\` is ${names.join(" or ")})`;
+}
+
 function nodeReference(t: PatchNodeType): string {
   const lines = [`### \`${t.id}\` — ${t.label}`, ""];
   if (t.description) lines.push(t.description, "");
   if (t.inputs.length) {
     lines.push("Inputs:");
-    for (const p of t.inputs) lines.push(`- \`${p.name}\` (${p.shape})${p.description ? ` — ${p.description}` : ""}`);
+    for (const p of t.inputs) {
+      lines.push(`- \`${p.name}\` (${p.shape})${p.description ? ` — ${p.description}` : ""} ${modeNote(t, p)}`.trimEnd());
+    }
     lines.push("");
   }
   if (t.outputs.length) {
     lines.push("Outputs:");
-    for (const p of t.outputs) lines.push(`- \`${p.name}\` (${p.shape})${p.description ? ` — ${p.description}` : ""}`);
+    for (const p of t.outputs) {
+      lines.push(`- \`${p.name}\` (${p.shape})${p.description ? ` — ${p.description}` : ""} ${modeNote(t, p)}`.trimEnd());
+    }
     lines.push("");
   }
   if (t.params.length) {
     lines.push("| Param | Range | Default | |", "| --- | --- | --- | --- |");
     for (const p of t.params) {
-      const notes = [p.description ?? "", typeof p.kind === "object" ? "(select; not wirable)" : "", p.integrate ? "(a rate: integrated over time)" : ""]
+      const notes = [
+        p.description ?? "",
+        typeof p.kind === "object" ? "(select; not wirable)" : "",
+        p.integrate ? "(a rate: integrated over time)" : "",
+        modeNote(t, p),
+      ]
         .filter(Boolean)
         .join(" ");
       lines.push(`| \`${p.name}\` | ${range(p)} | ${p.default} | ${notes.replace(/\|/g, "\\|")} |`);

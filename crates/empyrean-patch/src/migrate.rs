@@ -26,6 +26,12 @@
 //! input that reads its source elsewhere (Transform's `in`), which then
 //! didn't move it. `validate` refuses that now, so a Resample (Nearest) goes
 //! in between: the patch stays valid, and Transform moves the LED cells too.
+//!
+//! **6 → 7** (plans/palette-overhaul.md): fewer kinds that do the same thing.
+//! Full random, Random walk and Smooth noise become Random in their own Mode
+//! (Every frame, Walk, Smooth; params and ports keep their names), and
+//! Radial gradient becomes Rainbow with no turns (its Drift becomes Speed,
+//! scaled to move the bands as fast).
 
 use crate::{Edge, NodeInst, PATCH_FORMAT, PatchDoc, PortRef};
 use std::collections::BTreeMap;
@@ -33,11 +39,21 @@ use std::collections::BTreeMap;
 /// Upgrade `doc` to [`PATCH_FORMAT`] in place. Returns whether it changed.
 /// Newer formats are left alone (validation refuses them).
 pub fn migrate(doc: &mut PatchDoc) -> bool {
-    // Sub-patches carry whole documents of their own (format 4).
+    // Sub-patches carry whole documents of their own (format 4). A knob the
+    // inner migration renames is renamed on the outer wires into it too.
     let mut changed = false;
+    let mut port_renames: Vec<(String, String, String)> = Vec::new();
     for n in &mut doc.nodes {
         if let Some(sub) = n.sub.as_deref_mut() {
+            for (inner, old, new) in v7_renames(sub) {
+                port_renames.push((n.id.clone(), format!("{inner}.{old}"), format!("{inner}.{new}")));
+            }
             changed |= migrate(sub);
+        }
+    }
+    for (node, old, new) in port_renames {
+        for e in doc.edges.iter_mut().filter(|e| e.to.node == node && e.to.port == old) {
+            e.to.port = new.clone();
         }
     }
     if doc.format > PATCH_FORMAT {
@@ -52,6 +68,9 @@ pub fn migrate(doc: &mut PatchDoc) -> bool {
         }
         // 3 → 4 adds fields (`sub`, Clip nodes), 4 → 5 `code`, 5 → 6 `text`:
         // additions only, nothing that exists changes.
+        if doc.format <= 6 {
+            v6_to_v7(doc);
+        }
         doc.format = PATCH_FORMAT;
         changed = true;
     }
@@ -87,6 +106,62 @@ fn resample_led_sampling(doc: &mut PatchDoc) -> bool {
         wire(doc, port(&rs, "out"), e.to.clone());
         wire(doc, e.from.clone(), port(&rs, "in"));
         changed = true;
+    }
+}
+
+/// Radial gradient's defaults, which the registry no longer holds.
+const RADIAL_DRIFT: f32 = 0.5;
+const RADIAL_HUE_RANGE: f32 = 0.2;
+
+/// The params 6 → 7 renames in `doc`, as `(node id, old, new)`, so wires
+/// into a Sub-patch holding `doc` can follow. Empty for a current document.
+fn v7_renames(doc: &PatchDoc) -> Vec<(String, String, String)> {
+    if doc.format > 6 {
+        return Vec::new();
+    }
+    doc.nodes
+        .iter()
+        .filter(|n| n.kind == "gradient_radial")
+        .map(|n| (n.id.clone(), "drift".to_string(), "speed".to_string()))
+        .collect()
+}
+
+/// **6 → 7**: Full random, Random walk and Smooth noise are Random's modes;
+/// Radial gradient is Rainbow with no turns.
+fn v6_to_v7(doc: &mut PatchDoc) {
+    let mut renamed: Vec<String> = Vec::new();
+    for n in &mut doc.nodes {
+        let mode = match n.kind.as_str() {
+            "full_random" => 1.0,
+            "random_walk" => 2.0,
+            "smooth_noise" => 3.0,
+            "gradient_radial" => {
+                // Radial gradient's hue was `hue + (r + drift phase × 0.1) ×
+                // hue_range`; Rainbow's with no turns is `hue + r × hue_range
+                // + speed phase × 0.03`. The same bands, moving as fast.
+                let drift = n.params.remove("drift").unwrap_or(RADIAL_DRIFT);
+                let range = n.params.get("hue_range").copied().unwrap_or(RADIAL_HUE_RANGE);
+                n.kind = "rainbow".to_string();
+                n.params.insert("turns".to_string(), 0.0);
+                n.params.insert("speed".to_string(), (drift * 0.1 * range / 0.03).clamp(0.0, 4.0));
+                renamed.push(n.id.clone());
+                continue;
+            }
+            _ => continue,
+        };
+        n.kind = "random".to_string();
+        n.params.insert("mode".to_string(), mode);
+    }
+    // A wire into Drift drives Speed now, and an exposed Drift is Speed.
+    for e in &mut doc.edges {
+        if renamed.contains(&e.to.node) && e.to.port == "drift" {
+            e.to.port = "speed".to_string();
+        }
+    }
+    for x in &mut doc.exposed {
+        if renamed.contains(&x.node) && x.param == "drift" {
+            x.param = "speed".to_string();
+        }
     }
 }
 
@@ -344,6 +419,72 @@ mod tests {
         migrate(&mut doc);
         assert_eq!(doc.nodes[0].kind, "video_in");
         assert!(compile(&doc).unwrap().wgsl.contains("video_at(uv)"));
+    }
+
+    #[test]
+    fn a_v6_patch_folds_the_random_family_and_radial_gradient() {
+        let mut doc: PatchDoc = serde_json::from_value(serde_json::json!({
+            "format": 6,
+            "nodes": [
+                { "id": "w", "kind": "random_walk", "params": { "wander": 0.4 } },
+                { "id": "f", "kind": "full_random", "params": {} },
+                { "id": "s", "kind": "smooth_noise", "params": { "speed": 2 } },
+                { "id": "h", "kind": "random", "params": { "rate": 3 } },
+                { "id": "g", "kind": "gradient_radial", "params": { "drift": 1.5, "hue_range": 0.4 } },
+                { "id": "l", "kind": "lfo", "params": {} },
+                { "id": "o", "kind": "output", "params": {} }
+            ],
+            "edges": [
+                { "from": { "node": "l", "port": "out" }, "to": { "node": "g", "port": "drift" } },
+                { "from": { "node": "g", "port": "out" }, "to": { "node": "o", "port": "in" } }
+            ],
+            "exposed": [{ "node": "g", "param": "drift", "label": "" }]
+        }))
+        .unwrap();
+        assert!(migrate(&mut doc));
+        let kind = |id: &str| doc.nodes.iter().find(|n| n.id == id).unwrap();
+        assert_eq!(kind("w").kind, "random");
+        assert_eq!(kind("w").params["mode"], 2.0);
+        assert_eq!(kind("w").params["wander"], 0.4);
+        assert_eq!(kind("f").params["mode"], 1.0);
+        assert_eq!(kind("s").params["mode"], 3.0);
+        assert!(!kind("h").params.contains_key("mode"), "Hold is the default");
+        let g = kind("g");
+        assert_eq!(g.kind, "rainbow");
+        assert_eq!(g.params["turns"], 0.0);
+        assert!((g.params["speed"] - 1.5 * 0.1 * 0.4 / 0.03).abs() < 1e-5);
+        assert!(!g.params.contains_key("drift"));
+        assert_eq!(doc.edges[0].to.port, "speed");
+        assert_eq!(doc.exposed[0].param, "speed");
+        crate::validate::validate(&doc).expect("valid at format 7");
+    }
+
+    #[test]
+    fn a_wire_into_a_sub_patchs_radial_drift_follows_it() {
+        let mut doc: PatchDoc = serde_json::from_value(serde_json::json!({
+            "format": 6,
+            "nodes": [
+                { "id": "l", "kind": "lfo", "params": {} },
+                { "id": "p", "kind": "subpatch", "params": {}, "sub": {
+                    "format": 6,
+                    "nodes": [
+                        { "id": "g", "kind": "gradient_radial", "params": {} },
+                        { "id": "o", "kind": "output", "params": {} }
+                    ],
+                    "edges": [{ "from": { "node": "g", "port": "out" }, "to": { "node": "o", "port": "in" } }],
+                    "exposed": [{ "node": "g", "param": "drift", "label": "" }]
+                } },
+                { "id": "o", "kind": "output", "params": {} }
+            ],
+            "edges": [
+                { "from": { "node": "l", "port": "out" }, "to": { "node": "p", "port": "g.drift" } },
+                { "from": { "node": "p", "port": "out" }, "to": { "node": "o", "port": "in" } }
+            ]
+        }))
+        .unwrap();
+        assert!(migrate(&mut doc));
+        assert_eq!(doc.edges[0].to.port, "g.speed");
+        assert_eq!(doc.nodes[1].sub.as_ref().unwrap().exposed[0].param, "speed");
     }
 
     #[test]

@@ -247,6 +247,10 @@
   color: var(--pe-muted, #8a85a8);
 }
 
+.palette-item-preset {
+  color: var(--pe-accent, #7c5cff);
+}
+
 .palette-tag {
   font-size: 10px;
   color: var(--pe-muted, #8a85a8);
@@ -2013,4 +2017,16 @@
   flex-wrap: wrap;
   gap: 6px;
   margin: 4px 0 12px;
+}
+
+/* Kind icons beside a node's title and in its panel's heading. */
+.pnode-title .node-icon {
+  margin-right: 5px;
+  vertical-align: -2px;
+}
+
+.patch-panel-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }

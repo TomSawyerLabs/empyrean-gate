@@ -58,12 +58,13 @@ import { History } from "./history";
 import { addLayer, layerFor, layerInput, moveLayer, removeLayer } from "./layers";
 import { NodeIcon } from "./icons";
 import { MiniMeter, MiniRing, type MiniSource } from "./minis";
-import { Palette, PALETTE_DRAG_TYPE, type SubpatchChoice } from "./Palette";
+import { Palette, PALETTE_DRAG_TYPE, PALETTE_PARAMS_TYPE, type SubpatchChoice } from "./Palette";
 import { PanelHead, useSheet } from "./sheet";
 import { isBuiltin, linkedSources, snapshot, sourceRev, summarize, summaryLinks, syncLinks } from "./links";
 import { cloneAlong, crumbs, docAt, flatId, lockAt, sameLocation, unlink, validPath, type EditorLocation } from "./navigation";
 import { PatchBrowser } from "./PatchBrowser";
 import {
+  applies,
   CODE_KIND,
   NOTE_KIND,
   codeInputs,
@@ -281,6 +282,16 @@ function inputPorts(def: PatchNodeType, node?: PatchNode): { name: string; shape
   ];
 }
 
+/** Whether port (or knob) `name` of `node` applies in its current mode (see
+ * `applies`); ports of Code and Sub-patch nodes always do. */
+function portApplies(def: PatchNodeType, node: PatchNode, name: string): boolean {
+  const p =
+    def.inputs.find((q) => q.name === name) ??
+    def.outputs.find((q) => q.name === name) ??
+    def.params.find((q) => q.name === name);
+  return !p || applies(p, def, node);
+}
+
 /** The output ports of a node: the type's, or for a Code node the instance's
  * declared outputs. */
 function outputPorts(def: PatchNodeType, node?: PatchNode): { name: string; shape: PatchShape }[] {
@@ -442,7 +453,9 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
   if (!def) {
     return <div className="pnode pnode-unknown">unknown: {node.kind}</div>;
   }
-  const ins = inputPorts(def, node);
+  // A kind with modes (Random) shows the ports of its mode, and any other
+  // that is still wired.
+  const ins = inputPorts(def, node).filter((p) => portApplies(def, node, p.name) || data.wiredIn.includes(p.name));
   // Mini visualizers, per output style: field outputs get a thumbnail laid out
   // like the hardware, and so do the stream and texture sources (Touch
   // strokes, Triggered effects, Event effect, Video in, Still image, Clip),
@@ -455,8 +468,11 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
   const live = minis !== null && data.docId !== "" && activeId === data.docId;
   // The principal output: `out`, or the single output of a source node.
   // An LED node's field outputs carry LED data: dots, labels and drag
-  // checks all see the shape the wire really has.
-  const outs = outputPorts(def, node).map((p) => (data.led ? { ...p, shape: onLeds(p.shape) } : p));
+  // checks all see the shape the wire really has. A kind with modes (Random)
+  // shows its mode's outputs, and any other that is still wired.
+  const outs = outputPorts(def, node)
+    .filter((p) => portApplies(def, node, p.name) || data.wiredOut.includes(p.name))
+    .map((p) => (data.led ? { ...p, shape: onLeds(p.shape) } : p));
   const primary = outs.find((p) => p.name === "out") ?? (outs.length === 1 ? outs[0] : undefined);
   const showRing = live && primary !== undefined && RING_SHAPES.includes(primary.shape);
   // A Code node thumbnails every field output: the principal one as the
@@ -906,10 +922,13 @@ function ParamPanel({
   const node = doc.nodes.find((n) => n.id === nodeId);
   const def = node && registry.get(node.kind);
   if (!node || !def) return null;
-  const params = panelParams(def, node, registry);
-
   const wiredInto = (param: string) =>
     doc.edges.find((e) => e.to.node === node.id && e.to.port === param);
+  // A kind with modes (Random) shows the knobs of its mode, and any other
+  // that is still wired.
+  const params = panelParams(def, node, registry).filter(
+    (p) => portApplies(def, node, p.name) || wiredInto(p.name) !== undefined,
+  );
   const isExposed = (param: string) =>
     doc.exposed.some((x) => x.node === node.id && x.param === param);
   // A layered node (Blend) lists its params by layer, top layer first.
@@ -2223,14 +2242,15 @@ function Editor({
     return [Math.round(center.x - DEFAULT_SIZE.width / 2), Math.round(center.y - DEFAULT_SIZE.height / 2)];
   }, [flow]);
 
-  /** Add a node of `kind` at `at` (flow coordinates), or the canvas centre. */
+  /** Add a node of `kind` at `at` (flow coordinates), or the canvas centre,
+   * starting with `params` when given. */
   const addNode = useCallback(
-    (kind: string, at?: [number, number]) => {
+    (kind: string, at?: [number, number], params: Record<string, number> = {}) => {
       // A patch has one sink; the palette disables Output while it has it.
       if (kind === "output" && docRef.current?.nodes.some((n) => n.kind === "output")) return;
       const pos = at ?? canvasCenter();
       mutateDoc((d) => {
-        const node: PatchNode = { id: freshId(d), kind, name: "", params: {}, pos };
+        const node: PatchNode = { id: freshId(d), kind, name: "", params: { ...params }, pos };
         // A Code node is nothing without its ports and body; a Note is text.
         if (kind === CODE_KIND) node.code = defaultCode();
         if (kind === NOTE_KIND) node.text = "";
@@ -2477,8 +2497,8 @@ function Editor({
             types={registryList ?? []}
             subpatches={subpatchChoices}
             hasOutput={doc.nodes.some((n) => n.kind === "output")}
-            onPick={(kind) => {
-              addNode(kind);
+            onPick={(kind, params) => {
+              addNode(kind, undefined, params);
               if (compact) setSheet(null);
             }}
             onPickSubpatch={(choice) => {
@@ -2509,7 +2529,8 @@ function Editor({
             if (!canEdit || !kind) return;
             e.preventDefault();
             const at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-            addNode(kind, [Math.round(at.x), Math.round(at.y)]);
+            const params = e.dataTransfer.getData(PALETTE_PARAMS_TYPE);
+            addNode(kind, [Math.round(at.x), Math.round(at.y)], params ? JSON.parse(params) : undefined);
           }}
         >
           {doc && registry ? (

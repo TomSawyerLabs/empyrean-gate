@@ -6,7 +6,7 @@
 
 import type { PatchCore } from "../src/runtime/core";
 import { snippetDocs } from "../src/editor/code-snippets";
-import { CODE_KIND, type PatchDoc, type PatchNode, type PatchNodeType, type PatchShape } from "../src/types";
+import { applies, CODE_KIND, type PatchDoc, type PatchNode, type PatchNodeType, type PatchShape } from "../src/types";
 
 export interface CorpusEntry {
   label: string;
@@ -62,7 +62,8 @@ export function shaderCorpus(core: PatchCore): CorpusEntry[] {
       edges.push({ from: { node: "n", port: out.name }, to: { node: "o", port: into.name } });
     }
     if (fed) {
-      const inputs = t.inputs.map((p) => ({ name: p.name, shape: p.shape }));
+      // Only the inputs of the node's mode (Random's `when`).
+      const inputs = t.inputs.filter((p) => applies(p, t, n)).map((p) => ({ name: p.name, shape: p.shape }));
       if (t.layered) {
         n.layers = layers;
         for (let k = 2; k <= layers; k++) {

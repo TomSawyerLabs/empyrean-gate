@@ -342,7 +342,8 @@ impl Runtime {
         for i in 0..self.prog.cpu_order.len() {
             let node = self.prog.cpu_order[i];
             self.events[node].clear();
-            let kind = self.doc.nodes[node].kind.clone();
+            // Random runs the body of its mode (see `registry::body`).
+            let kind = crate::registry::body(&self.doc.nodes[node].kind, |p| self.param(node, p)).to_string();
             match kind.as_str() {
                 "time" => {
                     let rate = self.input(node, "rate");
@@ -1489,19 +1490,19 @@ mod tests {
 
     #[test]
     fn full_random_is_fresh_every_frame_within_range() {
-        let uniform = noise_trace("full_random", serde_json::json!({ "min": 2, "max": 4 }), &[], 4000);
+        let uniform = noise_trace("random", serde_json::json!({ "mode": 1, "min": 2, "max": 4 }), &[], 4000);
         assert!(uniform.iter().all(|v| (2.0..=4.0).contains(v)));
         assert!(uniform.windows(2).all(|w| w[0] != w[1]), "a new value every frame");
         assert!((mean(&uniform) - 3.0).abs() < 0.05, "{}", mean(&uniform));
         // A uniform 2..4 has a standard deviation of 2/√12 ≈ 0.577.
         assert!((spread(&uniform) - 0.577).abs() < 0.03, "{}", spread(&uniform));
         assert_eq!(
-            noise_trace("full_random", serde_json::json!({ "min": 2, "max": 4 }), &[], 4000),
+            noise_trace("random", serde_json::json!({ "mode": 1, "min": 2, "max": 4 }), &[], 4000),
             uniform,
             "same patch, same sequence"
         );
 
-        let bell = noise_trace("full_random", serde_json::json!({ "min": 2, "max": 4, "distribution": 1 }), &[], 4000);
+        let bell = noise_trace("random", serde_json::json!({ "mode": 1, "min": 2, "max": 4, "distribution": 1 }), &[], 4000);
         assert!(bell.iter().all(|v| (2.0..=4.0).contains(v)));
         assert!((mean(&bell) - 3.0).abs() < 0.03, "{}", mean(&bell));
         // ±3σ spans the range: σ = 1/3.
@@ -1510,10 +1511,10 @@ mod tests {
 
     #[test]
     fn random_walk_wanders_continuously_inside_its_edges() {
-        let still = noise_trace("random_walk", serde_json::json!({ "wander": 0, "min": 2, "max": 4 }), &[], 50);
+        let still = noise_trace("random", serde_json::json!({ "mode": 2, "wander": 0, "min": 2, "max": 4 }), &[], 50);
         assert!(still.iter().all(|&v| v == 3.0), "starts in the middle and, without wander, stays");
 
-        let walk = noise_trace("random_walk", serde_json::json!({ "wander": 0.3 }), &[], 3000);
+        let walk = noise_trace("random", serde_json::json!({ "mode": 2, "wander": 0.3 }), &[], 3000);
         assert!(walk.iter().all(|v| (0.0..=1.0).contains(v)));
         // A walk, not noise: frame-to-frame moves are tiny (σ = 0.3·√(1/60)
         // ≈ 0.04 of the range), but over time it covers ground.
@@ -1521,48 +1522,48 @@ mod tests {
         assert!(biggest < 0.2, "{biggest}");
         let (lo, hi) = walk.iter().fold((1.0f32, 0.0f32), |(lo, hi), &v| (lo.min(v), hi.max(v)));
         assert!(hi - lo > 0.4, "it wanders: {lo}..{hi}");
-        assert_eq!(noise_trace("random_walk", serde_json::json!({ "wander": 0.3 }), &[], 3000), walk);
+        assert_eq!(noise_trace("random", serde_json::json!({ "mode": 2, "wander": 0.3 }), &[], 3000), walk);
 
         // Every edge mode holds the range, even wandering hard.
         for edges in 0..3 {
-            let wild = noise_trace("random_walk", serde_json::json!({ "wander": 2, "edges": edges, "min": -1, "max": 1 }), &[], 2000);
+            let wild = noise_trace("random", serde_json::json!({ "mode": 2, "wander": 2, "edges": edges, "min": -1, "max": 1 }), &[], 2000);
             assert!(wild.iter().all(|v| (-1.0..=1.0).contains(v)), "edges {edges}");
         }
         // Wrap jumps across: some frame goes from near one edge to the other.
-        let wrap = noise_trace("random_walk", serde_json::json!({ "wander": 2, "edges": 1 }), &[], 2000);
+        let wrap = noise_trace("random", serde_json::json!({ "mode": 2, "wander": 2, "edges": 1 }), &[], 2000);
         assert!(wrap.windows(2).any(|w| (w[1] - w[0]).abs() > 0.5));
 
         // Pull keeps it nearer the middle.
-        let free = noise_trace("random_walk", serde_json::json!({ "wander": 0.5 }), &[], 6000);
-        let pulled = noise_trace("random_walk", serde_json::json!({ "wander": 0.5, "pull": 4 }), &[], 6000);
+        let free = noise_trace("random", serde_json::json!({ "mode": 2, "wander": 0.5 }), &[], 6000);
+        let pulled = noise_trace("random", serde_json::json!({ "mode": 2, "wander": 0.5, "pull": 4 }), &[], 6000);
         let off = |v: &[f32]| v.iter().map(|x| (x - 0.5).abs()).sum::<f32>() / v.len() as f32;
         assert!(off(&pulled) < off(&free) * 0.7, "pulled {} vs free {}", off(&pulled), off(&free));
 
         // `step` jumps (the clock wraps every 60 frames here); `reset`
         // returns to the middle.
-        let steps = noise_trace("random_walk", serde_json::json!({ "wander": 0, "jump": 0.3 }), &["step"], 240);
+        let steps = noise_trace("random", serde_json::json!({ "mode": 2, "wander": 0, "jump": 0.3 }), &["step"], 240);
         let moves: Vec<_> = steps.windows(2).filter(|w| w[0] != w[1]).collect();
         assert!(!moves.is_empty() && moves.len() <= 4, "{moves:?}");
         assert!(moves.iter().all(|w| (w[1] - w[0]).abs() <= 0.3 + 1e-6));
-        let reset = noise_trace("random_walk", serde_json::json!({ "wander": 1 }), &["reset"], 240);
+        let reset = noise_trace("random", serde_json::json!({ "mode": 2, "wander": 1 }), &["reset"], 240);
         assert!(reset.iter().any(|&v| v == 0.5), "back to the middle on reset");
     }
 
     #[test]
     fn smooth_noise_is_smooth_deterministic_and_per_node() {
-        let a = noise_trace("smooth_noise", serde_json::json!({ "speed": 1, "min": -1, "max": 1 }), &[], 1200);
+        let a = noise_trace("random", serde_json::json!({ "mode": 3, "speed": 1, "min": -1, "max": 1 }), &[], 1200);
         assert!(a.iter().all(|v| (-1.0..=1.0).contains(v)));
         let biggest = a.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
         assert!(biggest < 0.15, "smooth: {biggest}");
         assert!(spread(&a) > 0.1, "it moves: {}", spread(&a));
-        assert_eq!(noise_trace("smooth_noise", serde_json::json!({ "speed": 1, "min": -1, "max": 1 }), &[], 1200), a);
+        assert_eq!(noise_trace("random", serde_json::json!({ "mode": 3, "speed": 1, "min": -1, "max": 1 }), &[], 1200), a);
 
-        let frozen = noise_trace("smooth_noise", serde_json::json!({ "speed": 0 }), &[], 30);
+        let frozen = noise_trace("random", serde_json::json!({ "mode": 3, "speed": 0 }), &[], 30);
         assert!(frozen.windows(2).all(|w| w[0] == w[1]));
 
         // More harmonics, more detail: bigger frame-to-frame changes.
         let rough = |harmonics: f32| {
-            let v = noise_trace("smooth_noise", serde_json::json!({ "speed": 0.5, "harmonics": harmonics, "roughness": 0.8 }), &[], 1200);
+            let v = noise_trace("random", serde_json::json!({ "mode": 3, "speed": 0.5, "harmonics": harmonics, "roughness": 0.8 }), &[], 1200);
             v.windows(2).map(|w| (w[1] - w[0]).abs()).sum::<f32>()
         };
         assert!(rough(6.0) > rough(1.0) * 1.5, "{} vs {}", rough(6.0), rough(1.0));

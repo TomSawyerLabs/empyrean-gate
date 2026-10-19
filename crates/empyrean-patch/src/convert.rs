@@ -42,9 +42,6 @@ fn cpu_template_kind(kind: &str) -> bool {
             | "mix"
             | "clamp"
             | "random"
-            | "full_random"
-            | "random_walk"
-            | "smooth_noise"
             | "counter"
             | "toggle"
             | "threshold"
@@ -265,27 +262,30 @@ fn cpu_template(node: &NodeInst) -> Result<CodeDef, String> {
         shape: Shape::Event,
         ..Default::default()
     };
+    // Only what this node's mode uses (Random): see `registry::When`.
+    let applies = |when| registry::applies(when, |q| node.param(q));
     let knobs: Vec<CodePort> = ty
         .params
         .iter()
-        .filter(|p| matches!(p.kind, ParamKind::Number))
+        .filter(|p| matches!(p.kind, ParamKind::Number) && applies(p.when))
         .map(knob_port)
         .collect();
     let event_inputs: Vec<CodePort> = ty
         .inputs
         .iter()
-        .filter(|p| p.shape == Shape::Event)
+        .filter(|p| p.shape == Shape::Event && applies(p.when))
         .map(|p| event(p.name))
         .collect();
     let outputs: Vec<CodePort> = ty
         .outputs
         .iter()
+        .filter(|p| applies(p.when))
         .map(|p| match p.shape {
             Shape::Event => event(p.name),
             _ => scalar_out(p.name),
         })
         .collect();
-    let body = match node.kind.as_str() {
+    let body = match registry::body(&node.kind, |q| node.param(q)) {
         "slider" => "out = value;".to_string(),
         "scalar_math" => {
             let op = match sel("op") {
@@ -816,8 +816,8 @@ mod tests {
         check_template("delay", &[("seconds", 0.0)], &[], &["in"]);
         check_template("event_merge", &[], &[], &["b"]);
         check_template("sequence", &[("steps", 3.0), ("v2", 0.9)], &[], &["step"]);
-        check_template("smooth_noise", &[], &[], &[]);
-        check_template("smooth_noise", &[("harmonics", 6.0), ("roughness", 0.8), ("min", -2.0)], &["speed"], &[]);
+        check_template("random", &[("mode", 3.0)], &[], &[]);
+        check_template("random", &[("mode", 3.0), ("harmonics", 6.0), ("roughness", 0.8), ("min", -2.0)], &["speed"], &[]);
         for mode in 0..4 {
             check_template("time", &[("mode", mode as f32), ("rate", 0.8), ("end", 2.0)], &[], &["reset"]);
         }
@@ -829,11 +829,11 @@ mod tests {
     #[test]
     fn random_noise_templates_stay_in_range_and_move() {
         for (kind, params) in [
-            ("full_random", vec![("min", -1.0), ("max", 3.0)]),
-            ("full_random", vec![("min", -1.0), ("max", 3.0), ("distribution", 1.0)]),
-            ("random_walk", vec![("min", -1.0), ("max", 3.0), ("wander", 2.0)]),
-            ("random_walk", vec![("min", -1.0), ("max", 3.0), ("wander", 2.0), ("edges", 1.0)]),
-            ("random_walk", vec![("min", -1.0), ("max", 3.0), ("wander", 2.0), ("edges", 2.0)]),
+            ("random", vec![("mode", 1.0), ("min", -1.0), ("max", 3.0)]),
+            ("random", vec![("mode", 1.0), ("min", -1.0), ("max", 3.0), ("distribution", 1.0)]),
+            ("random", vec![("mode", 2.0), ("min", -1.0), ("max", 3.0), ("wander", 2.0)]),
+            ("random", vec![("mode", 2.0), ("min", -1.0), ("max", 3.0), ("wander", 2.0), ("edges", 1.0)]),
+            ("random", vec![("mode", 2.0), ("min", -1.0), ("max", 3.0), ("wander", 2.0), ("edges", 2.0)]),
         ] {
             let mut doc = PatchDoc {
                 nodes: vec![node("n", kind, &params), node("o", "output", &[])],

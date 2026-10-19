@@ -1,5 +1,5 @@
 {
-  "format": 6,
+  "format": 7,
   "id": "builtin-step-and-sample",
   "name": "Step and Sample",
   "description": "A clock steps a sequencer through hues; every bar a random scale and a toggled spiral. Shows the event tools.",

@@ -1,5 +1,5 @@
 {
-  "format": 6,
+  "format": 7,
   "id": "builtin-video-kaleido",
   "name": "Video Kaleido",
   "description": "The live video feed (Video tab) folded through a six-way kaleidoscope. Dark until a video source is running.",

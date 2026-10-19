@@ -110,13 +110,7 @@ const SHOWCASES: Record<string, Showcase> = {
     drive: ["c", "wrap"],
   },
   random: { nodes: [["n", "random", { rate: 1.5 }]], wires: [], show: "out" },
-  full_random: { nodes: [["n", "full_random"]], wires: [], show: "out" },
-  random_walk: {
-    nodes: [["n", "random_walk"], clock(5)],
-    wires: [["c", "wrap", "n", "step"]],
-    show: "out",
-  },
-  smooth_noise: { nodes: [["n", "smooth_noise"]], wires: [], show: "out" },
+
   counter: {
     nodes: [["n", "counter", { steps: 6 }], clock(2)],
     wires: [["c", "wrap", "n", "count"]],

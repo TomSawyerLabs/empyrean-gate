@@ -1024,16 +1024,6 @@ impl Gen<'_> {
             }
             // -- ported layer-stack generators (gate.wgsl bodies, audio
             // couplings replaced by wireable params) ------------------------
-            "gradient_radial" => format!(
-                "    let t = c.rn + {phase} * 0.1;\n\
-                 \x20   let hue = {h} + t * {hr};\n\
-                 \x20   return vec4f(hsv2rgb(hue, {s}, max({b}, 0.0)), 1.0);",
-                phase = self.p(i, "drift"),
-                h = self.p(i, "hue"),
-                hr = self.p(i, "hue_range"),
-                s = self.p(i, "saturation"),
-                b = self.p(i, "brightness"),
-            ),
             "noise_color" => format!(
                 "    let s = 2.0 * {scale};\n\
                  \x20   let p = vec3f(c.pos * s, {phase} * 0.25);\n\
@@ -1155,7 +1145,7 @@ impl Gen<'_> {
                 bright = self.p(i, "brightness"),
             ),
             "rainbow" => format!(
-                "    let turns = max(1.0, floor({turns} + 0.5));\n\
+                "    let turns = max(0.0, floor({turns} + 0.5));\n\
                  \x20   let hue = {h} + (c.theta / TAU) * turns + c.rn * {hr} + {phase} * 0.03;\n\
                  \x20   return vec4f(hsv2rgb(hue, {sat}, max({bright}, 0.0)), 1.0);",
                 turns = self.p(i, "turns"),

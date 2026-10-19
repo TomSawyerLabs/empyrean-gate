@@ -38,8 +38,10 @@ use std::collections::BTreeMap;
 /// 4: Sub-patch nodes carry another document ([`NodeInst::sub`]; Clips carry
 /// a sprite sheet in `media`). 5: Code nodes carry their ports and body
 /// ([`NodeInst::code`]). 6: Note nodes carry text ([`NodeInst::text`]).
+/// 7: Full random, Random walk and Smooth noise are Random's modes, Radial
+/// gradient is Rainbow with no turns.
 /// Older files are upgraded by [`migrate::migrate`].
-pub const PATCH_FORMAT: u32 = 6;
+pub const PATCH_FORMAT: u32 = 7;
 
 /// Pictures a patch may carry (Still image and Clip nodes), each its own
 /// media cell on the GPU.
@@ -204,7 +206,7 @@ impl Shape {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct PatchDoc {
-    /// Patch format version (currently 5). Older documents are upgraded on
+    /// Patch format version (currently 7). Older documents are upgraded on
     /// load; a newer one is refused rather than misread.
     pub format: u32,
     /// Stable identity (UUID string); filenames may change with renames.

@@ -121,12 +121,7 @@ const NODE_ICONS: Record<string, Icon> = {
   lfo: [sine(2, 22, 12, 7, 1.5)],
   envelope: [poly(2, 20, 7, 4, 11, 11, 17, 11, 22, 20)],
   sequence: [rect(3, 13, 4, 7), rect(10, 6, 4, 14), rect(17, 10, 4, 10)],
-
-  // -- Randomness
-  random: [poly(2, 15, 7, 15, 7, 6, 12, 6, 12, 18, 17, 18, 17, 10, 22, 10)],
-  full_random: [poly(2, 12, 4, 6, 6, 17, 8, 9, 10, 20, 12, 4, 14, 14, 16, 8, 18, 18, 20, 7, 22, 13)],
-  random_walk: [poly(3, 19, 6, 16, 5, 12, 9, 11, 11, 7, 14, 9, 15, 5, 19, 6, 21, 3), dot(3, 19, 1.4)],
-  smooth_noise: [p("M2 14c3 0 3-7 6-7s3 10 6 10 2-6 4-6 2 3 4 3")],
+  random: [rect(3, 3, 18, 18, 3), dot(8, 8, 1.5), dot(16, 8, 1.5), dot(12, 12, 1.5), dot(8, 16, 1.5), dot(16, 16, 1.5)],
 
   // -- Events
   counter: [line(4, 5, 4, 19), line(8, 5, 8, 19), line(12, 5, 12, 19), line(16, 5, 16, 19), line(2, 16, 19, 8)],
@@ -138,7 +133,6 @@ const NODE_ICONS: Record<string, Icon> = {
   // -- Building blocks
   solid: [solid("M4 4h16v16H4Z")],
   gradient: [rect(3, 3, 18, 18, 1.5), line(7, 3, 7, 21), line(10.5, 3, 10.5, 21), line(13.5, 3, 13.5, 21), line(16, 3, 16, 21), line(18, 3, 18, 21), line(19.6, 3, 19.6, 21)],
-  gradient_radial: [circle(12, 12, 9.5), circle(12, 12, 6.5), circle(12, 12, 3.5), dot(12, 12, 1)],
   coordinate: [poly(4, 3, 4, 20, 21, 20), line(4, 10, 14, 10), line(14, 10, 14, 20), dot(14, 10, 2)],
   perlin_noise: [p("M3 7c4-3 7 3 10 0s6-2 8 0"), p("M3 12c4-3 7 3 10 0s6-2 8 0"), p("M3 17c4-3 7 3 10 0s6-2 8 0")],
   random_field: [dot(5, 5, 1.4), dot(11, 4, 1), dot(18, 6, 1.6), dot(7, 11, 1.7), dot(14, 10, 1.1), dot(19, 13, 1.2), dot(4, 18, 1), dot(10, 17, 1.5), dot(16, 19, 1.8), dot(13, 14.5, 0.8)],
@@ -199,7 +193,6 @@ const GROUP_ICONS: Record<PatchGroup, Icon> = {
   media: [rect(2.5, 4.5, 19, 15, 2), poly(10, 9, 15, 12, 10, 15, 10, 9)],
   shape: [p("M3 18C9 18 9 6 15 6h6"), dot(3, 18, 1.6), dot(21, 6, 1.6)],
   motion: [sine(2, 22, 12, 6, 1), poly(18, 4, 21, 7, 18, 10)],
-  random: [rect(3, 3, 18, 18, 3), dot(8, 8, 1.5), dot(16, 8, 1.5), dot(12, 12, 1.5), dot(8, 16, 1.5), dot(16, 16, 1.5)],
   events: [bolt()],
   blocks: [rect(3, 3, 8, 8, 1), rect(13, 3, 8, 8, 1), rect(3, 13, 8, 8, 1), solid("M13 13h8v8h-8Z")],
   patterns: [star4(12, 12, 9.5), star4(19, 4.5, 2.5)],

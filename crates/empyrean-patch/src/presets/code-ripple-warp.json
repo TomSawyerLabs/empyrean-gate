@@ -1,5 +1,5 @@
 {
-  "format": 6,
+  "format": 7,
   "id": "builtin-code-ripple-warp",
   "name": "Code: Ripple Warp",
   "description": "A Plasma, warped and tinted by a Code node you can read and change. Open the Code node: its body is a few lines of WGSL, its knob is a port like any other.",
