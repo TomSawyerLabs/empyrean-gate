@@ -5818,8 +5818,7 @@ var GROUPS = [
   { id: "live", label: "Live input", blurb: "Music, phone motion, touch, taps, strokes and PRO DJ LINK", layout: "list" },
   { id: "media", label: "Media", blurb: "Video, pictures and clips", layout: "list" },
   { id: "shape", label: "Shape a signal", blurb: "Arithmetic and shaping of one number", layout: "list" },
-  { id: "motion", label: "Motion", blurb: "Numbers that move on their own", layout: "list" },
-  { id: "random", label: "Randomness", blurb: "Random numbers, held, jittering or wandering", layout: "list" },
+  { id: "motion", label: "Motion", blurb: "Numbers that move on their own, steady or at random", layout: "list" },
   { id: "events", label: "Events", blurb: "Count, latch, delay and merge triggers; turn them into effects", layout: "list" },
   { id: "blocks", label: "Building blocks", blurb: "Plain fields to build a look from", layout: "grid" },
   { id: "patterns", label: "Patterns", blurb: "Finished looks, each a whole pattern on its own", layout: "grid" },
@@ -6003,7 +6002,7 @@ function round(v) {
 }
 
 // src/types.ts
-var PATCH_FORMAT = 6;
+var PATCH_FORMAT = 7;
 var MAX_CODE_BYTES = 8192, MAX_CODE_PORTS = 16;
 
 // src/editor/files.ts
@@ -8284,6 +8283,12 @@ function range(p) {
     return p.kind.select.map((label, i) => `${i} = ${label}`).join(", ");
   return `${p.min} … ${p.max}`;
 }
+function modeNote(t, p) {
+  if (!p.when)
+    return "";
+  let select = t.params.find((q) => q.name === p.when.param), options = select && typeof select.kind === "object" ? select.kind.select : [], names = p.when.values.map((v) => options[v] ?? String(v));
+  return `(only when \`${p.when.param}\` is ${names.join(" or ")})`;
+}
 function nodeReference(t) {
   let lines = [`### \`${t.id}\` — ${t.label}`, ""];
   if (t.description)
@@ -8291,19 +8296,24 @@ function nodeReference(t) {
   if (t.inputs.length) {
     lines.push("Inputs:");
     for (let p of t.inputs)
-      lines.push(`- \`${p.name}\` (${p.shape})${p.description ? ` — ${p.description}` : ""}`);
+      lines.push(`- \`${p.name}\` (${p.shape})${p.description ? ` — ${p.description}` : ""} ${modeNote(t, p)}`.trimEnd());
     lines.push("");
   }
   if (t.outputs.length) {
     lines.push("Outputs:");
     for (let p of t.outputs)
-      lines.push(`- \`${p.name}\` (${p.shape})${p.description ? ` — ${p.description}` : ""}`);
+      lines.push(`- \`${p.name}\` (${p.shape})${p.description ? ` — ${p.description}` : ""} ${modeNote(t, p)}`.trimEnd());
     lines.push("");
   }
   if (t.params.length) {
     lines.push("| Param | Range | Default | |", "| --- | --- | --- | --- |");
     for (let p of t.params) {
-      let notes = [p.description ?? "", typeof p.kind === "object" ? "(select; not wirable)" : "", p.integrate ? "(a rate: integrated over time)" : ""].filter(Boolean).join(" ");
+      let notes = [
+        p.description ?? "",
+        typeof p.kind === "object" ? "(select; not wirable)" : "",
+        p.integrate ? "(a rate: integrated over time)" : "",
+        modeNote(t, p)
+      ].filter(Boolean).join(" ");
       lines.push(`| \`${p.name}\` | ${range(p)} | ${p.default} | ${notes.replace(/\|/g, "\\|")} |`);
     }
     lines.push("");

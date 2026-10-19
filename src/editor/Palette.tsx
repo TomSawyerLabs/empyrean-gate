@@ -14,7 +14,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import { grouped, groupOf, type GroupDef } from "../groups";
 import type { PatchGroup, PatchNodeType } from "../types";
 import { GroupIcon, NodeIcon } from "./icons";
-import { searchTypes } from "./search";
+import { searchKinds, type SearchHit } from "./search";
 import { PanelHead, useSheet } from "./sheet";
 import { hasThumb, RingThumb, TraceThumbView, useThumbs, type ThumbData } from "./thumbs";
 
@@ -23,6 +23,11 @@ export type SubpatchChoice = { id: string; name: string; nodes: number; preset: 
 
 /** The drag data type of a kind dragged out of the palette: its id. */
 export const PALETTE_DRAG_TYPE = "application/x-empyrean-node-kind";
+/** And the params it starts with (an option the search named), as JSON. */
+export const PALETTE_PARAMS_TYPE = "application/x-empyrean-node-params";
+
+/** Params a node of a search hit starts with. */
+const presetParams = (hit: SearchHit) => (hit.preset ? { [hit.preset.param]: hit.preset.value } : undefined);
 
 const RECENT_KEY = "empyrean.palette.recent";
 const FOLDED_KEY = "empyrean.palette.folded";
@@ -60,7 +65,8 @@ export function Palette({
   subpatches: SubpatchChoice[];
   /** The open patch already has its one Output: the palette's is disabled. */
   hasOutput: boolean;
-  onPick: (kind: string) => void;
+  /** Add a node of `kind`, starting with `params` when given. */
+  onPick: (kind: string, params?: Record<string, number>) => void;
   onPickSubpatch: (choice: SubpatchChoice) => void;
   /** Set when the palette is a sheet (compact layout): shows Done. */
   onClose?: () => void;
@@ -78,7 +84,7 @@ export function Palette({
   const byId = useMemo(() => new Map(types.map((t) => [t.id, t])), [types]);
   const groups = useMemo(() => grouped(types), [types]);
   const q = query.trim();
-  const results = useMemo(() => (q ? searchTypes(types, q) : []), [types, q]);
+  const results = useMemo(() => (q ? searchKinds(types, q) : []), [types, q]);
   const subResults = useMemo(() => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
     return q ? subpatches.filter((s) => words.every((w) => s.name.toLowerCase().includes(w))) : [];
@@ -88,14 +94,14 @@ export function Palette({
   const disabled = (t: PatchNodeType) => t.id === "output" && hasOutput;
 
   const pick = useCallback(
-    (t: PatchNodeType) => {
+    (t: PatchNodeType, params?: Record<string, number>) => {
       if (t.id === "output" && hasOutput) return;
       setRecent((r) => {
         const next = [t.id, ...r.filter((k) => k !== t.id)].slice(0, RECENT_MAX);
         writeStored(RECENT_KEY, next);
         return next;
       });
-      onPick(t.id);
+      onPick(t.id, params);
     },
     [hasOutput, onPick],
   );
@@ -142,8 +148,8 @@ export function Palette({
       e.preventDefault();
       listRef.current?.querySelector<HTMLElement>("[data-palette-entry]")?.focus();
     } else if (e.key === "Enter") {
-      const best = results.find((t) => !disabled(t));
-      if (best) pick(best);
+      const best = results.find((h) => !disabled(h.type));
+      if (best) pick(best.type, presetParams(best));
       else if (subResults[0]) onPickSubpatch(subResults[0]);
     } else if (e.key === "Escape" && query) {
       e.stopPropagation();
@@ -151,16 +157,17 @@ export function Palette({
     }
   };
 
-  const entry = (t: PatchNodeType, layout: "list" | "grid", tag?: ReactNode) => (
+  const entry = (t: PatchNodeType, layout: "list" | "grid", tag?: ReactNode, preset?: SearchHit["preset"]) => (
     <Entry
-      key={t.id}
+      key={preset ? `${t.id}:${preset.param}=${preset.value}` : t.id}
       type={t}
       layout={layout}
       thumbs={thumbs}
       compact={compact}
       disabled={disabled(t)}
       tag={tag}
-      onPick={() => pick(t)}
+      preset={preset}
+      onPick={() => pick(t, presetParams({ type: t, preset }))}
       onFocus={() => setFocus(t)}
     />
   );
@@ -232,7 +239,7 @@ export function Palette({
             {results.length === 0 && subResults.length === 0 && <p className="hint palette-none">No node matches “{q}”.</p>}
             {results.length > 0 && (
               <div className="palette-items palette-rows palette-results">
-                {results.map((t) => entry(t, "list", <span className="palette-tag">{groupOf(t).label}</span>))}
+                {results.map((h) => entry(h.type, "list", <span className="palette-tag">{groupOf(h.type).label}</span>, h.preset))}
               </div>
             )}
             {subResults.length > 0 && (
@@ -292,6 +299,7 @@ function Entry({
   compact,
   disabled,
   tag,
+  preset,
   onPick,
   onFocus,
 }: {
@@ -301,6 +309,8 @@ function Entry({
   compact: boolean;
   disabled: boolean;
   tag?: ReactNode;
+  /** The kind set to a Select option (a search hit on the option). */
+  preset?: SearchHit["preset"];
   onPick: () => void;
   onFocus: () => void;
 }) {
@@ -320,6 +330,7 @@ function Entry({
       draggable={!disabled}
       onDragStart={(e) => {
         e.dataTransfer.setData(PALETTE_DRAG_TYPE, t.id);
+        if (preset) e.dataTransfer.setData(PALETTE_PARAMS_TYPE, JSON.stringify({ [preset.param]: preset.value }));
         e.dataTransfer.effectAllowed = "copy";
       }}
       onClick={onPick}
@@ -336,6 +347,7 @@ function Entry({
       <span className="palette-item-text">
         <span className="palette-item-label">
           {t.label}
+          {preset && <span className="palette-item-preset"> · {preset.label}</span>}
           {disabled && <span className="hint"> · one per patch</span>}
         </span>
         {described && (

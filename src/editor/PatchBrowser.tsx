@@ -25,7 +25,7 @@ const TOPICS: { label: string; kinds: string[] }[] = [
   { label: "Video and images", kinds: ["video_in", "image_in", "clip", "texture_sample"] },
   {
     label: "Noise and chance",
-    kinds: ["random", "full_random", "random_walk", "smooth_noise", "noise_field", "noise_color", "perlin_noise", "random_field"],
+    kinds: ["random", "noise_field", "noise_color", "perlin_noise", "random_field"],
   },
   { label: "Code", kinds: ["code"] },
   { label: "Sub-patches", kinds: ["subpatch"] },

@@ -4,7 +4,7 @@
 
 /** The patch document format this package writes (crate::PATCH_FORMAT).
  * Older documents are upgraded with the patch core's `migrate`. */
-export const PATCH_FORMAT = 6;
+export const PATCH_FORMAT = 7;
 
 export type PatchShape =
   | "scalar"
@@ -28,12 +28,21 @@ export interface PatchShapeDef {
   accepts: PatchShape[];
 }
 
+/** A port or param that only applies while a Select param of its node has
+ * one of `values` (crate `registry::When`: Random's modes). */
+export interface PatchWhen {
+  param: string;
+  values: number[];
+}
+
 export interface PatchPortDef {
   name: string;
   shape: PatchShape;
   /** What the port carries, with units and ranges where they matter.
    * Optional: registries from older gates have none. */
   description?: string;
+  /** Only in some modes of its kind; absent: always. */
+  when?: PatchWhen;
 }
 
 export interface PatchParamDef {
@@ -47,6 +56,8 @@ export interface PatchParamDef {
   /** What the param does: units, what the ends of the range mean, and for a
    * select what each option does. Optional: older gates send none. */
   description?: string;
+  /** Only in some modes of its kind; absent: always. */
+  when?: PatchWhen;
 }
 
 /** A palette group's id (crate `registry::Group::id`). */
@@ -56,7 +67,6 @@ export type PatchGroup =
   | "media"
   | "shape"
   | "motion"
-  | "random"
   | "events"
   | "blocks"
   | "patterns"
@@ -424,6 +434,16 @@ export function nodeInputs(def: PatchNodeType, node: PatchNode | undefined): Pat
     }
   }
   return out;
+}
+
+/** Whether a port or param of `def` applies to `node` in its current mode
+ * (its `when`; crate `registry::applies`). Without a node: at the defaults,
+ * as a node just added would be. */
+export function applies(p: { when?: PatchWhen }, def: PatchNodeType, node?: PatchNode): boolean {
+  if (!p.when) return true;
+  const select = def.params.find((q) => q.name === p.when!.param);
+  const value = Math.round(node?.params[p.when.param] ?? select?.default ?? 0);
+  return p.when.values.includes(value);
 }
 
 /** A built-in node's params, layer by layer after the type's own, each

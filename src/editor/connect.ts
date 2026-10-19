@@ -7,6 +7,7 @@
 
 import { fitsInput } from "./domains";
 import {
+  applies,
   SUBPATCH_KIND,
   onLeds,
   type PatchNodeType,
@@ -77,10 +78,11 @@ function rank(order: Category[] | undefined, c: Category): number {
 
 /** Every connectable input of a type: shaped inputs, then knobs (as scalars). */
 function inputsOf(t: PatchNodeType): { name: string; shape: PatchShape; viaParam: boolean }[] {
+  // As a node just added has them: at its default mode.
   return [
-    ...t.inputs.map((p) => ({ name: p.name, shape: p.shape, viaParam: false })),
+    ...t.inputs.filter((p) => applies(p, t)).map((p) => ({ name: p.name, shape: p.shape, viaParam: false })),
     ...t.params
-      .filter((p) => p.kind === "number")
+      .filter((p) => p.kind === "number" && applies(p, t))
       .map((p) => ({ name: p.name, shape: "scalar" as PatchShape, viaParam: true })),
   ];
 }
@@ -99,7 +101,7 @@ export function suggestConnections(registry: Iterable<PatchNodeType>, from: Drag
             .filter((p) => fitsInput(p.shape, !p.viaParam && (t.sampled?.includes(p.name) ?? false), from.shape))
             .map((p) => ({ port: p.name, exact: sameValue(p.shape, from.shape), viaParam: p.viaParam }))
         : t.outputs
-            .filter((p) => fitsInput(from.shape, from.sampled ?? false, p.shape))
+            .filter((p) => applies(p, t) && fitsInput(from.shape, from.sampled ?? false, p.shape))
             .map((p) => ({ port: p.name, exact: sameValue(p.shape, from.shape), viaParam: false }));
     if (candidates.length === 0) continue;
     // The best port of this type: exact before adapter, shaped before knob,
