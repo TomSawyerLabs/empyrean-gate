@@ -113,10 +113,19 @@ test("an error's quick fixes are buttons under it and actions on its mark", asyn
   await buttons.filter({ hasText: "Assign" }).click();
   await expect(body).toHaveText("let w = hsv2rbg(0.5, 1.0, 1.0);out = vec4f(w, 1.0);");
 
-  // The other through the mark's own tooltip.
-  await panel.locator(".cm-lintRange-error").first().hover();
-  await panel.locator(".cm-tooltip-lint .cm-diagnosticAction", { hasText: "Change to `hsv2rgb`" }).click();
-  await expect(body).toHaveText("let w = hsv2rgb(0.5, 1.0, 1.0);out = vec4f(w, 1.0);");
+  // The other through the mark's own tooltip. The tooltip comes and goes
+  // (moving the pointer to its button can leave the mark; a diagnostics
+  // refresh replaces it), so hover and click it together until the fix lands,
+  // clicking where the button stands rather than moving the pointer there.
+  const action = panel.locator(".cm-tooltip-lint .cm-diagnosticAction", { hasText: "Change to `hsv2rgb`" });
+  const fixed = "let w = hsv2rgb(0.5, 1.0, 1.0);out = vec4f(w, 1.0);";
+  await expect(async () => {
+    if ((await body.textContent()) !== fixed) {
+      await panel.locator(".cm-lintRange-error").first().hover({ timeout: 2000 });
+      await action.dispatchEvent("click", undefined, { timeout: 2000 });
+    }
+    await expect(body).toHaveText(fixed, { timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
 });
 
 test("the large view lists what the body can use beside it, and sets its text size", async ({ page }) => {
