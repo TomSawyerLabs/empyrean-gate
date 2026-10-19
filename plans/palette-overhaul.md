@@ -1,9 +1,10 @@
 # Palette overhaul — fewer, better-sorted node types, with pictures
 
-Status: **done** (2026-10-19). Gate master up to 43aa016; site dev
-4d486cb + bot bump 840f077; checked on the dev Preview (groups, thumbnails,
-People, Hue pull, no sideways scroll). Cameron's calls answered; v0.16.0
-released.
+Status: **done** (2026-10-19). Gate master up to 8d5c885 (v0.16.0 tagged at
+d37802d and released, 18 assets); site dev 411bb39, 4d486cb + bot bumps up to
+494e325; checked on the dev Preview in Chrome (groups, thumbnails, People,
+Hue pull, no sideways scroll, every thumbnail name on whole words). All of
+Cameron's calls answered.
 
 ## Goal
 
