@@ -211,8 +211,8 @@ fn preview_style(node: &NodeInst) -> Option<PreviewStyle> {
         None => registry::lookup(&node.kind)?.output_shape("out"),
     };
     match shape {
-        Some(Shape::FieldColor) => Some(PreviewStyle::Color),
-        Some(Shape::FieldScalar) => Some(PreviewStyle::Gray),
+        Some(s) if s.is_color_field() => Some(PreviewStyle::Color),
+        Some(s) if s.is_grey_field() => Some(PreviewStyle::Gray),
         _ => None,
     }
 }
@@ -318,7 +318,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         }
         // Scalar wires adapted into shaped field inputs (e.g. LFO → Colorize.in).
         for (name, shape) in node.shaped_inputs() {
-            if shape != Shape::FieldScalar {
+            if !shape.is_grey_field() {
                 continue;
             }
             if let Some((from, port)) = wires.get(&(i, name.clone()))
@@ -403,7 +403,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
                 cells.extend(
                     def.outputs
                         .iter()
-                        .filter(|p| matches!(p.shape, Shape::FieldColor | Shape::FieldScalar))
+                        .filter(|p| p.shape.is_field())
                         .filter(|p| Some(&p.name) != principal.as_ref())
                         .map(|p| PreviewCell {
                             node: i,
@@ -618,8 +618,8 @@ impl Gen<'_> {
             Some((from, from_port)) => {
                 let f = self.field_fn(*from, from_port);
                 match self.doc.nodes[*from].output_shape(from_port) {
-                    Some(Shape::FieldColor) => format!("{f}({ctx})"),
-                    Some(Shape::FieldScalar) => format!("gray({f}({ctx}))"),
+                    Some(s) if s.is_color_field() => format!("{f}({ctx})"),
+                    Some(s) if s.is_grey_field() => format!("gray({f}({ctx}))"),
                     _ => "vec4f(0.0)".into(),
                 }
             }
@@ -658,8 +658,8 @@ impl Gen<'_> {
     fn code_fn(&self, code: &mut String, i: usize) -> Result<CodeLines, String> {
         let node = &self.doc.nodes[i];
         let def = node.code().ok_or("Code node without code")?;
-        let ty = |s: Shape| if s == Shape::FieldColor { "vec4f" } else { "f32" };
-        let zero = |s: Shape| if s == Shape::FieldColor { "vec4f(0.0)" } else { "0.0" };
+        let ty = |s: Shape| if s.is_color_field() { "vec4f" } else { "f32" };
+        let zero = |s: Shape| if s.is_color_field() { "vec4f(0.0)" } else { "0.0" };
         let fields: Vec<&str> = def
             .inputs
             .iter()
@@ -713,7 +713,7 @@ impl Gen<'_> {
                 }
                 _ => {
                     let expr = match p.shape {
-                        Shape::FieldColor => self.color_input(i, name, "c"),
+                        s if s.is_color_field() => self.color_input(i, name, "c"),
                         _ => self.scalar_field_input(i, name, "c"),
                     };
                     writeln!(
@@ -798,12 +798,12 @@ impl Gen<'_> {
             return Ok(());
         }
         let ret = match registry::lookup(kind).and_then(|t| t.output_shape("out")) {
-            Some(Shape::FieldScalar) => "f32",
+            Some(s) if s.is_grey_field() => "f32",
             _ => "vec4f",
         };
         // Transform/texture_sample rename their ctx arg (they derive a
         // transformed copy).
-        let arg = if kind == "transform" || kind == "texture_sample" {
+        let arg = if matches!(kind, "transform" | "texture_sample" | "resample") {
             "c0"
         } else {
             "c"
@@ -936,6 +936,42 @@ impl Gen<'_> {
                     kal = self.p(i, "kaleido"),
                     input = self.color_input(i, "in", "c"),
                 )
+            }
+            "resample" => {
+                // The input at one LED's own context: exact for LED data.
+                let at = |spoke: &str, px: &str| self.color_input(i, "in", &format!("led_ctx({spoke}, {px})"));
+                if self.select(i, "mode") == 0 {
+                    format!(
+                        "    let p = led_coord(c0);
+                             if p.y < -0.5 || p.y > f32(G.pixels) - 0.5 {{
+                                 return vec4f(0.0);
+                             }}
+                             let k = led_cell(c0);
+                             return {near};",
+                        near = at("k.x", "k.y"),
+                    )
+                } else {
+                    format!(
+                        "    let p = led_coord(c0);
+                             let last = f32(max(G.pixels, 1u) - 1u);
+                             if p.y < -0.5 || p.y > last + 0.5 {{
+                                 return vec4f(0.0);
+                             }}
+                             let s0 = u32(p.x) % max(G.spokes, 1u);
+                             let s1 = (s0 + 1u) % max(G.spokes, 1u);
+                             let y = clamp(p.y, 0.0, last);
+                             let i0 = u32(y);
+                             let i1 = min(i0 + 1u, u32(last));
+                             let fy = y - f32(i0);
+                             let a = mix({a0}, {a1}, fy);
+                             let b = mix({b0}, {b1}, fy);
+                             return mix(a, b, fract(p.x));",
+                        a0 = at("s0", "i0"),
+                        a1 = at("s0", "i1"),
+                        b0 = at("s1", "i0"),
+                        b1 = at("s1", "i1"),
+                    )
+                }
             }
             "colorize" => format!(
                 "    let v = {input};\n\
@@ -1587,16 +1623,7 @@ impl Gen<'_> {
              \x20   }}\n\
              \x20   let spoke = idx / G.pixels;\n\
              \x20   let i = idx % G.pixels;\n\
-             \x20   let theta = f32(spoke) / f32(G.spokes) * TAU - G.rotation;\n\
-             \x20   let r01 = f32(i) / f32(max(G.pixels - 1u, 1u));\n\
-             \x20   let rn = mix(1.0, G.inner_over_outer, r01);\n\
-             \x20   var ctx: Ctx;\n\
-             \x20   ctx.spoke = u32(fract(theta / TAU + 1.0) * f32(G.spokes)) % G.spokes;\n\
-             \x20   ctx.i = i;\n\
-             \x20   ctx.theta = theta;\n\
-             \x20   ctx.r01 = r01;\n\
-             \x20   ctx.rn = rn;\n\
-             \x20   ctx.pos = rn * vec2f(cos(theta), sin(theta));\n\
+             \x20   let ctx = led_ctx(spoke, i);\n\
              \x20   let root = {root};\n\
              \x20   finish(ctx, idx, root.rgb * {master});\n\
              }}\n",
@@ -1620,8 +1647,8 @@ impl Gen<'_> {
             // A Code node's extra output: its own accessor and shape.
             let style = match &cell.port {
                 Some(port) => match node.output_shape(port) {
-                    Some(Shape::FieldColor) => Some(PreviewStyle::Color),
-                    Some(Shape::FieldScalar) => Some(PreviewStyle::Gray),
+                    Some(s) if s.is_color_field() => Some(PreviewStyle::Color),
+                    Some(s) if s.is_grey_field() => Some(PreviewStyle::Gray),
                     _ => None,
                 },
                 None => preview_style(node),
@@ -1655,16 +1682,7 @@ impl Gen<'_> {
              \x20   let pix = idx % total;\n\
              \x20   let spoke = pix / G.pixels;\n\
              \x20   let i = pix % G.pixels;\n\
-             \x20   let theta = f32(spoke) / f32(G.spokes) * TAU - G.rotation;\n\
-             \x20   let r01 = f32(i) / f32(max(G.pixels - 1u, 1u));\n\
-             \x20   let rn = mix(1.0, G.inner_over_outer, r01);\n\
-             \x20   var ctx: Ctx;\n\
-             \x20   ctx.spoke = u32(fract(theta / TAU + 1.0) * f32(G.spokes)) % G.spokes;\n\
-             \x20   ctx.i = i;\n\
-             \x20   ctx.theta = theta;\n\
-             \x20   ctx.r01 = r01;\n\
-             \x20   ctx.rn = rn;\n\
-             \x20   ctx.pos = rn * vec2f(cos(theta), sin(theta));\n\
+             \x20   let ctx = led_ctx(spoke, i);\n\
              \x20   var acc = vec3f(0.0);\n\
              \x20   switch slot {{\n\
              {cases}\
@@ -2012,6 +2030,37 @@ mod tests {
                 ..Default::default()
             };
             compile(&doc).unwrap_or_else(|e| panic!("{}: {e}", ty.id));
+        }
+    }
+
+    /// LED data through Resample, both modes, into a Transform: valid WGSL
+    /// in the main and preview modules, each mode reading the input at LED
+    /// contexts (one for Nearest, four for Smooth).
+    #[test]
+    fn resample_compiles_and_validates() {
+        for (mode, reads) in [(0.0, 1), (1.0, 4)] {
+            let mut rs = node("rs", registry::RESAMPLE_KIND);
+            rs.params.insert("mode".into(), mode);
+            let doc = PatchDoc {
+                nodes: vec![
+                    node("snow", "random_field"),
+                    node("tint", "colorize"),
+                    rs,
+                    node("t", "transform"),
+                    node("o", "output"),
+                ],
+                edges: vec![
+                    edge("snow", "out", "tint", "in"),
+                    edge("tint", "out", "rs", "in"),
+                    edge("rs", "out", "t", "in"),
+                    edge("t", "out", "o", "in"),
+                ],
+                ..Default::default()
+            };
+            let prog = compile(&doc).unwrap();
+            validate_wgsl(&format!("resample mode {mode}"), &prog.wgsl);
+            validate_wgsl(&format!("resample mode {mode} preview"), &prog.preview_wgsl);
+            assert_eq!(prog.wgsl.matches("(led_ctx(").count(), reads, "{}", prog.wgsl);
         }
     }
 

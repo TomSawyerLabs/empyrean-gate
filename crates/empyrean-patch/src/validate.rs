@@ -4,7 +4,7 @@
 
 use super::code;
 use super::registry::{self, NodeType};
-use super::{MAX_MEDIA_BYTES, MAX_PATCH_EDGES, MAX_PATCH_IMAGES, MAX_PATCH_NODES, PATCH_FORMAT, PatchDoc};
+use super::{MAX_MEDIA_BYTES, MAX_PATCH_EDGES, MAX_PATCH_IMAGES, MAX_PATCH_NODES, NodeInst, PATCH_FORMAT, PatchDoc, Shape};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -17,6 +17,9 @@ pub struct Validated {
     /// Index of the single `output` sink. `None` is structurally legal (a
     /// patch mid-edit) but not renderable — activation requires `Some`.
     pub output: Option<usize>,
+    /// Per node (indexed like `doc.nodes`): whether its field outputs carry
+    /// LED data rather than the plane (see [`led_nodes`]).
+    pub led: Vec<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,6 +54,12 @@ pub enum PatchError {
         from: String,
         to: String,
         detail: String,
+    },
+    /// LED data wired into an input its node reads somewhere other than the
+    /// LED being drawn (see [`led_nodes`]).
+    LedSampled {
+        from: String,
+        to: String,
     },
     /// Two wires into the same input.
     InputBusy {
@@ -120,6 +129,10 @@ impl fmt::Display for PatchError {
             Self::ShapeMismatch { from, to, detail } => {
                 write!(f, "can't connect {from} → {to}: {detail}")
             }
+            Self::LedSampled { from, to } => write!(
+                f,
+                "can't connect {from} → {to}: {from} is LED data, defined only at the gate's LEDs, and {to} reads its input at other positions; put a Resample between them"
+            ),
             Self::InputBusy { node, port } => {
                 write!(f, "input \"{port}\" of node \"{node}\" already has a wire")
             }
@@ -350,12 +363,85 @@ pub fn validate(doc: &PatchDoc) -> Result<Validated, Vec<PatchError>> {
         errors.push(PatchError::Cycle { nodes: on_cycle });
     }
 
+    // Domains need a dependency order, so only an acyclic graph is judged.
+    let led = if order.len() == doc.nodes.len() {
+        led_nodes(doc, &order)
+    } else {
+        vec![false; doc.nodes.len()]
+    };
+    for e in &doc.edges {
+        let (Some(&fi), Some(&ti)) = (index.get(e.from.node.as_str()), index.get(e.to.node.as_str())) else {
+            continue;
+        };
+        if led[fi] && carries_field(&doc.nodes[fi], &e.from.port) && sampled_input(&doc.nodes[ti], &e.to.port) {
+            errors.push(PatchError::LedSampled {
+                from: format!("{}.{}", e.from.node, e.from.port),
+                to: format!("{}.{}", e.to.node, e.to.port),
+            });
+        }
+    }
+
     if !errors.is_empty() {
         return Err(errors);
     }
 
     let output = doc.nodes.iter().position(|n| n.kind == "output");
-    Ok(Validated { order, output })
+    Ok(Validated { order, output, led })
+}
+
+/// Which nodes hand on LED data (indexed like `doc.nodes`; `order` is a
+/// dependency order, every node after the ones feeding it). A node does when
+/// it declares an LED output (Full random field, a Code node's `led_*`
+/// port), when it is a GPU Code node that keys on the physical LED (`c.spoke`
+/// or `c.i`), or when a field wire brings it LED data. Resample never does:
+/// turning LED data into the plane is its whole job. Only field wires carry
+/// the domain on, so a node that measures LED data into a Scalar hands on a
+/// plain Scalar. A node's field outputs all share its domain.
+pub fn led_nodes(doc: &PatchDoc, order: &[usize]) -> Vec<bool> {
+    let index: HashMap<&str, usize> = doc.nodes.iter().enumerate().map(|(i, n)| (n.id.as_str(), i)).collect();
+    let mut led = vec![false; doc.nodes.len()];
+    for &i in order {
+        let n = &doc.nodes[i];
+        if n.kind == registry::RESAMPLE_KIND {
+            continue;
+        }
+        led[i] = declares_led(n)
+            || n.code().is_some_and(|d| d.reads_leds())
+            || doc.edges.iter().any(|e| {
+                e.to.node == n.id
+                    && index
+                        .get(e.from.node.as_str())
+                        .is_some_and(|&f| led[f] && carries_field(&doc.nodes[f], &e.from.port))
+            });
+    }
+    led
+}
+
+/// The shape a node's output really carries: its declared shape, moved onto
+/// the LEDs when the node hands on LED data (`led`, from [`led_nodes`]).
+pub fn resolved_shape(node: &NodeInst, port: &str, led: bool) -> Option<Shape> {
+    node.output_shape(port).map(|s| if led { s.on_leds() } else { s })
+}
+
+/// Whether `node` reads field input `port` somewhere other than the LED
+/// being drawn: a registry kind's [`registry::sampled_inputs`], or a field
+/// input a Code node's body calls `name_at` on.
+pub fn sampled_input(node: &NodeInst, port: &str) -> bool {
+    match node.code() {
+        Some(def) => def.input(port).is_some_and(|p| p.shape.is_field()) && def.samples(port),
+        None => registry::sampled_inputs(&node.kind).contains(&port),
+    }
+}
+
+fn declares_led(node: &NodeInst) -> bool {
+    match node.code() {
+        Some(def) => def.outputs.iter().any(|p| p.shape.is_led()),
+        None => registry::lookup(&node.kind).is_some_and(|t| t.outputs.iter().any(|p| p.shape.is_led())),
+    }
+}
+
+fn carries_field(node: &NodeInst, port: &str) -> bool {
+    node.output_shape(port).is_some_and(Shape::is_field)
 }
 
 /// Human-readable single-string form, for `ServerMsg::Error` payloads.
@@ -624,5 +710,139 @@ mod tests {
             .collect();
         let errs = validate(&doc(nodes, vec![])).unwrap_err();
         assert!(matches!(errs[0], PatchError::TooLarge { .. }));
+    }
+
+    fn code_node(id: &str, inputs: &[(&str, Shape)], outputs: &[(&str, Shape)], body: &str) -> NodeInst {
+        let port = |(name, shape): &(&str, Shape)| code::CodePort {
+            name: name.to_string(),
+            shape: *shape,
+            ..Default::default()
+        };
+        let mut n = node(id, code::KIND);
+        n.code = Some(Box::new(code::CodeDef {
+            inputs: inputs.iter().map(port).collect(),
+            outputs: outputs.iter().map(port).collect(),
+            body: body.to_string(),
+        }));
+        n
+    }
+
+    fn led_of(v: &Validated, d: &PatchDoc, id: &str) -> bool {
+        v.led[d.nodes.iter().position(|n| n.id == id).unwrap()]
+    }
+
+    /// TV snow coloured: LED data carries through a pointwise node and into
+    /// the Output, which draws each LED where it is.
+    #[test]
+    fn led_data_flows_through_pointwise_nodes_to_the_output() {
+        let d = doc(
+            vec![
+                node("snow", "random_field"),
+                node("tint", "colorize"),
+                node("sky", "gradient"),
+                node("mix", "blend"),
+                node("o", "output"),
+            ],
+            vec![
+                edge("snow", "out", "tint", "in"),
+                edge("sky", "out", "mix", "base"),
+                edge("tint", "out", "mix", "over"),
+                edge("mix", "out", "o", "in"),
+            ],
+        );
+        let v = validate(&d).expect("LED data may reach the Output");
+        assert!(led_of(&v, &d, "snow") && led_of(&v, &d, "tint") && led_of(&v, &d, "mix"));
+        assert!(!led_of(&v, &d, "sky"), "a plane source stays plane");
+        let tint = &d.nodes[1];
+        assert_eq!(resolved_shape(tint, "out", true), Some(Shape::LedColor));
+        assert_eq!(resolved_shape(tint, "out", false), Some(Shape::FieldColor));
+    }
+
+    #[test]
+    fn transform_refuses_led_data_and_resample_admits_it() {
+        let wired = |via_resample: bool| {
+            let mut nodes = vec![node("snow", "random_field"), node("tint", "colorize"), node("t", "transform"), node("o", "output")];
+            let mut edges = vec![edge("snow", "out", "tint", "in"), edge("t", "out", "o", "in")];
+            if via_resample {
+                nodes.push(node("rs", registry::RESAMPLE_KIND));
+                edges.push(edge("tint", "out", "rs", "in"));
+                edges.push(edge("rs", "out", "t", "in"));
+            } else {
+                edges.push(edge("tint", "out", "t", "in"));
+            }
+            doc(nodes, edges)
+        };
+        let errs = validate(&wired(false)).unwrap_err();
+        assert_eq!(
+            errs,
+            vec![PatchError::LedSampled {
+                from: "tint.out".into(),
+                to: "t.in".into()
+            }]
+        );
+        assert!(errs[0].to_string().contains("Resample"), "{}", errs[0]);
+
+        let d = wired(true);
+        let v = validate(&d).expect("Resample turns LED data into the plane");
+        assert!(led_of(&v, &d, "tint"));
+        assert!(!led_of(&v, &d, "rs") && !led_of(&v, &d, "t"));
+    }
+
+    #[test]
+    fn code_nodes_join_the_domains_through_their_bodies() {
+        let field = Shape::FieldColor;
+        // Keys on the physical LED: LED data, which Transform refuses.
+        let spokes = code_node("k", &[], &[("out", field)], "out = vec4f(f32(c.spoke % 2u));");
+        let d = doc(
+            vec![spokes.clone(), node("t", "transform"), node("o", "output")],
+            vec![edge("k", "out", "t", "in"), edge("t", "out", "o", "in")],
+        );
+        assert!(matches!(validate(&d).unwrap_err()[..], [PatchError::LedSampled { .. }]));
+
+        // Only in a comment, or as a member of something else: plane.
+        for body in ["// c.spoke would key on the LED
+out = vec4f(c.r01);", "let v = c.pos; out = vec4f(v.x);"] {
+            let n = code_node("k", &[], &[("out", field)], body);
+            let d = doc(
+                vec![n, node("t", "transform"), node("o", "output")],
+                vec![edge("k", "out", "t", "in"), edge("t", "out", "o", "in")],
+            );
+            validate(&d).unwrap_or_else(|e| panic!("{body}: {e:?}"));
+        }
+
+        // A declared LED output is LED whatever the body reads.
+        let declared = code_node("k", &[], &[("out", Shape::LedColor)], "out = vec4f(c.r01);");
+        let d = doc(vec![declared, node("o", "output")], vec![edge("k", "out", "o", "in")]);
+        assert!(led_of(&validate(&d).unwrap(), &d, "k"));
+
+        // A Code node that samples its input elsewhere refuses LED data; one
+        // that reads it in place takes it and hands on LED data.
+        let sampler = code_node("s", &[("img", field)], &[("out", field)], "out = img_at(c);");
+        let reader = code_node("s", &[("img", field)], &[("out", field)], "out = img * 0.5;");
+        for (n, ok) in [(sampler, false), (reader, true)] {
+            let d = doc(
+                vec![spokes.clone(), n, node("o", "output")],
+                vec![edge("k", "out", "s", "img"), edge("s", "out", "o", "in")],
+            );
+            match validate(&d) {
+                Ok(v) => assert!(ok && led_of(&v, &d, "s")),
+                Err(e) => assert!(!ok && matches!(e[..], [PatchError::LedSampled { .. }]), "{e:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn sub_patches_are_judged_inlined_for_domains_too() {
+        let inner = doc(
+            vec![node("snow", "random_field"), node("tint", "colorize"), node("o", "output")],
+            vec![edge("snow", "out", "tint", "in"), edge("tint", "out", "o", "in")],
+        );
+        let mut sub = node("s", crate::flatten::KIND);
+        sub.sub = Some(Box::new(inner));
+        let d = doc(
+            vec![sub, node("t", "transform"), node("o", "output")],
+            vec![edge("s", "out", "t", "in"), edge("t", "out", "o", "in")],
+        );
+        assert!(matches!(validate(&d).unwrap_err()[..], [PatchError::LedSampled { .. }]));
     }
 }

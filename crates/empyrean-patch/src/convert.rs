@@ -23,8 +23,9 @@ pub fn convertible(kind: &str) -> bool {
         && !matches!(
             kind,
             // The stream and texture sources have no function of their own;
-            // Output is the sink.
-            "touch_dabs" | "effects_in" | "video_in" | "image_in" | "clip" | "output"
+            // Output is the sink. Resample reads its input at other LEDs,
+            // which a Code node's `in_at` may not do with LED data.
+            "touch_dabs" | "effects_in" | "video_in" | "image_in" | "clip" | "output" | "resample"
         )
 }
 
@@ -589,7 +590,7 @@ mod tests {
             // Feed every input so a converted body references its ports.
             for inp in t.inputs {
                 let (src, port) = match inp.shape {
-                    Shape::FieldScalar => ("grey", "out"),
+                    s if s.is_grey_field() => ("grey", "out"),
                     Shape::Points => ("dabs", "points"),
                     Shape::Effects => ("fx", "effects"),
                     Shape::Texture => ("video", "tex"),

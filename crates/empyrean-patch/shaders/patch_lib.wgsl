@@ -510,10 +510,8 @@ fn feedback_at(c: Ctx) -> vec3f {
         return vec3f(0.0);
     }
     let total = G.spokes * G.pixels;
-    let spoke = u32(fract((c.theta + G.rotation) / TAU + 1.0) * f32(G.spokes) + 0.5) % max(G.spokes, 1u);
-    let r01 = clamp((1.0 - c.rn) / max(1.0 - G.inner_over_outer, 0.001), 0.0, 1.0);
-    let i = u32(r01 * f32(max(G.pixels - 1u, 1u)) + 0.5);
-    return unpack4x8unorm(OUT[total + spoke * G.pixels + i]).rgb;
+    let led = led_cell(c);
+    return unpack4x8unorm(OUT[total + led.x * G.pixels + led.y]).rgb;
 }
 
 // ---------------------------------------------------------------------------
@@ -527,6 +525,41 @@ struct Ctx {
     r01: f32,     // 0 = OUTER end of spoke, 1 = inner end (string order)
     rn: f32,      // radius normalized: inner/outer .. 1.0 (1 = outer edge)
     pos: vec2f,   // cartesian, outer edge at |pos| = 1
+}
+
+/// The context of the LED on physical spoke `spoke` at pixel `i` (0 = outer
+/// end), exactly as the entry points build it for that LED.
+fn led_ctx(spoke: u32, i: u32) -> Ctx {
+    let theta = f32(spoke) / f32(G.spokes) * TAU - G.rotation;
+    let r01 = f32(i) / f32(max(G.pixels - 1u, 1u));
+    let rn = mix(1.0, G.inner_over_outer, r01);
+    var c: Ctx;
+    c.spoke = u32(fract(theta / TAU + 1.0) * f32(G.spokes)) % G.spokes;
+    c.i = i;
+    c.theta = theta;
+    c.r01 = r01;
+    c.rn = rn;
+    c.pos = rn * vec2f(cos(theta), sin(theta));
+    return c;
+}
+
+/// Where a position falls among the LEDs, in LED units: x is the physical
+/// spoke (0..G.spokes, wrapping), y the pixel along it (0 = outer end; below
+/// -0.5 or past G.pixels - 0.5 is off the ring).
+fn led_coord(c: Ctx) -> vec2f {
+    let s = fract((c.theta + G.rotation) / TAU + 1.0) * f32(G.spokes);
+    let r01 = (1.0 - c.rn) / max(1.0 - G.inner_over_outer, 0.001);
+    return vec2f(s, r01 * f32(max(G.pixels - 1u, 1u)));
+}
+
+/// The LED nearest a position, as (physical spoke, pixel), the pixel held to
+/// the ring. At an LED it is that LED. Key a pattern on this rather than
+/// `c.spoke` / `c.i` and it stays a plane field: Transform moves it.
+fn led_cell(c: Ctx) -> vec2u {
+    let p = led_coord(c);
+    let spoke = u32(p.x + 0.5) % max(G.spokes, 1u);
+    let i = u32(clamp(p.y + 0.5, 0.0, f32(max(G.pixels, 1u)) - 0.5));
+    return vec2u(spoke, i);
 }
 
 /// Domain transform for the Transform node: rotate (radians), zoom, N-way

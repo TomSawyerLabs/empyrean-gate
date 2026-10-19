@@ -210,6 +210,7 @@ pub fn is_gpu_kind(kind: &str) -> bool {
             | "waveform"
             | "spectrum"
             | "transform"
+            | "resample"
             | "colorize"
             | "blend"
             | "effects_in"
@@ -286,6 +287,20 @@ pub const MAX_LAYERS: u32 = 8;
 pub fn layered(kind: &str) -> &'static [&'static str] {
     match kind {
         "blend" => &["over", "mode", "opacity"],
+        _ => &[],
+    }
+}
+
+/// The node kind that turns LED data into the plane (see `validate::led_nodes`).
+pub const RESAMPLE_KIND: &str = "resample";
+
+/// The field inputs a node of this kind reads somewhere other than the LED
+/// or position being drawn (Transform moves the picture), so LED data can't
+/// flow into them without Resample (see `validate::led_nodes`). A Code node's
+/// are found in its body instead (`code::CodeDef::samples`).
+pub fn sampled_inputs(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "transform" => &["in"],
         _ => &[],
     }
 }
@@ -368,6 +383,11 @@ pub fn palette_json() -> serde_json::Value {
                 // absent on kinds that have no layers.
                 if !layered(t.id).is_empty() {
                     entry["layered"] = json!({ "names": layered(t.id), "max": MAX_LAYERS });
+                }
+                // The inputs that refuse LED data (see `sampled_inputs`);
+                // absent where there are none.
+                if !sampled_inputs(t.id).is_empty() {
+                    entry["sampled"] = json!(sampled_inputs(t.id));
                 }
                 entry
             })
@@ -2100,11 +2120,11 @@ pub const TYPES: &[NodeType] = &[
         label: "Full random field",
         category: Category::Generator,
         group: Group::Blocks,
-        description: "Static: an independent random grey value 0..1 for every LED (or every spoke, or every ring), re-rolled Rate times a second. Keys on the physical LED, so Transform does not move it. A mask for glitter and glitches, or TV snow straight into Output.",
+        description: "Static: an independent random grey value 0..1 for every LED (or every spoke, or every ring), re-rolled Rate times a second. LED data: it keys on the physical LED, so to move it with Transform put Resample in between. A mask for glitter and glitches, or TV snow straight into Output.",
         inputs: &[],
         outputs: &[port(
             "out",
-            Shape::FieldScalar,
+            Shape::LedScalar,
             "A random 0..1 per LED, spoke or ring.",
         )],
         params: &[
@@ -2924,7 +2944,7 @@ pub const TYPES: &[NodeType] = &[
         label: "Transform",
         category: Category::FieldOp,
         group: Group::Color,
-        description: "Moves where everything upstream is sampled: rotate, spin, zoom, an N-way kaleidoscope and a left/right mirror, for any colour field (generators, video, feedback). Nodes that key on the physical LED or spoke (Sparkle, and the per-spoke randomness of Spoke chase, Meteors and Warp) only partly follow it.",
+        description: "Moves where everything upstream is sampled: rotate, spin, zoom, an N-way kaleidoscope and a left/right mirror, for any colour field (generators, video, feedback). It reads its input at other positions, so LED data (Full random field, or anything fed by it) needs Resample first.",
         inputs: &[port("in", Shape::FieldColor, "The colour field to transform.")],
         outputs: &[port("out", Shape::FieldColor, "The transformed field.")],
         params: &[
@@ -2967,6 +2987,21 @@ pub const TYPES: &[NodeType] = &[
                 "on: mirror one half of the disc onto the other (left/right).",
             ),
         ],
+    },
+    NodeType {
+        id: "resample",
+        label: "Resample",
+        category: Category::FieldOp,
+        group: Group::Color,
+        description: "Turns LED data (defined only at the gate's LEDs, like Full random field) into a plane picture defined everywhere, so Transform can move it: each position takes the nearest LED's colour, or a blend of the four LEDs around it. Off the ring it is transparent. Fed plane data, it quantizes the picture to the LEDs.",
+        inputs: &[port("in", Shape::FieldColor, "The LED data (or picture) to spread over the plane.")],
+        outputs: &[port("out", Shape::FieldColor, "A plane picture: defined at every position.")],
+        params: &[sel(
+            "mode",
+            "Mode",
+            &["Nearest", "Smooth"],
+            "Nearest: each position shows the LED it falls on, in hard cells. Smooth: blends the four LEDs around it (four times the cost of what feeds it).",
+        )],
     },
     NodeType {
         id: "colorize",
@@ -3454,8 +3489,12 @@ mod tests {
         let accepts = |id: &str| {
             shapes.iter().find(|s| s["id"] == id).unwrap()["accepts"].clone()
         };
-        assert_eq!(accepts("field_scalar"), serde_json::json!(["scalar", "field_scalar"]));
-        assert_eq!(accepts("field_color"), serde_json::json!(["field_scalar", "field_color"]));
+        assert_eq!(accepts("field_scalar"), serde_json::json!(["scalar", "field_scalar", "led_scalar"]));
+        assert_eq!(
+            accepts("field_color"),
+            serde_json::json!(["field_scalar", "field_color", "led_scalar", "led_color"])
+        );
+        assert_eq!(accepts("led_scalar"), serde_json::json!(["scalar", "field_scalar", "led_scalar"]));
         assert_eq!(accepts("event"), serde_json::json!(["event"]));
         // Every shape a registry port uses is listed.
         for t in TYPES {

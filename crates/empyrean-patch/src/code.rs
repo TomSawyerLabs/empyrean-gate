@@ -39,6 +39,9 @@ pub struct CodePort {
     pub name: String,
     /// scalar or event (a CPU-tier node), field_scalar or field_color (a
     /// GPU-tier node, which takes no event inputs and has only field outputs).
+    /// led_scalar and led_color are GPU-tier too: an output so declared is
+    /// LED data whatever the body reads; an input so declared takes the same
+    /// wires as its field twin.
     pub shape: Shape,
     /// Scalar inputs only: the knob's lowest value.
     pub min: f32,
@@ -114,7 +117,7 @@ impl CodeDef {
         if self.outputs.is_empty() {
             return Err("a Code node needs at least one output".into());
         }
-        let field = |s: Shape| matches!(s, Shape::FieldScalar | Shape::FieldColor);
+        let field = |s: Shape| s.is_field();
         let control = |s: Shape| matches!(s, Shape::Scalar | Shape::Event);
         let buffer = |s: Shape| matches!(s, Shape::Points | Shape::Effects | Shape::Texture);
         for p in &self.outputs {
@@ -159,6 +162,31 @@ impl CodeDef {
             }
             Ok(Tier::Cpu)
         }
+    }
+
+    /// Whether a GPU body reads field input `name` somewhere else
+    /// (`name_at(…)`), which LED data can't support (see
+    /// `validate::led_nodes`). Comments don't count.
+    pub fn samples(&self, name: &str) -> bool {
+        let at = format!("{name}_at");
+        matches!(self.tier(), Ok(Tier::Gpu))
+            && tokens(&self.body).iter().any(|t| t.kind == TokKind::Ident && t.text == at)
+    }
+
+    /// Whether a GPU body keys on the physical LED (`c.spoke` or `c.i`), so
+    /// what it makes is LED data. Comments don't count.
+    pub fn reads_leds(&self) -> bool {
+        if !matches!(self.tier(), Ok(Tier::Gpu)) {
+            return false;
+        }
+        let toks = tokens(&self.body);
+        (0..toks.len().saturating_sub(2)).any(|k| {
+            // `c` itself, not a member named `c` (`x.c.i`).
+            (k == 0 || toks[k - 1].text != ".")
+                && toks[k].text == "c"
+                && toks[k + 1].text == "."
+                && matches!(toks[k + 2].text, "spoke" | "i")
+        })
     }
 
     /// Every structural check: port counts and names, body size, a tier,

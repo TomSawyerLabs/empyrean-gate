@@ -11,7 +11,53 @@ inlets/outlets (the follow-on feature) need it to name their shapes.
 
 ## Status
 
-Design only. Nothing is built. Waiting on Cameron's answers below.
+Approved 2026-10-18; building in the `field-domains` worktree
+(`C:\Users\camer\.t3\worktrees\Empyrean\field-domains`, branch
+`field-domains` → gate master). Coordination: `.agents.txt` in the
+`playground` worktree (Agent I, round 2).
+
+## Decisions already made (don't re-ask)
+
+- The split is the gate's spoke × pixel layout (LEDs) vs. a continuous plane.
+  (Cameron: "yes".)
+- The plane stays continuous (symbolic functions, as fields are now). Texture
+  is the explicit "render to a grid" step. (Cameron: "sounds good".)
+- A stored rectangular x/y grid as its own type "could be a good idea too":
+  logged as future work below, not part of this round.
+- Rewrite the generators that are LED-keyed only by accident so they work in
+  the plane. (Cameron: "sounds good".)
+- Sub-patch inlets/outlets come after this, using these shapes.
+- Don't mix commits with other agents' in shared worktrees; this work has its
+  own worktree.
+
+## Design (as built)
+
+- `Shape` gains `LedScalar` and `LedColor` (`led_scalar`, `led_color`).
+  `FieldScalar` / `FieldColor` keep their names and mean the plane.
+- `accepts` judges value type only (grey, colour, scalar), never domain: a
+  colour-field input takes a plane or an LED colour. Domain is judged by one
+  rule in `validate`, below.
+- **Domain inference** (validate, after the topo sort): a node is *LED* when
+  one of its outputs is declared `led_*`, when it is a GPU Code node whose
+  body reads `c.spoke` or `c.i`, or when any wired field input comes from an
+  LED node. Exception: the new Resample node always hands on the plane. An
+  LED node's field outputs resolve to `led_*`.
+- **Sampled inputs** read their input somewhere other than the LED being
+  drawn: Transform's `in` (registry), and a Code node's field input whose
+  `<name>_at(` the body calls. An LED source wired into a sampled input is a
+  `PatchError::LedSampled` that names the fix (put a Resample between).
+- **Resample** (new node, LEDs → plane): Nearest (the LED the position falls
+  on) or Smooth (blends the four surrounding LEDs, 4× the upstream cost).
+  Transparent outside the ring. Built on a `led_ctx` helper that builds the
+  exact `Ctx` of an LED, so any upstream LED function evaluates correctly.
+- Plane → LEDs needs no node: sampling at the LED's position is what drawing
+  already does.
+- `Full random field` is the built-in LED source (its `out` becomes
+  `led_scalar`; only that port shape changes, because Agent L is merging the
+  Random family).
+- The editor mirrors the inference (registry data: `led_*` outputs and
+  `sampled` inputs) to draw LED wires distinctly and refuse an LED wire into
+  a sampled input at drag time. `validate` stays the authority.
 
 ## How it works today
 
@@ -39,50 +85,60 @@ Design only. Nothing is built. Waiting on Cameron's answers below.
 - Nothing in the types tells the two apart, so Transform, warps and blurs
   silently do nothing to LED-keyed inputs.
 
-## Proposal (not yet agreed)
-
-Make the domain part of the shape, alongside grey/colour:
-
-| | Grey | Colour |
-| --- | --- | --- |
-| **Plane** (continuous 2D, position-keyed) | plane grey | plane colour |
-| **LEDs** (one value per physical LED, spoke × pixel) | LED grey | LED colour |
-
-- Plane → LEDs is lossless and free (sample at each LED's position), so it is
-  an implicit wire, as scalar → field is now.
-- LEDs → plane is lossy and needs a choice (nearest LED, or smooth across
-  spoke and ring), so it is an explicit node.
-- Transform, warps, blurs and anything that samples elsewhere take plane
-  inputs only. Wiring an LED-keyed source into one then needs the explicit
-  conversion, instead of silently not moving.
-- Output takes LED colour, so plane colour reaches it through the implicit
-  conversion.
-- `Texture` stays the materialized grid (images, video, feedback). Whether it
-  also counts as "plane" data (sample-able anywhere) is open question 2.
-- Several LED-keyed generators could become plane-native by hashing angle
-  sectors and radial cells instead of `spoke` and `i`. They would look the
-  same on the gate and gain Transform. Only `random_field`'s per-LED mode,
-  physical indexing and per-LED feedback are LED-keyed by nature.
-
 ## Open questions for Cameron
 
-1. Is the split above the one you mean: the gate's spoke × pixel layout vs. a
-   continuous 2D plane? Or do you mean a rectangular x/y grid as its own
-   materialized type, separate from both?
-2. Should the plane be continuous (functions, as fields are now) or
-   materialized onto a fixed x/y grid like Texture? Continuous costs nothing
-   until something needs neighbours; a grid makes blur and feedback cheap.
-   Recommendation: continuous, with Texture as the explicit "render to a grid"
-   step.
-3. Rewrite the LED-keyed generators that don't need to be (sparkle, meteors,
-   spoke chase, starfield) as plane-native? Recommendation: yes, where the
-   look survives.
+None open. (Answered 2026-10-18; see Decisions.)
+
+## Findings / gotchas
+
+- Only one built-in node samples a field input elsewhere: `transform`
+  (`ctx_transform` rebinds `c`, then reads `in` at it). `texture_sample`
+  samples a Texture, not a field. GPU Code nodes can sample with `name_at`.
+- `ctx_transform` copies `spoke` and `i` unchanged, which is why LED-keyed
+  nodes ignore Transform today.
+- `feedback_at` already finds the nearest LED from the position, so Feedback
+  is plane-native (it works under Transform, as its description promises).
+  It stays a plane source.
+- The accidentally LED-keyed code reads `c.spoke` / `c.i` (or
+  `ctx.spoke * G.pixels + ctx.i`): `sparkle`, `spoke_chase`, `meteors`,
+  `warp`, `coordinate` (its spoke-index output), the glitter effect
+  (`render_effects` case 6) and two dab styles (`render_points` cases 2, 6).
+  Rewriting them on a position-derived LED cell gives the same look at the
+  LEDs and makes them move with Transform.
+- `Shape::Pixels` is reserved and used by no port. Left alone.
+
+## Plan / steps
+
+1. Core shapes: `LedScalar` / `LedColor`, value-type `accepts`, labels and
+   descriptions. Done.
+2. Validate: domain inference, sampled inputs, `LedSampled`. Tests. Done.
+3. Codegen: Led variants wherever field shapes are matched; Code nodes may
+   declare `led_*` ports; `led_ctx` + Resample node. Tests (naga). Done;
+   both entry points now build their context with `led_ctx`.
+4. Registry: Full random field → `led_scalar`; Transform `in` sampled;
+   Resample; export `sampled` in the registry JSON. Done.
+5. Plane-native rewrites: a `led_cell(c)` helper (shared with
+   `feedback_at`; added in step 3), then the seven sites above. ← current
+6. Editor (patch-web): `PatchShape`, `shapeAccepts`, domain mirror, wire
+   class and CSS, drag-time refusal, Code panel shape choices, agent guide.
+   Tests.
+7. Docs: shape descriptions, agent guide, gate README, site README/plan.
+8. Checks (cargo test, clippy, bun test, typecheck, behaviour + browser
+   shader specs), merge to gate master, web-dist bump, Preview check.
+9. Then: sub-patch inlets/outlets.
+
+## Future work (not this round)
+
+- A stored rectangular x/y grid type (render a plane field into a texture so
+  blur and grid-space feedback are cheap). Cameron: "could be a good idea
+  too".
 
 ## Progress log
 
 - [x] Survey shapes, `Ctx`, and which kinds key on the physical LED
   (2026-10-18)
-- [ ] Cameron's answers to the open questions
+- [x] Cameron's answers (2026-10-18)
+- [ ] Steps 1–8 above
 - [ ] Then: sub-patch inlets/outlets (Patch in / Patch out nodes), using the
   agreed shapes
 

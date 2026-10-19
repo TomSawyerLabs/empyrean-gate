@@ -51,7 +51,11 @@ pub const MAX_PATCH_NODES: usize = 256;
 pub const MAX_PATCH_EDGES: usize = 1024;
 
 /// The data type flowing on a wire — the whole type system. Wires connect only
-/// matching shapes, plus two blessed adapters (see [`Shape::accepts`]).
+/// matching shapes, plus two blessed adapters (see [`Shape::accepts`]). Fields
+/// come in two domains: the plane (`Field*`, defined at every position) and
+/// the LEDs (`Led*`, defined only at the gate's physical LEDs); `validate`
+/// infers which a wire carries and refuses LED data where a node would read
+/// it somewhere else (see `validate::led_nodes`).
 /// `Shape::description` says more, for agents and the editor
 /// (`registry::shapes_json`, `shapes()` in the wasm build).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -68,6 +72,11 @@ pub enum Shape {
     FieldScalar,
     /// An RGB function over the polar domain. Every generator's output.
     FieldColor,
+    /// A scalar per physical LED (spoke × pixel): defined only at the LEDs,
+    /// so it can't be moved or sampled between them without Resample.
+    LedScalar,
+    /// An RGB colour per physical LED, as [`Shape::LedScalar`].
+    LedColor,
     /// Bounded GPU array of point sprites (touch dabs, particles).
     Points,
     /// Bounded stream of triggered show effects (burst, strobe, sweep, pulse).
@@ -80,11 +89,13 @@ pub enum Shape {
 
 impl Shape {
     /// Every shape, in declaration order.
-    pub const ALL: [Shape; 8] = [
+    pub const ALL: [Shape; 10] = [
         Shape::Scalar,
         Shape::Event,
         Shape::FieldScalar,
         Shape::FieldColor,
+        Shape::LedScalar,
+        Shape::LedColor,
         Shape::Points,
         Shape::Effects,
         Shape::Texture,
@@ -98,6 +109,8 @@ impl Shape {
             Shape::Event => "Event",
             Shape::FieldScalar => "Grey field (Field<f32>)",
             Shape::FieldColor => "Colour field (Field<color>)",
+            Shape::LedScalar => "Grey LEDs (Led<f32>)",
+            Shape::LedColor => "Colour LEDs (Led<color>)",
             Shape::Points => "Points",
             Shape::Effects => "Effects",
             Shape::Texture => "Texture",
@@ -117,10 +130,16 @@ impl Shape {
                 "A trigger that fires on a frame and carries no value: a beat, a tap, a touch-down, a counter wrapping. Events connect only to Event inputs, which exist only on CPU nodes (Envelope, Counter, Toggle, Random, Delay, Event effect …). Envelope, Toggle, Counter and Random turn events into Scalars; Threshold turns a Scalar into events."
             }
             Shape::FieldScalar => {
-                "Field<f32>: one number per pixel, computed on the GPU as a function of the pixel's position (gradients, masks, Coordinate, Touch mask, Field math). Compiled inline into the patch shader, never stored. It drives grey-field inputs, and colour-field inputs as greyscale (RGB = the value, alpha = the value clamped to 0..1). A grey-field input also accepts a Scalar (as a uniform field)."
+                "Field<f32>: one number per position on the plane, computed on the GPU as a function of where it is (gradients, masks, Coordinate, Touch mask, Field math, noise). Compiled inline into the patch shader, never stored, and defined everywhere, so Transform can move it. It drives grey-field inputs, and colour-field inputs as greyscale (RGB = the value, alpha = the value clamped to 0..1). A grey-field input also accepts a Scalar (as a uniform field) and Grey LEDs."
             }
             Shape::FieldColor => {
-                "Field<color>: an RGB colour per pixel plus a 0..1 coverage alpha, computed on the GPU — every generator's output. RGB may exceed 1 (the Output soft-clips); the alpha is what Blend's alpha_over and Brightness of's alpha measure read. It connects only to colour-field inputs (Transform, Blend, Color adjust, Brightness of, Output …); a colour-field input also accepts a grey field (as greyscale), but not a Scalar."
+                "Field<color>: an RGB colour per position on the plane plus a 0..1 coverage alpha, computed on the GPU — nearly every generator's output. RGB may exceed 1 (the Output soft-clips); the alpha is what Blend's alpha_over and Brightness of's alpha measure read. Defined everywhere, so Transform can move it. It connects only to colour-field inputs (Transform, Blend, Color adjust, Brightness of, Output …); a colour-field input also accepts a grey field (as greyscale) and LED data, but not a Scalar."
+            }
+            Shape::LedScalar => {
+                "Led<f32>: one number per physical LED (spoke × pixel), defined only at the LEDs — Full random field, or a Code node that reads `c.spoke` or `c.i`. A node fed LED data hands on LED data (Blend of an LED input is LED too). It drives grey and colour inputs like a grey field, except an input that reads its source somewhere else (Transform's `in`, a Code node's `name_at`): there it needs Resample first, which turns the LEDs into a plane picture."
+            }
+            Shape::LedColor => {
+                "Led<color>: an RGB colour plus coverage alpha per physical LED, defined only at the LEDs (a node fed LED data hands on LED data). It drives colour inputs like a colour field, except one that reads its source somewhere else (Transform's `in`, a Code node's `name_at`): put Resample in between, which turns the LEDs into a plane picture. Plane data needs nothing to reach LED inputs: drawing samples it at each LED."
             }
             Shape::Points => {
                 "A bounded stream of point sprites: the live-draw dabs from Touch strokes, each with its own position, pen, colour and age. Connects only to Points inputs (Render points), which draw it into a colour field."
@@ -139,14 +158,40 @@ impl Shape {
 
     /// Whether a wire carrying `from` may drive an input of this shape.
     /// Two adapters are blessed because both compile to trivial WGSL:
-    /// Scalar → Field<f32> (uniform field) and Field<f32> → Field<color>
-    /// (grayscale). Nothing else converts implicitly.
+    /// Scalar → grey (uniform field) and grey → colour (grayscale). Nothing
+    /// else converts implicitly. Judged by value type alone: the domain
+    /// (plane or LEDs) is `validate`'s business, since whether LED data may
+    /// flow in depends on whether the node samples that input elsewhere.
     pub fn accepts(self, from: Shape) -> bool {
         self == from
-            || matches!(
-                (from, self),
-                (Shape::Scalar, Shape::FieldScalar) | (Shape::FieldScalar, Shape::FieldColor)
-            )
+            || (self.is_grey_field() && (from == Shape::Scalar || from.is_grey_field()))
+            || (self.is_color_field() && from.is_field())
+    }
+
+    /// A per-position GPU value, grey or colour, plane or LEDs.
+    pub fn is_field(self) -> bool {
+        self.is_grey_field() || self.is_color_field()
+    }
+
+    pub fn is_grey_field(self) -> bool {
+        matches!(self, Shape::FieldScalar | Shape::LedScalar)
+    }
+
+    pub fn is_color_field(self) -> bool {
+        matches!(self, Shape::FieldColor | Shape::LedColor)
+    }
+
+    pub fn is_led(self) -> bool {
+        matches!(self, Shape::LedScalar | Shape::LedColor)
+    }
+
+    /// The same value type on the LEDs (a field shape; others unchanged).
+    pub fn on_leds(self) -> Shape {
+        match self {
+            Shape::FieldScalar => Shape::LedScalar,
+            Shape::FieldColor => Shape::LedColor,
+            other => other,
+        }
     }
 }
 
@@ -741,5 +786,13 @@ mod tests {
         assert!(!Points.accepts(Texture));
         assert!(Effects.accepts(Effects));
         assert!(!FieldColor.accepts(Effects));
+        // Domain is validate's call: value types alone decide here.
+        assert!(FieldColor.accepts(LedColor));
+        assert!(FieldColor.accepts(LedScalar), "grayscale adapter on the LEDs");
+        assert!(LedColor.accepts(FieldColor), "drawing samples the plane at each LED");
+        assert!(FieldScalar.accepts(LedScalar));
+        assert!(LedScalar.accepts(Scalar), "uniform adapter on the LEDs");
+        assert!(!LedScalar.accepts(LedColor), "colour does not narrow to grey");
+        assert!(!FieldScalar.accepts(LedColor));
     }
 }
