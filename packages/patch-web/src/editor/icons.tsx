@@ -174,6 +174,12 @@ const NODE_ICONS: Record<string, Icon> = {
   luminance: [circle(12, 12, 4), ...spokes(12, 12, 7, 10, 8, -90)],
   field_math: [rect(3, 3, 18, 18, 2), line(7, 9, 12, 9), line(9.5, 6.5, 9.5, 11.5), line(12, 15.5, 17, 15.5)],
   transform: [poly(12, 2, 12, 22), poly(2, 12, 22, 12), poly(9.5, 4.5, 12, 2, 14.5, 4.5), poly(9.5, 19.5, 12, 22, 14.5, 19.5), poly(4.5, 9.5, 2, 12, 4.5, 14.5), poly(19.5, 9.5, 22, 12, 19.5, 14.5)],
+  // LEDs (a grid of dots) become a smooth plane.
+  resample: [
+    dot(3.5, 6, 1.2), dot(3.5, 12, 1.2), dot(3.5, 18, 1.2), dot(8, 6, 1.2), dot(8, 12, 1.2), dot(8, 18, 1.2),
+    line(10.5, 12, 14, 12), poly(12.5, 10, 14.5, 12, 12.5, 14),
+    rect(16, 4, 5.5, 16, 2), solid("M16 12h5.5v6a2 2 0 0 1-2 2H18a2 2 0 0 1-2-2Z"),
+  ],
   blend: [rect(3, 3, 12, 12, 1.5), rect(9, 9, 12, 12, 1.5), solid("M9 9h6v6H9Z")],
 
   // -- Draw streams

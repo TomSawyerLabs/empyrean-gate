@@ -2073,7 +2073,9 @@ mod tests {
         }
         let lib = PATCH_LIB_WGSL;
         let start = lib.find("fn led_ctx(").unwrap();
-        let end = start + lib[start..].find("\n}\n").unwrap();
+        // The function's closing brace: the first at the start of a line
+        // (CRLF or LF, as the checkout has it).
+        let end = start + lib[start..].find("\n}").unwrap();
         let outside: String = format!("{}{}", &lib[..start], &lib[end..])
             .lines()
             .map(|l| l.split("//").next().unwrap_or(""))
