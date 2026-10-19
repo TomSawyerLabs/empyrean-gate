@@ -1539,6 +1539,29 @@
   margin-bottom: 0;
 }
 
+/* The key row on a touch screen (CodeKeys.tsx): one line, scrolled
+   sideways, big enough for a thumb. */
+.code-keys {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.code-keys button {
+  flex: none;
+  min-width: 38px;
+  min-height: 40px;
+  padding: 0 8px;
+  font: 16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.code-keys button[aria-pressed="true"] {
+  border-color: var(--pe-accent, #7c5cff);
+  background: #2d2652;
+}
+
 /* On a phone (the width the editor goes compact at, or a phone on its side)
    the modal is the whole screen. A media query, not the editor's measured
    width: the dialog covers the window, whatever share the editor has. */
@@ -1574,6 +1597,15 @@
 
   .code-refcol-item {
     padding: 6px;
+  }
+
+  /* On a touch screen the view follows the visual viewport (set from
+     CodePanel), so the key row sits just above the on-screen keyboard. */
+  .code-modal.touch {
+    top: var(--vv-top, 0px);
+    bottom: auto;
+    height: var(--vv-height, 100dvh);
+    margin: 0 auto;
   }
 }
 

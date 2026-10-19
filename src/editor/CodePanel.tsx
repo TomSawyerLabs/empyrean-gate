@@ -6,6 +6,7 @@
 
 import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { applyEdits, CodeEditor, diagnosticsFor, scopeNames, type CodeEditorHandle, type CodeScope } from "./CodeEditor";
+import { CodeKeys } from "./CodeKeys";
 import { CodeRefColumn, CodeRefNotes } from "./CodeRefCard";
 import { fixesFor, type FixContext } from "./code-fixes";
 import { NodeContext } from "./context";
@@ -275,6 +276,25 @@ export function CodePanel({
     if (!expanded || !dialog || dialog.open) return;
     dialog.showModal();
   }, [expanded]);
+  // A touch screen gets the key row, and the large view follows the visual
+  // viewport, so the row sits just above the on-screen keyboard.
+  const [touch] = useState(() => typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const vv = window.visualViewport;
+    if (!expanded || !touch || !dialog || !vv) return;
+    const follow = () => {
+      dialog.style.setProperty("--vv-height", `${vv.height}px`);
+      dialog.style.setProperty("--vv-top", `${vv.offsetTop}px`);
+    };
+    follow();
+    vv.addEventListener("resize", follow);
+    vv.addEventListener("scroll", follow);
+    return () => {
+      vv.removeEventListener("resize", follow);
+      vv.removeEventListener("scroll", follow);
+    };
+  }, [expanded, touch]);
   const editor = (
     <CodeEditor
       value={def.body}
@@ -433,7 +453,7 @@ export function CodePanel({
       {expanded && (
         <dialog
           ref={dialogRef}
-          className="code-modal"
+          className={`code-modal ${touch ? "touch" : ""}`}
           style={{ "--code-font": `${fontSize}px` } as CSSProperties}
           aria-label={`${node.name || "Code"} body`}
           onClose={() => setExpanded(false)}
@@ -489,6 +509,7 @@ export function CodePanel({
             )}
           </div>
           {errorLine}
+          {touch && canEdit && <CodeKeys view={() => editorRef.current?.view() ?? null} />}
         </dialog>
       )}
       <details className="code-ref">
