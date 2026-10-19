@@ -426,7 +426,7 @@ Design:
   batches, the web runtime) already carries `scalar:<node>:<port>`. The
   editor draws the latest value at the end of each declaring line.
 
-Steps (current: F):
+Steps (all done; last: CI green on the Linux runner):
 - [x] A search / multi-select (`4467409`)
 - [x] B snippets (`bb3c226`): every snippet, at its defaults, is run by
   the core in `code-snippets.test.ts` and compiled by Chrome in the
@@ -436,11 +436,17 @@ Steps (current: F):
   under the error too (no hover on a phone)
 - [x] E modal reference column + text size (`3c03c70`); the caret now
   survives the move into and out of the large view
-- [ ] F number scrubbing
-- [ ] G colour swatches
-- [ ] H phone key row
-- [ ] I live values
-- [ ] README (gate + site), web-dist on the Preview
+- [x] F number scrubbing (`aa65b65`)
+- [x] G colour swatches (`3cbb736`)
+- [x] H phone key row (`9340615`)
+- [x] I live values (`5c079b6`): crate `script.rs` probes, `eval.rs`,
+  `codegen.rs` `preview_scalars`; editor `code-live.ts`
+- [x] README (gate `9636e0b`, site `88bf051`)
+- [x] Checked on a local site build against this checkout
+  (`PATCH_WEB_DIR`): live values updating in Chrome with WebGPU, swatches,
+  signature help, the reference column, the phone layout at 390 px. Found
+  and fixed there: the large view's editor widened past a phone's screen
+  on a long line (`min-width: 0`, guarded in the phone spec).
 
 Round 6 gotchas:
 - Git Bash's `sed -i` rewrites a CRLF file as LF; normalize with
@@ -459,6 +465,26 @@ Round 6 gotchas:
 - The mock backend compiles nothing; a spec stages a body error with
   `POST /mock/status?client=…` (`patch_error`), applied at hello.
 - The palette overhaul moved Code into the "Structure" group.
+- The column-select check failed on CI's Linux three times before the
+  cause showed: Linux's wider fonts make the body's second line overflow
+  the panel, the editor scrolls sideways to the caret, and a point
+  measured from a `.cm-line` box lands on the (sticky) lint gutter. The
+  spec presses Ctrl+Home first. Found by running the spec on Linux in WSL
+  (Bun in ~/.bun; Chromium's missing libnspr4/libnss3/libasound fetched
+  with `apt-get download` and unpacked under ~/pwlibs, no sudo, then
+  `LD_LIBRARY_PATH`), with a probe logging the events' targets. Earlier
+  theories (focus lost on Alt release, caret counting) were wrong.
+- A meter key with no value reads 0 everywhere; a live value no frame has
+  computed (`let` in a branch never taken) reads NaN instead (`@` keys
+  only), which survives the gate's binary f32 mini batches and the wasm
+  sim, and the editor skips it.
+- The crate's interpreter counts columns in bytes; the editor derives the
+  same keys counting bytes on the original line (comments blanked only for
+  matching).
+- The preview browser in T3 has no WebGPU adapter; the playground's live
+  preview (and so live values) needs Chrome.
+- The site (empyreangate.org) is LF throughout (`.gitattributes`, oxfmt);
+  only the gate is CRLF in the working tree.
 
 ## Findings / gotchas
 
