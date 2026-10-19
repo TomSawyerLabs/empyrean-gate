@@ -43,6 +43,7 @@ export {
   type TrackLayout,
   type TrackSound,
 } from "./djlink";
+export { DjSound, notesAt, upcomingSteps, type DjNote, type DjSoundOptions } from "./djsound";
 export {
   attachGroove,
   GROOVE_BPM,

@@ -43,7 +43,13 @@ control-rate evaluator, effect and audio analysis. This package only hosts it.
   work the decks (`dj.act(deck, { action })`, `setCrossfader`; a hand on them
   turns Auto off), unplug the LINK (`dj.connected = false`: every output as on
   a gate without CDJs), and choose where `restart()` starts the set
-  (`settings.startAt`), so captures repeat.
+  (`settings.startAt`), so captures repeat. To hear it, `DjSound.listen(runtime,
+  dj)` (from a click) plays the set through Web Audio: a house groove whose
+  parts follow each deck's phrases (no kick in a breakdown, a riser on a
+  build, a snare roll on a fill-in, a crash as a chorus lands), each deck
+  through its fader and the crossfader, loops and jumps heard where they
+  happen. It is output only; the patch's audio stays the set's synthetic
+  features, so captures still repeat.
 - `@empyrean-gate/patch-web/agent` — patches for AI agents: `createPatchApi(host)`
   (guide, node types, presets, get/set/validate, `edit(ops)` with small
   operations, `snapshot`, `link`), `patchTools(api)` (the same as tool

@@ -9119,6 +9119,7 @@ var DJ_EVENTS = [
     title: "Ember Theory",
     artist: "Halcyon Static",
     mood: "high",
+    root: 45,
     phrases: [
       { kind: "intro", beats: 32 },
       { kind: "up", beats: 16, fill: 4 },
@@ -9134,6 +9135,7 @@ var DJ_EVENTS = [
     title: "Tidewater",
     artist: "The Lantern Choir",
     mood: "mid",
+    root: 50,
     phrases: [
       { kind: "intro", beats: 32 },
       { kind: "verse", beats: 32 },
@@ -9149,6 +9151,7 @@ var DJ_EVENTS = [
     title: "Low Orbit",
     artist: "Cassini Drift",
     mood: "low",
+    root: 43,
     phrases: [
       { kind: "intro", beats: 32 },
       { kind: "verse", beats: 32 },
@@ -9162,6 +9165,7 @@ var DJ_EVENTS = [
     title: "Night Market",
     artist: "Paper Tigers Club",
     mood: "high",
+    root: 48,
     phrases: [
       { kind: "intro", beats: 32 },
       { kind: "up", beats: 32, fill: 8 },
@@ -9177,6 +9181,7 @@ var DJ_EVENTS = [
     title: "Glasswing",
     artist: "Mirror Pilots",
     mood: "mid",
+    root: 52,
     phrases: [
       { kind: "intro", beats: 32 },
       { kind: "verse", beats: 32 },
@@ -9572,6 +9577,8 @@ class DjLinkSim {
       playMode: d.looping ? PLAY_MODES.looping : PLAY_MODES[d.mode],
       looping: d.looping,
       loopBeats: d.loop ? d.loop.end - d.loop.start : null,
+      loopRange: d.loop ? [d.loop.start, d.loop.end] : null,
+      position: d.pos,
       beat,
       beats: l?.beats ?? 0,
       beatInBar: beat > 0 ? (beat - 1) % 4 + 1 : 0,
