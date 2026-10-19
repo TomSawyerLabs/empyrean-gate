@@ -74,26 +74,27 @@ playground, the CLI's `render`, the MCP server's `snapshot`).
 ## Plan / steps
 
 1. [x] Survey: the stand-in, the engine's derivations, consumers, pipeline.
-2. [ ] **`src/runtime/djlink.ts`**: crate of tracks (phrases, fill-ins,
+2. [x] **`src/runtime/djlink.ts`**: crate of tracks (phrases, fill-ins,
    performance moves), `CdjDeck`, the mixer, `GateLinkView` (the gate's
    derivations), `DjLinkSim` (step, manual controls, auto policy, `reset(at)`,
    `scalars()`, events, `audio()`, `state()` for UIs).
-3. [ ] `groove.ts`: `attachGroove` drives the set; audio from the set;
+3. [x] `groove.ts`: `attachGroove` drives the set; audio from the set;
    returns `dj`; `grooveDjLink` removed; `djMix` deprecated. Exports in
    `runtime/index.ts`.
-4. [ ] Tests (`bun test src`): event rules vs `rhythm.rs`, mix easing, phrase
+4. [x] Tests (`bun test src`): event rules vs `rhythm.rs`, mix easing, phrase
    key, every event within one auto cycle, determinism, `reset(at)`,
    disconnected zeros, the scalars' order against the registry's `dj_link`
    outputs, the breakdown dropping the bass.
-5. [ ] Agent: a shared `dj_deck` tool (`src/agent/dj.ts`) — read the deck,
+5. [x] Agent: a shared `dj_deck` tool (`src/agent/dj.ts`) — read the deck,
    connect/disconnect, auto on/off, start the set at a time, deck actions;
    guide text. CLI: `render --at <s> --no-link`; MCP serves `dj_deck`.
-6. [ ] README (patch-web), typecheck, tests, browser test; commit; merge to
+6. [ ] **(current)** README (patch-web), typecheck, tests; commit; merge to
    gate master; watch CI publish web-dist.
-7. [ ] Site (own worktree): the DJ panel (two decks with play / hold-cue /
+7. [x] Site (own worktree): the DJ panel (two decks with play / hold-cue /
    loop / jump / load, phrase strip, master & on-air lamps, crossfader, Auto
    DJ, LINK connected, event lamps), `set_inputs` → `dj_deck`, README,
-   tests; after the bot's bump lands, push `dev`, verify the Preview.
+   tests (committed on site branch `dj-sim`); after the bot's bump lands,
+   rebase onto `dev`, push, verify the Preview.
 8. [ ] Gate follow-up: drop `GrooveSettings.djMix` once the site no longer
    sets it.
 
@@ -110,11 +111,45 @@ playground, the CLI's `render`, the MCP server's `snapshot`).
   its last value while stopped.
 - Events are edge-detected per frame by `event_seq` in the evaluator: two
   firings of one event in a single frame count once.
+- Beat packets are periodic (one per beat period), not "when the beat number
+  changes": a 1-beat loop sends a packet every lap with the same bar beat.
+  The beat path's own loop wrap (followed deck, downbeat, 500 ms cooldown) is
+  why an 8-beat loop wraps twice a lap on the gate. The beat path's
+  "pending jump" from bar discontinuities is not modelled (it serves
+  beat-only devices; the status path catches every jump the simulator makes).
+- First dry run of the Auto DJ found two bugs, both fixed: a cue preview
+  (cue-play counts as playing) was taken for the outgoing deck and pressed
+  Play, starting the next track 40 beats in; and leaving a loop on the frame
+  of its wrap read as a hot-cue `jump`. A DJ exits during the last lap, so
+  Auto does too.
+- End to end (CLI `render` on Dawn, preset "DJ Loop Tunnel", `--at 51`): the
+  scripted loop at ~53 s doubles the frame mean (0.084 → 0.175) and a wrap
+  launches a ring; `--no-link` gives the preset's dim floor (mean 0.018).
+- The embedded T3 preview browser has `navigator.gpu` but no adapter; the
+  site's `bun run test:gpu` (installed Chrome, headless) is where the decks
+  can be seen and tested. It reuses any server on port 4180: check the port
+  is free first, or it tests another agent's build.
+- Site WebKit: two existing playground tests flake under a parallel run
+  (logged in the site's ISSUES.md); the decks render only static text there
+  (no WebGPU), so they are not the cause.
 
 ## Progress log
 
 - [x] 2026-10-18: survey; plan written; `.agents.txt` entry in the site
       checkout.
+- [x] Gate `dj-sim` (rebased onto master f912100): 3fc41d5 (runtime:
+      djlink.ts, groove, tests), bee9350 (agent `dj_deck`, CLI `--at` /
+      `--no-link`, guide, README). patch-web typecheck + 99 tests green; root
+      `tsc -b` green. `test:browser` not run: no shader or wasm change.
+- [x] Site `dj-sim` (worktree `.t3/worktrees/empyreangate.org/dj-sim`):
+      a71e501 (DjDecks.tsx, wiring, agent tool, docs, spec playground-dj),
+      016ed13 (ISSUES: WebKit flake). Checked against the new package
+      overlaid into node_modules: typecheck, unit tests, `test:gpu` 36 passed
+      (1 skipped: the no-WebGPU case), playground specs on three browsers
+      (WebKit flake aside). The site's *old* code also typechecks against the
+      new package (the bump bot's check).
+- [ ] Push gate master; web-dist; the bot's bump; site dev; Preview check.
+- [ ] Follow-up: drop `GrooveSettings.djMix` once site dev no longer sets it.
 
 ## Open questions for the user
 
