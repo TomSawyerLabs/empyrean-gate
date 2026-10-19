@@ -290,6 +290,18 @@ one editor instance (the panel shows "Editing in the large view" meanwhile,
 so two CodeMirrors never fight over one body), the live minis row and the
 node's error line; Done or Esc returns it to the panel. Spec case added.
 
+Follow-up (2026-10-18, Cameron: the body "is too small to be very useful"
+on the site): on empyreangate.org the modal sat in the top-left corner at
+1200×900. The site's `root.css` reset (`*, ::before, ::after { margin: 0 }`)
+removes the user-agent `margin: auto` that centres a modal dialog; the gate
+app has no such reset, so the spec never saw it. `.code-modal` now sets
+`margin: auto` itself, grows to min(96vw, 1400px) × 94dvh, and below 640 px
+wide or 500 px tall it is the whole screen (100vw × 100dvh, no border,
+safe-area padding). ⤢ Expand and Done get bigger touch targets. Two spec
+cases inject the site's reset: centred and nearly the window at 1400×900,
+and the whole screen at 390×844 (opened through the compact sheet). The
+centring case fails (28 px off) with the `margin: auto` taken out.
+
 ## Round 5: safety, buffers, notes, a starter (2026-10-18)
 
 Cameron's answers to the outstanding list: hold the app release; fix the
