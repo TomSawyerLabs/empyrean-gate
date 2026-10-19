@@ -380,7 +380,63 @@ compile errors marked on their lines. Not yet built, in recommended order:
 9. Live values for the CPU tier: each `let`'s current value as faint text
    at the line end (needs the interpreter to report them; the largest).
 
-Waiting on Cameron's pick.
+Cameron (2026-10-18): "i love them all. boil the ocean." All nine, in
+this order, one commit each (own worktree `code-modal-fit`, Agent M in the
+site's `.agents.txt`).
+
+Design:
+- **A. Search / multi-select**: `@codemirror/search` (panel themed dark,
+  Ctrl+F / Ctrl+H inside the body), `highlightSelectionMatches`,
+  `selectNextOccurrence` (Ctrl+D), `rectangularSelection` +
+  `crosshairCursor` (Alt-drag), `allowMultipleSelections`.
+- **B. Snippets**: `snippetCompletion` per tier: GPU `for` with a literal
+  bound, `if`/`else`, polar ripple, smoothstep band, hsv out, sample a
+  field elsewhere; CPU `if`, `state` counter, edge detect, smoothing.
+- **C. Signature help**: a StateField scans back from the caret to the
+  innermost unclosed `(`, names the call, counts top-level commas; a
+  tooltip shows the signature with the current parameter bold. One
+  lookup (`fnFor`) shared with hover.
+- **D. Quick fixes**: `Diagnostic.actions` built in a pure module
+  (`code-fixes.ts`, unit-tested) from the message text: `return <value>`,
+  unclosed / stray `{ } ( )`, `while`/`loop` → bounded `for`, a `for`
+  without a bound, assigning an input (copy into a `var`), assigning a
+  `let` (make it `var`), a missing `;`, and "did you mean" for unknown
+  names (edit distance over everything in scope).
+- **E. Modal**: the reference card becomes a component; in the modal it
+  is a side column (toggle; an overlay on phones) that also lists every
+  helper, builtin and port, each inserting itself at the caret. A−/A+ in
+  the modal head, remembered in localStorage.
+- **F. Scrubbing**: Alt-drag a number literal (Shift ×10, Ctrl ÷10),
+  keeping its decimals and suffix; `u` literals stay ≥ 0. The drag edits
+  without history; on release one history entry from the original to the
+  final value (revert silently, then apply).
+- **G. Swatches**: a widget before `vec3f(`/`vec4f(` with literal rgb
+  (or one splat) and before `hsv2rgb(` with literal h, s, v; clicking
+  opens a colour input that rewrites the literals.
+- **H. Phone row**: in the modal on a coarse pointer, a row of keys
+  (Tab, `{}` `()` `;` `.` `=` `+` `-` `*` `/` `<` `>` `,`, ← →, undo,
+  redo, scrub toggle) that never takes focus; the modal follows the
+  visual viewport so the row sits above the on-screen keyboard.
+- **I. Live values (CPU tier)**: `script::Script` records each `let`/`var`
+  (key `@line:col:name`) and each `state.name` (`@state:name`); `run`
+  reports the ones written this frame; eval keeps the last value per key
+  and puts it in the node's outputs map, so `scalar_value` serves it;
+  codegen appends the keys to `preview_scalars` after every real output
+  (same 64 cap). Everything downstream (wasm sim, the gate's minis
+  batches, the web runtime) already carries `scalar:<node>:<port>`. The
+  editor draws the latest value at the end of each declaring line.
+
+Steps (current: A):
+- [ ] A search / multi-select
+- [ ] B snippets
+- [ ] C signature help
+- [ ] D quick fixes
+- [ ] E modal reference column + text size
+- [ ] F number scrubbing
+- [ ] G colour swatches
+- [ ] H phone key row
+- [ ] I live values
+- [ ] README (gate + site), web-dist on the Preview
 
 ## Findings / gotchas
 
