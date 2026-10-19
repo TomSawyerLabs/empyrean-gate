@@ -21,11 +21,21 @@ The only thing this machine does is **push a version tag**.
 - Remote: `https://github.com/TomSawyerLabs/empyrean-gate.git`, branch `master`.
 - Trigger: `on: push: tags: ["v*"]` in `.github/workflows/release.yml`.
 - Tags are **annotated** (`git tag -a`), matching v0.6.0 through v0.9.0.
-- The version lives in **four** files and they must agree:
+- The version lives in **nine** files and they must agree. The app's four:
   - `package.json`
   - `src-tauri/Cargo.toml`
   - `src-tauri/Cargo.lock` (let `cargo metadata` rewrite it, don't hand-edit)
   - `src-tauri/tauri.conf.json`
+
+  And, since v0.15.0, the patch core and the shared editor, which were created
+  at the app's version (0.14.0) and track it — they are path dependencies, not
+  published, so the number is only a label, but a label that must not drift:
+  - `crates/empyrean-patch/Cargo.toml`
+  - `crates/empyrean-patch-wasm/Cargo.toml`
+  - `crates/Cargo.lock` (`cargo metadata --manifest-path crates/Cargo.toml`)
+  - `packages/patch-web/package.json`
+  - `bun.lock` (records the workspace package's version; a plain `bun install`
+    rewrites the one line, and `--frozen-lockfile` in CI fails without it)
 - The version-bump commit's message is bare: `v0.9.0`. No body.
 - What CI gates a release on, in order: `bun install --frozen-lockfile`,
   `bun run typecheck`, `bun run test:layout`, `bun run test:behavior`,
@@ -70,8 +80,11 @@ The only thing this machine does is **push a version tag**.
    ```
    Wrap the heavy ones in `node ~/.claude/bin/cpu-slots.mjs run --slots N -- …`
    (see the `compute-budget` skill) — this machine is shared.
-5. **Bump the four files**, `cargo metadata --manifest-path src-tauri/Cargo.toml`
-   to refresh the lock, and commit as `vX.Y.Z`.
+5. **Bump the nine files**: `sed` the six manifests, then
+   `cargo metadata --manifest-path src-tauri/Cargo.toml`,
+   `cargo metadata --manifest-path crates/Cargo.toml` and `bun install` to
+   refresh the three locks, and commit as `vX.Y.Z`. Check the diff is eleven
+   version lines and nothing else.
 6. **Re-fetch.** If origin moved while you were testing, rebase again and re-run
    step 4. On v0.9.0 this happened twice.
 7. **Push the branch, then the tag:**
