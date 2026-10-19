@@ -1,6 +1,6 @@
 {
   "name": "@empyrean-gate/patch-web",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "private": true,
   "license": "MIT",
   "description": "The Empyrean Gate's patch editor and a WebGPU runtime for its patches, for use outside the desktop app",

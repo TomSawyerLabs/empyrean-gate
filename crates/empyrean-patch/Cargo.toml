@@ -1,6 +1,6 @@
 [package]
 name = "empyrean-patch"
-version = "0.15.0"
+version = "0.16.0"
 description = "The Empyrean Gate's node-graph patterns: document model, validation, WGSL codegen and control-rate evaluator"
 license = "MIT"
 edition = "2024"
