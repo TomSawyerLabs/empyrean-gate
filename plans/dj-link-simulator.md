@@ -13,6 +13,16 @@ a simulator that behaves like a real two-deck PRO DJ LINK set, as the gate
 itself would read it, everywhere the web runtime runs (the empyreangate.org
 playground, the CLI's `render`, the MCP server's `snapshot`).
 
+**Round 2** (Cameron, 2026-10-19, on the two open questions: "do both"):
+
+- **An audible set** in the playground: the simulated set synthesized with
+  Web Audio and played through the speakers on request, following the decks
+  (each deck through its own fader and the crossfader, sections, fills,
+  loops, jumps).
+- **A simulated PRO DJ LINK in the desktop gate**, to test a gate with no
+  CDJs: virtual players 1 and 2 feeding the gate's *real* LINK pipeline
+  in-process, as if their packets came off the network.
+
 ## Environment / context
 
 - Gate repo: `TomSawyerLabs/empyrean-gate`. This work: worktree
@@ -71,6 +81,19 @@ playground, the CLI's `render`, the MCP server's `snapshot`).
   keeps working.
 - Tracks are invented (titles/artists made up), not real songs.
 
+- **Round 2, audible set:** output only. The patch's audio features stay the
+  simulator's synthetic ones (deterministic, so agents' captures repeat);
+  listening is a person's choice (a click, as browsers require), never an
+  agent's. It lives in patch-web (`djsound.ts`), scheduled ahead on the
+  audio clock from the simulator's state each frame, so loops and jumps are
+  heard where they happen.
+- **Round 2, desktop:** the virtual CDJs emit real status and beat packets
+  into rhythm.rs's own handlers (not a shortcut into the engine), so the
+  real diff, beat and phrase code is what gets exercised; synthetic track
+  metadata (phrases, waveform) is inserted the way a fetch would. The crate
+  is one JSON file shared by the TypeScript and Rust simulators, and a drift
+  guard keeps the two Auto DJs in step.
+
 ## Plan / steps
 
 1. [x] Survey: the stand-in, the engine's derivations, consumers, pipeline.
@@ -97,6 +120,22 @@ playground, the CLI's `render`, the MCP server's `snapshot`).
    rebase onto `dev`, push, verify the Preview.
 8. [x] Gate follow-up: drop `GrooveSettings.djMix` once the site no longer
    sets it.
+
+**Round 2**
+
+9. [ ] **(current)** Audible set: `packages/patch-web/src/runtime/djsound.ts`
+   (Web Audio voices: kick, bass, hats, clap, snare roll, pad, riser; one
+   channel per deck through fader × crossfader; a lookahead scheduler on
+   the simulator's playheads). Exported; README.
+10. [ ] Site: a "Listen" button and volume in the Sound panel (the click
+    starts the AudioContext); spec; README.
+11. [ ] Desktop: map the LINK ingest (agent survey), then
+    `src-tauri/src/prolink_sim.rs` (decks, mixer, Auto DJ, packet builders,
+    synthetic track info), a config switch and a Settings toggle, the mock
+    backend, tests (Rust unit tests on the packets and the real handlers;
+    a drift guard against the TS simulator's timeline).
+12. [ ] Ship: gate master, web-dist, the site, the Preview; desktop needs a
+    release to reach a gate (ask Cameron before tagging).
 
 ## Findings / gotchas
 
@@ -162,13 +201,8 @@ playground, the CLI's `render`, the MCP server's `snapshot`).
 
 ## Open questions for the user
 
-1. A "simulated LINK" source in the desktop gate (for testing a gate with no
-   CDJs at home)? It would mean the same model in Rust feeding the engine's
-   Pioneer path. Recommendation: not now; the web simulator covers building
-   patches, and the CDJ hardware test plan covers the real thing.
-2. An audible set (Web Audio synthesizing the kick, hats and pads the
-   simulator describes) so the playground can be *heard*? Recommendation:
-   later, if wanted; autoplaying sound needs a click anyway.
+(Round 1's two — a desktop simulated LINK and an audible set — were
+answered "do both"; see Round 2.)
 
 ## Things not to do
 
