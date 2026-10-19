@@ -894,10 +894,16 @@ function ParamPanel({
   /** The renderer's verdict, for a Code node's error marks. */
   status?: { active: boolean; error: string | null } | null;
   codeReference?: CodeReference | null;
-  /** Replace the node with its Code conversion (see `PatchEditorProps`). */
-  onConvertToCode?: () => void;
+  /** Replace the node with its Code conversion (see `PatchEditorProps`).
+   * Rejects with the reason when the node cannot be converted. */
+  onConvertToCode?: () => Promise<void>;
 }) {
   const sheet = useSheet(onClose);
+  // Why Convert to Code was refused, for the node (and layer count) it was
+  // refused for: selecting another node, or removing a layer, clears it.
+  const [convertError, setConvertError] = useState<{ node: string; layers?: number; message: string } | null>(
+    null,
+  );
   const node = doc.nodes.find((n) => n.id === nodeId);
   const def = node && registry.get(node.kind);
   if (!node || !def) return null;
@@ -1125,11 +1131,23 @@ function ParamPanel({
       {canEdit && def.convertible && onConvertToCode && (
         <button
           type="button"
-          onClick={onConvertToCode}
+          onClick={() => {
+            setConvertError(null);
+            onConvertToCode().catch((err: unknown) =>
+              setConvertError({
+                node: node.id,
+                layers: node.layers,
+                message: err instanceof Error ? err.message : String(err),
+              }),
+            );
+          }}
           title="Replace this node with a Code node that does the same thing, to edit from there. Its wires and knobs stay."
         >
           Convert to Code
         </button>
+      )}
+      {convertError && convertError.node === node.id && convertError.layers === node.layers && (
+        <p className="patch-status error">{convertError.message}</p>
       )}
       {canEdit && node.kind !== "output" && onDuplicate && (
         <button type="button" onClick={onDuplicate}>
@@ -2334,17 +2352,14 @@ function Editor({
             codeReference={codeReference}
             onConvertToCode={
               convertToCode
-                ? () => {
+                ? async () => {
                     if (!doc) return;
-                    void convertToCode(doc, selectedNode)
-                      .then((next) =>
-                        mutateDoc((d) => {
-                          d.nodes = structuredClone(next.nodes);
-                          d.edges = structuredClone(next.edges);
-                          d.exposed = structuredClone(next.exposed);
-                        }),
-                      )
-                      .catch((err: unknown) => console.error("convert to code:", err));
+                    const next = await convertToCode(doc, selectedNode);
+                    mutateDoc((d) => {
+                      d.nodes = structuredClone(next.nodes);
+                      d.edges = structuredClone(next.edges);
+                      d.exposed = structuredClone(next.exposed);
+                    });
                   }
                 : undefined
             }

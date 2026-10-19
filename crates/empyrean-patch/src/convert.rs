@@ -188,6 +188,16 @@ fn gpu_definition(doc: &PatchDoc, index: usize) -> Result<CodeDef, String> {
             ..Default::default()
         }))
         .collect();
+    // An eight-layer Blend has 17 (base, and an over and an opacity per
+    // layer): refuse here rather than make a Code node that cannot run.
+    if inputs.len() > code::MAX_CODE_PORTS {
+        return Err(format!(
+            "A Code node takes at most {} inputs and this {} would need {}; remove a layer or two first.",
+            code::MAX_CODE_PORTS,
+            ty.label,
+            inputs.len()
+        ));
+    }
     let raw = crate::codegen::builtin_body(doc, index)?;
     let mut body = header(node, ty);
     body.push('\n');
@@ -646,6 +656,25 @@ mod tests {
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default())
             .validate(&module)
             .unwrap_or_else(|e| panic!("{e:?}\n{}", def.body));
+    }
+
+    /// A Blend with more ports than a Code node may have is refused, and
+    /// left as it was; one layer fewer converts.
+    #[test]
+    fn a_blend_too_wide_for_a_code_node_is_refused() {
+        let mut doc = PatchDoc {
+            nodes: vec![node("n", "blend", &[]), node("o", "output", &[])],
+            edges: vec![edge("n", "out", "o", "in")],
+            ..Default::default()
+        };
+        doc.nodes[0].layers = registry::MAX_LAYERS;
+        let before = doc.clone();
+        let err = convert(&mut doc, "n").unwrap_err();
+        assert!(err.contains("at most 16 inputs") && err.contains("17"), "{err}");
+        assert_eq!(serde_json::to_value(&doc).unwrap(), serde_json::to_value(&before).unwrap());
+        doc.nodes[0].layers = registry::MAX_LAYERS - 1;
+        convert(&mut doc, "n").unwrap();
+        compile(&doc).unwrap();
     }
 
     #[test]

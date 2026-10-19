@@ -169,6 +169,25 @@ test("a built-in node converts to a Code node in place, keeping its id and wire"
   await expect(panel.locator(".patch-param-head").filter({ hasText: "scale" })).not.toContainText("(rate)");
 });
 
+test("a conversion the core refuses says why under the button, and changes nothing", async ({ page }) => {
+  // The core refuses e.g. an eight-layer Blend (more ports than a Code node
+  // may have); the mock converts anything, so stand in for the refusal.
+  const reason = "A Code node takes at most 16 inputs and this Blend would need 17; remove a layer or two first.";
+  await page.route("**/patch/convert-to-code", (r) => r.fulfill({ status: 400, json: { error: reason } }));
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto("/#patch");
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+  await page.getByRole("button", { name: "＋ New" }).click();
+  await page.locator(".pnode", { hasText: "Noise" }).click();
+  const panel = page.locator(".patch-side");
+  await panel.getByRole("button", { name: "Convert to Code" }).click();
+  await expect(panel.locator(".patch-status.error")).toHaveText(reason);
+  await expect(page.locator(".pnode.cat-code")).toHaveCount(0);
+  // It belongs to that node: selecting another clears it.
+  await page.locator(".pnode", { hasText: "Output" }).click();
+  await expect(panel.locator(".patch-status.error")).toHaveCount(0);
+});
+
 test("the body opens in a large modal, edits there reach the patch, Esc comes back", async ({ page }) => {
   const sent: string[] = [];
   const node = await newPatchWithCode(page, sent);
