@@ -11,6 +11,8 @@ export type PatchShape =
   | "event"
   | "field_scalar"
   | "field_color"
+  | "led_scalar"
+  | "led_color"
   | "points"
   | "effects"
   | "texture"
@@ -74,6 +76,10 @@ export interface PatchNodeType {
    * they are, layer k (2..`max`) the name followed by k (`over2`, `mode2`,
    * `opacity2`). The instance's count is `PatchNode.layers`. */
   layered?: { names: string[]; max: number };
+  /** The field inputs this kind reads somewhere other than the LED being
+   * drawn (crate `registry::sampled_inputs`; Transform's `in`): LED data
+   * can't go into them without Resample. Absent when there are none. */
+  sampled?: string[];
   category: "input" | "scalar" | "generator" | "field" | "combine" | "texture" | "sink" | "code";
   /** The palette group it is listed under (crate `registry::Group`; labels
    * and order in `groups.ts`). Optional: older gates send none, and
@@ -235,6 +241,10 @@ export interface CodeReference {
 /** The node kind whose ports and body live on the instance (crate `code::KIND`). */
 export const CODE_KIND = "code";
 
+/** The node kind that turns LED data into the plane (crate
+ * `registry::RESAMPLE_KIND`). */
+export const RESAMPLE_KIND = "resample";
+
 /** The node kind that is a remark on the canvas (crate `registry::NOTE_KIND`). */
 export const NOTE_KIND = "note";
 
@@ -245,12 +255,21 @@ export const CODE_INPUT_SHAPES: readonly PatchShape[] = [
   "event",
   "field_scalar",
   "field_color",
+  "led_scalar",
+  "led_color",
   "points",
   "effects",
   "texture",
 ];
 /** Shapes a Code node's outputs may have: what a body can make. */
-export const CODE_OUTPUT_SHAPES: readonly PatchShape[] = ["scalar", "event", "field_scalar", "field_color"];
+export const CODE_OUTPUT_SHAPES: readonly PatchShape[] = [
+  "scalar",
+  "event",
+  "field_scalar",
+  "field_color",
+  "led_scalar",
+  "led_color",
+];
 /** @deprecated use CODE_INPUT_SHAPES / CODE_OUTPUT_SHAPES */
 export const CODE_SHAPES = CODE_OUTPUT_SHAPES;
 
@@ -263,7 +282,7 @@ export const MAX_CODE_PORTS = 16;
  * `"cpu"` when every port is Scalar/Event, `"gpu"` when every output is a
  * field and no input is an Event, otherwise `null` (the core refuses it). */
 export function codeTier(def: CodeDef): "cpu" | "gpu" | null {
-  const field = (s: PatchShape) => s === "field_scalar" || s === "field_color";
+  const field = isFieldShape;
   const control = (s: PatchShape) => s === "scalar" || s === "event";
   const buffer = (s: PatchShape) => s === "points" || s === "effects" || s === "texture";
   if (def.outputs.length === 0) return null;
@@ -328,13 +347,40 @@ export function defaultCode(): CodeDef {
 }
 
 /** Wire-compat rule — mirrors Shape::accepts in Rust: exact match plus the
- * two blessed adapters (Scalar→Field<f32>, Field<f32>→Field<color>). */
+ * two blessed adapters (Scalar→grey, grey→colour). Value types only: whether
+ * LED data may go in is the domain rule's business (`fitsInput` in
+ * editor/domains.ts). */
 export function shapeAccepts(into: PatchShape, from: PatchShape): boolean {
   return (
     into === from ||
-    (from === "scalar" && into === "field_scalar") ||
-    (from === "field_scalar" && into === "field_color")
+    (isGreyField(into) && (from === "scalar" || isGreyField(from))) ||
+    (isColorField(into) && isFieldShape(from))
   );
+}
+
+/** A per-position GPU value: grey or colour, on the plane or the LEDs. */
+export function isFieldShape(s: PatchShape): boolean {
+  return isGreyField(s) || isColorField(s);
+}
+
+export function isGreyField(s: PatchShape): boolean {
+  return s === "field_scalar" || s === "led_scalar";
+}
+
+export function isColorField(s: PatchShape): boolean {
+  return s === "field_color" || s === "led_color";
+}
+
+/** LED data: defined only at the gate's physical LEDs. */
+export function isLedShape(s: PatchShape): boolean {
+  return s === "led_scalar" || s === "led_color";
+}
+
+/** The same value type on the LEDs (a field shape; others unchanged). */
+export function onLeds(s: PatchShape): PatchShape {
+  if (s === "field_scalar") return "led_scalar";
+  if (s === "field_color") return "led_color";
+  return s;
 }
 
 /** The name layer `k` (1-based) gives one of a layered type's repeated

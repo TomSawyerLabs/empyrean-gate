@@ -15,6 +15,7 @@ import {
   CODE_INPUT_SHAPES,
   CODE_OUTPUT_SHAPES,
   codeTier,
+  isFieldShape,
   isPortName,
   MAX_CODE_PORTS,
   shapeAccepts,
@@ -31,6 +32,8 @@ const SHAPE_NAMES: Record<PatchShape, string> = {
   event: "event",
   field_scalar: "grey field",
   field_color: "colour field",
+  led_scalar: "grey LEDs",
+  led_color: "colour LEDs",
   points: "points",
   effects: "effects",
   texture: "texture",
@@ -314,7 +317,7 @@ export function CodePanel({
   const minisRow = live && def.outputs.length > 0 && (
     <div className="code-minis" aria-label="Live outputs">
       {def.outputs.map((p) =>
-        p.shape === "field_color" || p.shape === "field_scalar" ? (
+        isFieldShape(p.shape) ? (
           <div key={p.name} className="code-mini">
             <div className="pnode-mini">
               <MiniRing

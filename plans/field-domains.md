@@ -122,8 +122,10 @@ None open. (Answered 2026-10-18; see Decisions.)
    with a guard test (`only_led_kinds_key_on_the_physical_led`).
 6. Editor (patch-web): `PatchShape`, `shapeAccepts`, domain mirror, wire
    class and CSS, drag-time refusal, Code panel shape choices, agent guide.
-   Tests. ← current
+   Tests. Done: `editor/domains.ts` (+ tests), dotted LED wires and square
+   ports, drag-time refusal, spec `patch-led-data`.
 7. Docs: shape descriptions, agent guide, gate README, site README/plan.
+   ← current (shape descriptions and agent guide done)
 8. Checks (cargo test, clippy, bun test, typecheck, behaviour + browser
    shader specs), merge to gate master, web-dist bump, Preview check.
 9. Then: sub-patch inlets/outlets.

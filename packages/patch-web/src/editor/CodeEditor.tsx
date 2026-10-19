@@ -249,6 +249,8 @@ const SHAPE_WORD: Record<PatchShape, string> = {
   event: "event",
   field_scalar: "grey field (f32)",
   field_color: "colour field (vec4f)",
+  led_scalar: "grey LEDs (f32)",
+  led_color: "colour LEDs (vec4f)",
   points: "points",
   effects: "effects",
   texture: "texture",

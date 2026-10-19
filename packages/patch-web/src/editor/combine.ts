@@ -21,6 +21,8 @@ export interface Combiner {
 export const COMBINERS: Partial<Record<PatchShape, Combiner>> = {
   field_color: { kind: "blend", lower: "base", upper: "over", out: "out" },
   field_scalar: { kind: "field_math", lower: "a", upper: "b", out: "out" },
+  led_color: { kind: "blend", lower: "base", upper: "over", out: "out" },
+  led_scalar: { kind: "field_math", lower: "a", upper: "b", out: "out" },
   event: { kind: "event_merge", lower: "a", upper: "b", out: "out" },
   scalar: { kind: "scalar_math", lower: "a", upper: "b", out: "out" },
 };

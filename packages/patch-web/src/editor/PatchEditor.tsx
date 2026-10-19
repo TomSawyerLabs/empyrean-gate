@@ -51,6 +51,7 @@ import { CodePanel } from "./CodePanel";
 import { combinerFor, freeSpot, insertCombiner, type Combiner, type PortRef } from "./combine";
 import { NodeContext, type WireDrag } from "./context";
 import { SHAPE_LABEL, suggestConnections, type Suggestion } from "./connect";
+import { fitsInput, isSampledInput, ledNodes } from "./domains";
 import { matchScore } from "./search";
 import { imageFileToMedia } from "./files";
 import { History } from "./history";
@@ -70,15 +71,16 @@ import {
   codeParams,
   codeTier,
   defaultCode,
+  isFieldShape,
   layerCount,
   layerName,
   nodeInputs,
   nodeParams,
+  onLeds,
   PATCH_FORMAT,
   splitLayer,
   type CodeReference,
   SUBPATCH_KIND,
-  shapeAccepts,
   subpatchPorts,
   type PatchDoc,
   type PatchNode,
@@ -403,6 +405,8 @@ type PatchFlowNode = FlowNode<
     wiredOut: string[];
     /** Input ports already taken (one wire per input). */
     wiredIn: string[];
+    /** Its field outputs carry LED data, not the plane (see domains.ts). */
+    led: boolean;
   },
   "patch"
 >;
@@ -411,6 +415,8 @@ type PatchFlowNode = FlowNode<
 const RING_SHAPES: readonly PatchShape[] = [
   "field_color",
   "field_scalar",
+  "led_color",
+  "led_scalar",
   "points",
   "effects",
   "texture",
@@ -448,7 +454,9 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
   // canvas.
   const live = minis !== null && data.docId !== "" && activeId === data.docId;
   // The principal output: `out`, or the single output of a source node.
-  const outs = outputPorts(def, node);
+  // An LED node's field outputs carry LED data: dots, labels and drag
+  // checks all see the shape the wire really has.
+  const outs = outputPorts(def, node).map((p) => (data.led ? { ...p, shape: onLeds(p.shape) } : p));
   const primary = outs.find((p) => p.name === "out") ?? (outs.length === 1 ? outs[0] : undefined);
   const showRing = live && primary !== undefined && RING_SHAPES.includes(primary.shape);
   // A Code node thumbnails every field output: the principal one as the
@@ -456,7 +464,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
   const rings: { mini: string; label: string }[] =
     live && node.kind === CODE_KIND
       ? outs
-          .filter((p) => p.shape === "field_color" || p.shape === "field_scalar")
+          .filter((p) => isFieldShape(p.shape))
           .map((p) => ({
             mini: p.name === primary?.name ? `node:${data.mini}` : `node:${data.mini}:${p.name}`,
             label: p.name,
@@ -476,8 +484,8 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
   const fitClass = (shape: PatchShape, dir: "in" | "out", name: string): string => {
     if (!drag) return "";
     if (drag.node === node.id) return " port-nofit";
-    if (dir === "out") return drag.dir === "in" && shapeAccepts(drag.shape, shape) ? " port-fit" : " port-nofit";
-    if (drag.dir !== "out" || !shapeAccepts(shape, drag.shape)) return " port-nofit";
+    if (dir === "out") return drag.dir === "in" && fitsInput(drag.shape, drag.sampled ?? false, shape) ? " port-fit" : " port-nofit";
+    if (drag.dir !== "out" || !fitsInput(shape, isSampledInput(def, node, name), drag.shape)) return " port-nofit";
     if (!data.wiredIn.includes(name)) return " port-fit";
     return combines(node.id, name) ? " port-fit port-combine" : " port-nofit";
   };
@@ -735,6 +743,7 @@ const EDGE_TYPES = { wire: WireEdge };
 /** The flow nodes for what is shown: the document at `path` inside `root`. */
 function toFlowNodes(root: PatchDoc, path: string[], registry: Registry): PatchFlowNode[] {
   const doc = docAt(root, path);
+  const leds = ledNodes(doc, registry);
   return doc.nodes.map((n) => ({
     id: n.id,
     type: "patch" as const,
@@ -746,6 +755,7 @@ function toFlowNodes(root: PatchDoc, path: string[], registry: Registry): PatchF
       mini: flatId(root, path, n.id),
       wiredOut: doc.edges.filter((e) => e.from.node === n.id).map((e) => e.from.port),
       wiredIn: doc.edges.filter((e) => e.to.node === n.id).map((e) => e.to.port),
+      led: leds.has(n.id),
     },
   }));
 }
@@ -755,10 +765,12 @@ function edgeId(e: PatchDoc["edges"][number]): string {
 }
 
 function toFlowEdges(doc: PatchDoc, registry: Registry): FlowEdge[] {
+  const leds = ledNodes(doc, registry);
   return doc.edges.map((e) => {
     const from = doc.nodes.find((n) => n.id === e.from.node);
     const def = registry.get(from?.kind ?? "");
-    const shape = portShape(def, e.from.port, "out", from) ?? "scalar";
+    const declared = portShape(def, e.from.port, "out", from) ?? "scalar";
+    const shape = leds.has(e.from.node) ? onLeds(declared) : declared;
     return {
       id: edgeId(e),
       type: "wire",
@@ -1986,9 +1998,11 @@ function Editor({
       if (!conn.sourceHandle || !conn.targetHandle) return false;
       const source = d.nodes.find((n) => n.id === conn.source);
       const target = d.nodes.find((n) => n.id === conn.target);
-      const from = portShape(registry.get(source?.kind ?? ""), conn.sourceHandle, "out", source);
+      const declared = portShape(registry.get(source?.kind ?? ""), conn.sourceHandle, "out", source);
+      const from = declared && ledNodes(d, registry).has(conn.source) ? onLeds(declared) : declared;
       const into = portShape(registry.get(target?.kind ?? ""), conn.targetHandle, "in", target);
-      if (!from || !into || !shapeAccepts(into, from)) return false;
+      const sampled = isSampledInput(registry.get(target?.kind ?? ""), target, conn.targetHandle);
+      if (!from || !into || !fitsInput(into, sampled, from)) return false;
       // One wire per input; a second one into a taken input is fine when a
       // combiner can go between them (onConnect puts it there).
       const taken = d.edges.some((e) => e.to.node === conn.target && e.to.port === conn.targetHandle);
@@ -2094,8 +2108,12 @@ function Editor({
       if (!d || !registry || !p.nodeId || !p.handleId || !p.handleType) return;
       const node = d.nodes.find((n) => n.id === p.nodeId);
       const dir = p.handleType === "source" ? "out" : "in";
-      const shape = portShape(registry.get(node?.kind ?? ""), p.handleId, dir, node);
-      if (shape) setDrag({ node: p.nodeId, port: p.handleId, shape, dir });
+      const def = registry.get(node?.kind ?? "");
+      const declared = portShape(def, p.handleId, dir, node);
+      const led = dir === "out" && ledNodes(d, registry).has(p.nodeId);
+      const shape = declared && led ? onLeds(declared) : declared;
+      const sampled = dir === "in" && isSampledInput(def, node, p.handleId);
+      if (shape) setDrag({ node: p.nodeId, port: p.handleId, shape, dir, sampled });
       setChooser(null);
     },
     [registry],

@@ -431,6 +431,36 @@ const server = Bun.serve({
           outputs: [],
           params: [],
         },
+        // LED data and the plane: an LED source, a node that samples its
+        // input elsewhere, and the bridge between them.
+        {
+          id: "random_field",
+          label: "Full random field",
+          category: "generator",
+          description: "A random grey value per LED: LED data.",
+          inputs: [],
+          outputs: [{ name: "out", shape: "led_scalar" }],
+          params: [],
+        },
+        {
+          id: "transform",
+          label: "Transform",
+          category: "field",
+          description: "Moves where everything upstream is sampled.",
+          inputs: [{ name: "in", shape: "field_color" }],
+          outputs: [{ name: "out", shape: "field_color" }],
+          params: [],
+          sampled: ["in"],
+        },
+        {
+          id: "resample",
+          label: "Resample",
+          category: "field",
+          description: "Turns LED data into a plane picture.",
+          inputs: [{ name: "in", shape: "field_color" }],
+          outputs: [{ name: "out", shape: "field_color" }],
+          params: [],
+        },
         {
           id: "output",
           label: "Output",
