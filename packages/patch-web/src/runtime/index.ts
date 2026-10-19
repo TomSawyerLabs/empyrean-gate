@@ -18,11 +18,36 @@ import { TestFilm, type VideoSource } from "./standins";
 export { loadPatchCore, type Limits, type PatchCore } from "./core";
 export { requestGateDevice, screenToPolar, ShaderError, WebGpuUnavailable, type Geometry } from "./gpu";
 export {
+  CRATE,
+  DJ_EVENTS,
+  DJ_SCALARS,
+  DjLinkSim,
+  PHRASE_CODES,
+  phraseAt,
+  PLAY_MODES,
+  SET_BPM,
+  trackLayout,
+  trackSound,
+  type DeckAction,
+  type DeckMode,
+  type DjDeckState,
+  type DjEvent,
+  type DjLinkSimOptions,
+  type DjLinkState,
+  type DjScalar,
+  type PhraseKind,
+  type PlacedPhrase,
+  type SimMove,
+  type SimPhrase,
+  type SimTrack,
+  type TrackLayout,
+  type TrackSound,
+} from "./djlink";
+export {
   attachGroove,
   GROOVE_BPM,
   grooveAt,
   grooveAudio,
-  grooveDjLink,
   type GrooveFeatures,
   type GrooveSettings,
 } from "./groove";
@@ -500,7 +525,8 @@ export class PatchRuntime implements MiniSource {
     this.sim?.setHuePull(target, amount, loose);
   }
 
-  /** PRO DJ LINK stand-in: the 18 scalars in `setDjLink` order. */
+  /** PRO DJ LINK: the 18 scalars in `DJ_SCALARS` order (`DjLinkSim` makes
+   * them for a simulated set). */
   setDjLink(values: Float32Array) {
     this.sim?.setDjLink(values);
   }

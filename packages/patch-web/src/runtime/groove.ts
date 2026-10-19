@@ -1,13 +1,15 @@
-// Music for a patch when there is none: a steady synthetic groove on audio
-// source 0 and a stand-in DJ deck riding the same beat, so audio- and
-// DJ-driven nodes move in a playground, a demo, or an agent's headless
-// render. Not music, but the patterns were written for some. (Moved here from
-// empyreangate.org's app/gate/engine.ts, which drove its playground with it.)
+// Music for a patch when there is none: a simulated DJ set (djlink.ts) on
+// the PRO DJ LINK inputs, and its sound as a synthetic groove on audio source
+// 0, so audio- and DJ-driven nodes move in a playground, a demo, or an agent's
+// headless render. Not music, but the patterns were written for some. (Moved
+// here from empyreangate.org's app/gate/engine.ts, which drove its playground
+// with it.)
 
+import { DjLinkSim, SET_BPM } from "./djlink";
 import type { PatchRuntime } from "./index";
 
-/** The groove's tempo. */
-export const GROOVE_BPM = 122;
+/** The groove's tempo: the set's. */
+export const GROOVE_BPM = SET_BPM;
 
 export interface GrooveFeatures {
   level: number;
@@ -18,7 +20,8 @@ export interface GrooveFeatures {
   onset: number;
 }
 
-/** The groove at `t` seconds. */
+/** A plain groove at `t` seconds: a track's chorus, with no set around it
+ * (`attachGroove` plays the set's own sound). */
 export function grooveAt(t: number): GrooveFeatures {
   const beatPhase = ((t * GROOVE_BPM) / 60) % 1;
   const bar = ((t * GROOVE_BPM) / 240) % 1;
@@ -56,61 +59,41 @@ export function grooveAudio(t: number): Float32Array {
   ]);
 }
 
-/** A deck playing the groove, as `PatchRuntime.setDjLink` takes it; `mix`
- * is the crossfader 0..1. */
-export function grooveDjLink(t: number, mix = 0.5): Float32Array {
-  const beat = Math.floor((t * GROOVE_BPM) / 60);
-  const phrase = ((t * GROOVE_BPM) / 60 / 32) % 1;
-  return new Float32Array([
-    1, // active
-    grooveAt(t).level, // energy
-    1,
-    -1,
-    1,
-    -1, // deck, deck_side, event_deck, event_side
-    1,
-    1,
-    1,
-    0, // playing, on_air, deck_1_on_air, deck_2_on_air
-    0, // looping
-    mix,
-    0, // mix, mix_activity
-    (beat % 4) + 1, // beat_in_bar
-    1,
-    1,
-    phrase,
-    0, // phrase_active, phrase_kind, phrase_progress, phrase_fill
-  ]);
-}
-
 export interface GrooveSettings {
-  /** Feed the groove to audio source 0 (false: silence there; for a host
+  /** Feed the set's sound to audio source 0 (false: silence there; for a host
    * whose microphone has taken over, see `audio: "off"`). */
   audio: "groove" | "silent" | "off";
-  /** Crossfader of the stand-in deck. */
-  djMix: number;
+  /** Where in the set `runtime.restart()` starts it, in seconds, so a
+   * capture repeats from there. */
+  startAt: number;
+  /** @deprecated Ignored: the set's crossfader is `dj.setCrossfader`. Kept
+   * so hosts written for the old stand-in deck still compile. */
+  djMix?: number;
 }
 
-/** Drive `runtime` with the groove every frame until the returned `stop`.
- * The clock restarts with `runtime.restart()`, so a capture repeats. */
+/** Drive `runtime` with the simulated set every frame until the returned
+ * `stop`: its PRO DJ LINK outputs and events, and (per `settings.audio`) its
+ * sound. `dj` is the set, for a host's deck controls. The set restarts at
+ * `settings.startAt` with `runtime.restart()`, so a capture repeats. */
 export function attachGroove(
   runtime: PatchRuntime,
   initial: Partial<GrooveSettings> = {},
-): { settings: GrooveSettings; time(): number; stop(): void } {
-  const settings: GrooveSettings = { audio: "groove", djMix: 0.5, ...initial };
-  let t = 0;
+): { settings: GrooveSettings; dj: DjLinkSim; time(): number; stop(): void } {
+  const settings: GrooveSettings = { audio: "groove", startAt: 0, ...initial };
+  const dj = new DjLinkSim();
+  if (settings.startAt > 0) dj.reset(settings.startAt);
   const offFrame = runtime.onFrame((dt) => {
-    t += dt;
-    if (settings.audio === "groove") runtime.setAudio(0, grooveAudio(t));
+    const fired = dj.step(dt);
+    if (settings.audio === "groove") runtime.setAudio(0, dj.audio());
     else if (settings.audio === "silent") runtime.setAudio(0, new Float32Array(11));
-    runtime.setDjLink(grooveDjLink(t, settings.djMix));
+    runtime.setDjLink(dj.scalars());
+    for (const [event] of fired) runtime.fireDjEvent(event);
   });
-  const offRestart = runtime.onRestart(() => {
-    t = 0;
-  });
+  const offRestart = runtime.onRestart(() => dj.reset(settings.startAt));
   return {
     settings,
-    time: () => t,
+    dj,
+    time: () => dj.time,
     stop: () => {
       offFrame();
       offRestart();
