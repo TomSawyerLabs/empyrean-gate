@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "empyrean-patch"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "bytemuck",
  "jsonschema",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "empyrean-patch-wasm"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "bytemuck",
  "empyrean-patch",

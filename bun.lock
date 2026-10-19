@@ -23,7 +23,7 @@
     },
     "packages/patch-web": {
       "name": "@empyrean-gate/patch-web",
-      "version": "0.14.0",
+      "version": "0.15.0",
       "dependencies": {
         "@codemirror/autocomplete": "^6.20.3",
         "@codemirror/commands": "^6.11.1",
