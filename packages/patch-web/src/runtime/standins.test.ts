@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
-import type { PatchRuntime } from "./index";
-import { attachVisitors, syntheticMotion, TestFilm } from "./standins";
+import { attachVisitors, syntheticMotion, TestFilm, type VisitorHost } from "./standins";
 
 /** Just enough of a runtime for the visitors: frames, restarts, a status,
  * and a log of what they did. */
@@ -20,7 +19,7 @@ function fakeRuntime(touch = false) {
     for (let i = 0; i < seconds * 60; i++) frames.forEach((l) => l(1 / 60));
   };
   const restart = () => restarts.forEach((l) => l());
-  return { runtime: rt as unknown as PatchRuntime, log, run, restart };
+  return { runtime: rt as unknown as VisitorHost, log, run, restart };
 }
 
 test("visitors tap on the beat and draw strokes, the same again after a restart", () => {

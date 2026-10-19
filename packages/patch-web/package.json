@@ -19,7 +19,7 @@
   "scripts": {
     "build:wasm": "bun scripts/build-wasm.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p cli/tsconfig.json && tsc -p browser/tsconfig.json",
-    "test": "bun test src",
+    "test": "bun test src cli",
     "test:browser": "playwright test -c playwright.config.ts",
     "demo": "vite --config demo/vite.config.ts",
     "build:cli": "bun scripts/build-cli.ts"

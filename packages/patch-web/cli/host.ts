@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { PatchHost } from "../src/agent/api";
 import { exportPatch, parsePatchFile } from "../src/editor/files";
+import { decodeDataUrl } from "./png";
 import { loadPatchCore, type PatchCore } from "../src/runtime/core";
 import { attachGroove } from "../src/runtime/groove";
 import { GATE_GEOMETRY, PatchRuntime } from "../src/runtime/index";
@@ -70,7 +71,11 @@ export type Groove = ReturnType<typeof attachGroove>;
 export async function headlessRuntime(): Promise<{ runtime: PatchRuntime; groove: Groove } | null> {
   const gpu = await loadWebGpu();
   if (!gpu) return null;
-  const runtime = await PatchRuntime.create(GATE_GEOMETRY, { gpu, wasm: wasmBytes() as BufferSource });
+  const runtime = await PatchRuntime.create(GATE_GEOMETRY, {
+    gpu,
+    wasm: wasmBytes() as BufferSource,
+    decodeImage: decodeDataUrl,
+  });
   return { runtime, groove: attachGroove(runtime) };
 }
 

@@ -13,7 +13,7 @@ import {
   type Motion,
   type MotionSource,
 } from "./inputs";
-import { TestFilm, type VideoSource } from "./standins";
+import { synthScope, TestFilm, type VideoSource } from "./standins";
 
 export { loadPatchCore, type Limits, type PatchCore } from "./core";
 export { requestGateDevice, screenToPolar, ShaderError, WebGpuUnavailable, type Geometry } from "./gpu";
@@ -65,9 +65,11 @@ export { MediaTexture, VIDEO_SIZE, type Motion, type MotionSource } from "./inpu
 export {
   attachVisitors,
   seeded,
+  synthScope,
   syntheticMotion,
   TestFilm,
   type VideoSource,
+  type VisitorHost,
   type VisitorSettings,
 } from "./standins";
 
@@ -117,6 +119,9 @@ export interface RuntimeOptions {
   /** The patch core's wasm bytes, where it cannot be fetched (see
    * `loadPatchCore`). */
   wasm?: BufferSource;
+  /** Decode a Still image's or Clip's data URL into `size`² RGBA, where
+   * there is no DOM to do it (Node). */
+  decodeImage?: (dataUrl: string, size: number) => Promise<Uint8Array>;
 }
 
 export interface CaptureOptions {
@@ -166,6 +171,10 @@ export class PatchRuntime implements MiniSource {
    * the stand-in film. Frames are uploaded only while the patch reads them. */
   private video: VideoSource = new TestFilm();
   private usesVideo = false;
+  /** Audio source 0's features as last set, and the clock for the scope
+   * made from them while no microphone gives a real one. */
+  private audioFeatures: Float32Array | null = null;
+  private scopeT = 0;
 
   // MiniSource
   spokes = 0;
@@ -180,9 +189,16 @@ export class PatchRuntime implements MiniSource {
   private uploadedImages = new Map<number, string>();
   private previewScalars: [string, string][] = [];
 
-  private constructor(core: PatchCore, gpu: GateGpu) {
+  private readonly decode: (dataUrl: string, size: number) => Promise<Uint8Array>;
+
+  private constructor(
+    core: PatchCore,
+    gpu: GateGpu,
+    decode: (dataUrl: string, size: number) => Promise<Uint8Array> = decodeImage,
+  ) {
     this.core = core;
     this.gpu = gpu;
+    this.decode = decode;
     this.geometry = gpu.geometry;
     gpu.device.lost.then((info) => {
       this.stop();
@@ -194,7 +210,7 @@ export class PatchRuntime implements MiniSource {
    * [`WebGpuUnavailable`] where WebGPU is missing. */
   static async create(geometry: Geometry = GATE_GEOMETRY, options: RuntimeOptions = {}): Promise<PatchRuntime> {
     const [core, device] = await Promise.all([loadPatchCore(options.wasm), requestGateDevice(options.gpu)]);
-    return new PatchRuntime(core, new GateGpu(device, core.limits, geometry));
+    return new PatchRuntime(core, new GateGpu(device, core.limits, geometry), options.decodeImage);
   }
 
   getStatus(): RuntimeStatus {
@@ -300,7 +316,7 @@ export class PatchRuntime implements MiniSource {
         continue;
       }
       this.uploadedImages.set(slot, media);
-      void decodeImage(media, size)
+      void this.decode(media, size)
         .then((rgba) => {
           // Still the picture this cell should hold?
           if (this.uploadedImages.get(slot) !== media || this.sim !== sim) return;
@@ -453,6 +469,13 @@ export class PatchRuntime implements MiniSource {
       slab: sim.slab(),
     });
     if (this.stopMic) this.gpu.writeScope(sim.scope());
+    else if (this.audioFeatures) {
+      const { scopeWave, scopeSpectrum, scopeFloats, audioSources } = this.core.limits;
+      this.scopeT += dt;
+      const scope = new Float32Array(scopeFloats * audioSources);
+      scope.set(synthScope(this.audioFeatures, this.scopeT, scopeWave, scopeSpectrum));
+      this.gpu.writeScope(scope);
+    }
     this.gpu.render();
 
     if (this.miniRefs > 0 && now - this.lastPreview >= PREVIEW_INTERVAL_MS) {
@@ -537,6 +560,7 @@ export class PatchRuntime implements MiniSource {
 
   /** Audio features without a microphone (e.g. a synthetic groove). */
   setAudio(source: number, features: Float32Array) {
+    if (source === 0) this.audioFeatures = features;
     this.sim?.setAudio(source, features);
   }
 
