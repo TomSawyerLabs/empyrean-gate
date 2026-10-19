@@ -31,6 +31,8 @@ Usage: empyrean-patch <command> [options]
   link <file|-> [--base url]   A playground link that opens the patch
   render <file|-> [-o out.png] Pictures of the patch over time (needs: npm i webgpu)
         [--frames 4] [--interval 0.5] [--warmup 1] [--size 384] [--separate]
+        [--at 0] [--no-link]   start the simulated DJ set at a time (s);
+                               or with the PRO DJ LINK unplugged
   mcp [file]                   An MCP server on stdio with the playground's tools;
                                with a file, it opens it and saves every change to it
 
@@ -52,6 +54,8 @@ async function main(argv: string[]): Promise<number> {
       warmup: { type: "string" },
       size: { type: "string" },
       separate: { type: "boolean" },
+      at: { type: "string" },
+      "no-link": { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -100,11 +104,14 @@ async function main(argv: string[]): Promise<number> {
         for (const e of errors) console.error(e);
         return 1;
       }
-      const runtime = await headlessRuntime();
-      if (!runtime) {
+      const headless = await headlessRuntime();
+      if (!headless) {
         console.error(WEBGPU_HINT);
         return 2;
       }
+      const { runtime, groove } = headless;
+      groove.settings.startAt = Math.max(0, Number(values.at ?? 0) || 0);
+      groove.dj.connected = !values["no-link"];
       const api = createPatchApi(fileHost(core, runtime));
       const set = await api.setPatch(doc);
       if (!set.ok) {

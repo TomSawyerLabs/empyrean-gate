@@ -15,15 +15,17 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createPatchApi } from "../src/agent/api";
+import { djTool } from "../src/agent/dj";
 import { patchTools, type AgentTool } from "../src/agent/tools";
 import { exportPatch, parsePatchFile } from "../src/editor/files";
 import type { PatchCore } from "../src/runtime/core";
 import type { PatchRuntime } from "../src/runtime/index";
-import { fileHost } from "./host";
+import { fileHost, type Groove } from "./host";
 
 declare const PACKAGE_VERSION: string;
 
-export async function serveMcp(core: PatchCore, runtime: PatchRuntime | null, file?: string): Promise<void> {
+export async function serveMcp(core: PatchCore, headless: { runtime: PatchRuntime; groove: Groove } | null, file?: string): Promise<void> {
+  const runtime = headless?.runtime ?? null;
   const host = fileHost(core, runtime, file);
   const api = createPatchApi(host);
 
@@ -57,6 +59,7 @@ export async function serveMcp(core: PatchCore, runtime: PatchRuntime | null, fi
       },
     },
   ];
+  if (headless) fileTools.push(djTool(headless.groove));
   const tools = patchTools(api, fileTools);
   const byName = new Map(tools.map((t) => [t.name, t]));
 

@@ -3,6 +3,7 @@
 // operations, and patches in links.
 
 export { createPatchApi, type PatchApi, type PatchHost, type SetResult, type Snapshot, type SnapshotOptions } from "./api";
+export { describeDj, djTool, type DjHost } from "./dj";
 export { applyOps, arranged, OP_NAMES, type PatchOp, type PortRef } from "./edit";
 export { agentGuide, nodeSummary, type GuideOptions } from "./guide";
 export { hasPatchLink, MAX_LINK_CHARS, patchLink, readPatchLink } from "./link";

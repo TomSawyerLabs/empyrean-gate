@@ -28,17 +28,30 @@ control-rate evaluator, effect and audio analysis. This package only hosts it.
   `readFrame()` and `capture({ frames, interval, warmup, restart })`, which
   steps the patch through patch time at a steady 60 Hz and reads each frame
   back; `renderRing`, `contactSheet`, `encodePng` and `frameStats` turn
-  frames into PNGs and numbers without a GPU view. `attachGroove(runtime)`
-  plays a synthetic 122 BPM groove and a stand-in DJ deck when there is no
-  music. `PatchRuntime.create(geometry, { gpu, wasm })` runs without a
-  browser (Node, with the `webgpu` package).
+  frames into PNGs and numbers without a GPU view. `PatchRuntime.create(geometry,
+  { gpu, wasm })` runs without a browser (Node, with the `webgpu` package).
+  For music without music, `attachGroove(runtime)` plays a simulated PRO DJ
+  LINK set (`DjLinkSim`, returned as `dj`) when there is no gate: two CDJs
+  and a mixer at 122 BPM, an Auto DJ mixing a crate of invented tracks with
+  rekordbox phrases, fill-ins, loops, hot-cue jumps and crossfades, and a
+  synthetic groove on audio source 0 that follows what is on air (a
+  breakdown drops the kick). The hardware is modelled as Pioneer reports it
+  and read with the gate's own rules (ported from `src-tauri`'s `rhythm.rs`
+  and engine), so every `dj_link` output and event behaves as on the night,
+  quirks included: cue-play fires `play` and `cue`, an 8-beat loop wraps on
+  each bar, `mix` takes 0, 0.5 or 1 from the on-air flags, eased. A host can
+  work the decks (`dj.act(deck, { action })`, `setCrossfader`; a hand on them
+  turns Auto off), unplug the LINK (`dj.connected = false`: every output as on
+  a gate without CDJs), and choose where `restart()` starts the set
+  (`settings.startAt`), so captures repeat.
 - `@empyrean-gate/patch-web/agent` — patches for AI agents: `createPatchApi(host)`
   (guide, node types, presets, get/set/validate, `edit(ops)` with small
   operations, `snapshot`, `link`), `patchTools(api)` (the same as tool
   definitions with JSON-Schema inputs and MCP-shaped results),
   `registerWebMcp(tools, signal)` (offers them to the browser's agent through
   [WebMCP](https://webmachinelearning.github.io/webmcp/)), `agentGuide(core)`
-  (the guide, generated from the registry), and `patchLink` /
+  (the guide, generated from the registry), `djTool(groove)` (the `dj_deck`
+  tool over a host's simulated set), and `patchLink` /
   `readPatchLink` (a patch in a URL fragment). The editor takes an
   `editorRef` (`PatchEditorHandle`: `doc`, `open`, `replace`, `arrange`), so a
   host's tools act through it and every agent change is one undo step.
@@ -65,8 +78,8 @@ npx -p webgpu -p github:TomSawyerLabs/empyrean-gate#web-dist empyrean-patch <com
 | `schema`                      | JSON Schema of a patch document                                      |
 | `validate <file\|->`          | Check a patch; exit 1 with the reasons                               |
 | `link <file\|->`              | A playground link that opens it                                      |
-| `render <file\|-> [-o x.png]` | Frames over time as PNG (`--frames --interval --warmup --size`)      |
-| `mcp [file]`                  | An MCP server on stdio with the agent tools, optionally bound to a file |
+| `render <file\|-> [-o x.png]` | Frames over time as PNG (`--frames --interval --warmup --size`; `--at <s>` starts the simulated DJ set there, `--no-link` unplugs it) |
+| `mcp [file]`                  | An MCP server on stdio with the agent tools (with WebGPU, `dj_deck` too), optionally bound to a file |
 
 `render` and `mcp`'s `snapshot` need WebGPU, from the optional `webgpu`
 package (Dawn); everything else runs without it. Run it with Node: Dawn's

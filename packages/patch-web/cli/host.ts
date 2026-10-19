@@ -63,14 +63,15 @@ export const WEBGPU_HINT =
   "Rendering needs WebGPU from the optional `webgpu` package (Dawn), run under Node: " +
   "`npm i webgpu` in your project, or `npx -p webgpu -p github:TomSawyerLabs/empyrean-gate#web-dist empyrean-patch …`.";
 
-/** A runtime with no display, driven by the synthetic groove; null without
- * WebGPU. */
-export async function headlessRuntime(): Promise<PatchRuntime | null> {
+export type Groove = ReturnType<typeof attachGroove>;
+
+/** A runtime with no display, driven by the simulated DJ set and its groove
+ * (`groove.dj`); null without WebGPU. */
+export async function headlessRuntime(): Promise<{ runtime: PatchRuntime; groove: Groove } | null> {
   const gpu = await loadWebGpu();
   if (!gpu) return null;
   const runtime = await PatchRuntime.create(GATE_GEOMETRY, { gpu, wasm: wasmBytes() as BufferSource });
-  attachGroove(runtime);
-  return runtime;
+  return { runtime, groove: attachGroove(runtime) };
 }
 
 /** A host over one document in memory, rendered by `runtime` if any, and
@@ -103,7 +104,8 @@ export function fileHost(core: PatchCore, runtime: PatchRuntime | null, file?: s
         (file ? `, saved to \`${file}\` on every change` : "") +
         " (save_patch writes it anywhere; open_file reads one). " +
         (runtime
-          ? "snapshot renders it with WebGPU, driven by a synthetic 122 BPM groove standing in for the music."
+          ? "snapshot renders it with WebGPU, driven by a simulated 122 BPM DJ set standing in for the music and " +
+            "the DJ's decks (dj_deck works them)."
           : "Nothing renders here (no WebGPU): " + WEBGPU_HINT),
     },
     async open(d) {
