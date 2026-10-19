@@ -156,3 +156,62 @@ test("the large view lists what the body can use beside it, and sets its text si
   expect(await size()).toBe("16px");
   await expect(column).toHaveCount(0);
 });
+
+/** Page coordinates of the middle of `text` in the body editor under `root`. */
+async function textPoint(page: Page, root: string, text: string) {
+  return page.evaluate(
+    ([sel, t]) => {
+      const content = document.querySelector(`${sel} .cm-content`)!;
+      const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const i = n.textContent!.indexOf(t);
+        if (i < 0) continue;
+        const r = document.createRange();
+        r.setStart(n, i);
+        r.setEnd(n, i + t.length);
+        const box = r.getBoundingClientRect();
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      }
+      throw new Error(`no ${t}`);
+    },
+    [root, text] as const,
+  );
+}
+
+test("Alt-drag scrubs a number live, and one undo puts it back", async ({ page }) => {
+  const sent: string[] = [];
+  page.on("websocket", (ws) =>
+    ws.on("framesent", (f) => {
+      if (typeof f.payload === "string") sent.push(f.payload);
+    }),
+  );
+  const { body } = await codeNode(page);
+  await body.fill("let k = 0.5;\nout = vec4f(vec3f(k), 1.0);");
+  const at = await textPoint(page, ".patch-side", "0.5");
+  await page.keyboard.down("Alt");
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(at.x + 20, at.y, { steps: 4 });
+  // Live: the body (and so the patch) changes during the drag.
+  await expect(body).toContainText("let k = 1.0;");
+  await page.mouse.move(at.x + 40, at.y, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.up("Alt");
+  await expect(body).toContainText("let k = 1.5;");
+  await expect.poll(() => sent.some((m) => m.includes('"patch_save"') && m.includes("let k = 1.5;"))).toBe(true);
+  // The whole drag is one step back.
+  await body.press("ControlOrMeta+z");
+  await expect(body).toContainText("let k = 0.5;");
+
+  // Off a number, Alt-drag is still a column selection: a caret per line.
+  const lines = page.locator(".patch-side .cm-line");
+  const top = (await lines.nth(0).boundingBox())!;
+  const below = (await lines.nth(1).boundingBox())!;
+  await page.keyboard.down("Alt");
+  await page.mouse.move(top.x + 10, top.y + top.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(top.x + 10, below.y + below.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.up("Alt");
+  await expect(page.locator(".patch-side .cm-cursor")).toHaveCount(2);
+});
