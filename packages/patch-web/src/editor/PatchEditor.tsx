@@ -2180,16 +2180,24 @@ function Editor({
     [mutateDoc],
   );
 
-  /** Where a new node lands: the middle of the canvas as shown, not of the
-   * window (a host may give the editor one corner of the page). */
+  /** Where a new node lands: centred in the canvas as shown, not the window
+   * (a host may give the editor one corner of the page), and clear of the
+   * globals card pinned in its corner: the middle of what the card leaves,
+   * to its left or above it. */
   const canvasCenter = useCallback((): [number, number] => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    const center = flow.screenToFlowPosition(
-      rect
-        ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
-        : { x: window.innerWidth / 2, y: window.innerHeight / 2 },
-    );
-    return [Math.round(center.x), Math.round(center.y)];
+    const el = canvasRef.current;
+    const rect = el?.getBoundingClientRect();
+    let [left, top, right, bottom] = rect
+      ? [rect.left, rect.top, rect.right, rect.bottom]
+      : [0, 0, window.innerWidth, window.innerHeight];
+    const card = el?.querySelector(".patch-globals")?.getBoundingClientRect();
+    if (card && card.width > 0) {
+      if (card.left - left >= DEFAULT_SIZE.width + 40) right = Math.min(right, card.left);
+      else if (card.top - top >= DEFAULT_SIZE.height + 40) bottom = Math.min(bottom, card.top);
+    }
+    const center = flow.screenToFlowPosition({ x: (left + right) / 2, y: (top + bottom) / 2 });
+    // A node's position is its corner: centre the node itself there.
+    return [Math.round(center.x - DEFAULT_SIZE.width / 2), Math.round(center.y - DEFAULT_SIZE.height / 2)];
   }, [flow]);
 
   /** Add a node of `kind` at `at` (flow coordinates), or the canvas centre. */

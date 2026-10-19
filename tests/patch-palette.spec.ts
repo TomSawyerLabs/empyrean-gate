@@ -98,3 +98,15 @@ test("every node and listed kind carries its kind's icon", async ({ page }) => {
   await expect(entries.locator("svg.node-icon")).toHaveCount(await entries.count());
   await expect(page.locator(".pnode .pnode-title svg.node-icon")).toHaveCount(2);
 });
+
+test("a node added by click lands clear of the globals card", async ({ page }) => {
+  const palette = await open(page);
+  await page.setViewportSize({ width: 1000, height: 640 });
+  const card = page.locator(".patch-globals");
+  await expect(card).toBeVisible();
+  await palette.locator(".palette-item", { hasText: "Field math" }).click();
+  const node = (await page.locator(".pnode", { hasText: "Field math" }).boundingBox())!;
+  const c = (await card.boundingBox())!;
+  const overlaps = node.x < c.x + c.width && c.x < node.x + node.width && node.y < c.y + c.height && c.y < node.y + node.height;
+  expect(overlaps).toBe(false);
+});
