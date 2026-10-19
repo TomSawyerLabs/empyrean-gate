@@ -189,6 +189,13 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
     "A wire connects ports of the same shape, plus two automatic adapters: `scalar` → `field_scalar` (a constant " +
       "field) and `field_scalar` → `field_color` (grayscale).",
     "",
+    "**Two domains.** Fields live on the *plane* (`field_*`: defined at every position, so Transform can move them) " +
+      "or on the *LEDs* (`led_*`: defined only at the gate's physical LEDs, such as `random_field`, or a Code node " +
+      "that reads `c.spoke` or `c.i`). A node fed LED data hands on LED data, and a field input takes either. The one " +
+      "exception is an input that reads its source at other positions: Transform's `in`, or a Code node's input whose " +
+      "`x_at` the body calls. LED data can't go there; put a `resample` node in between, which turns it into a plane " +
+      "picture (the nearest LED, or a blend of the four around).",
+    "",
   );
 
   add(
@@ -239,7 +246,9 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
       "",
       "**GPU tier** (a field output): the body is pasted into a WGSL function for one LED. `c` is this LED (`Ctx`, " +
         "below). A field input `x` is the upstream field at this LED (`f32` for `field_scalar`, `vec4f` for " +
-        "`field_color`); `x_at(ctx)` samples it anywhere else (warps, offsets, blurs). A `field_color` output is a " +
+        "`field_color`); `x_at(ctx)` samples it anywhere else (warps, offsets, blurs), which LED data can't feed. " +
+        "A body that reads `c.spoke` or `c.i` keys on the physical LED, so its outputs are LED data; key on " +
+        "`led_cell(c)` (the nearest LED to the position) instead to stay on the plane. A `field_color` output is a " +
         "`vec4f`: RGB plus coverage in `.a` (how much it covers what is under it when blended). `G` (globals) and " +
         "`AUDIO[0]` (the music: `level`, `bass`, `mid`, `treble`, `onset`, `beat_phase`, `bpm`) are readable; " +
         "`return` is not allowed.",

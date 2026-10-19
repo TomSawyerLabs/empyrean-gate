@@ -633,6 +633,21 @@
 .react-flow__edge.pedge.shape-effects path { stroke: #ff9f5c; }
 .react-flow__edge.pedge.shape-texture path { stroke: #ff5c7a; }
 
+/* LED data (defined only at the gate's LEDs): the colour of its field twin,
+   as a row of dots on the wire and a square port. */
+.shape-led_scalar { background: #c0a8ff !important; }
+.shape-led_color { background: #ff8fd0 !important; }
+.port-dot.shape-led_scalar,
+.port-dot.shape-led_color { border-radius: 1px !important; }
+.react-flow__edge.pedge.shape-led_scalar path { stroke: #c0a8ff; }
+.react-flow__edge.pedge.shape-led_color path { stroke: #ff8fd0; }
+.react-flow__edge.pedge.shape-led_scalar .react-flow__edge-path,
+.react-flow__edge.pedge.shape-led_color .react-flow__edge-path {
+  stroke-width: 3;
+  stroke-dasharray: 0 6;
+  stroke-linecap: round;
+}
+
 /* A selected wire stands out, and carries a ✕ at its middle (WireEdge). */
 .react-flow__edge.pedge.selected .react-flow__edge-path {
   stroke-width: 3;

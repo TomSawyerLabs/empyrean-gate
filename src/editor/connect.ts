@@ -5,9 +5,10 @@
 // input before a knob, the categories that usually follow this kind of data
 // first, then by name. Pure, so it is unit-tested on a small registry.
 
+import { fitsInput } from "./domains";
 import {
   SUBPATCH_KIND,
-  shapeAccepts,
+  onLeds,
   type PatchNodeType,
   type PatchShape,
 } from "../types";
@@ -28,6 +29,9 @@ export interface DragFrom {
   /** "out": the wire starts at an output and wants a consumer; "in": it
    * starts at an input and wants a producer. */
   dir: "out" | "in";
+  /** Dragging from an input that reads its source somewhere else
+   * (Transform's `in`): LED data won't do there. */
+  sampled?: boolean;
 }
 
 type Category = PatchNodeType["category"];
@@ -40,6 +44,8 @@ const CONSUMERS: Partial<Record<PatchShape, Category[]>> = {
   event: ["scalar", "input", "generator", "field", "combine", "texture", "sink"],
   field_scalar: ["field", "combine", "sink", "generator", "texture", "scalar", "input"],
   field_color: ["combine", "field", "sink", "texture", "generator", "scalar", "input"],
+  led_scalar: ["field", "combine", "sink", "generator", "texture", "scalar", "input"],
+  led_color: ["field", "combine", "sink", "texture", "generator", "scalar", "input"],
   points: ["field", "combine", "sink", "generator", "texture", "scalar", "input"],
   effects: ["field", "combine", "sink", "generator", "texture", "scalar", "input"],
   texture: ["texture", "field", "combine", "sink", "generator", "scalar", "input"],
@@ -51,10 +57,18 @@ const PRODUCERS: Partial<Record<PatchShape, Category[]>> = {
   event: ["input", "scalar", "generator", "field", "combine", "texture", "sink"],
   field_scalar: ["generator", "field", "combine", "input", "texture", "scalar", "sink"],
   field_color: ["generator", "field", "combine", "texture", "input", "scalar", "sink"],
+  led_scalar: ["generator", "field", "combine", "input", "texture", "scalar", "sink"],
+  led_color: ["generator", "field", "combine", "texture", "input", "scalar", "sink"],
   points: ["input", "generator", "field", "combine", "texture", "scalar", "sink"],
   effects: ["input", "scalar", "generator", "field", "combine", "texture", "sink"],
   texture: ["input", "texture", "generator", "field", "combine", "scalar", "sink"],
 };
+
+/** The same value type, whichever domain (an LED colour wire is an exact
+ * fit for a colour-field input). */
+function sameValue(a: PatchShape, b: PatchShape): boolean {
+  return onLeds(a) === onLeds(b);
+}
 
 function rank(order: Category[] | undefined, c: Category): number {
   const i = (order ?? ALL).indexOf(c);
@@ -82,11 +96,11 @@ export function suggestConnections(registry: Iterable<PatchNodeType>, from: Drag
     const candidates =
       from.dir === "out"
         ? inputsOf(t)
-            .filter((p) => shapeAccepts(p.shape, from.shape))
-            .map((p) => ({ port: p.name, exact: p.shape === from.shape, viaParam: p.viaParam }))
+            .filter((p) => fitsInput(p.shape, !p.viaParam && (t.sampled?.includes(p.name) ?? false), from.shape))
+            .map((p) => ({ port: p.name, exact: sameValue(p.shape, from.shape), viaParam: p.viaParam }))
         : t.outputs
-            .filter((p) => shapeAccepts(from.shape, p.shape))
-            .map((p) => ({ port: p.name, exact: p.shape === from.shape, viaParam: false }));
+            .filter((p) => fitsInput(from.shape, from.sampled ?? false, p.shape))
+            .map((p) => ({ port: p.name, exact: sameValue(p.shape, from.shape), viaParam: false }));
     if (candidates.length === 0) continue;
     // The best port of this type: exact before adapter, shaped before knob,
     // then the type's own order (its first port is its main one).
@@ -106,6 +120,8 @@ export const SHAPE_LABEL: Record<PatchShape, string> = {
   event: "event",
   field_scalar: "field (grey)",
   field_color: "field (colour)",
+  led_scalar: "LEDs (grey)",
+  led_color: "LEDs (colour)",
   points: "points",
   effects: "effects",
   texture: "texture",
