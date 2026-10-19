@@ -50,3 +50,29 @@ test("Ctrl+F searches the body, and Ctrl+D adds a caret at each next match", asy
   await expect(modal.locator(".cm-search")).toHaveCount(0);
   await expect(modal).toBeVisible();
 });
+
+test("a snippet goes in from completion, its fields linked, and Tab moves on", async ({ page }) => {
+  const sent: string[] = [];
+  page.on("websocket", (ws) =>
+    ws.on("framesent", (f) => {
+      if (typeof f.payload === "string") sent.push(f.payload);
+    }),
+  );
+  const { panel, body } = await codeNode(page);
+  await body.fill("");
+  await body.pressSequentially("ripp");
+  const selected = panel.locator('.cm-tooltip-autocomplete [aria-selected="true"]');
+  await expect(selected).toContainText("ripple");
+  // CodeMirror ignores Enter for 75 ms after a list opens (a typist's guard).
+  await page.waitForTimeout(150);
+  await body.press("Enter");
+  // The first field (the wave's name) is selected everywhere it appears.
+  await body.pressSequentially("w");
+  await expect(body).toContainText("let w = sin(c.rn * 12.0 - G.time * 2.0);");
+  await expect(body).toContainText("out = vec4f(vec3f(0.5 + 0.5 * w), 1.0);");
+  // Tab: the next field, the ring count.
+  await body.press("Tab");
+  await body.pressSequentially("20.0");
+  await expect(body).toContainText("sin(c.rn * 20.0 -");
+  await expect.poll(() => sent.some((m) => m.includes('"patch_save"') && m.includes("c.rn * 20.0"))).toBe(true);
+});

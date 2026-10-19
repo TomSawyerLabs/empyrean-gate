@@ -1,9 +1,11 @@
 // Every kind of shader the patch core can generate, as documents: each node
 // kind alone and with every input wired, once per Select option (a Select
-// can switch the WGSL a node emits), each Convert to Code result, and every
-// preset. `shaders.spec.ts` compiles them all in a real browser.
+// can switch the WGSL a node emits), each Convert to Code result, every
+// preset, and every body snippet the editor offers. `shaders.spec.ts`
+// compiles them all in a real browser.
 
 import type { PatchCore } from "../src/runtime/core";
+import { snippetDocs } from "../src/editor/code-snippets";
 import { CODE_KIND, type PatchDoc, type PatchNode, type PatchNodeType, type PatchShape } from "../src/types";
 
 export interface CorpusEntry {
@@ -108,5 +110,6 @@ export function shaderCorpus(core: PatchCore): CorpusEntry[] {
     }
   }
   for (const p of core.presets) entries.push({ label: `preset "${p.name}"`, doc: p });
+  entries.push(...snippetDocs(core.limits.patchFormat, into.name));
   return entries;
 }

@@ -42,6 +42,7 @@ import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { tags as t } from "@lezer/highlight";
 import type { CodeFnRef, CodePort, CodeReference, PatchShape } from "../types";
+import { snippetsFor } from "./code-snippets";
 
 // --- WGSL, as a stream mode --------------------------------------------------
 
@@ -417,9 +418,11 @@ function makeCompletions(scope: () => CodeScope) {
         if (!options.some((o) => o.label === ty)) options.push({ label: ty, type: "type" });
       }
     }
-    for (const k of ["let", "var", "if", "else", "for", "while", "loop", "break", "continue", "return", "true", "false"]) {
+    // `if` and `for` come as snippets (code-snippets.ts).
+    for (const k of ["let", "var", "else", "while", "loop", "break", "continue", "return", "true", "false"]) {
       options.push({ label: k, type: "keyword", boost: -1 });
     }
+    options.push(...snippetsFor(s));
     return { from, options, validFor: /^\w*$/ };
   };
 }
