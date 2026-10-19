@@ -118,3 +118,12 @@ test("a node added by click lands clear of the globals card", async ({ page }) =
   const overlaps = node.x < c.x + c.width && c.x < node.x + node.width && node.y < c.y + c.height && c.y < node.y + node.height;
   expect(overlaps).toBe(false);
 });
+
+test("a narrow palette never scrolls sideways", async ({ page }) => {
+  const palette = await open(page);
+  // As on a page whose scrollbars take room: the site's.
+  await page.addStyleTag({ content: ".patch-palette { width: 180px !important; }" });
+  const list = palette.locator(".palette-scroll");
+  const [scroll, client] = await list.evaluate((el) => [el.scrollWidth, el.clientWidth]);
+  expect(scroll).toBeLessThanOrEqual(client);
+});
