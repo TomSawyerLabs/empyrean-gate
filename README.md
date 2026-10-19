@@ -259,8 +259,9 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   body is edited in a real code editor (CodeMirror: WGSL highlighting,
   completion and hover docs read off the shader lib itself through
   `GET /patch/code-reference`, Tab indents, Ctrl+Space; ⤢ Expand opens it
-  in a large modal with the live minis beside it), shader errors
-  inside a body are marked on its own lines, and every output of a Code
+  in a large modal, the whole screen on a phone, with the live minis beside
+  it), shader errors inside a body are marked on its own lines, and every
+  output of a Code
   node gets a live mini (a ring per field output, a meter per scalar or
   event) on the node and beside the editor. Any built-in node's panel has
   **Convert to Code**: the node becomes a Code node in place, wires and

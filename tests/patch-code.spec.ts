@@ -209,6 +209,48 @@ test("the body opens in a large modal, edits there reach the patch, Esc comes ba
   await expect(panel.getByLabel("Body (WGSL)")).toContainText("out = vec4f(0.5);");
 });
 
+// The site's root.css resets every margin, the dialog's centring included.
+const HOST_RESET = "*, ::before, ::after { margin: 0; padding: 0; }";
+
+test("the large modal is centred and nearly the window under a host's margin reset", async ({ page }) => {
+  const sent: string[] = [];
+  const node = await newPatchWithCode(page, sent);
+  await page.addStyleTag({ content: HOST_RESET });
+  await node.click();
+  await page.locator(".patch-side").getByRole("button", { name: "Open the body in a bigger editor" }).click();
+  const modal = page.locator("dialog.code-modal");
+  await expect(modal).toBeVisible();
+  const box = (await modal.boundingBox())!;
+  expect(box.width).toBeGreaterThan(1300);
+  expect(box.height).toBeGreaterThan(800);
+  expect(Math.abs(box.x + box.width / 2 - 700)).toBeLessThan(2);
+  expect(Math.abs(box.y + box.height / 2 - 450)).toBeLessThan(2);
+});
+
+test("on a phone the large modal is the whole screen", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#patch");
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+  await page.addStyleTag({ content: HOST_RESET });
+  await page.locator(".patch-name-chip").click();
+  await page.getByRole("button", { name: "＋ Blank patch" }).click();
+  await page.getByRole("button", { name: "Add node" }).click();
+  const group = page.locator(".palette-group", { has: page.locator("h4", { hasText: "Code" }) });
+  await group.getByRole("button", { name: "Code" }).click();
+  await page.locator(".pnode.cat-code").click();
+  await page.getByRole("button", { name: /settings/ }).click();
+  const sheet = page.locator(".patch-side.patch-sheet");
+  await sheet.getByRole("button", { name: "Open the body in a bigger editor" }).click();
+  const modal = page.locator("dialog.code-modal");
+  await expect(modal).toBeVisible();
+  const box = (await modal.boundingBox())!;
+  expect([box.x, box.y, box.width, box.height].map(Math.round)).toEqual([0, 0, 390, 844]);
+  await expect(modal.locator(".cm-editor")).toBeVisible();
+  await modal.getByRole("button", { name: "Done" }).click();
+  await expect(modal).toHaveCount(0);
+  await expect(sheet).toBeVisible();
+});
+
 test("the body takes a Tab as an indent", async ({ page }) => {
   const sent: string[] = [];
   const node = await newPatchWithCode(page, sent);
