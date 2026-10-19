@@ -18,8 +18,9 @@
   },
   "scripts": {
     "build:wasm": "bun scripts/build-wasm.ts",
-    "typecheck": "tsc -p tsconfig.json && tsc -p cli/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p cli/tsconfig.json && tsc -p browser/tsconfig.json",
     "test": "bun test src",
+    "test:browser": "playwright test -c playwright.config.ts",
     "demo": "vite --config demo/vite.config.ts",
     "build:cli": "bun scripts/build-cli.ts"
   },
@@ -50,6 +51,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "@playwright/test": "^1.62.1",
     "@types/node": "^24"
   }
 }

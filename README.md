@@ -549,6 +549,8 @@ Useful during pattern development:
   requests a feedback report, and verifies the bundle end to end (timeline folding,
   frames.bin geometry, PNG contact sheet, path-traversal defense).
 - `bun run test:layout` — the **layout gate** (see below).
+- `bun run test:browser` in `packages/patch-web` — every patch shader through
+  Chrome's own WGSL compiler (see that package's README). CI runs it on every push.
 - `bun run mock-backend` — serve the built UI with a deterministic fake backend
   (no GPU, no audio device) at http://127.0.0.1:9531. Handy for UI work.
 - `bun run screenshots` — regenerate the screenshots in `docs/` from that same

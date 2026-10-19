@@ -96,5 +96,15 @@ cargo install wasm-bindgen-cli --version 0.2.129 --locked
 bun run build:wasm      # crates/empyrean-patch-wasm -> ./wasm (gitignored)
 bun run build:cli       # cli/ -> cli/empyrean-patch.mjs (gitignored)
 bun run typecheck
+bun run test:browser    # every shader the core generates, through Chrome's compiler
 bun run demo            # every preset on a bare WebGPU page, port 28150
 ```
+
+`test:browser` (needs the wasm build, and `bunx playwright install chromium`)
+compiles every shader the patch core can generate in Chromium: each node kind
+alone and with its inputs wired, each Select option, each Convert to Code
+result and every preset. It then builds each pipeline within a time budget.
+The crate's tests check the same WGSL with naga, which is what the desktop app
+uses, but browsers bring their own compilers and Chrome's (Tint) is stricter.
+It runs on SwiftShader, Chrome's software WebGPU, so it needs no GPU and runs
+in CI. Safari's compiler is not covered: Playwright's WebKit has no WebGPU.

@@ -97,6 +97,32 @@ jobs:
         working-directory: packages/patch-web
         run: bun run test
 
+      # Chromium only, under its own key: the ui job's cache holds WebKit too,
+      # and sharing a key would leave one job re-downloading the other's
+      # browser on every run.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: playwright-chromium-${{ runner.os }}-
+
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+
+      # Every shader the core can generate, through Chrome's own WGSL
+      # compiler on SwiftShader (no GPU here). The crate's naga validation
+      # is what the desktop app compiles with; browsers are stricter.
+      - name: Browser shader check
+        working-directory: packages/patch-web
+        run: bun run test:browser
+
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: patch-web-failure-traces
+          path: packages/patch-web/test-results
+          if-no-files-found: ignore
+
   rust:
     name: Rust unit tests (${{ matrix.os }})
     # Windows as well as Linux: the show machine is Windows, and the difference
