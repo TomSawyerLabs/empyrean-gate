@@ -213,7 +213,10 @@ test("Alt-drag scrubs a number live, and one undo puts it back", async ({ page }
   await page.mouse.move(top.x + 10, below.y + below.height / 2, { steps: 4 });
   await page.mouse.up();
   await page.keyboard.up("Alt");
-  await expect(page.locator(".patch-side .cm-cursor")).toHaveCount(2);
+  // What a caret per line does (counting the drawn carets is not reliable
+  // on Linux): one keystroke lands on both lines.
+  await page.keyboard.type("#");
+  await expect(body).toHaveText(/^[^;#]*#[^;#]*;[^;#]*#[^#]*$/);
 });
 
 test("a colour in literals gets a swatch, and picking rewrites it as one step", async ({ page }) => {
