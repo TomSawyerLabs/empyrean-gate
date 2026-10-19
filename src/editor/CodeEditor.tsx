@@ -1,12 +1,14 @@
 // The Code node's body editor: CodeMirror 6 with a WGSL mode, completion and
 // hover docs fed by the patch core's reference (and the node's own ports),
-// and the host's errors as marks on the body's lines. One instance per
+// search and multiple selections, and the host's errors as marks on the
+// body's lines. One instance per
 // panel; the document is kept in sync with the patch (undo in the patch
 // replaces the text here, edits here go to the patch coalesced).
 
 import { useEffect, useRef } from "react";
 import { Compartment, EditorState } from "@codemirror/state";
 import {
+  crosshairCursor,
   drawSelection,
   EditorView,
   highlightActiveLine,
@@ -14,6 +16,7 @@ import {
   hoverTooltip,
   keymap,
   lineNumbers,
+  rectangularSelection,
   type Tooltip,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
@@ -36,8 +39,11 @@ import {
   type CompletionResult,
 } from "@codemirror/autocomplete";
 import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
+import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { tags as t } from "@lezer/highlight";
 import type { CodeFnRef, CodePort, CodeReference, PatchShape } from "../types";
+import { signatureHelp } from "./code-signature";
+import { snippetsFor } from "./code-snippets";
 
 // --- WGSL, as a stream mode --------------------------------------------------
 
@@ -180,6 +186,30 @@ const theme = EditorView.theme(
     ".cm-completionInfo": { fontFamily: "system-ui, sans-serif", maxWidth: "320px" },
     ".cm-lintRange-error": { backgroundImage: "none", textDecoration: "underline wavy #ff8a8a" },
     ".cm-diagnostic-error": { borderLeftColor: "#ff8a8a" },
+    ".cm-panels": { backgroundColor: "#1b1630", color: "#e8e4ff" },
+    ".cm-panels-top": { borderBottom: "1px solid #2a2445" },
+    ".cm-search": { fontFamily: "system-ui, sans-serif", fontSize: "12px", padding: "4px 6px" },
+    ".cm-search input, .cm-search button, .cm-search label": { margin: "2px 4px 2px 0", fontSize: "12px" },
+    ".cm-search input[type=checkbox]": { marginRight: "3px", verticalAlign: "middle" },
+    ".cm-textfield": {
+      backgroundColor: "var(--pe-bg, #0d0a1a)",
+      color: "#e8e4ff",
+      border: "1px solid #2a2445",
+      borderRadius: "3px",
+      padding: "2px 5px",
+    },
+    ".cm-button": {
+      backgroundImage: "none",
+      backgroundColor: "#2d2652",
+      color: "#e8e4ff",
+      border: "1px solid #3b3270",
+      borderRadius: "3px",
+      padding: "2px 8px",
+    },
+    ".cm-panel.cm-search [name=close]": { color: "#8a85a8", fontSize: "16px", padding: "0 6px" },
+    ".cm-searchMatch": { backgroundColor: "#f2c94c33", outline: "1px solid #f2c94c66" },
+    ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "#f2c94c66" },
+    ".cm-selectionMatch": { backgroundColor: "#7c5cff33" },
     ".code-hover": { padding: "4px 8px", maxWidth: "360px", fontFamily: "system-ui, sans-serif" },
     ".code-hover code": { fontFamily: "ui-monospace, Menlo, Consolas, monospace", color: "#82aaff" },
   },
@@ -299,6 +329,51 @@ function ctxNames(doc: string): Set<string> {
   return names;
 }
 
+/** The functions an input port gives the body: `<name>_at` to sample it
+ * elsewhere, and a buffer's `<name>_on`. */
+function portFns(p: CodePort): CodeFnRef[] {
+  const n = p.name;
+  switch (p.shape) {
+    case "points":
+    case "effects": {
+      const rec = p.shape === "points" ? "Dab" : "Effect";
+      const fns = [{ name: `${n}_at`, signature: `${n}_at(k: u32) -> ${rec}`, doc: `The k-th of the live ${p.shape} (0..${n}_count); a zeroed ${rec} past the end.` }];
+      if (p.shape === "effects") {
+        fns.push({ name: `${n}_on`, signature: `${n}_on(k: u32) -> bool`, doc: `Whether effect k belongs to the chain wired into ${n} (the Effects buffer holds every chain's).` });
+      }
+      return fns;
+    }
+    case "texture":
+      return [{ name: `${n}_at`, signature: `${n}_at(uv: vec2f) -> vec4f`, doc: `The texture wired into ${n} at uv (0..1, y down), RGBA.` }];
+    case "field_scalar":
+    case "field_color":
+      return [
+        {
+          name: `${n}_at`,
+          signature: `${n}_at(ctx: Ctx) -> ${p.shape === "field_color" ? "vec4f" : "f32"}`,
+          doc: `The ${n} input sampled at another position, e.g. ${n}_at(ctx_transform(c, angle, zoom, 0.0, 0.0)).`,
+        },
+      ];
+    default:
+      return [];
+  }
+}
+
+/** The function named `name` in the body's scope: a port's own, a lib
+ * helper (GPU) or interpreter builtin (CPU), or a WGSL builtin. */
+export function fnFor(s: CodeScope, name: string): CodeFnRef | null {
+  for (const p of s.inputs) {
+    const fn = portFns(p).find((f) => f.name === name);
+    if (fn) return fn;
+  }
+  const ref = s.reference;
+  return (
+    (s.tier === "cpu" ? ref?.cpu_builtins : ref?.helpers)?.find((h) => h.name === name) ??
+    WGSL_BUILTINS.find((b) => b.name === name) ??
+    null
+  );
+}
+
 function makeCompletions(scope: () => CodeScope) {
   return (ctx: CompletionContext): CompletionResult | null => {
     const s = scope();
@@ -334,28 +409,13 @@ function makeCompletions(scope: () => CodeScope) {
     const options: Completion[] = [];
     for (const p of s.inputs) {
       const n = p.name;
+      for (const fn of portFns(p)) options.push(fnCompletion(fn, 2));
       if (p.shape === "points" || p.shape === "effects") {
-        const rec = p.shape === "points" ? "Dab" : "Effect";
         options.push({ label: `${n}_count`, type: "variable", detail: `u32 · live ${p.shape} on this input`, boost: 3 });
-        options.push(fnCompletion({ name: `${n}_at`, signature: `${n}_at(k: u32) -> ${rec}`, doc: `The k-th of the live ${p.shape} (0..${n}_count); a zeroed ${rec} past the end.` }, 2));
-        if (p.shape === "effects") {
-          options.push(fnCompletion({ name: `${n}_on`, signature: `${n}_on(k: u32) -> bool`, doc: `Whether effect k belongs to the chain wired into ${n} (the Effects buffer holds every chain's).` }, 2));
-        }
-        continue;
-      }
-      if (p.shape === "texture") {
+      } else if (p.shape === "texture") {
         options.push({ label: n, type: "variable", detail: "vec4f · the texture at this pixel (ring mapping)", boost: 3 });
-        options.push(fnCompletion({ name: `${n}_at`, signature: `${n}_at(uv: vec2f) -> vec4f`, doc: `The texture wired into ${n} at uv (0..1, y down), RGBA.` }, 2));
-        continue;
-      }
-      options.push({ label: n, type: "variable", detail: `input · ${SHAPE_WORD[p.shape]}`, boost: 3 });
-      if (p.shape === "field_scalar" || p.shape === "field_color") {
-        options.push(
-          fnCompletion(
-            { name: `${n}_at`, signature: `${n}_at(ctx) -> ${p.shape === "field_color" ? "vec4f" : "f32"}`, doc: `The ${n} input sampled at another position, e.g. ${n}_at(ctx_transform(c, angle, zoom, 0.0, 0.0)).` },
-            2,
-          ),
-        );
+      } else {
+        options.push({ label: n, type: "variable", detail: `input · ${SHAPE_WORD[p.shape]}`, boost: 3 });
       }
     }
     for (const p of s.outputs) {
@@ -389,9 +449,11 @@ function makeCompletions(scope: () => CodeScope) {
         if (!options.some((o) => o.label === ty)) options.push({ label: ty, type: "type" });
       }
     }
-    for (const k of ["let", "var", "if", "else", "for", "while", "loop", "break", "continue", "return", "true", "false"]) {
+    // `if` and `for` come as snippets (code-snippets.ts).
+    for (const k of ["let", "var", "else", "while", "loop", "break", "continue", "return", "true", "false"]) {
       options.push({ label: k, type: "keyword", boost: -1 });
     }
+    options.push(...snippetsFor(s));
     return { from, options, validFor: /^\w*$/ };
   };
 }
@@ -422,9 +484,7 @@ function makeHover(scope: () => CodeScope) {
       doc = field.doc;
     } else {
       const port = [...s.inputs, ...s.outputs].find((p) => p.name === word);
-      const fn =
-        (s.tier === "cpu" ? ref?.cpu_builtins : ref?.helpers)?.find((h) => h.name === word) ??
-        WGSL_BUILTINS.find((b) => b.name === word);
+      const fn = fnFor(s, word);
       if (port) {
         title = `${port.name}: ${SHAPE_WORD[port.shape]}`;
         doc = s.inputs.includes(port) ? (port.shape === "scalar" ? `input knob ${port.min}..${port.max}, default ${port.default}` : "input") : "output";
@@ -526,6 +586,12 @@ export function CodeEditor({
           highlightActiveLineGutter(),
           highlightActiveLine(),
           drawSelection(),
+          // Several carets: Ctrl+D adds the next match, Alt-drag a column.
+          EditorState.allowMultipleSelections.of(true),
+          rectangularSelection(),
+          crosshairCursor(),
+          highlightSelectionMatches(),
+          search({ top: true }),
           history(),
           bracketMatching(),
           closeBrackets(),
@@ -535,8 +601,16 @@ export function CodeEditor({
           syntaxHighlighting(highlight),
           autocompletion({ override: [makeCompletions(getScope)], activateOnTyping: true, maxRenderedOptions: 40 }),
           makeHover(getScope),
+          signatureHelp((name) => fnFor(getScope(), name)),
           lintGutter(),
-          keymap.of([...closeBracketsKeymap, ...completionKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
+          keymap.of([
+            ...closeBracketsKeymap,
+            ...completionKeymap,
+            ...searchKeymap,
+            ...defaultKeymap,
+            ...historyKeymap,
+            indentWithTab,
+          ]),
           theme,
           EditorView.contentAttributes.of({ "aria-label": ariaLabel, spellcheck: "false", autocorrect: "off", autocapitalize: "off" }),
           readOnlyC.current.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
