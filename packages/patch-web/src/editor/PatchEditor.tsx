@@ -51,10 +51,14 @@ import { CodePanel } from "./CodePanel";
 import { combinerFor, freeSpot, insertCombiner, type Combiner, type PortRef } from "./combine";
 import { NodeContext, type WireDrag } from "./context";
 import { SHAPE_LABEL, suggestConnections, type Suggestion } from "./connect";
+import { matchScore } from "./search";
 import { imageFileToMedia } from "./files";
 import { History } from "./history";
 import { addLayer, layerFor, layerInput, moveLayer, removeLayer } from "./layers";
+import { NodeIcon } from "./icons";
 import { MiniMeter, MiniRing, type MiniSource } from "./minis";
+import { Palette, PALETTE_DRAG_TYPE, type SubpatchChoice } from "./Palette";
+import { PanelHead, useSheet } from "./sheet";
 import {
   CODE_KIND,
   NOTE_KIND,
@@ -240,28 +244,6 @@ function GlobalsCard({
   );
 }
 
-
-const CATEGORY_LABELS: Record<PatchNodeType["category"], string> = {
-  input: "Inputs",
-  scalar: "Scalar ops",
-  generator: "Generators",
-  field: "Field ops",
-  combine: "Combine",
-  texture: "Texture",
-  sink: "Output",
-  code: "Code",
-};
-
-const CATEGORY_ORDER: PatchNodeType["category"][] = [
-  "input",
-  "scalar",
-  "generator",
-  "field",
-  "combine",
-  "texture",
-  "code",
-  "sink",
-];
 
 type Registry = Map<string, PatchNodeType>;
 
@@ -512,7 +494,10 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
     return (
       <div className={`pnode pnode-collapsed cat-${def.category} ${selected ? "selected" : ""}`}>
         <div className="pnode-head">
-          <span className="pnode-title">{node.name || def.label}</span>
+          <span className="pnode-title">
+            <NodeIcon kind={node.kind} category={def.category} size={13} />
+            {node.name || def.label}
+          </span>
           {collapseButton}
         </div>
         <div className="pnode-body">
@@ -565,6 +550,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
     <div className={`pnode cat-${def.category} ${selected ? "selected" : ""}`}>
       <div className="pnode-head">
         <span className="pnode-title">
+          <NodeIcon kind={node.kind} category={def.category} size={13} />
           {def.label}
           {node.name && <span className="pnode-name"> · {node.name}</span>}
         </span>
@@ -836,38 +822,6 @@ function useCompact(ref: React.RefObject<HTMLElement | null>): boolean {
   return compact;
 }
 
-/** Heading of a side panel; as a sheet it also carries the Done button. */
-function PanelHead({ title, onClose }: { title: ReactNode; onClose?: () => void }) {
-  return (
-    <div className="patch-panel-head">
-      <h3>{title}</h3>
-      {onClose && (
-        <button type="button" className="patch-sheet-done" onClick={onClose}>
-          Done
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** A sheet closes on Escape and takes focus when it opens, so a keyboard
- * user lands inside it. */
-function useSheet(onClose: (() => void) | undefined) {
-  const ref = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (onClose) ref.current?.focus({ preventScroll: true });
-  }, [onClose]);
-  const onKeyDown = onClose
-    ? (e: React.KeyboardEvent) => {
-        if (e.key === "Escape") {
-          e.stopPropagation();
-          onClose();
-        }
-      }
-    : undefined;
-  return { ref, onKeyDown, tabIndex: onClose ? -1 : undefined };
-}
-
 function ParamPanel({
   doc,
   nodeId,
@@ -1004,7 +958,15 @@ function ParamPanel({
       tabIndex={sheet.tabIndex}
       onKeyDown={sheet.onKeyDown}
     >
-      <PanelHead title={def.label} onClose={onClose} />
+      <PanelHead
+        title={
+          <>
+            <NodeIcon kind={def.id} category={def.category} size={18} />
+            {def.label}
+          </>
+        }
+        onClose={onClose}
+      />
       {def.description && <p className="hint patch-node-about">{def.description}</p>}
       <label className="patch-field">
         <span>Name</span>
@@ -1174,85 +1136,6 @@ function ParamPanel({
   );
 }
 
-// --- palette ---------------------------------------------------------------
-
-type PaletteGroup = { category: string; label: string; types: PatchNodeType[] };
-
-/** A saved patch or a preset the palette offers as a Sub-patch. */
-type SubpatchChoice = { id: string; name: string; nodes: number; preset: boolean };
-
-function Palette({
-  grouped,
-  subpatches,
-  hasOutput,
-  onPick,
-  onPickSubpatch,
-  onClose,
-}: {
-  grouped: PaletteGroup[];
-  subpatches: SubpatchChoice[];
-  /** The open patch already has its one Output: the palette's is disabled. */
-  hasOutput: boolean;
-  onPick: (kind: string) => void;
-  onPickSubpatch: (choice: SubpatchChoice) => void;
-  /** Set when the palette is a sheet (compact layout): shows Done. */
-  onClose?: () => void;
-}) {
-  const sheet = useSheet(onClose);
-  return (
-    <aside
-      className={`patch-palette ${onClose ? "patch-sheet" : ""}`}
-      aria-label="Add a node"
-      ref={sheet.ref}
-      tabIndex={sheet.tabIndex}
-      onKeyDown={sheet.onKeyDown}
-    >
-      {onClose && <PanelHead title="Add a node" onClose={onClose} />}
-      {grouped.map((g) => (
-        <div key={g.category} className="palette-group">
-          <h4>{g.label}</h4>
-          <div className="palette-items">
-            {g.types.map((t) => {
-              const placed = t.id === "output" && hasOutput;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`palette-item cat-${t.category}`}
-                  disabled={placed}
-                  onClick={() => onPick(t.id)}
-                >
-                  {t.label}
-                  {placed && <span className="hint"> · one per patch</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-      {subpatches.length > 0 && (
-        <div className="palette-group palette-subpatches">
-          <h4>Sub-patches</h4>
-          <div className="palette-items">
-            {subpatches.map((s) => (
-              <button
-                key={(s.preset ? "preset:" : "patch:") + s.id}
-                type="button"
-                className="palette-sub cat-combine"
-                title={`Insert a copy of ${s.name} as one node (${s.nodes} nodes inside)`}
-                onClick={() => onPickSubpatch(s)}
-              >
-                {s.name}
-                {s.preset && <span className="hint"> · preset</span>}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </aside>
-  );
-}
-
 /** The compact layout's stand-in for the toolbar: everything about the open
  * patch and the library, behind the patch-name chip on the canvas. */
 function MenuSheet({ onClose, children }: { onClose: () => void; children: ReactNode }) {
@@ -1311,7 +1194,7 @@ function ConnectChooser({
   }, [onClose, panel.ref, sheet]);
   const q = filter.trim().toLowerCase();
   const shown = q
-    ? suggestions.filter((s) => `${s.type.label} ${s.port}`.toLowerCase().includes(q))
+    ? suggestions.filter((s) => matchScore(s.type, q) !== null || s.port.toLowerCase().includes(q))
     : suggestions;
   const title = `${from.dir === "out" ? "Send" : "Feed"} ${from.port} (${SHAPE_LABEL[from.shape]}) ${from.dir === "out" ? "to…" : "from…"}`;
   return (
@@ -1344,18 +1227,14 @@ function ConnectChooser({
             type="button"
             className={`palette-item cat-${s.type.category}`}
             onClick={() => onPick(s)}
-            title={
-              s.exact
-                ? `${s.type.label}: ${s.port} takes ${SHAPE_LABEL[from.shape]}`
-                : `${s.type.label}: ${s.port} takes it through an adapter`
-            }
           >
-            {s.type.label}
+            <NodeIcon kind={s.type.id} category={s.type.category} />
+            <span className="patch-connect-label">{s.type.label}</span>
             <span className="patch-connect-port">
               {from.dir === "out" ? "→ " : "← "}
               {s.port}
               {s.viaParam ? " (knob)" : ""}
-              {s.exact ? "" : " ≈"}
+              {s.exact ? "" : " ≈ adapted"}
             </span>
           </button>
         ))}
@@ -1941,11 +1820,12 @@ function Editor({
     return [Math.round(center.x), Math.round(center.y)];
   }, [flow]);
 
+  /** Add a node of `kind` at `at` (flow coordinates), or the canvas centre. */
   const addNode = useCallback(
-    (kind: string) => {
+    (kind: string, at?: [number, number]) => {
       // A patch has one sink; the palette disables Output while it has it.
       if (kind === "output" && docRef.current?.nodes.some((n) => n.kind === "output")) return;
-      const pos = canvasCenter();
+      const pos = at ?? canvasCenter();
       mutateDoc((d) => {
         const node: PatchNode = { id: freshId(d), kind, name: "", params: {}, pos };
         // A Code node is nothing without its ports and body; a Note is text.
@@ -2026,21 +1906,6 @@ function Editor({
   );
 
   const isActive = doc !== null && doc.id !== "" && activeId === doc.id;
-
-  const grouped = useMemo(() => {
-    if (!registry) return [];
-    const byCat = new Map<string, PatchNodeType[]>();
-    for (const t of registry.values()) {
-      const list = byCat.get(t.category) ?? [];
-      list.push(t);
-      byCat.set(t.category, list);
-    }
-    return CATEGORY_ORDER.filter((c) => byCat.has(c)).map((c) => ({
-      category: c,
-      label: CATEGORY_LABELS[c],
-      types: byCat.get(c)!,
-    }));
-  }, [registry]);
 
   const selectedDef =
     selectedNode && doc && registry
@@ -2194,7 +2059,7 @@ function Editor({
       <div className="patch-main">
         {canEdit && doc && registry && (!compact || sheet === "palette") && (
           <Palette
-            grouped={grouped}
+            types={registryList ?? []}
             subpatches={subpatchChoices}
             hasOutput={doc.nodes.some((n) => n.kind === "output")}
             onPick={(kind) => {
@@ -2215,7 +2080,23 @@ function Editor({
           />
         )}
 
-        <div className="patch-canvas" ref={canvasRef}>
+        <div
+          className="patch-canvas"
+          ref={canvasRef}
+          // A kind dragged out of the palette lands where it is dropped.
+          onDragOver={(e) => {
+            if (!canEdit || !e.dataTransfer.types.includes(PALETTE_DRAG_TYPE)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }}
+          onDrop={(e) => {
+            const kind = e.dataTransfer.getData(PALETTE_DRAG_TYPE);
+            if (!canEdit || !kind) return;
+            e.preventDefault();
+            const at = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+            addNode(kind, [Math.round(at.x), Math.round(at.y)]);
+          }}
+        >
           {doc && registry ? (
             <ReactFlow
               nodes={nodes}

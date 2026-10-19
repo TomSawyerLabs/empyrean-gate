@@ -23,7 +23,7 @@ test("the palette is a sheet opened from Add node, and a pick closes it", async 
   // A sheet covers the canvas rather than squeezing it.
   const box = (await sheet.boundingBox())!;
   expect(box.width).toBeGreaterThan(380);
-  await sheet.locator(".palette-item", { hasText: "Noise" }).click();
+  await sheet.getByRole("button", { name: "Noise", exact: true }).click();
   await expect(sheet).toHaveCount(0);
   await expect(page.locator(".pnode")).toHaveCount(before + 1);
 });

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>patch-web editor</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0a0814; color: #e8e6f4; font: 14px system-ui, sans-serif; }
+      body { display: grid; grid-template-columns: 1fr 280px; }
+      #editor { min-width: 0; height: 100vh; }
+      aside { padding: 8px; color: #8a85a8; }
+      canvas { width: 264px; height: 264px; display: block; }
+    </style>
+  </head>
+  <body>
+    <div id="editor"></div>
+    <aside><canvas id="gate"></canvas></aside>
+    <script type="module" src="./editor.tsx"></script>
+  </body>
+</html>

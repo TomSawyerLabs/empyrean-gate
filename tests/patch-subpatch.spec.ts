@@ -18,7 +18,7 @@ test("a preset inserted as a Sub-patch offers its exposed knobs as ports", async
 
   // The palette lists the presets (and saved patches) under Sub-patches.
   const group = page.locator(".palette-subpatches");
-  await expect(group.locator("h4")).toHaveText("Sub-patches");
+  await expect(group.locator(".palette-group-label")).toHaveText("Sub-patches");
   await group.locator(".palette-sub", { hasText: "Mock Noise" }).first().click();
 
   const node = page.locator(".pnode", { hasText: "Sub-patch" });

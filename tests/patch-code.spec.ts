@@ -1,5 +1,5 @@
 // A Code node: its ports and body live on the instance (plans/code-node.md).
-// The palette offers it under "Code"; the side panel edits its ports and
+// The palette offers it under "Structure"; the side panel edits its ports and
 // body (a CodeMirror editor with completion); renaming a port carries its
 // wires along.
 
@@ -16,7 +16,7 @@ async function newPatchWithCode(page: Page, sent: string[]) {
   await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
   await page.getByRole("button", { name: "＋ New" }).click();
   await expect(page.locator(".pnode")).toHaveCount(2);
-  const group = page.locator(".palette-group", { has: page.locator("h4", { hasText: "Code" }) });
+  const group = page.locator(".palette-group", { has: page.locator("h4", { hasText: "Structure" }) });
   await group.getByRole("button", { name: "Code" }).click();
   const node = page.locator(".pnode.cat-code");
   await expect(node).toBeVisible();
@@ -235,7 +235,7 @@ test("on a phone the large modal is the whole screen", async ({ page }) => {
   await page.locator(".patch-name-chip").click();
   await page.getByRole("button", { name: "＋ Blank patch" }).click();
   await page.getByRole("button", { name: "Add node" }).click();
-  const group = page.locator(".palette-group", { has: page.locator("h4", { hasText: "Code" }) });
+  const group = page.locator(".palette-group", { has: page.locator("h4", { hasText: "Structure" }) });
   await group.getByRole("button", { name: "Code" }).click();
   await page.locator(".pnode.cat-code").click();
   await page.getByRole("button", { name: /settings/ }).click();
@@ -274,7 +274,7 @@ test("a Note node holds text on the canvas and in its panel, and saves it", asyn
   await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
   await page.getByRole("button", { name: "＋ New" }).click();
   await expect(page.locator(".pnode")).toHaveCount(2);
-  await page.locator(".palette-group", { has: page.locator("h4", { hasText: "Code" }) }).getByRole("button", { name: "Note" }).click();
+  await page.locator(".palette-group", { has: page.locator("h4", { hasText: "Structure" }) }).getByRole("button", { name: "Note" }).click();
   const note = page.locator(".pnode", { has: page.locator(".pnode-note") });
   await expect(note).toBeVisible();
   await expect(note.locator(".pnode-port")).toHaveCount(0);
