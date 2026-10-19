@@ -214,8 +214,9 @@ test("Alt-drag scrubs a number live, and one undo puts it back", async ({ page }
   await page.mouse.up();
   await page.keyboard.up("Alt");
   // What a caret per line does (counting the drawn carets is not reliable
-  // on Linux): one keystroke lands on both lines.
-  await page.keyboard.type("#");
+  // on Linux): one keystroke lands on both lines. Typed through the body,
+  // which refocuses it: on Linux the Alt press can leave the page unfocused.
+  await body.pressSequentially("#");
   await expect(body).toHaveText(/^[^;#]*#[^;#]*;[^;#]*#[^#]*$/);
 });
 
