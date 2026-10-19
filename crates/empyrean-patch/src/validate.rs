@@ -800,8 +800,7 @@ mod tests {
         assert!(matches!(validate(&d).unwrap_err()[..], [PatchError::LedSampled { .. }]));
 
         // Only in a comment, or as a member of something else: plane.
-        for body in ["// c.spoke would key on the LED
-out = vec4f(c.r01);", "let v = c.pos; out = vec4f(v.x);"] {
+        for body in ["// c.spoke would key on the LED\nout = vec4f(c.r01);", "let v = c.pos; out = vec4f(v.x);"] {
             let n = code_node("k", &[], &[("out", field)], body);
             let d = doc(
                 vec![n, node("t", "transform"), node("o", "output")],

@@ -942,30 +942,30 @@ impl Gen<'_> {
                 let at = |spoke: &str, px: &str| self.color_input(i, "in", &format!("led_ctx({spoke}, {px})"));
                 if self.select(i, "mode") == 0 {
                     format!(
-                        "    let p = led_coord(c0);
-                             if p.y < -0.5 || p.y > f32(G.pixels) - 0.5 {{
-                                 return vec4f(0.0);
-                             }}
-                             let k = led_cell(c0);
-                             return {near};",
+                        "    let p = led_coord(c0);\n\
+                         \x20   if p.y < -0.5 || p.y > f32(G.pixels) - 0.5 {{\n\
+                         \x20       return vec4f(0.0);\n\
+                         \x20   }}\n\
+                         \x20   let k = led_cell(c0);\n\
+                         \x20   return {near};",
                         near = at("k.x", "k.y"),
                     )
                 } else {
                     format!(
-                        "    let p = led_coord(c0);
-                             let last = f32(max(G.pixels, 1u) - 1u);
-                             if p.y < -0.5 || p.y > last + 0.5 {{
-                                 return vec4f(0.0);
-                             }}
-                             let s0 = u32(p.x) % max(G.spokes, 1u);
-                             let s1 = (s0 + 1u) % max(G.spokes, 1u);
-                             let y = clamp(p.y, 0.0, last);
-                             let i0 = u32(y);
-                             let i1 = min(i0 + 1u, u32(last));
-                             let fy = y - f32(i0);
-                             let a = mix({a0}, {a1}, fy);
-                             let b = mix({b0}, {b1}, fy);
-                             return mix(a, b, fract(p.x));",
+                        "    let p = led_coord(c0);\n\
+                         \x20   let last = f32(max(G.pixels, 1u) - 1u);\n\
+                         \x20   if p.y < -0.5 || p.y > last + 0.5 {{\n\
+                         \x20       return vec4f(0.0);\n\
+                         \x20   }}\n\
+                         \x20   let s0 = u32(p.x) % max(G.spokes, 1u);\n\
+                         \x20   let s1 = (s0 + 1u) % max(G.spokes, 1u);\n\
+                         \x20   let y = clamp(p.y, 0.0, last);\n\
+                         \x20   let i0 = u32(y);\n\
+                         \x20   let i1 = min(i0 + 1u, u32(last));\n\
+                         \x20   let fy = y - f32(i0);\n\
+                         \x20   let a = mix({a0}, {a1}, fy);\n\
+                         \x20   let b = mix({b0}, {b1}, fy);\n\
+                         \x20   return mix(a, b, fract(p.x));",
                         a0 = at("s0", "i0"),
                         a1 = at("s0", "i1"),
                         b0 = at("s1", "i0"),
@@ -1073,7 +1073,7 @@ impl Gen<'_> {
                     "1.0"
                 };
                 format!(
-                    "    let h = hash01(c.spoke * 7919u);\n\
+                    "    let h = hash01(led_cell(c).x * 7919u);\n\
                      \x20   let head = fract(h + {phase} * 0.2 * {dir});\n\
                      \x20   let d = fract(c.r01 - head);\n\
                      \x20   let v = exp(-d / {tail}) * step(0.0, d);\n\
@@ -1107,7 +1107,8 @@ impl Gen<'_> {
                 intensity = self.p(i, "intensity"),
             ),
             "sparkle" => format!(
-                "    let idx = c.spoke * G.pixels + c.i;\n\
+                "    let led = led_cell(c);\n\
+                 \x20   let idx = led.x * G.pixels + led.y;\n\
                  \x20   let tw_rate = 4.0 + {twinkle} * 20.0;\n\
                  \x20   let cell = u32({phase} * tw_rate);\n\
                  \x20   let rnd = hash01(idx * 2654435761u + cell * 40503u);\n\
@@ -1310,17 +1311,18 @@ impl Gen<'_> {
                 };
                 format!(
                     "    let rate = 0.15 + {tail} * 1.2;\n\
-                     \x20   let h0 = hash01(c.spoke * 4099u);\n\
+                     \x20   let spoke = led_cell(c).x;\n\
+                     \x20   let h0 = hash01(spoke * 4099u);\n\
                      \x20   let t = {phase} * rate + h0 * 7.0;\n\
                      \x20   let epoch = u32(t);\n\
                      \x20   let t_ep = fract(t);\n\
-                     \x20   let alive = step(1.0 - (0.1 + {density} * 0.5), hash01(c.spoke * 31337u + epoch * 269u));\n\
+                     \x20   let alive = step(1.0 - (0.1 + {density} * 0.5), hash01(spoke * 31337u + epoch * 269u));\n\
                      \x20   let dir_r = {dir};\n\
                      \x20   let head = t_ep * 1.3;\n\
                      \x20   let d = head - dir_r;\n\
                      \x20   let tail_len = 0.08 + {tail} * 0.15;\n\
                      \x20   let v = alive * exp(-d / tail_len) * step(0.0, d) * step(dir_r, head);\n\
-                     \x20   let hue = {hh} + hash01(c.spoke * 911u + epoch) * {hr};\n\
+                     \x20   let hue = {hh} + hash01(spoke * 911u + epoch) * {hr};\n\
                      \x20   return vec4f(hsv2rgb(hue, {sat}, v * {bright}), v);",
                     tail = self.p(i, "tail"),
                     phase = self.p(i, "speed"),
@@ -1334,11 +1336,12 @@ impl Gen<'_> {
             }
             "warp" => format!(
                 "    let cells = 6.0 + {density} * 20.0;\n\
-                 \x20   let u = c.r01 * cells + hash01(c.spoke * 7919u) * 13.0;\n\
+                 \x20   let spoke = led_cell(c).x;\n\
+                 \x20   let u = c.r01 * cells + hash01(spoke * 7919u) * 13.0;\n\
                  \x20   let flow = u + {phase};\n\
                  \x20   let cell = u32(flow);\n\
                  \x20   let f = fract(flow);\n\
-                 \x20   let star = step(1.0 - (0.15 + {density} * 0.2), hash01(cell * 6151u + c.spoke * 389u));\n\
+                 \x20   let star = step(1.0 - (0.15 + {density} * 0.2), hash01(cell * 6151u + spoke * 389u));\n\
                  \x20   let streak = (1.0 - f) * (1.0 - f);\n\
                  \x20   let persp = 0.35 + (1.0 - c.r01) * 0.65;\n\
                  \x20   let v = star * streak * persp;\n\
@@ -1421,7 +1424,10 @@ impl Gen<'_> {
                     1 => "fract(c.theta / TAU + 1.0)",
                     2 => "c.pos.x * 0.5 + 0.5",
                     3 => "c.pos.y * 0.5 + 0.5",
-                    4 => "f32(c.spoke) / f32(max(G.spokes, 1u))",
+                    // The spoke the angle falls in, counted as the entry points
+                    // count `c.spoke`: the same at every LED, and it follows a
+                    // Transform.
+                    4 => "floor(fract(c.theta / TAU + 1.0) * f32(G.spokes)) / f32(max(G.spokes, 1u))",
                     _ => "c.r01",
                 };
                 let wrap = if self.select(i, "wrap") == 1 { "fract(t)" } else { "t" };
@@ -2031,6 +2037,49 @@ mod tests {
             };
             compile(&doc).unwrap_or_else(|e| panic!("{}: {e}", ty.id));
         }
+    }
+
+    /// Whether WGSL text keys on the physical LED (`c.spoke`, `ctx.i` …).
+    fn keys_on_leds(text: &str) -> bool {
+        ["c.", "ctx."].iter().any(|v| {
+            text.match_indices(v).any(|(at, _)| {
+                let before = text[..at].chars().next_back();
+                let rest = &text[at + v.len()..];
+                let word: String = rest.chars().take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_').collect();
+                !before.is_some_and(|b| b.is_ascii_alphanumeric() || b == '_' || b == '.')
+                    && (word == "spoke" || word == "i")
+            })
+        })
+    }
+
+    /// Only kinds that declare LED data may key on the physical LED: every
+    /// other built-in is a plane field, so Transform moves all of it. The
+    /// shader lib reads LED identity only where it builds an LED's context.
+    #[test]
+    fn only_led_kinds_key_on_the_physical_led() {
+        assert!(keys_on_leds("hash01(c.spoke * 3u)") && keys_on_leds("let x = ctx.i;"));
+        assert!(!keys_on_leds("c.pos + c.r01 + abc.i + c.id"));
+        for ty in registry::TYPES {
+            if !registry::is_gpu_kind(ty.id) || ty.id == "output" {
+                continue;
+            }
+            let led = ty.outputs.iter().any(|p| p.shape.is_led());
+            let doc = PatchDoc {
+                nodes: vec![node("n", ty.id)],
+                ..Default::default()
+            };
+            let body = builtin_body(&doc, 0).unwrap_or_default();
+            assert_eq!(keys_on_leds(&body), led, "{}: {body}", ty.id);
+        }
+        let lib = PATCH_LIB_WGSL;
+        let start = lib.find("fn led_ctx(").unwrap();
+        let end = start + lib[start..].find("\n}\n").unwrap();
+        let outside: String = format!("{}{}", &lib[..start], &lib[end..])
+            .lines()
+            .map(|l| l.split("//").next().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!keys_on_leds(&outside), "the shader lib keys on the LED outside led_ctx");
     }
 
     /// LED data through Resample, both modes, into a Transform: valid WGSL

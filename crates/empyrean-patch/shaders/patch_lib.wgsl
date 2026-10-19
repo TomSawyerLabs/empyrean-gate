@@ -401,7 +401,7 @@ fn wang_hash(seed: u32) -> u32 {
     return s;
 }
 
-/// A fixed pseudo-random 0..1 for an integer seed (e.g. `c.spoke`, a particle index).
+/// A fixed pseudo-random 0..1 for an integer seed (e.g. `led_cell(c).x`, a particle index).
 fn hash01(seed: u32) -> f32 {
     return f32(wang_hash(seed)) / 4294967295.0;
 }
@@ -792,7 +792,8 @@ fn effect_color(E: Effect, ctx: Ctx) -> vec3f {
         case 6u: {
             let swell = sin(PI * clamp(t * 1.1, 0.0, 1.0));
             let seed = u32(abs(E.angle) * 1024.0);
-            let idx = ctx.spoke * G.pixels + ctx.i;
+            let led = led_cell(ctx);
+            let idx = led.x * G.pixels + led.y;
             let cell = u32(t * 26.0);
             let rnd = hash01(idx * 2654435761u + cell * 40503u + seed * 7919u);
             let density = clamp(0.07 * E.size, 0.02, 0.35) * swell;
@@ -904,7 +905,8 @@ fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
         case 2u: {
             let s = D.size * 1.5;
             let inside = exp(-(d * d) / (s * s * 0.5));
-            let idx = ctx.spoke * G.pixels + ctx.i;
+            let led = led_cell(ctx);
+            let idx = led.x * G.pixels + led.y;
             let cell = u32(D.age * 24.0);
             let rnd = hash01(idx * 2654435761u + dab_index * 97u + cell * 40503u);
             let lit = step(0.86, rnd);
@@ -938,7 +940,8 @@ fn dab_color(D: Dab, ctx: Ctx, dab_index: u32) -> vec3f {
             let dd = distance(ctx.pos, center);
             let s = D.size * 1.2;
             let inside = exp(-(dd * dd) / (s * s * 0.5));
-            let idx = ctx.spoke * G.pixels + ctx.i;
+            let led = led_cell(ctx);
+            let idx = led.x * G.pixels + led.y;
             let cell = u32(D.age * 14.0);
             let rnd = hash01(idx * 2654435761u + dab_index * 131u + cell * 40503u);
             let lit = step(0.8, rnd);

@@ -118,10 +118,11 @@ None open. (Answered 2026-10-18; see Decisions.)
 4. Registry: Full random field → `led_scalar`; Transform `in` sampled;
    Resample; export `sampled` in the registry JSON. Done.
 5. Plane-native rewrites: a `led_cell(c)` helper (shared with
-   `feedback_at`; added in step 3), then the seven sites above. ← current
+   `feedback_at`; added in step 3), then the seven sites above. Done,
+   with a guard test (`only_led_kinds_key_on_the_physical_led`).
 6. Editor (patch-web): `PatchShape`, `shapeAccepts`, domain mirror, wire
    class and CSS, drag-time refusal, Code panel shape choices, agent guide.
-   Tests.
+   Tests. ← current
 7. Docs: shape descriptions, agent guide, gate README, site README/plan.
 8. Checks (cargo test, clippy, bun test, typecheck, behaviour + browser
    shader specs), merge to gate master, web-dist bump, Preview check.

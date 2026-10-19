@@ -2253,7 +2253,7 @@ pub const TYPES: &[NodeType] = &[
         label: "Sparkle",
         category: Category::Generator,
         group: Group::Patterns,
-        description: "Glitter: random LEDs flash and fade, each LED re-rolling its chance every twinkle; hues spread by Hue range. It keys on the physical LED, so Transform does not move it.",
+        description: "Glitter: random LEDs flash and fade, each LED re-rolling its chance every twinkle; hues spread by Hue range. Each glint fills one LED's cell, and Transform moves the cells (zoom in and a glint covers several LEDs).",
         inputs: &[],
         outputs: COLOR_OUT,
         params: &[
@@ -2877,7 +2877,7 @@ pub const TYPES: &[NodeType] = &[
         label: "Coordinate",
         category: Category::Generator,
         group: Group::Blocks,
-        description: "The pixel's own position as a Field<f32>, for building custom gradients and masks with Field math, Colorize or Palette. After a Transform it reports the transformed position (except Spoke, which stays physical).",
+        description: "The pixel's own position as a Field<f32>, for building custom gradients and masks with Field math, Colorize or Palette. After a Transform it reports the transformed position.",
         inputs: &[],
         outputs: &[port(
             "out",
