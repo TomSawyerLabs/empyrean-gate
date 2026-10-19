@@ -66,9 +66,6 @@ export interface GrooveSettings {
   /** Where in the set `runtime.restart()` starts it, in seconds, so a
    * capture repeats from there. */
   startAt: number;
-  /** @deprecated Ignored: the set's crossfader is `dj.setCrossfader`. Kept
-   * so hosts written for the old stand-in deck still compile. */
-  djMix?: number;
 }
 
 /** Drive `runtime` with the simulated set every frame until the returned
