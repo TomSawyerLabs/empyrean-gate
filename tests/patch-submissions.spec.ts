@@ -22,9 +22,10 @@ test("submissions open as new credited patches and leave the queue once decided"
   await expect(page.locator(".patch-name")).toHaveValue("Ember Drift");
   await expect(page.locator(".patch-credit")).toHaveText("by Ada");
   // A new patch here, not the sender's: the library grows by one.
-  await expect(page.locator(".patch-toolbar select").first().locator("option")).toContainText([
-    /Ember Drift/,
-  ]);
+  await page.getByRole("button", { name: "📁 Patches" }).click();
+  await expect(
+    page.locator(".browser-folder", { hasText: "Your patches" }).locator(".browser-item"),
+  ).toContainText([/Ember Drift/]);
 
   await drawer.locator("li").nth(1).getByRole("button", { name: "Decline" }).click();
   await expect(drawer.locator("li")).toHaveCount(1);

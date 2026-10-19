@@ -28,6 +28,26 @@ export function linksTo(doc: PatchDoc, id: string): boolean {
   );
 }
 
+/** Every source `doc` links, at any depth (each once). */
+export function linkedSources(doc: PatchDoc): string[] {
+  const out = new Set<string>();
+  const walk = (d: PatchDoc) => {
+    for (const n of d.nodes) {
+      if (n.kind !== SUBPATCH_KIND) continue;
+      if (n.linked && n.source) out.add(n.source);
+      else if (n.sub) walk(n.sub);
+    }
+  };
+  walk(doc);
+  return [...out];
+}
+
+/** Whether a library summary's Sub-patches link the patch `id` (so
+ * inserting that patch into `id` would nest the two in each other). */
+export function summaryLinks(subs: SubpatchSummary[] | undefined, id: string): boolean {
+  return (subs ?? []).some((s) => (s.linked && s.source === id) || summaryLinks(s.subpatches, id));
+}
+
 /** Refresh, in place, every Sub-patch in `doc` linked to `source` (at any
  * depth). True when anything changed. A source that links `doc` itself is
  * refused, as the crate's `sync_links` does. */

@@ -30,3 +30,5 @@ export {
   savePatchToDisk,
 } from "./files";
 export { BUILTIN_PREFIX, isBuiltin, linksTo, snapshot, sourceRev, summarize, syncLinks } from "./links";
+export { sameLocation, type EditorLocation } from "./navigation";
+export { PatchBrowser, type BrowserView } from "./PatchBrowser";

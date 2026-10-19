@@ -3,15 +3,23 @@
 // live thumbnails key on it, and used to stay blank until the patch was
 // reopened (reported 2026-10-15 on the playground).
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+/** Open the built-in from the patch browser, then make the copy to edit. */
+async function editCopyOfMockNoise(page: Page) {
+  await page.locator(".patch-browser .browser-item", { hasText: "Mock Noise" }).click();
+  await expect(page.locator(".pnode")).toHaveCount(2);
+  await page.locator(".patch-lock-chip").click();
+  await page.getByRole("button", { name: "Make a copy to edit" }).click();
+  await expect(page.locator(".patch-lock-chip")).toHaveCount(0);
+}
 
 test("a preset copy shows node thumbnails once it is saved and on air", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.goto("/#patch");
   await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
 
-  await page.locator(".patch-toolbar select").nth(1).selectOption({ label: "Mock Noise" });
-  await expect(page.locator(".pnode")).toHaveCount(2);
+  await editCopyOfMockNoise(page);
   // The autosave (600 ms) names it; Activate is enabled once it has an id.
   const activate = page.getByRole("button", { name: "▶ Activate" });
   await expect(activate).toBeEnabled({ timeout: 5_000 });
@@ -30,8 +38,7 @@ test("stream and texture sources get a thumbnail on air", async ({ page }) => {
   await page.goto("/#patch");
   await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
 
-  await page.locator(".patch-toolbar select").nth(1).selectOption({ label: "Mock Noise" });
-  await expect(page.locator(".pnode")).toHaveCount(2);
+  await editCopyOfMockNoise(page);
   const activate = page.getByRole("button", { name: "▶ Activate" });
   await expect(activate).toBeEnabled({ timeout: 5_000 });
   await activate.click();

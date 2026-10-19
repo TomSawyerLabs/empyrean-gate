@@ -249,7 +249,14 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   the event tools Counter, Toggle, Threshold, Delay, Merge, Step sequencer)
   into a typed dataflow whose sink is the array. A saved patch or a preset can
   be dropped into another as a **Sub-patch** node whose inputs are its exposed
-  knobs. A **Code** node is written rather than wired up: declare its inputs
+  knobs. It arrives *linked*: it follows its source, so saving that patch
+  updates every patch using it, until **Clone for this project** makes it
+  this patch's own copy (which offers **Update from …** once the source has
+  moved on). Double-click a Sub-patch to open it, with a breadcrumb back
+  out; a linked one or a built-in preset is read-only, and an edit there
+  offers the clone or a copy instead. **📁 Patches** browses the built-ins
+  and your library as a tree (patches unfold to their Sub-patches), by topic
+  (Sound, DJ, Touch…, from the nodes a patch uses) or as one list. A **Code** node is written rather than wired up: declare its inputs
   and outputs (scalars, events, grey or colour fields) and type a WGSL body
   that sets the outputs by name. With a field output it is pasted into the
   shader (scalar inputs are knobs, field inputs can be resampled with
