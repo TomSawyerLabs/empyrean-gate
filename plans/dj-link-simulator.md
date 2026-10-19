@@ -123,19 +123,24 @@ playground, the CLI's `render`, the MCP server's `snapshot`).
 
 **Round 2**
 
-9. [ ] **(current)** Audible set: `packages/patch-web/src/runtime/djsound.ts`
+9. [x] Audible set: `packages/patch-web/src/runtime/djsound.ts`
    (Web Audio voices: kick, bass, hats, clap, snare roll, pad, riser; one
    channel per deck through fader × crossfader; a lookahead scheduler on
    the simulator's playheads). Exported; README.
-10. [ ] Site: a "Listen" button and volume in the Sound panel (the click
-    starts the AudioContext); spec; README.
-11. [ ] Desktop: map the LINK ingest (agent survey), then
+10. [x] Site: a "Listen" button, volume and level meter in the DJ decks
+    panel (not the Sound fieldset: keeps Playground.tsx edits to one line);
+    spec; README.
+11. [x] Desktop: map the LINK ingest (agent survey), then
     `src-tauri/src/prolink_sim.rs` (decks, mixer, Auto DJ, packet builders,
     synthetic track info), a config switch and a Settings toggle, the mock
     backend, tests (Rust unit tests on the packets and the real handlers;
     a drift guard against the TS simulator's timeline).
-12. [ ] Ship: gate master, web-dist, the site, the Preview; desktop needs a
-    release to reach a gate (ask Cameron before tagging).
+12. [ ] **(current)** Ship: gate master, web-dist, the site, the Preview;
+    desktop needs a release to reach a gate (ask Cameron before tagging).
+13. [ ] Cameron: try Settings → Lighting clock → PRO DJ LINK → Simulated CDJs
+    in the real app (a dev build or the next release). Not done here: a
+    `--headless` backend would be a second gate on the LAN (sACN discovery,
+    peer, updater, firewall), so it waits for his go-ahead or a gate.
 
 ## Findings / gotchas
 
@@ -168,6 +173,36 @@ playground, the CLI's `render`, the MCP server's `snapshot`).
   site's `bun run test:gpu` (installed Chrome, headless) is where the decks
   can be seen and tested. It reuses any server on port 4180: check the port
   is free first, or it tests another agent's build.
+- **Round 2, desktop ingest map** (survey): `rhythm::spawn` → `pioneer_thread`
+  (2 ms loop) drains UDP 50000 (`receive_keepalive`), 50001
+  (`receive_channels_on_air`, `receive_absolute_position`, `receive_beat`) and
+  50002 (`maybe_request_metadata`, `receive_status`), then
+  `take_due_visual_events`; `trigger_pioneer_visual` records patch events and
+  fires classic DJ effects. Phrase/fill events are the *engine's* (from
+  `pioneer_tracks` + the followed deck's beat). Those per-packet bodies are
+  now `ingest_discovery` / `ingest_beat_port` / `ingest_status`, shared by the
+  sockets and the simulator. Status needs pitch 0x100000 at 0x8d (else −100 %)
+  and BPM at 0x92; avoid player 3 (the metadata identity default).
+  `PioneerClockState` keeps decks 10 s and `on_air_observed` forever, so
+  turning the simulator off resets it outright (`end_simulation`).
+- Timing in rhythm.rs is `Instant::now()` at handling (350/500 ms
+  cooldowns, 250 ms jump grace, 2 s freshness): the simulator must run in
+  real time, so it steps inside `pioneer_thread` every 10 ms.
+- Consumers typecheck patch-web's TS sources with their own tsconfig, so
+  the crate stays TypeScript; `djlink.fixture.test.ts` writes it (and an
+  Auto DJ timeline) to `tests/fixtures/dj-sim.json`, which the Rust
+  simulator `include_str!`s and replays (the drift guard). It passed on the
+  first run: f64 arithmetic in the same order gives the same set.
+- Gate tests: `bun run build` then Playwright against the mock backend on
+  port 9531 with `reuseExistingServer` locally: use `PW_PORT` for a port of
+  your own. Settings' checkboxes are controlled (they follow the config the
+  backend echoes): click, then wait for the state; `.check()` races it.
+- Cargo in this worktree: `CARGO_BUILD_BUILD_DIR=<worktree>/src-tauri/target/
+  build-private` (the machine-wide build dir lets worktrees swap outputs) and
+  every heavy run through `~/.claude/bin/cpu-slots.mjs` (4 slots for cargo).
+- My push guard `if …; fi && git push` pushed despite a failing spec (an
+  `if` without an else exits 0): the failure was a flake (a 0.6 s lamp),
+  fixed in the next commit, but gate pushes on the test's exit status.
 - Site WebKit: two existing playground tests flake under a parallel run
   (logged in the site's ISSUES.md); the decks render only static text there
   (no WebGPU), so they are not the cause.
@@ -194,6 +229,13 @@ playground, the CLI's `render`, the MCP server's `snapshot`).
       `dj_deck` offered to the page's agent. Workers Builds green.
 - [x] `GrooveSettings.djMix` dropped (gate, after the site stopped setting
       it).
+- [x] Round 2, audible: gate d6b8a6f (DjSound, tests), site a8e6372 (Listen)
+      + 25f5c29 (spec waits on chips, not lamps). DJ specs 5/5 on a private
+      port, several runs.
+- [x] Round 2, desktop: gate 55cbf65 (fixture writer), 91aab26 (simulated
+      CDJs: prolink_sim.rs, ingest refactor, config, Settings toggle, spec,
+      README). cargo test --lib 347, cargo test all green, no-default-features
+      check clean; Settings spec green; patch-web 156 tests; tsc -b.
 - Not ours, seen on the way: site dev's `test:gpu` fails "the Phone IMU node
   can be driven by hand" since the palette overhaul arrived (its palette
   item no longer clickable as before); reproduced on the bump commit alone,
