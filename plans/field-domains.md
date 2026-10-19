@@ -11,10 +11,11 @@ inlets/outlets (the follow-on feature) need it to name their shapes.
 
 ## Status
 
-Approved 2026-10-18; building in the `field-domains` worktree
+Approved 2026-10-18. Landed on gate master 2026-10-19 (`e9855b7` through
+`0efe863`); built in the `field-domains` worktree
 (`C:\Users\camer\.t3\worktrees\Empyrean\field-domains`, branch
-`field-domains` → gate master). Coordination: `.agents.txt` in the
-`playground` worktree (Agent I, round 2).
+`field-domains`). Coordination: `.agents.txt` in the `playground` worktree
+(Agent I, round 2). Next: sub-patch inlets/outlets.
 
 ## Decisions already made (don't re-ask)
 
@@ -87,7 +88,10 @@ Approved 2026-10-18; building in the `field-domains` worktree
 
 ## Open questions for Cameron
 
-None open. (Answered 2026-10-18; see Decisions.)
+1. Go ahead with sub-patch inlets/outlets, and with which design: explicit
+   Patch in / Patch out nodes (recommended: the interface is visible in the
+   inner patch, and an unwired inlet has a clear default) or exposing inner
+   ports, as knobs are exposed today?
 
 ## Findings / gotchas
 
@@ -117,6 +121,22 @@ None open. (Answered 2026-10-18; see Decisions.)
   anything is validated; it knows Sub-patches (inner Output's feed).
 - The Bash tool collapses `\` inside heredocs: Python edit scripts that
   contain backslashes go in a file (Write tool), not a heredoc.
+- **Gate master moves fast** (four rebases to land this). Since this work
+  started, every node kind needs a palette `group`, an icon (`icons.tsx`)
+  and a thumbnail (`bun run thumbnails`, showcase in
+  `scripts/thumbnails-render.ts`). The thumbnail script now counts LED
+  outputs as pictures. Regenerating left Sparkle, Meteors, Warp and Spoke
+  chase byte-identical, which confirms `led_cell` keeps their look; Feedback,
+  Waveform and Spectrum vary from run to run, so keep their committed data.
+- **The cargo build dir is shared across worktrees** and the wasm has no
+  hash in its name: build it with
+  `CARGO_BUILD_BUILD_DIR="$(pwd)/crates/target/build-private"`.
+- The palette's hover footer used to grow and hide the last visible kinds.
+  Agent L fixed it on master at the same time (`1ddc1fa`), so my duplicate
+  fix was dropped in the rebase.
+- Known flakes under parallel load, both passing when run alone: the WebKit
+  `multitouch` duplicate-click test (already in ISSUES.md) and
+  `patch-code-aids` "an error's quick fixes…" (passed alone three times).
 
 ## Plan / steps
 
@@ -137,10 +157,20 @@ None open. (Answered 2026-10-18; see Decisions.)
    ports, drag-time refusal, spec `patch-led-data`.
 7. Docs: shape descriptions, agent guide, gate README (done), site
    README/plan (after merge). Plus the `migrate` repair above.
-8. Checks (cargo test, clippy, bun test, typecheck, behaviour + browser
-   shader specs), merge to gate master, web-dist bump, Preview check.
-   ← current
-9. Then: sub-patch inlets/outlets.
+8. Checks (cargo test, bun test, typecheck, layout, behaviour and browser
+   shader specs): done locally, then merged to gate master (`0efe863`).
+   Gate CI green apart from `patch-code-aids` "Alt-drag scrubs a number",
+   which had failed on every master run since `1ddc1fa` (another thread's
+   work). Web-dist `cf1bbe7`, site bump `b1ffe6c`, site note `3f80926`.
+   Checked in the site's own playground at the bump, run locally because
+   dev.empyreangate.org is now behind Cloudflare Access: an old-style patch
+   (Full random field → Colorize → Transform) came back with a Resample
+   inserted, and the LED wires are dotted. Done.
+9. Sub-patch inlets/outlets: waiting on Cameron's go-ahead and design pick
+   (explicit Patch in / Patch out nodes, recommended, or exposed inner
+   ports). Note that linked sub-patches and Sub-patches that open
+   (`9355344`, `6a8ef68`, another thread) landed meanwhile; the design has
+   to fit them. ← next
 
 ## Future work (not this round)
 
@@ -153,7 +183,7 @@ None open. (Answered 2026-10-18; see Decisions.)
 - [x] Survey shapes, `Ctx`, and which kinds key on the physical LED
   (2026-10-18)
 - [x] Cameron's answers (2026-10-18)
-- [ ] Steps 1–8 above
+- [x] Steps 1–8 (2026-10-19)
 - [ ] Then: sub-patch inlets/outlets (Patch in / Patch out nodes), using the
   agreed shapes
 
