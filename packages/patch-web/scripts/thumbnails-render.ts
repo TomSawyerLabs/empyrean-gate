@@ -19,7 +19,7 @@ import { encodePng, toBase64 } from "../src/runtime/ring";
 import { attachVisitors, syntheticMotion, TestFilm, type VisitorHost } from "../src/runtime/standins";
 import { GATE_GEOMETRY } from "../src/runtime/index";
 import { ICON_ONLY, type ThumbData, type TraceThumb } from "../src/editor/thumbs";
-import type { PatchDoc, PatchNode, PatchNodeType } from "../src/types";
+import { isFieldShape, type PatchDoc, type PatchNode, type PatchNodeType } from "../src/types";
 
 const out = process.argv[2];
 if (!out) throw new Error("usage: thumbnails-render <out.ts>");
@@ -159,6 +159,12 @@ const SHOWCASES: Record<string, Showcase> = {
   clip: { nodes: [["n", "clip", { fps: 4 }], ["t", "texture_sample"]], wires: [["n", "tex", "t", "tex"]], at: 1.3 },
   texture_sample: { nodes: [["s", "video_in"], ["n", "texture_sample", { kaleido: 3 }]], wires: [["s", "tex", "n", "tex"]], at: 3 },
   transform: { nodes: [["s", "wedges"], ["n", "transform", { kaleido: 3, zoom: 1.4, rotate: 0.08 }]], wires: [["s", "out", "n", "in"]] },
+  // LED data made smooth, then folded by a kaleidoscope: Transform reads it
+  // between the LEDs, which only Resample allows.
+  resample: {
+    nodes: [["s", "random_field", { rate: 0 }], ["c", "colorize", { hue_range: 0.6 }], ["n", "resample", { mode: 1 }], ["t", "transform", { kaleido: 4, rotate: 0.06 }]],
+    wires: [["s", "out", "c", "in"], ["c", "out", "n", "in"], ["n", "out", "t", "in"]],
+  },
   colorize: { nodes: [["s", "perlin_noise"], ["n", "colorize"]], wires: [["s", "out", "n", "in"]] },
   palette: { nodes: [["s", "perlin_noise"], ["n", "palette", { palette: 6, cycles: 1.5 }]], wires: [["s", "out", "n", "in"]] },
   color_adjust: { nodes: [["s", "rainbow"], ["n", "color_adjust", { hue: 0.35, saturation: 1.6, contrast: 1.4 }]], wires: [["s", "out", "n", "in"]] },
@@ -193,7 +199,7 @@ function doc(core: PatchCore, id: string, s: Showcase, last: string): PatchDoc {
 function showcase(t: PatchNodeType): Showcase | null {
   if (SHOWCASES[t.id]) return SHOWCASES[t.id]!;
   const out = t.outputs[0]?.shape;
-  if (!t.inputs.length && (out === "field_color" || out === "field_scalar")) return { nodes: [["n", t.id]], wires: [] };
+  if (!t.inputs.length && out !== undefined && isFieldShape(out)) return { nodes: [["n", t.id]], wires: [] };
   return null;
 }
 
