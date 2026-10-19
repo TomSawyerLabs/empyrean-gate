@@ -20,7 +20,7 @@ export interface CallSite {
 }
 
 /** `text` with comments blanked to spaces (offsets kept). */
-function blankComments(text: string): string {
+export function blankComments(text: string): string {
   return text.replace(/\/\/[^\n]*|\/\*[\s\S]*?(\*\/|$)/g, (m) => m.replace(/[^\n]/g, " "));
 }
 
@@ -133,7 +133,14 @@ export function signatureHelp(lookup: (name: string) => CodeFnRef | null): Exten
   return [
     field,
     EditorView.baseTheme({
-      ".code-signature": { padding: "3px 8px", maxWidth: "420px", fontFamily: "system-ui, sans-serif" },
+      // Information only: it often sits over the panel's own controls (the
+      // body's first line is right under them), so clicks go through it.
+      ".code-signature": {
+        padding: "3px 8px",
+        maxWidth: "420px",
+        fontFamily: "system-ui, sans-serif",
+        pointerEvents: "none",
+      },
       ".code-signature code": { fontFamily: "ui-monospace, Menlo, Consolas, monospace", color: "#82aaff" },
       ".code-signature b": { color: "#ffcb6b", fontWeight: "600" },
       ".code-signature div": { opacity: "0.75", marginTop: "2px" },

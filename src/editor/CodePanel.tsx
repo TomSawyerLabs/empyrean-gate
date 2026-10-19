@@ -4,8 +4,10 @@
 // validates the result on every edit; what it refuses shows under the minis
 // and as a mark on the body's line. See plans/code-node.md.
 
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { CodeEditor, diagnosticsFor, type CodeScope } from "./CodeEditor";
+import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { applyEdits, CodeEditor, diagnosticsFor, scopeNames, type CodeEditorHandle, type CodeScope } from "./CodeEditor";
+import { CodeRefColumn, CodeRefNotes } from "./CodeRefCard";
+import { fixesFor, type FixContext } from "./code-fixes";
 import { NodeContext } from "./context";
 import { MiniMeter, MiniRing } from "./minis";
 import {
@@ -42,6 +44,32 @@ function freshPortName(def: CodeDef, base: string): string {
   while (taken.has(`${base}${i}`)) i++;
   return `${base}${i}`;
 }
+
+/** A setting kept in localStorage (the large view's text size, its
+ * reference column), shared by every Code node. */
+function useStored<T extends string | number | boolean>(key: string, initial: () => T): [T, (v: T) => void] {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw !== null) return JSON.parse(raw) as T;
+    } catch {
+      // No storage (or a bad value): the default.
+    }
+    return initial();
+  });
+  const set = (v: T) => {
+    setValue(v);
+    try {
+      localStorage.setItem(key, JSON.stringify(v));
+    } catch {
+      // Private mode and the like: the setting lasts this page only.
+    }
+  };
+  return [value, set];
+}
+
+const FONT_MIN = 10;
+const FONT_MAX = 24;
 
 /** The part of the host's error that is about this node, if any. */
 function ownError(error: string | null, node: PatchNode): string | null {
@@ -197,9 +225,40 @@ export function CodePanel({
     () => ({ tier, inputs: def.inputs, outputs: def.outputs, reference }),
     [tier, def.inputs, def.outputs, reference],
   );
+  const fixContext: FixContext = useMemo(
+    () => ({
+      outputs: [...def.outputs].sort((a, b) => Number(b.name === "out") - Number(a.name === "out")).map((p) => p.name),
+      names: scopeNames(scope),
+      tier,
+    }),
+    [def.outputs, scope, tier],
+  );
   const diagnostics = useMemo(
-    () => diagnosticsFor(error, [node.id, node.name].filter(Boolean), def.body),
-    [error, node.id, node.name, def.body],
+    () => diagnosticsFor(error, [node.id, node.name].filter(Boolean), def.body, fixContext),
+    [error, node.id, node.name, def.body, fixContext],
+  );
+  // The same fixes as buttons under the error, for a touch screen (no hover
+  // over the mark) and for whoever reads the error there first.
+  const fixes = useMemo(
+    () =>
+      canEdit
+        ? diagnostics.flatMap((d) => fixesFor(d.message, d.from, def.body, fixContext)).slice(0, 4)
+        : [],
+    [canEdit, diagnostics, def.body, fixContext],
+  );
+  const errorLine = mine && (
+    <div className="code-error">
+      <p>⚠ {mine}</p>
+      {fixes.length > 0 && (
+        <div className="code-fixes">
+          {fixes.map((f, i) => (
+            <button key={i} type="button" onClick={() => setBody(applyEdits(def.body, f.changes))}>
+              {f.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
   const principal = def.outputs.find((p) => p.name === "out") ?? def.outputs[0];
 
@@ -207,6 +266,10 @@ export function CodePanel({
   // is open (two instances editing one body would fight over the caret).
   const [expanded, setExpanded] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const editorRef = useRef<CodeEditorHandle>(null);
+  const caret = useRef<{ anchor: number; head: number } | null>(null);
+  const [fontSize, setFontSize] = useStored<number>("empyrean-code-font", () => 14);
+  const [refOpen, setRefOpen] = useStored<boolean>("empyrean-code-reference", () => window.innerWidth >= 900);
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!expanded || !dialog || dialog.open) return;
@@ -220,6 +283,9 @@ export function CodePanel({
       scope={scope}
       diagnostics={diagnostics}
       ariaLabel="Body (WGSL)"
+      handle={editorRef}
+      caret={caret}
+      autoFocus={expanded}
     />
   );
   const minisRow = live && def.outputs.length > 0 && (
@@ -363,11 +429,12 @@ export function CodePanel({
         </div>
         {expanded ? <p className="hint code-body-away">Editing in the large view.</p> : editor}
       </div>
-      {!expanded && mine && <p className="code-error">⚠ {mine}</p>}
+      {!expanded && errorLine}
       {expanded && (
         <dialog
           ref={dialogRef}
           className="code-modal"
+          style={{ "--code-font": `${fontSize}px` } as CSSProperties}
           aria-label={`${node.name || "Code"} body`}
           onClose={() => setExpanded(false)}
           onCancel={(e) => {
@@ -378,69 +445,55 @@ export function CodePanel({
           <div className="code-modal-head">
             <strong>{node.name || "Code"}</strong>
             <span className="hint">{tierText}</span>
-            <button type="button" onClick={() => setExpanded(false)} title="Back to the panel (Esc)">
-              Done
-            </button>
+            <div className="code-modal-tools">
+              <button
+                type="button"
+                aria-label="Smaller text"
+                title="Smaller text"
+                disabled={fontSize <= FONT_MIN}
+                onClick={() => setFontSize(Math.max(FONT_MIN, fontSize - 1))}
+              >
+                A−
+              </button>
+              <button
+                type="button"
+                aria-label="Larger text"
+                title="Larger text"
+                disabled={fontSize >= FONT_MAX}
+                onClick={() => setFontSize(Math.min(FONT_MAX, fontSize + 1))}
+              >
+                A+
+              </button>
+              <button
+                type="button"
+                aria-pressed={refOpen}
+                title="Everything the body can use; a click inserts it"
+                onClick={() => setRefOpen(!refOpen)}
+              >
+                Reference
+              </button>
+              <button type="button" onClick={() => setExpanded(false)} title="Back to the panel (Esc)">
+                Done
+              </button>
+            </div>
           </div>
           {minisRow}
-          <div className="code-modal-body">{editor}</div>
-          {mine && <p className="code-error">⚠ {mine}</p>}
+          <div className={`code-modal-main ${refOpen ? "with-ref" : ""}`}>
+            <div className="code-modal-body">{editor}</div>
+            {refOpen && (
+              <CodeRefColumn
+                scope={scope}
+                onInsert={(text, caret) => editorRef.current?.insert(text, caret)}
+                onSnippet={(template) => editorRef.current?.insertSnippet(template)}
+              />
+            )}
+          </div>
+          {errorLine}
         </dialog>
       )}
       <details className="code-ref">
         <summary>What the body can use</summary>
-        <ul>
-          <li>
-            Every input by name; every output by name — assign it (<code>out = …;</code>). Unassigned
-            outputs are 0; <code>return;</code> ends the body early. Ctrl+Space lists what is in scope;
-            hover a name for its doc. Any built-in node's panel has "Convert to Code" to start from its
-            body.
-          </li>
-          {tier === "gpu" ? (
-            <>
-              <li>
-                <code>c</code>, this pixel: <code>c.theta</code> (angle), <code>c.r01</code> (0 = outer
-                end, 1 = inner), <code>c.rn</code> (radius, 1 = outer edge), <code>c.pos</code> (x, y),{" "}
-                <code>c.spoke</code>, <code>c.i</code>. <code>G.time</code>, <code>G.dt</code>,{" "}
-                <code>G.spokes</code>, <code>G.pixels</code>.
-              </li>
-              <li>
-                A field input is its value here; <code>name_at(ctx)</code> samples it elsewhere, e.g.{" "}
-                <code>img_at(ctx_transform(c, angle, zoom, 0.0, 0.0))</code>. A points or effects input
-                gives <code>name_count</code> and <code>name_at(k)</code> (a <code>Dab</code> /{" "}
-                <code>Effect</code>; <code>name_on(k)</code> says if effect k is on this wire); draw them with{" "}
-                <code>dab_color(D, c, k)</code> / <code>effect_color(E, c)</code>. A texture input is its colour
-                here, <code>name_at(uv)</code> elsewhere.
-              </li>
-              <li>
-                Loops: <code>for</code> with a fixed bound only (a literal up to 4096, a <code>_count</code>, or a{" "}
-                <code>let</code> clamped to a literal); <code>while</code> and <code>loop</code> are refused, since
-                an unbounded loop would hang the gate's GPU.
-              </li>
-              <li>
-                Helpers: <code>hsv2rgb(h, s, v)</code>, <code>rgb2hsv</code>, <code>snoise3(vec3f)</code>,{" "}
-                <code>fbm3</code>, <code>hash01(u32)</code>, <code>cosine_palette(t, which)</code>,{" "}
-                <code>ctx_transform</code>, <code>TAU</code>, <code>PI</code>, and all of WGSL. A grey field
-                is an <code>f32</code>, a colour field a <code>vec4f</code> (rgb + alpha).
-              </li>
-            </>
-          ) : (
-            <>
-              <li>
-                A WGSL subset: <code>let</code>/<code>var</code>, <code>if</code>/<code>else</code>,{" "}
-                <code>for</code>/<code>while</code>/<code>loop</code>, numbers and booleans, the usual
-                operators and math builtins (<code>sin</code>, <code>fract</code>, <code>mix</code>,{" "}
-                <code>smoothstep</code>, <code>select</code>…). No vectors.
-              </li>
-              <li>
-                An event input is true on the frame it fires; an event output fires when left true.{" "}
-                <code>dt</code> is seconds since the last frame, <code>master_speed</code> the crew's speed
-                multiplier; <code>state.name</code> keeps a number across frames (
-                <code>state.n += 1.0;</code>).
-              </li>
-            </>
-          )}
-        </ul>
+        <CodeRefNotes tier={tier} />
       </details>
     </div>
   );
