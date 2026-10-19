@@ -354,12 +354,18 @@ function Entry({
 
 function SubpatchEntry({ choice: s, onPick }: { choice: SubpatchChoice; onPick: () => void }) {
   return (
-    <button type="button" className="palette-sub palette-list-item cat-combine" data-palette-entry="" onClick={onPick}>
+    <button
+      type="button"
+      className="palette-sub palette-list-item cat-combine"
+      data-palette-entry=""
+      title={`Insert ${s.name} as one node, linked: it follows that patch until you clone it for this project`}
+      onClick={onPick}
+    >
       <NodeIcon kind="subpatch" />
       <span className="palette-item-text">
         <span className="palette-item-label">{s.name}</span>
         <span className="hint">
-          {s.preset ? "preset · " : ""}
+          {s.preset ? "built-in · " : ""}
           {s.nodes} node{s.nodes === 1 ? "" : "s"} inside
         </span>
       </span>

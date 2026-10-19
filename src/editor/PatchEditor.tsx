@@ -59,6 +59,9 @@ import { NodeIcon } from "./icons";
 import { MiniMeter, MiniRing, type MiniSource } from "./minis";
 import { Palette, PALETTE_DRAG_TYPE, type SubpatchChoice } from "./Palette";
 import { PanelHead, useSheet } from "./sheet";
+import { isBuiltin, linkedSources, snapshot, sourceRev, summarize, summaryLinks, syncLinks } from "./links";
+import { cloneAlong, crumbs, docAt, flatId, lockAt, sameLocation, unlink, validPath, type EditorLocation } from "./navigation";
+import { PatchBrowser } from "./PatchBrowser";
 import {
   CODE_KIND,
   NOTE_KIND,
@@ -154,6 +157,13 @@ export interface PatchEditorProps {
   globalsNote?: ReactNode;
   /** Drive the editor from outside (an agent's tools): see `PatchEditorHandle`. */
   editorRef?: Ref<PatchEditorHandle>;
+  /** Where to open first, instead of the active patch (a host's URL). */
+  initialLocation?: EditorLocation | null;
+  /** The person moved somewhere: opened a patch, a built-in or a Sub-patch,
+   * or came back out of one. Hosts with URLs push it; `replace` means the
+   * same place under a new name (a new patch's first save, a built-in's
+   * copy), so it should not become a separate step back. */
+  onNavigate?: (location: EditorLocation, how: { replace: boolean }) => void;
 }
 
 /** The editor, driven from outside: what a host's agent tools act through,
@@ -170,6 +180,11 @@ export interface PatchEditorHandle {
   replace(doc: PatchDoc): void;
   /** Lay the graph out, as the Arrange button does. */
   arrange(): void;
+  /** Go somewhere without it counting as the person's move (a host's Back
+   * and Forward): `onNavigate` is not called. */
+  navigate(location: EditorLocation): void;
+  /** Where the editor is ("" for a patch not saved yet). */
+  location(): EditorLocation | null;
 }
 
 /** One global the host exposes in the editor's canvas. */
@@ -349,6 +364,15 @@ function freshId(d: PatchDoc, taken?: Set<string>): string {
   return `n${i}`;
 }
 
+/** How a move is reported to the host (see `PatchEditorProps.onNavigate`);
+ * null: not at all (the host moved the editor itself). */
+type NavHow = "push" | "replace" | null;
+
+/** A double-click on this node opens it rather than its settings. */
+function opensInside(node: PatchFlowNode): boolean {
+  return node.data.node.kind === SUBPATCH_KIND && node.data.node.sub !== undefined;
+}
+
 function emptyPatch(): PatchDoc {
   return {
     format: PATCH_FORMAT,
@@ -372,6 +396,9 @@ type PatchFlowNode = FlowNode<
     def: PatchNodeType | undefined;
     /** Doc id these nodes belong to — minis only flow for the active patch. */
     docId: string;
+    /** The node's id in the patch as it renders (inside a Sub-patch,
+     * `"{sub}/{node}"`): what its thumbnail and meters key on. */
+    mini: string;
     /** Output ports with at least one outgoing wire (meters show these). */
     wiredOut: string[];
     /** Input ports already taken (one wire per input). */
@@ -431,11 +458,11 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
       ? outs
           .filter((p) => p.shape === "field_color" || p.shape === "field_scalar")
           .map((p) => ({
-            mini: p.name === primary?.name ? `node:${node.id}` : `node:${node.id}:${p.name}`,
+            mini: p.name === primary?.name ? `node:${data.mini}` : `node:${data.mini}:${p.name}`,
             label: p.name,
           }))
       : showRing
-        ? [{ mini: `node:${node.id}`, label: node.name || def.label }]
+        ? [{ mini: `node:${data.mini}`, label: node.name || def.label }]
         : [];
   const meterable = outs.filter((p) => p.shape === "scalar" || p.shape === "event");
   const meterPorts = live
@@ -522,7 +549,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
             {faceMeter && (
               <MiniMeter
                 source={minis!}
-                mini={`scalar:${node.id}:${faceMeter.name}`}
+                mini={`scalar:${data.mini}:${faceMeter.name}`}
                 label={faceMeter.name}
                 kind={faceMeter.shape === "event" ? "event" : "scalar"}
               />
@@ -577,7 +604,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
             <MiniMeter
               key={p.name}
               source={minis!}
-              mini={`scalar:${node.id}:${p.name}`}
+              mini={`scalar:${data.mini}:${p.name}`}
               label={p.name}
               kind={p.shape === "event" ? "event" : "scalar"}
             />
@@ -705,7 +732,9 @@ const EDGE_TYPES = { wire: WireEdge };
 
 // --- doc <-> flow mapping --------------------------------------------------
 
-function toFlowNodes(doc: PatchDoc, registry: Registry): PatchFlowNode[] {
+/** The flow nodes for what is shown: the document at `path` inside `root`. */
+function toFlowNodes(root: PatchDoc, path: string[], registry: Registry): PatchFlowNode[] {
+  const doc = docAt(root, path);
   return doc.nodes.map((n) => ({
     id: n.id,
     type: "patch" as const,
@@ -713,7 +742,8 @@ function toFlowNodes(doc: PatchDoc, registry: Registry): PatchFlowNode[] {
     data: {
       node: n,
       def: registry.get(n.kind),
-      docId: doc.id,
+      docId: root.id,
+      mini: flatId(root, path, n.id),
       wiredOut: doc.edges.filter((e) => e.from.node === n.id).map((e) => e.from.port),
       wiredIn: doc.edges.filter((e) => e.to.node === n.id).map((e) => e.to.port),
     },
@@ -834,6 +864,7 @@ function ParamPanel({
   status,
   codeReference,
   onConvertToCode,
+  subpatch,
 }: {
   doc: PatchDoc;
   nodeId: string;
@@ -851,6 +882,8 @@ function ParamPanel({
   /** Replace the node with its Code conversion (see `PatchEditorProps`).
    * Rejects with the reason when the node cannot be converted. */
   onConvertToCode?: () => Promise<void>;
+  /** For a Sub-patch node: its source and what can be done with it. */
+  subpatch?: SubpatchActions;
 }) {
   const sheet = useSheet(onClose);
   // Why Convert to Code was refused, for the node (and layer count) it was
@@ -982,13 +1015,7 @@ function ParamPanel({
           }
         />
       </label>
-      {node.kind === SUBPATCH_KIND && (
-        <p className="hint">
-          {node.sub
-            ? `A copy of "${node.sub.name || "patch"}" (${node.sub.nodes.length} nodes). Its exposed knobs are this node's inputs; to change the inside, edit that patch and insert it again.`
-            : "An empty sub-patch renders black. Insert a saved patch or a preset from the palette's Sub-patches group instead."}
-        </p>
-      )}
+      {node.kind === SUBPATCH_KIND && <SubpatchInfo node={node} canEdit={canEdit} actions={subpatch} />}
       {node.kind === NOTE_KIND && (
         <label className="patch-field">
           <span>Text</span>
@@ -1136,6 +1163,118 @@ function ParamPanel({
   );
 }
 
+/** What a Sub-patch node's panel needs from the editor. */
+type SubpatchActions = {
+  /** A source document: undefined while it is being fetched, null when it
+   * is gone (deleted, or a built-in this version doesn't have). */
+  source: (id: string) => PatchDoc | null | undefined;
+  /** The document on the canvas can't be edited here (a built-in, or the
+   * inside of a linked Sub-patch): cloning waits for its own unlock. */
+  locked: boolean;
+  open: (node: string) => void;
+  openSource: (id: string) => void;
+  clone: (node: string) => void;
+  update: (node: string) => void;
+};
+
+/** A Sub-patch's origin and the moves it offers: open it, clone a linked
+ * one for this project, update a clone whose source has moved on. */
+function SubpatchInfo({
+  node,
+  canEdit,
+  actions,
+}: {
+  node: PatchNode;
+  canEdit: boolean;
+  actions?: SubpatchActions;
+}) {
+  const [confirmUpdate, setConfirmUpdate] = useState(false);
+  useEffect(() => setConfirmUpdate(false), [node.id]);
+  if (!node.sub) {
+    return (
+      <p className="hint">
+        An empty sub-patch renders black. Insert a saved patch or a built-in from the palette's Sub-patches group
+        instead.
+      </p>
+    );
+  }
+  const sourceId = node.source;
+  const source = sourceId && actions ? actions.source(sourceId) : undefined;
+  const sourceName = source?.name || node.sub.name || "its source";
+  const kind = sourceId && isBuiltin(sourceId) ? "a built-in" : "a patch in your library";
+  const inner = `${node.sub.nodes.length} nodes inside`;
+  // A clone can be updated once its source has moved on; if the clone was
+  // changed here too, updating replaces those changes (so it asks twice).
+  const stale = !node.linked && source && node.source_rev !== undefined && sourceRev(source) !== node.source_rev;
+  const edited = node.source_rev !== undefined && sourceRev(node.sub) !== node.source_rev;
+  return (
+    <div className="patch-subpatch-info">
+      {node.linked ? (
+        <p className="hint">
+          Linked to <strong>{sourceName}</strong>, {kind} ({inner}). It follows that patch: change it there and every
+          patch using it changes too. Its exposed knobs are this node's inputs.
+          {source === null && " That patch is gone, so this keeps the last copy it had."}
+        </p>
+      ) : sourceId ? (
+        <p className="hint">
+          This project's own copy of <strong>{sourceName}</strong> ({inner}), yours to change here.
+          {stale && ` ${sourceName} has changed since it was copied.`}
+        </p>
+      ) : (
+        <p className="hint">This patch's own copy of "{node.sub.name || "a patch"}" ({inner}), yours to change here.</p>
+      )}
+      {actions && (
+        <div className="patch-subpatch-actions">
+          <button type="button" onClick={() => actions.open(node.id)} title="Or double-click the node">
+            Open inside ↘
+          </button>
+          {canEdit && node.linked && (
+            <button
+              type="button"
+              disabled={actions.locked}
+              title={
+                actions.locked
+                  ? "This patch can't be changed here; copy it first"
+                  : "Make this a copy this patch owns, to change without touching the original"
+              }
+              onClick={() => actions.clone(node.id)}
+            >
+              Clone for this project
+            </button>
+          )}
+          {canEdit && stale && (
+            <button
+              type="button"
+              disabled={actions.locked}
+              className={edited && confirmUpdate ? "danger" : undefined}
+              title={
+                edited
+                  ? `Replace this copy with ${sourceName} as it is now; the changes made to the copy here are lost`
+                  : `Replace this copy with ${sourceName} as it is now`
+              }
+              onClick={() => {
+                if (edited && !confirmUpdate) {
+                  setConfirmUpdate(true);
+                  return;
+                }
+                setConfirmUpdate(false);
+                actions.update(node.id);
+              }}
+            >
+              {edited && confirmUpdate ? "Really replace your changes?" : `Update from ${sourceName}`}
+            </button>
+          )}
+          {sourceId && source && (
+            <button type="button" onClick={() => actions.openSource(sourceId)}>
+              Open {sourceName}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The compact layout's stand-in for the toolbar: everything about the open
  * patch and the library, behind the patch-name chip on the canvas. */
 function MenuSheet({ onClose, children }: { onClose: () => void; children: ReactNode }) {
@@ -1262,6 +1401,8 @@ function Editor({
   globals,
   globalsNote,
   editorRef,
+  initialLocation = null,
+  onNavigate,
 }: PatchEditorProps) {
   const flow = useReactFlow();
   const registry = useMemo<Registry | null>(
@@ -1269,16 +1410,34 @@ function Editor({
     [registryList],
   );
   const [patches, setPatches] = useState<PatchSummary[]>([]);
-  const [doc, setDoc] = useState<PatchDoc | null>(null);
+  // The library has answered at least once (so a source missing from it is
+  // gone, not just not listed yet).
+  const [listed, setListed] = useState(false);
+  // The patch open (what is saved and renders) and where in it the canvas
+  // is: `path` goes down through Sub-patch nodes, and `doc` is the document
+  // there, the one on the canvas. Edits land in `doc` inside `root`.
+  const [root, setRoot] = useState<PatchDoc | null>(null);
+  const [path, setPath] = useState<string[]>([]);
+  const doc = useMemo(() => (root ? docAt(root, path) : null), [root, path]);
+  // Why the canvas can't be edited (a built-in, a linked Sub-patch), and
+  // whether an edit was tried since it opened: then a bar says so.
+  const lock = useMemo(() => (root ? lockAt(root, path) : null), [root, path]);
+  const [lockTried, setLockTried] = useState(false);
+  // The patch browser, beside the canvas (a wide layout).
+  const [browsing, setBrowsing] = useState(false);
+  // Sub-patches' source documents, fetched as their panels or links need
+  // them (null: gone). Cleared whenever another patch opens.
+  const [sources, setSources] = useState<Map<string, PatchDoc | null>>(() => new Map());
+  const sourceWanted = useRef(new Set<string>());
   const [nodes, setNodes] = useState<PatchFlowNode[]>([]);
   const [edges, setEdges] = useState<FlowEdge[]>([]);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Compact layout (a phone, or a narrow host column): the palette and the
   // node panel are sheets, opened on purpose and closed with Done.
-  const rootRef = useRef<HTMLDivElement>(null);
+  const tabRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
-  const compact = useCompact(rootRef);
+  const compact = useCompact(tabRef);
   // "menu" is the compact stand-in for the toolbar: open/new/rename/save/
   // delete and the host's extras, behind the patch-name chip on the canvas.
   const [sheet, setSheet] = useState<"palette" | "node" | "menu" | null>(null);
@@ -1298,12 +1457,35 @@ function Editor({
   } | null>(null);
   const docRef = useRef(doc);
   docRef.current = doc;
+  const rootRef = useRef(root);
+  rootRef.current = root;
+  const pathRef = useRef(path);
+  pathRef.current = path;
+  const presetsRef = useRef(presets);
+  presetsRef.current = presets;
+  const sourcesRef = useRef(sources);
+  sourcesRef.current = sources;
   const registryRef = useRef(registry);
   registryRef.current = registry;
   const requestedId = useRef<string | null>(null);
+  /** Where in the requested patch to land, and how to report it. */
+  const requestedAt = useRef<{ path: string[]; how: NavHow }>({ path: [], how: null });
+  /** How to report a new patch once its first save gives it an id. */
+  const unsavedHow = useRef<NavHow>(null);
   /** A saved patch asked for to be inserted as a Sub-patch, not opened. */
   const insertRequestedId = useRef<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The edit the save timer holds: opening another patch, or leaving,
+   * writes it at once instead of letting the next edit's timer drop it. */
+  const pendingSave = useRef<PatchDoc | null>(null);
+  const flushSave = useCallback(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    const d = pendingSave.current;
+    pendingSave.current = null;
+    if (d) store.save(d);
+  }, [store]);
+  useEffect(() => flushSave, [flushSave]);
   const history = useRef(new History<PatchDoc>());
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
@@ -1311,8 +1493,19 @@ function Editor({
   const onDocChangeRef = useRef(onDocChange);
   onDocChangeRef.current = onDocChange;
   useEffect(() => {
-    onDocChangeRef.current?.(doc);
-  }, [doc]);
+    onDocChangeRef.current?.(root);
+  }, [root]);
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
+  /** Tell the host the person moved (unless `how` is null: the host moved
+   * us, or nothing changed). */
+  const lastAnnounced = useRef<EditorLocation | null>(null);
+  const announce = useCallback((loc: EditorLocation, how: NavHow) => {
+    if (how && !sameLocation(loc, lastAnnounced.current)) {
+      onNavigateRef.current?.(loc, { replace: how === "replace" });
+    }
+    lastAnnounced.current = loc;
+  }, []);
 
   // A sheet has nothing to show once the layout widens, the node it was for
   // is gone (deleted, or another patch opened), or nothing is selected.
@@ -1340,14 +1533,24 @@ function Editor({
       lastTap.current = { id: node.id, at: now };
       if (last && last.id === node.id && now - last.at < 400) {
         lastTap.current = null;
+        if (opensInside(node)) {
+          openInsideRef.current(node.id);
+          return;
+        }
         setSelectedNode(node.id);
         setSheet("node");
       }
     },
     [compact],
   );
+  /** Double-click (or double-tap): a Sub-patch opens; on a phone any other
+   * node's settings open. */
   const onNodeOpen = useCallback(
     (_: unknown, node: PatchFlowNode) => {
+      if (opensInside(node)) {
+        openInsideRef.current(node.id);
+        return;
+      }
       if (!compact) return;
       setSelectedNode(node.id);
       setSheet("node");
@@ -1360,129 +1563,298 @@ function Editor({
     if (ready) store.list();
   }, [ready, store]);
 
-  // Stable (ref-based) so the long-lived message subscription never goes stale.
-  const openDoc = useCallback((d: PatchDoc) => {
-    history.current.clear();
-    setDoc(d);
-    setSelectedNode(null);
-    setConfirmDelete(false);
+  /** Put `root` at `at` on the canvas (React Flow's copy of the document). */
+  const showAt = useCallback((r: PatchDoc, at: string[]) => {
     const reg = registryRef.current;
-    if (reg) {
-      setNodes(toFlowNodes(d, reg));
-      setEdges(toFlowEdges(d, reg));
-    }
+    if (!reg) return;
+    setNodes(toFlowNodes(r, at, reg));
+    setEdges(toFlowEdges(docAt(r, at), reg));
   }, []);
+  const fitSoon = useCallback(() => {
+    requestAnimationFrame(() => void flow.fitView({ padding: 0.15 }));
+  }, [flow]);
+
+  // Stable (ref-based) so the long-lived message subscription never goes stale.
+  const openDoc = useCallback(
+    (d: PatchDoc, at: string[] = [], how: NavHow = "push") => {
+      flushSave();
+      history.current.clear();
+      const p = validPath(d, at);
+      rootRef.current = d;
+      pathRef.current = p;
+      setRoot(d);
+      setPath(p);
+      setSelectedNode(null);
+      setConfirmDelete(false);
+      setLockTried(false);
+      setChooser(null);
+      setSources(new Map());
+      sourceWanted.current.clear();
+      showAt(d, p);
+      fitSoon();
+      if (d.id) announce({ patch: d.id, path: p }, how);
+      else unsavedHow.current = how;
+    },
+    [announce, fitSoon, flushSave, showAt],
+  );
+
+  /** Go to a location: inside the open patch, a built-in, or a saved patch
+   * (asked of the store, opened when it answers). */
+  const goTo = useCallback(
+    (loc: EditorLocation, how: NavHow) => {
+      const r = rootRef.current;
+      if (r && loc.patch === r.id) {
+        const p = validPath(r, loc.path);
+        if (sameLocation({ patch: r.id, path: p }, { patch: r.id, path: pathRef.current })) return;
+        pathRef.current = p;
+        setPath(p);
+        setSelectedNode(null);
+        setLockTried(false);
+        setChooser(null);
+        showAt(r, p);
+        fitSoon();
+        if (r.id) announce({ patch: r.id, path: p }, how);
+        return;
+      }
+      if (isBuiltin(loc.patch)) {
+        const preset = presetsRef.current.find((p) => p.id === loc.patch);
+        if (preset) openDoc(structuredClone(preset), loc.path, how);
+        return;
+      }
+      if (!loc.patch) return;
+      requestedId.current = loc.patch;
+      requestedAt.current = { path: loc.path, how };
+      store.get(loc.patch);
+    },
+    [announce, fitSoon, openDoc, showAt, store],
+  );
+  const openInsideRef = useRef<(node: string) => void>(() => {});
+  openInsideRef.current = (node: string) => {
+    const r = rootRef.current;
+    if (r) goTo({ patch: r.id, path: [...pathRef.current, node] }, "push");
+  };
 
   // Store events.
   useEffect(() => {
     return store.subscribe((msg) => {
       if (msg.type === "patches") {
         setPatches(msg.patches);
+        setListed(true);
       } else if (msg.type === "patch") {
-        if (insertRequestedId.current === msg.patch.id) {
+        const id = msg.patch.id;
+        // A Sub-patch's source we asked for (or one we hold, saved again).
+        const wasSource = sourceWanted.current.delete(id);
+        if (wasSource || sourcesRef.current.has(id)) {
+          setSources((m) => new Map(m).set(id, msg.patch));
+        }
+        if (insertRequestedId.current === id) {
           insertRequestedId.current = null;
           insertSubpatchRef.current?.(msg.patch);
-        } else if (requestedId.current === msg.patch.id) {
+        } else if (requestedId.current === id) {
           requestedId.current = null;
-          openDoc(msg.patch);
-        } else if (docRef.current && docRef.current.id === "") {
+          openDoc(msg.patch, requestedAt.current.path, requestedAt.current.how);
+        } else if (!wasSource && rootRef.current && rootRef.current.id === "") {
           // Save echo for a brand-new patch: adopt the assigned id, keep edits.
           // The nodes on the canvas learn it too: their live thumbnails and
           // meters key on it (a preset copy otherwise showed none until it
           // was reopened).
-          const id = msg.patch.id;
-          setDoc((d) => (d && d.id === "" ? { ...d, id } : d));
+          const next = { ...rootRef.current, id };
+          rootRef.current = next;
+          setRoot(next);
           setNodes((nds) => nds.map((n) => ({ ...n, data: { ...n.data, docId: id } })));
+          announce({ patch: id, path: pathRef.current }, unsavedHow.current ?? "replace");
+          unsavedHow.current = null;
         }
       } else if (msg.type === "param") {
         // Someone played an exposed param (Control tab, possibly on a phone):
         // reflect it in the open doc so the side panel doesn't go stale.
-        setDoc((d) => {
-          if (!d) return d;
-          const n = d.nodes.find((x) => x.id === msg.node);
-          if (!n || n.params[msg.param] === msg.value) return d;
-          const next = structuredClone(d);
-          next.nodes.find((x) => x.id === msg.node)!.params[msg.param] = msg.value;
-          return next;
-        });
+        const d = rootRef.current;
+        if (!d) return;
+        const n = d.nodes.find((x) => x.id === msg.node);
+        if (!n || n.params[msg.param] === msg.value) return;
+        const next = structuredClone(d);
+        next.nodes.find((x) => x.id === msg.node)!.params[msg.param] = msg.value;
+        rootRef.current = next;
+        setRoot(next);
       }
     });
-  }, [store, openDoc]);
+  }, [store, openDoc, announce]);
 
-  // Reopen the live patch when returning to this tab. Subscribe first so a
-  // fast local response cannot arrive before the editor is listening.
+  // Open where the host says (its URL), or reopen the live patch when
+  // returning to this tab. Subscribe first so a fast local response cannot
+  // arrive before the editor is listening. A built-in waits for the presets.
   useEffect(() => {
-    if (!ready || !activeId || docRef.current || requestedId.current) return;
-    requestedId.current = activeId;
-    store.get(activeId);
-  }, [activeId, store, ready]);
+    if (!ready || rootRef.current || requestedId.current) return;
+    const want = initialLocation ?? (activeId ? { patch: activeId, path: [] } : null);
+    if (!want || (isBuiltin(want.patch) && presets.length === 0)) return;
+    goTo(want, "replace");
+  }, [activeId, initialLocation, presets, ready, goTo]);
 
   // Registry may arrive after the doc was opened.
   useEffect(() => {
-    if (registry && docRef.current) {
-      setNodes(toFlowNodes(docRef.current, registry));
-      setEdges(toFlowEdges(docRef.current, registry));
+    if (registry && rootRef.current) showAt(rootRef.current, pathRef.current);
+  }, [registry, showAt]);
+
+  // --- Sub-patch sources -------------------------------------------------
+
+  /** A source document: a built-in from the presets, a saved patch from
+   * the store (undefined while asked for; null when it is gone). */
+  const sourceFor = useCallback(
+    (id: string): PatchDoc | null | undefined => {
+      if (isBuiltin(id)) return presets.find((p) => p.id === id) ?? (presets.length ? null : undefined);
+      if (sources.has(id)) return sources.get(id);
+      if (listed && !patches.some((p) => p.id === id)) return null;
+      return undefined;
+    },
+    [presets, sources, listed, patches],
+  );
+  // Ask the store for the sources in play: what the open patch links (to
+  // keep those copies current) and what the canvas's Sub-patches came from
+  // (for their panels).
+  const wantedSources = useMemo(() => {
+    const ids = new Set(root ? linkedSources(root) : []);
+    for (const n of doc?.nodes ?? []) if (n.kind === SUBPATCH_KIND && n.source) ids.add(n.source);
+    return [...ids].filter((id) => !isBuiltin(id) && id !== root?.id);
+  }, [root, doc]);
+  useEffect(() => {
+    for (const id of wantedSources) {
+      if (sources.has(id) || sourceWanted.current.has(id)) continue;
+      if (listed && !patches.some((p) => p.id === id)) continue;
+      sourceWanted.current.add(id);
+      store.get(id);
     }
-  }, [registry]);
+  }, [wantedSources, sources, listed, patches, store]);
 
   const scheduleSave = useCallback(
     (d: PatchDoc) => {
       if (!canEdit) return;
       if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
-        saveTimer.current = null;
-        store.save(d);
-      }, 600);
+      pendingSave.current = d;
+      saveTimer.current = setTimeout(flushSave, 600);
     },
-    [canEdit, store],
+    [canEdit, flushSave],
   );
 
   /** All document mutations funnel through here: clone, mutate, sync, save.
-   * `key` names the control being changed so a run of edits on one knob is
-   * a single undo step. */
+   * `mutate` gets the document on the canvas (or the one at `at`) inside a
+   * copy of the patch. `key` names the control being changed so a run of
+   * edits on one knob is a single undo step. Where the canvas can't be
+   * edited (a built-in, a linked Sub-patch) nothing changes: the bar says
+   * why and offers a copy, and the canvas drops whatever it moved already.
+   * `force` is for the moves that lift that lock (clone). */
   const mutateDoc = useCallback(
-    (mutate: (d: PatchDoc) => void, resync = true, key?: string) => {
-      setDoc((prev) => {
-        if (!prev) return prev;
-        history.current.push(prev, key);
-        const next: PatchDoc = structuredClone(prev);
-        mutate(next);
-        scheduleSave(next);
-        if (resync && registry) {
-          setNodes(toFlowNodes(next, registry));
-          setEdges(toFlowEdges(next, registry));
-        }
-        return next;
-      });
+    (mutate: (d: PatchDoc) => void, resync = true, key?: string, opts: { at?: string[]; force?: boolean } = {}) => {
+      const prev = rootRef.current;
+      if (!prev) return;
+      const at = opts.at ?? pathRef.current;
+      if (!opts.force && lockAt(prev, at)) {
+        setLockTried(true);
+        showAt(prev, pathRef.current);
+        return;
+      }
+      history.current.push(prev, key);
+      const next: PatchDoc = structuredClone(prev);
+      mutate(docAt(next, at));
+      rootRef.current = next;
+      setRoot(next);
+      scheduleSave(next);
+      if (resync) showAt(next, pathRef.current);
     },
-    [registry, scheduleSave],
+    [scheduleSave, showAt],
   );
 
-  /** Show another snapshot of the open document (undo/redo). */
+  /** Show another snapshot of the open patch (undo/redo). The canvas stays
+   * where it is unless that Sub-patch is gone in the snapshot. */
   const restoreDoc = useCallback(
     (d: PatchDoc) => {
-      setDoc(d);
+      const p = validPath(d, pathRef.current);
+      rootRef.current = d;
+      pathRef.current = p;
+      setRoot(d);
+      setPath(p);
       scheduleSave(d);
-      if (registry) {
-        setNodes(toFlowNodes(d, registry));
-        setEdges(toFlowEdges(d, registry));
-      }
-      setSelectedNode((sel) => (sel && d.nodes.some((n) => n.id === sel) ? sel : null));
+      showAt(d, p);
+      const shown = docAt(d, p);
+      setSelectedNode((sel) => (sel && shown.nodes.some((n) => n.id === sel) ? sel : null));
     },
-    [registry, scheduleSave],
+    [scheduleSave, showAt],
   );
   const undo = useCallback(() => {
-    const cur = docRef.current;
+    const cur = rootRef.current;
     if (!cur || !canEdit) return;
     const prev = history.current.undo(cur);
     if (prev) restoreDoc(prev);
   }, [canEdit, restoreDoc]);
   const redo = useCallback(() => {
-    const cur = docRef.current;
+    const cur = rootRef.current;
     if (!cur || !canEdit) return;
     const next = history.current.redo(cur);
     if (next) restoreDoc(next);
   }, [canEdit, restoreDoc]);
+
+  // --- built-ins and linked Sub-patches ----------------------------------
+
+  /** A built-in can't change: open an editable copy of it instead, at the
+   * same place, with any linked Sub-patch on the way there cloned too. It
+   * takes the built-in's place in the host's history. */
+  const forkBuiltin = useCallback(() => {
+    const r = rootRef.current;
+    if (!r) return;
+    const copy = structuredClone(r);
+    copy.id = "";
+    cloneAlong(copy, pathRef.current);
+    openDoc(copy, pathRef.current, "replace");
+    scheduleSave(copy);
+  }, [openDoc, scheduleSave]);
+  /** The canvas is inside linked Sub-patches: make them this patch's own. */
+  const cloneHere = useCallback(() => {
+    mutateDoc((d) => cloneAlong(d, pathRef.current), true, undefined, { at: [], force: true });
+    setLockTried(false);
+  }, [mutateDoc]);
+  const subpatchActions = useMemo(
+    () => ({
+      source: sourceFor,
+      locked: lock !== null,
+      open: (node: string) => openInsideRef.current(node),
+      openSource: (id: string) => goTo({ patch: id, path: [] }, "push"),
+      clone: (node: string) =>
+        mutateDoc((d) => {
+          const n = d.nodes.find((x) => x.id === node);
+          if (n) unlink(n);
+        }),
+      update: (node: string) => {
+        const n = docRef.current?.nodes.find((x) => x.id === node);
+        const src = n?.source ? sourceFor(n.source) : null;
+        if (!src) return;
+        mutateDoc((d) => {
+          const m = d.nodes.find((x) => x.id === node);
+          if (!m) return;
+          m.sub = snapshot(src);
+          m.source_rev = sourceRev(src);
+        });
+      },
+    }),
+    [sourceFor, lock, goTo, mutateDoc],
+  );
+
+  // Linked copies follow their sources: when the open patch has a stale
+  // one (a built-in changed with the app, or a saved patch changed while
+  // this one wasn't looking), refresh it, as the store does on save.
+  useEffect(() => {
+    const r = rootRef.current;
+    if (!r || !r.id || isBuiltin(r.id) || !canEdit) return;
+    const next = structuredClone(r);
+    let changed = false;
+    for (const id of linkedSources(r)) {
+      const src = sourceFor(id);
+      if (src) changed = syncLinks(next, src) || changed;
+    }
+    if (!changed) return;
+    rootRef.current = next;
+    setRoot(next);
+    showAt(next, pathRef.current);
+    scheduleSave(next);
+  }, [root?.id, sourceFor, canEdit, showAt, scheduleSave]);
 
   /** Lay the graph out left to right by its wires: one undo step, then the
    * view fits the result. Deterministic for a given document (see arrange.ts). */
@@ -1837,14 +2209,22 @@ function Editor({
     [canvasCenter, mutateDoc],
   );
 
-  /** Add a Sub-patch node holding a copy of `inner`. */
+  /** Add a Sub-patch node linked to `inner` (a saved patch or a built-in):
+   * it holds a copy that follows it until cloned. */
   const insertSubpatch = useCallback(
     (inner: PatchDoc) => {
       const pos = canvasCenter();
-      const sub = structuredClone(inner);
-      sub.id = "";
+      const sub = snapshot(inner);
       mutateDoc((d) => {
-        d.nodes.push({ id: freshId(d), kind: SUBPATCH_KIND, name: "", params: {}, pos, sub });
+        d.nodes.push({
+          id: freshId(d),
+          kind: SUBPATCH_KIND,
+          name: "",
+          params: {},
+          pos,
+          sub,
+          ...(inner.id ? { source: inner.id, linked: true } : {}),
+        });
       });
     },
     [canvasCenter, mutateDoc],
@@ -1854,13 +2234,16 @@ function Editor({
 
   const subpatchChoices = useMemo<SubpatchChoice[]>(() => {
     if (!registry?.has(SUBPATCH_KIND)) return [];
+    // Not the patch itself, nor one that links it: they would nest in each
+    // other without end.
+    const here = root?.id ?? "";
     return [
       ...patches
-        .filter((p) => p.id !== doc?.id)
+        .filter((p) => !here || (p.id !== here && !summaryLinks(p.subpatches, here)))
         .map((p) => ({ id: p.id, name: p.name, nodes: p.nodes, preset: false })),
       ...presets.map((p) => ({ id: p.id, name: p.name, nodes: p.nodes.length, preset: true })),
     ];
-  }, [registry, patches, presets, doc?.id]);
+  }, [registry, patches, presets, root?.id]);
 
   // --- toolbar actions ---
 
@@ -1878,34 +2261,45 @@ function Editor({
   useImperativeHandle(
     editorRef,
     () => ({
-      doc: () => docRef.current,
-      open: (d: PatchDoc, asNew = false) => {
-        openAs(d, asNew);
-        // Read back at once, before the next render catches up.
-        docRef.current = { ...structuredClone(d), id: asNew ? "" : d.id };
-      },
+      // The whole patch (what saves and renders), wherever the canvas is.
+      doc: () => rootRef.current,
+      open: (d: PatchDoc, asNew = false) => openAs(d, asNew),
       replace: (d: PatchDoc) => {
-        const cur = docRef.current;
-        if (!cur) {
+        const cur = rootRef.current;
+        // A built-in can't change: the new document becomes a patch of its own.
+        if (!cur || isBuiltin(cur.id)) {
           openAs(d, true);
-          docRef.current = { ...structuredClone(d), id: "" };
           return;
         }
         // Wholly: a field the new document leaves out goes, as on Open.
         const next: PatchDoc = { ...structuredClone(d), id: cur.id };
-        mutateDoc((c) => {
-          for (const key of Object.keys(c)) delete (c as unknown as Record<string, unknown>)[key];
-          Object.assign(c, next);
-        }, true);
-        docRef.current = next;
-        setSelectedNode((sel) => (sel && d.nodes.some((n) => n.id === sel) ? sel : null));
+        mutateDoc(
+          (c) => {
+            for (const key of Object.keys(c)) delete (c as unknown as Record<string, unknown>)[key];
+            Object.assign(c, next);
+          },
+          false,
+          undefined,
+          { at: [], force: true },
+        );
+        const replaced = rootRef.current!;
+        const p = validPath(replaced, pathRef.current);
+        pathRef.current = p;
+        setPath(p);
+        showAt(replaced, p);
+        const shown = docAt(replaced, p);
+        setSelectedNode((sel) => (sel && shown.nodes.some((n) => n.id === sel) ? sel : null));
       },
       arrange: arrangeNodes,
+      navigate: (loc: EditorLocation) => goTo(loc, null),
+      location: () => (rootRef.current ? { patch: rootRef.current.id, path: pathRef.current } : null),
     }),
-    [openAs, mutateDoc, arrangeNodes],
+    [openAs, mutateDoc, arrangeNodes, goTo, showAt],
   );
 
-  const isActive = doc !== null && doc.id !== "" && activeId === doc.id;
+  const isActive = root !== null && root.id !== "" && activeId === root.id;
+  const builtinSummaries = useMemo(() => presets.map(summarize), [presets]);
+  const here: EditorLocation | null = root ? { patch: root.id, path } : null;
 
   const selectedDef =
     selectedNode && doc && registry
@@ -1913,39 +2307,35 @@ function Editor({
       : undefined;
 
   // Toolbar pieces, shared by the wide toolbar and the compact menu sheet.
-  const openPreset = (preset: PatchDoc) => {
-    // Instantiate a COPY: blank id makes the autosave mint a fresh patch, so
-    // the built-in template is never overwritten.
-    const copy = structuredClone(preset);
-    copy.id = "";
-    openDoc(copy);
-    scheduleSave(copy);
-  };
   const deletePatch = () => {
-    if (!doc) return;
+    if (!root) return;
     if (!confirmDelete) {
       setConfirmDelete(true);
       setTimeout(() => setConfirmDelete(false), 3000);
       return;
     }
-    store.remove(doc.id);
-    setDoc(null);
+    store.remove(root.id);
+    rootRef.current = null;
+    pathRef.current = [];
+    setRoot(null);
+    setPath([]);
     setNodes([]);
     setEdges([]);
   };
-  const nameField = doc && (
+  // The patch's own name, wherever the canvas is.
+  const nameField = root && (
     <input
       className="patch-name"
       aria-label="Patch name"
-      value={doc.name}
+      value={root.name}
       disabled={!canEdit}
-      onChange={(e) => mutateDoc((d) => void (d.name = e.target.value), false)}
+      onChange={(e) => mutateDoc((d) => void (d.name = e.target.value), false, undefined, { at: [] })}
     />
   );
   // Who made it, when it came from somewhere else (a playground submission).
-  const creditLabel = doc?.credit ? (
+  const creditLabel = root?.credit ? (
     <span className="patch-credit" title="Who sent this pattern">
-      by {doc.credit}
+      by {root.credit}
     </span>
   ) : null;
   const undoRedo = canEdit && doc && (
@@ -1968,17 +2358,17 @@ function Editor({
       ⇆ Arrange
     </button>
   );
-  const activateButton = doc && canEdit && showActivate && (
+  const activateButton = root && canEdit && showActivate && !isBuiltin(root.id) && (
     <button
       type="button"
       className={isActive ? "active" : ""}
-      disabled={doc.id === ""}
-      onClick={() => store.activate(isActive ? null : doc.id)}
+      disabled={root.id === ""}
+      onClick={() => store.activate(isActive ? null : root.id)}
     >
       {isActive ? "■ Deactivate" : "▶ Activate"}
     </button>
   );
-  const deleteButton = doc && canEdit && doc.id !== "" && (
+  const deleteButton = root && canEdit && root.id !== "" && !isBuiltin(root.id) && (
     <button type="button" className="danger" onClick={deletePatch}>
       {confirmDelete ? "Really delete?" : "Delete"}
     </button>
@@ -1992,55 +2382,26 @@ function Editor({
   );
 
   return (
-    <div className={`patch-tab ${compact ? "compact" : ""}`} ref={rootRef}>
+    <div className={`patch-tab ${compact ? "compact" : ""}`} ref={tabRef}>
       {!compact && (
         <div className="patch-toolbar">
-          <select
-            aria-label="Open patch"
-            value={doc?.id ?? ""}
-            onChange={(e) => {
-              const id = e.target.value;
-              if (!id) return;
-              requestedId.current = id;
-              store.get(id);
-            }}
+          <button
+            type="button"
+            className={browsing ? "active" : ""}
+            aria-expanded={browsing}
+            title="Built-in patterns and your patches"
+            onClick={() => setBrowsing(!browsing)}
           >
-            <option value="" disabled>
-              {patches.length ? "Open patch…" : "No saved patches"}
-            </option>
-            {patches.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} ({p.nodes}){p.id === activeId ? " ●" : ""}
-              </option>
-            ))}
-          </select>
+            📁 Patches
+          </button>
           {canEdit && <button onClick={() => openDoc(emptyPatch())}>＋ New</button>}
           {undoRedo}
           {arrangeButton}
-          {canEdit && presets.length > 0 && (
-            <select
-              aria-label="New from preset"
-              value=""
-              onChange={(e) => {
-                const preset = presets.find((p) => p.id === e.target.value);
-                if (preset) openPreset(preset);
-              }}
-            >
-              <option value="" disabled>
-                New from preset…
-              </option>
-              {presets.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          )}
           {nameField}
           {creditLabel}
           {activateButton}
           {deleteButton}
-          {toolbarExtra?.({ doc, open: openAs })}
+          {toolbarExtra?.({ doc: root, open: openAs })}
           <span className="spacer" />
           {statusLine}
         </div>
@@ -2057,7 +2418,30 @@ function Editor({
         }}
       >
       <div className="patch-main">
-        {canEdit && doc && registry && (!compact || sheet === "palette") && (
+        {!compact && (browsing || !root) && (
+          <aside className="patch-browser-panel" aria-label="Patches">
+            <div className="patch-panel-head">
+              <h3>Patches</h3>
+              {root && (
+                <button type="button" className="patch-sheet-done" onClick={() => setBrowsing(false)}>
+                  Close
+                </button>
+              )}
+            </div>
+            <PatchBrowser
+              patches={patches}
+              builtins={builtinSummaries}
+              current={here}
+              activeId={activeId}
+              onOpen={(loc) => {
+                // A pick closes it, so the palette is back for editing.
+                goTo(loc, "push");
+                setBrowsing(false);
+              }}
+            />
+          </aside>
+        )}
+        {canEdit && doc && registry && (compact ? sheet === "palette" : !browsing) && (
           <Palette
             types={registryList ?? []}
             subpatches={subpatchChoices}
@@ -2140,11 +2524,83 @@ function Editor({
             <div className="patch-empty">
               {registry === null
                 ? "Loading node palette…"
-                : patches.length
-                  ? "Open a patch or create a new one."
+                : patches.length || presets.length
+                  ? "Open a patch from the list, or start a new one."
                   : canEdit
                     ? "No patches yet — hit ＋ New to start."
                     : "No patches yet. Create one on the Gate machine."}
+            </div>
+          )}
+          {root && (path.length > 0 || lock) && (!compact || sheet === null) && (
+            <nav className="patch-crumbs" aria-label="Where you are in the patch">
+              {crumbs(root, path).map((c, i, all) =>
+                i < all.length - 1 ? (
+                  <span key={c.path.join("/")} className="patch-crumb">
+                    <button type="button" onClick={() => goTo({ patch: root.id, path: c.path }, "push")}>
+                      {c.label}
+                    </button>
+                    <span aria-hidden="true"> › </span>
+                  </span>
+                ) : (
+                  <span key={c.path.join("/")} className="patch-crumb" aria-current="location">
+                    {c.label}
+                  </span>
+                ),
+              )}
+              {lock && (
+                <button
+                  type="button"
+                  className="patch-lock-chip"
+                  onClick={() => setLockTried(true)}
+                  title={
+                    lock.kind === "builtin"
+                      ? "Built in: read-only. Edit a copy."
+                      : `Linked: it follows ${lock.name}. Clone it to change it here.`
+                  }
+                >
+                  {lock.kind === "builtin" ? "🔒 Built-in" : `🔗 Linked to ${lock.name}`}
+                </button>
+              )}
+            </nav>
+          )}
+          {lock && lockTried && (!compact || sheet === null) && (
+            <div className="patch-lock-bar" role="alert">
+              <p>
+                {lock.kind === "builtin" ? (
+                  <>
+                    <strong>{lock.name}</strong> is built in, so it can't change. Edit a copy of it instead.
+                  </>
+                ) : (
+                  <>
+                    This is linked to <strong>{lock.name}</strong>: it follows that patch, so it can't change here.
+                  </>
+                )}
+              </p>
+              <div className="patch-lock-actions">
+                {lock.kind === "builtin" ? (
+                  canEdit && (
+                    <button type="button" className="primary" onClick={forkBuiltin}>
+                      Make a copy to edit
+                    </button>
+                  )
+                ) : (
+                  <>
+                    {canEdit && !isBuiltin(root!.id) && (
+                      <button type="button" className="primary" onClick={cloneHere}>
+                        Clone for this project
+                      </button>
+                    )}
+                    {!isBuiltin(lock.source) && sourceFor(lock.source) && (
+                      <button type="button" onClick={() => goTo({ patch: lock.source, path: [] }, "push")}>
+                        Edit {lock.name} everywhere
+                      </button>
+                    )}
+                  </>
+                )}
+                <button type="button" aria-label="Dismiss" onClick={() => setLockTried(false)}>
+                  ✕
+                </button>
+              </div>
             </div>
           )}
           {compact && sheet === null && (
@@ -2153,10 +2609,10 @@ function Editor({
                 type="button"
                 className="patch-name-chip"
                 onClick={() => setSheet("menu")}
-                aria-label={doc ? `Patch: ${doc.name || "Untitled"}. Open the patch menu` : "Open the patch menu"}
+                aria-label={root ? `Patch: ${root.name || "Untitled"}. Open the patch menu` : "Open the patch menu"}
               >
                 <span aria-hidden="true">☰ </span>
-                {doc ? doc.name || "Untitled" : patches.length ? "Open patch…" : "Patches"}
+                {root ? root.name || "Untitled" : "Patches"}
               </button>
               {status?.error && (
                 <button
@@ -2242,6 +2698,7 @@ function Editor({
             onClose={compact ? () => setSheet(null) : undefined}
             status={status}
             codeReference={codeReference}
+            subpatch={subpatchActions}
             onConvertToCode={
               convertToCode
                 ? async () => {
@@ -2272,35 +2729,13 @@ function Editor({
               {arrangeButton}
               {activateButton}
               {toolbarExtra?.({
-                doc,
+                doc: root,
                 open: (d, asNew) => {
                   openAs(d, asNew);
                   setSheet(null);
                 },
               })}
               {deleteButton}
-            </div>
-            <h4>Open</h4>
-            <div className="patch-menu-list">
-              {patches.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={p.id === doc?.id ? "current" : ""}
-                  onClick={() => {
-                    requestedId.current = p.id;
-                    store.get(p.id);
-                    setSheet(null);
-                  }}
-                >
-                  {p.name}
-                  <span className="hint">
-                    {" "}
-                    ({p.nodes}){p.id === activeId ? " ●" : ""}
-                  </span>
-                </button>
-              ))}
-              {patches.length === 0 && <p className="hint">No saved patches yet.</p>}
             </div>
             {canEdit && (
               <>
@@ -2315,21 +2750,20 @@ function Editor({
                   >
                     ＋ Blank patch
                   </button>
-                  {presets.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        openPreset(p);
-                        setSheet(null);
-                      }}
-                    >
-                      From preset: {p.name}
-                    </button>
-                  ))}
                 </div>
               </>
             )}
+            <h4>Open</h4>
+            <PatchBrowser
+              patches={patches}
+              builtins={builtinSummaries}
+              current={here}
+              activeId={activeId}
+              onOpen={(loc) => {
+                goTo(loc, "push");
+                setSheet(null);
+              }}
+            />
           </MenuSheet>
         )}
       </div>

@@ -1763,3 +1763,228 @@
   padding: 6px;
   resize: vertical;
 }
+
+/* --- Navigation: the patch browser, the breadcrumb, read-only frames ------ */
+
+.patch-browser-panel {
+  width: 240px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 10px;
+  background: var(--pe-bg2, #141024);
+  border-right: 1px solid #2a2445;
+}
+
+.patch-browser-panel .patch-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.patch-browser-panel .patch-panel-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.browser-views {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.browser-views button {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.browser-views button.active {
+  border-color: var(--pe-accent, #7c5cff);
+  background: #2a1f55;
+}
+
+.browser-folder {
+  margin: 6px 0;
+}
+
+.browser-folder > summary {
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--pe-muted, #8a85a8);
+  padding: 4px 0;
+}
+
+.browser-folder-hint {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.browser-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.browser-subs {
+  margin-left: 18px;
+  border-left: 1px solid #2a2445;
+  padding-left: 4px;
+}
+
+.browser-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.patch-tab .browser-twist {
+  flex: 0 0 18px;
+  width: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--pe-muted, #8a85a8);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.patch-tab .browser-item {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  width: 100%;
+  margin: 1px 0;
+  padding: 4px 8px;
+  text-align: left;
+  font-size: 13px;
+  border-color: transparent;
+  background: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patch-tab .browser-item[aria-current] {
+  border-color: var(--pe-accent, #7c5cff);
+  background: #2a1f55;
+}
+
+.browser-lock {
+  margin-right: 4px;
+  font-size: 11px;
+}
+
+.patch-sheet .patch-browser .browser-item {
+  padding: 9px 10px;
+  font-size: 15px;
+}
+
+/* Where the canvas is in the patch, and why it can't change when it can't. */
+.patch-crumbs {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.patch-crumbs > * {
+  pointer-events: auto;
+}
+
+.patch-crumb {
+  display: inline-flex;
+  align-items: center;
+  color: var(--pe-muted, #8a85a8);
+}
+
+.patch-crumb[aria-current] {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--pe-panel, #1a1530);
+  color: var(--pe-text, #e8e6f4);
+  font-weight: 600;
+}
+
+.patch-tab .patch-crumb button {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.patch-tab .patch-lock-chip {
+  margin-left: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border-color: #6b5a2a;
+  color: #f2e6a8;
+}
+
+.patch-lock-bar {
+  position: absolute;
+  top: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  width: min(560px, calc(100% - 20px));
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid #6b5a2a;
+  border-radius: 10px;
+  background: #241d0c;
+  color: #f2e6a8;
+  font-size: 13px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+.patch-lock-bar p {
+  flex: 1 1 260px;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.patch-lock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.patch-tab .patch-lock-actions button.primary {
+  border-color: var(--pe-accent, #7c5cff);
+  background: #3a2a7a;
+}
+
+/* Compact: the chips own the top row, so the breadcrumb goes under them. */
+.patch-tab.compact .patch-crumbs {
+  top: 56px;
+}
+
+.patch-tab.compact .patch-lock-bar {
+  top: auto;
+  bottom: 12px;
+}
+
+.patch-subpatch-info strong {
+  color: var(--pe-text, #e8e6f4);
+}
+
+.patch-subpatch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 12px;
+}

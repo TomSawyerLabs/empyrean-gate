@@ -6041,6 +6041,12 @@ function parsePatchValue(raw, depth) {
       pos: Array.isArray(n.pos) && n.pos.length === 2 ? [Number(n.pos[0]), Number(n.pos[1])] : [0, 0],
       ...typeof n.media === "string" ? { media: n.media } : {},
       ...n.code && typeof n.code === "object" ? { code: structuredClone(n.code) } : {},
+      ...typeof n.text === "string" ? { text: n.text } : {},
+      ...n.collapsed === !0 ? { collapsed: !0 } : {},
+      ...typeof n.layers === "number" && n.layers > 1 ? { layers: n.layers } : {},
+      ...typeof n.source === "string" && n.source ? { source: n.source } : {},
+      ...n.linked === !0 ? { linked: !0 } : {},
+      ...typeof n.source_rev === "string" ? { source_rev: n.source_rev } : {},
       ...n.sub && typeof n.sub === "object" ? depth < MAX_SUBPATCH_DEPTH ? { sub: parsePatchValue(n.sub, depth + 1) } : (() => {
         throw Error("That patch nests sub-patches too deep.");
       })() : {}
