@@ -379,3 +379,10 @@ by Playwright (`reuseExistingServer`) and serves a stale registry; check
   `code::check_ident`, bodies only through `code::rewrite_body`.
 - Do not key anything on `&'static str` for per-instance ports.
 - Do not bump `bun.lock` in the site by hand (bot does it).
+
+## Release
+
+v0.15.0 (tag at `693d98c`, 2026-10-18) carries rounds 1–5 to the real gate, along with every
+other thread's work since v0.14.0 (noise nodes, Blend layer stack, agent tools and CLI,
+phone-canvas chips, wire delete). Cut per `plans/releasing.md`; the version now lives
+in nine files, bumped together.
