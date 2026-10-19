@@ -7,13 +7,9 @@
 // buffer sizes.
 
 import type { Limits } from "./core";
+import type { Geometry } from "./geometry";
 
-export interface Geometry {
-  spokes: number;
-  pixels: number;
-  /** Inner radius over outer radius. */
-  innerOverOuter: number;
-}
+export type { Geometry } from "./geometry";
 
 /** One frame of inputs, as bytes from `PatchSim`. */
 export interface FrameData {
