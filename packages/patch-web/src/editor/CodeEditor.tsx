@@ -42,6 +42,7 @@ import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { tags as t } from "@lezer/highlight";
 import type { CodeFnRef, CodePort, CodeReference, PatchShape } from "../types";
+import { signatureHelp } from "./code-signature";
 import { snippetsFor } from "./code-snippets";
 
 // --- WGSL, as a stream mode --------------------------------------------------
@@ -328,6 +329,51 @@ function ctxNames(doc: string): Set<string> {
   return names;
 }
 
+/** The functions an input port gives the body: `<name>_at` to sample it
+ * elsewhere, and a buffer's `<name>_on`. */
+function portFns(p: CodePort): CodeFnRef[] {
+  const n = p.name;
+  switch (p.shape) {
+    case "points":
+    case "effects": {
+      const rec = p.shape === "points" ? "Dab" : "Effect";
+      const fns = [{ name: `${n}_at`, signature: `${n}_at(k: u32) -> ${rec}`, doc: `The k-th of the live ${p.shape} (0..${n}_count); a zeroed ${rec} past the end.` }];
+      if (p.shape === "effects") {
+        fns.push({ name: `${n}_on`, signature: `${n}_on(k: u32) -> bool`, doc: `Whether effect k belongs to the chain wired into ${n} (the Effects buffer holds every chain's).` });
+      }
+      return fns;
+    }
+    case "texture":
+      return [{ name: `${n}_at`, signature: `${n}_at(uv: vec2f) -> vec4f`, doc: `The texture wired into ${n} at uv (0..1, y down), RGBA.` }];
+    case "field_scalar":
+    case "field_color":
+      return [
+        {
+          name: `${n}_at`,
+          signature: `${n}_at(ctx: Ctx) -> ${p.shape === "field_color" ? "vec4f" : "f32"}`,
+          doc: `The ${n} input sampled at another position, e.g. ${n}_at(ctx_transform(c, angle, zoom, 0.0, 0.0)).`,
+        },
+      ];
+    default:
+      return [];
+  }
+}
+
+/** The function named `name` in the body's scope: a port's own, a lib
+ * helper (GPU) or interpreter builtin (CPU), or a WGSL builtin. */
+export function fnFor(s: CodeScope, name: string): CodeFnRef | null {
+  for (const p of s.inputs) {
+    const fn = portFns(p).find((f) => f.name === name);
+    if (fn) return fn;
+  }
+  const ref = s.reference;
+  return (
+    (s.tier === "cpu" ? ref?.cpu_builtins : ref?.helpers)?.find((h) => h.name === name) ??
+    WGSL_BUILTINS.find((b) => b.name === name) ??
+    null
+  );
+}
+
 function makeCompletions(scope: () => CodeScope) {
   return (ctx: CompletionContext): CompletionResult | null => {
     const s = scope();
@@ -363,28 +409,13 @@ function makeCompletions(scope: () => CodeScope) {
     const options: Completion[] = [];
     for (const p of s.inputs) {
       const n = p.name;
+      for (const fn of portFns(p)) options.push(fnCompletion(fn, 2));
       if (p.shape === "points" || p.shape === "effects") {
-        const rec = p.shape === "points" ? "Dab" : "Effect";
         options.push({ label: `${n}_count`, type: "variable", detail: `u32 · live ${p.shape} on this input`, boost: 3 });
-        options.push(fnCompletion({ name: `${n}_at`, signature: `${n}_at(k: u32) -> ${rec}`, doc: `The k-th of the live ${p.shape} (0..${n}_count); a zeroed ${rec} past the end.` }, 2));
-        if (p.shape === "effects") {
-          options.push(fnCompletion({ name: `${n}_on`, signature: `${n}_on(k: u32) -> bool`, doc: `Whether effect k belongs to the chain wired into ${n} (the Effects buffer holds every chain's).` }, 2));
-        }
-        continue;
-      }
-      if (p.shape === "texture") {
+      } else if (p.shape === "texture") {
         options.push({ label: n, type: "variable", detail: "vec4f · the texture at this pixel (ring mapping)", boost: 3 });
-        options.push(fnCompletion({ name: `${n}_at`, signature: `${n}_at(uv: vec2f) -> vec4f`, doc: `The texture wired into ${n} at uv (0..1, y down), RGBA.` }, 2));
-        continue;
-      }
-      options.push({ label: n, type: "variable", detail: `input · ${SHAPE_WORD[p.shape]}`, boost: 3 });
-      if (p.shape === "field_scalar" || p.shape === "field_color") {
-        options.push(
-          fnCompletion(
-            { name: `${n}_at`, signature: `${n}_at(ctx) -> ${p.shape === "field_color" ? "vec4f" : "f32"}`, doc: `The ${n} input sampled at another position, e.g. ${n}_at(ctx_transform(c, angle, zoom, 0.0, 0.0)).` },
-            2,
-          ),
-        );
+      } else {
+        options.push({ label: n, type: "variable", detail: `input · ${SHAPE_WORD[p.shape]}`, boost: 3 });
       }
     }
     for (const p of s.outputs) {
@@ -453,9 +484,7 @@ function makeHover(scope: () => CodeScope) {
       doc = field.doc;
     } else {
       const port = [...s.inputs, ...s.outputs].find((p) => p.name === word);
-      const fn =
-        (s.tier === "cpu" ? ref?.cpu_builtins : ref?.helpers)?.find((h) => h.name === word) ??
-        WGSL_BUILTINS.find((b) => b.name === word);
+      const fn = fnFor(s, word);
       if (port) {
         title = `${port.name}: ${SHAPE_WORD[port.shape]}`;
         doc = s.inputs.includes(port) ? (port.shape === "scalar" ? `input knob ${port.min}..${port.max}, default ${port.default}` : "input") : "output";
@@ -572,6 +601,7 @@ export function CodeEditor({
           syntaxHighlighting(highlight),
           autocompletion({ override: [makeCompletions(getScope)], activateOnTyping: true, maxRenderedOptions: 40 }),
           makeHover(getScope),
+          signatureHelp((name) => fnFor(getScope(), name)),
           lintGutter(),
           keymap.of([
             ...closeBracketsKeymap,

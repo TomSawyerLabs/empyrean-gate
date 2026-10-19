@@ -76,3 +76,18 @@ test("a snippet goes in from completion, its fields linked, and Tab moves on", a
   await expect(body).toContainText("sin(c.rn * 20.0 -");
   await expect.poll(() => sent.some((m) => m.includes('"patch_save"') && m.includes("c.rn * 20.0"))).toBe(true);
 });
+
+test("inside a call, its signature shows with the argument being typed in bold", async ({ page }) => {
+  const { panel, body } = await codeNode(page);
+  await body.fill("out = vec4f(mix(0.2, ");
+  await body.press("ControlOrMeta+End");
+  const sig = panel.locator(".code-signature");
+  await expect(sig.locator("code")).toHaveText("mix(a, b, t)");
+  await expect(sig.locator("b")).toHaveText("b");
+  await body.pressSequentially("0.8, ");
+  await expect(sig.locator("b")).toHaveText("t");
+  // Closing the call returns to the outer one.
+  await body.pressSequentially("0.5)");
+  await expect(sig.locator("code")).toHaveText("vec4f(x, y, z, w)");
+  await expect(sig.locator("b")).toHaveText("x");
+});
