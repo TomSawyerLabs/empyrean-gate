@@ -226,7 +226,16 @@ impl CodeDef {
             Tier::Cpu => {
                 crate::script::compile(self).map_err(|e| e.to_string())?;
             }
-            Tier::Gpu => check_gpu_body(self)?,
+            Tier::Gpu => {
+                check_gpu_body(self)?;
+                // LED data has nothing between the LEDs to read.
+                if let Some(p) = self.inputs.iter().find(|p| p.shape.is_led() && self.samples(&p.name)) {
+                    return Err(format!(
+                        "input \"{0}\" is LED data, defined only at the LEDs: read it as `{0}` (this LED), not `{0}_at`; to sample it elsewhere, declare it a field and wire it through Resample",
+                        p.name
+                    ));
+                }
+            }
         }
         Ok(tier)
     }
@@ -813,6 +822,10 @@ mod tests {
         ok("if a > 0.5 { return; }", &[("a", Shape::Scalar)]);
         ok("var x = a; x += 1.0; let b = vec4f(x); out = b;", &[("a", Shape::Scalar)]);
         ok("let q = s.P;", &[("s", Shape::FieldColor)]);
+        // LED inputs are read at this LED only.
+        ok("out = snow; // not snow_at(c)", &[("snow", Shape::LedColor)]);
+        assert!(err("out = snow_at(c);", &[("snow", Shape::LedColor)]).contains("Resample"));
+        ok("out = img_at(c);", &[("img", Shape::FieldColor)]);
         let e = err("out = vec4f(1.0);\nloop { }", &[]);
         assert!(e.starts_with("line 2:1:") && e.contains("hang"), "{e}");
         assert!(err("while true { }", &[]).contains("`while`"));
