@@ -246,6 +246,10 @@ test("on a phone the large modal is the whole screen", async ({ page }) => {
   const box = (await modal.boundingBox())!;
   expect([box.x, box.y, box.width, box.height].map(Math.round)).toEqual([0, 0, 390, 844]);
   await expect(modal.locator(".cm-editor")).toBeVisible();
+  // A long line scrolls inside the editor; it does not widen it off screen.
+  await modal.getByLabel("Body (WGSL)").fill(`out = vec4f(${"0.5 + ".repeat(30)}0.5);`);
+  const editor = (await modal.locator(".cm-editor").boundingBox())!;
+  expect(editor.x + editor.width).toBeLessThanOrEqual(390);
   await modal.getByRole("button", { name: "Done" }).click();
   await expect(modal).toHaveCount(0);
   await expect(sheet).toBeVisible();
