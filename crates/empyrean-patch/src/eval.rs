@@ -404,6 +404,22 @@ impl Runtime {
                     let v = self.input(node, "value");
                     self.outputs[node].insert("out".into(), v);
                 }
+                // A Sub-patch's inlet or outlet, Number or Event (the field
+                // shapes are shader nodes): `in` passes through to `out`.
+                "patch_in" | "patch_out" => {
+                    if self.doc.nodes[node].boundary_shape() == Some(Shape::Event) {
+                        if self.event_fired(node, "in") {
+                            self.events[node].push("out".into());
+                        }
+                    } else {
+                        let v = if self.prog.wires.contains_key(&(node, "in".to_string())) {
+                            self.input(node, "in")
+                        } else {
+                            self.param(node, "default")
+                        };
+                        self.outputs[node].insert("out".into(), v);
+                    }
+                }
                 "audio" => {
                     let src =
                         (self.param(node, "source").round() as usize).min(MAX_AUDIO_SOURCES - 1);
@@ -1658,6 +1674,36 @@ mod tests {
                 (1.0, true, false, 0.0, false, true),
             ]
         );
+    }
+
+    /// Patch in and Patch out with a Number or Event shape are CPU
+    /// pass-throughs: the wired value (or its Default, unwired) and the
+    /// wired events, frame for frame.
+    #[test]
+    fn number_and_event_boundaries_pass_through() {
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let doc = clocked(
+            serde_json::json!([
+                { "id": "num", "kind": "patch_in", "params": { "shape": 2 } },
+                { "id": "dflt", "kind": "patch_in", "params": { "shape": 2, "default": 0.25 } },
+                { "id": "ev", "kind": "patch_out", "params": { "shape": 3 } }
+            ]),
+            serde_json::json!([
+                { "from": { "node": "clock", "port": "out" }, "to": { "node": "num", "port": "in" } },
+                { "from": { "node": "clock", "port": "wrap" }, "to": { "node": "ev", "port": "in" } }
+            ]),
+        );
+        let mut rt = runtime(doc);
+        let mut log = Vec::new();
+        for _ in 0..4 {
+            step(&mut rt, &audio);
+            log.push((value(&rt, "clock", "out"), value(&rt, "num", "out"), value(&rt, "dflt", "out"), fired(&rt, "ev", "out")));
+        }
+        for (clock, num, dflt, _) in &log {
+            assert_eq!(num, clock);
+            assert_eq!(*dflt, 0.25);
+        }
+        assert_eq!(log.iter().map(|l| l.3).collect::<Vec<_>>(), vec![false, false, false, true], "fires on the wrap");
     }
 
     #[test]

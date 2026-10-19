@@ -12,8 +12,14 @@
 //!   black Solid, so the node renders as nothing rather than failing;
 //! - wires and exposed entries of the outer document that point at a
 //!   sub-patch port are rewritten to the inner node and param, and
-//!   [`Flat::aliases`] remembers the mapping for live param changes.
+//!   [`Flat::aliases`] remembers the mapping for live param changes;
+//! - each Patch in of the inner patch is an input port and each Patch out an
+//!   output port, named by that node's id (plans/subpatch-ports.md). They
+//!   stay real nodes, pass-throughs: a wire into port `p` goes to
+//!   `{sub}/p.in`, a wire from port `q` comes from `{sub}/q.out`, so each hop
+//!   is a wire judged (and adapted) on its own.
 
+use crate::registry::{PATCH_IN_KIND, PATCH_OUT_KIND};
 use crate::{Edge, NodeInst, PatchDoc, PortRef};
 use std::collections::HashMap;
 
@@ -73,8 +79,11 @@ fn flatten_at(
         edges: Vec::with_capacity(doc.edges.len()),
         exposed: Vec::with_capacity(doc.exposed.len()),
     };
-    // Each sub-patch node's ports → (flattened node, param).
+    // Each sub-patch node's ports → (flattened node, param or port): its
+    // knobs, its Patch in inputs, its Patch out outputs.
     let mut ports: HashMap<&str, HashMap<String, (String, String)>> = HashMap::new();
+    let mut inlets: HashMap<&str, HashMap<String, PortRef>> = HashMap::new();
+    let mut outlets: HashMap<&str, HashMap<String, PortRef>> = HashMap::new();
 
     for n in &doc.nodes {
         if n.kind != KIND {
@@ -90,10 +99,12 @@ fn flatten_at(
             ));
         }
         let mut map = HashMap::new();
+        let mut ins = HashMap::new();
+        let mut outs = HashMap::new();
         match n.sub.as_deref() {
             None => out.nodes.push(black(&n.id, n.pos)),
-            Some(inner) => {
-                let inner = flatten_at(inner, depth + 1, &mut HashMap::new())?;
+            Some(own) => {
+                let inner = flatten_at(own, depth + 1, &mut HashMap::new())?;
                 let output = inner.nodes.iter().find(|m| m.kind == "output").map(|m| m.id.clone());
                 let root = output.as_ref().and_then(|o| {
                     inner
@@ -158,33 +169,60 @@ fn flatten_at(
                         (rename(&x.node), x.param.clone()),
                     );
                 }
+                // Its own boundary nodes only: a nested sub-patch's were
+                // inlined above and are that one's business.
+                for m in &own.nodes {
+                    let to = |port: &str| PortRef {
+                        node: rename(&m.id),
+                        port: port.to_string(),
+                    };
+                    if m.kind == PATCH_IN_KIND {
+                        ins.insert(m.id.clone(), to("in"));
+                    } else if m.kind == PATCH_OUT_KIND {
+                        if m.id == "out" {
+                            return Err(format!(
+                                "sub-patch \"{}\": its Patch out \"out\" has the name of the Output's port; give it another id",
+                                n.id
+                            ));
+                        }
+                        outs.insert(m.id.clone(), to("out"));
+                    }
+                }
             }
         }
         for (port, target) in &map {
             aliases.insert((n.id.clone(), port.clone()), target.clone());
         }
         ports.insert(&n.id, map);
+        inlets.insert(&n.id, ins);
+        outlets.insert(&n.id, outs);
     }
 
     for e in &doc.edges {
         let mut e = e.clone();
         if let Some(map) = ports.get(e.to.node.as_str()) {
-            let Some((node, param)) = map.get(&e.to.port) else {
+            if let Some((node, param)) = map.get(&e.to.port) {
+                e.to = PortRef {
+                    node: node.clone(),
+                    port: param.clone(),
+                };
+            } else if let Some(inlet) = inlets[e.to.node.as_str()].get(&e.to.port) {
+                e.to = inlet.clone();
+            } else {
                 return Err(format!(
                     "sub-patch \"{}\" has no input \"{}\"",
                     e.to.node, e.to.port
                 ));
-            };
-            e.to = PortRef {
-                node: node.clone(),
-                port: param.clone(),
-            };
+            }
         }
         if ports.contains_key(e.from.node.as_str()) && e.from.port != "out" {
-            return Err(format!(
-                "sub-patch \"{}\" has no output \"{}\"",
-                e.from.node, e.from.port
-            ));
+            let Some(outlet) = outlets[e.from.node.as_str()].get(&e.from.port) else {
+                return Err(format!(
+                    "sub-patch \"{}\" has no output \"{}\"",
+                    e.from.node, e.from.port
+                ));
+            };
+            e.from = outlet.clone();
         }
         out.edges.push(e);
     }
@@ -328,5 +366,142 @@ mod tests {
         }));
         assert!(flatten(&outer).unwrap_err().contains("no input \"ramp.inner\""));
         assert!(compile(&outer).unwrap_err().contains("ramp.inner"));
+    }
+
+    /// A block rather than a picture: a Patch in takes a colour field, a
+    /// Transform folds it, and two Patch outs hand on the fold and its grey
+    /// brightness. No Output inside.
+    fn folding_block() -> serde_json::Value {
+        serde_json::json!({
+            "name": "Fold",
+            "nodes": [
+                { "id": "img", "kind": "patch_in", "name": "Picture" },
+                { "id": "fold", "kind": "transform", "params": { "kaleido": 4 } },
+                { "id": "lum", "kind": "luminance" },
+                { "id": "folded", "kind": "patch_out" },
+                { "id": "level", "kind": "patch_out", "params": { "shape": 1 } }
+            ],
+            "edges": [
+                { "from": { "node": "img", "port": "out" }, "to": { "node": "fold", "port": "in" } },
+                { "from": { "node": "fold", "port": "out" }, "to": { "node": "folded", "port": "in" } },
+                { "from": { "node": "fold", "port": "out" }, "to": { "node": "lum", "port": "in" } },
+                { "from": { "node": "lum", "port": "out" }, "to": { "node": "level", "port": "in" } }
+            ]
+        })
+    }
+
+    fn edges_of(d: &PatchDoc) -> Vec<String> {
+        d.edges
+            .iter()
+            .map(|e| format!("{}.{}>{}.{}", e.from.node, e.from.port, e.to.node, e.to.port))
+            .collect()
+    }
+
+    #[test]
+    fn patch_in_and_out_are_ports_named_by_their_ids() {
+        let outer = doc(serde_json::json!({
+            "nodes": [
+                { "id": "p", "kind": "plasma" },
+                { "id": "s", "kind": "subpatch", "sub": folding_block() },
+                { "id": "tint", "kind": "colorize" },
+                { "id": "mix", "kind": "blend" },
+                { "id": "o", "kind": "output" }
+            ],
+            "edges": [
+                { "from": { "node": "p", "port": "out" }, "to": { "node": "s", "port": "img" } },
+                { "from": { "node": "s", "port": "folded" }, "to": { "node": "mix", "port": "base" } },
+                { "from": { "node": "s", "port": "level" }, "to": { "node": "tint", "port": "in" } },
+                { "from": { "node": "tint", "port": "out" }, "to": { "node": "mix", "port": "over" } },
+                { "from": { "node": "mix", "port": "out" }, "to": { "node": "o", "port": "in" } }
+            ]
+        }));
+        let flat = flatten(&outer).unwrap();
+        let edges = edges_of(&flat.doc);
+        for e in ["p.out>s/img.in", "s/folded.out>mix.base", "s/level.out>tint.in", "s/img.out>s/fold.in"] {
+            assert!(edges.contains(&e.to_string()), "{e} in {edges:?}");
+        }
+        // The boundary nodes stay, as pass-throughs; there is no root to
+        // take the Sub-patch's id (no Output inside), so it renders nothing.
+        let kinds: Vec<(&str, &str)> = flat.doc.nodes.iter().map(|n| (n.id.as_str(), n.kind.as_str())).collect();
+        assert!(kinds.contains(&("s/img", "patch_in")) && kinds.contains(&("s/level", "patch_out")));
+        assert!(kinds.contains(&("s", "solid")));
+        compile(&outer).expect("compiles");
+
+        // Ports are by id: a name is only a label.
+        let missing = doc(serde_json::json!({
+            "nodes": [ { "id": "p", "kind": "plasma" }, { "id": "s", "kind": "subpatch", "sub": folding_block() } ],
+            "edges": [ { "from": { "node": "p", "port": "out" }, "to": { "node": "s", "port": "Picture" } } ]
+        }));
+        assert!(flatten(&missing).unwrap_err().contains("no input \"Picture\""));
+        let no_out = doc(serde_json::json!({
+            "nodes": [ { "id": "s", "kind": "subpatch", "sub": folding_block() }, { "id": "o", "kind": "output" } ],
+            "edges": [ { "from": { "node": "s", "port": "fold" }, "to": { "node": "o", "port": "in" } } ]
+        }));
+        assert!(flatten(&no_out).unwrap_err().contains("no output \"fold\""));
+    }
+
+    /// Each hop is its own wire: a Number into a grey inlet (the uniform
+    /// adapter), the grey inlet into a colour outlet (the greyscale adapter).
+    /// Wired straight through, Number into colour would be refused.
+    #[test]
+    fn adapters_work_hop_by_hop() {
+        let block = serde_json::json!({
+            "nodes": [
+                { "id": "g", "kind": "patch_in", "params": { "shape": 1 } },
+                { "id": "c", "kind": "patch_out" }
+            ],
+            "edges": [ { "from": { "node": "g", "port": "out" }, "to": { "node": "c", "port": "in" } } ]
+        });
+        let outer = doc(serde_json::json!({
+            "nodes": [
+                { "id": "sl", "kind": "slider" },
+                { "id": "s", "kind": "subpatch", "sub": block },
+                { "id": "o", "kind": "output" }
+            ],
+            "edges": [
+                { "from": { "node": "sl", "port": "out" }, "to": { "node": "s", "port": "g" } },
+                { "from": { "node": "s", "port": "c" }, "to": { "node": "o", "port": "in" } }
+            ]
+        }));
+        compile(&outer).expect("Number → grey → colour, one adapter per wire");
+    }
+
+    #[test]
+    fn a_patch_out_may_not_be_called_out() {
+        let block = serde_json::json!({
+            "nodes": [ { "id": "out", "kind": "patch_out" } ]
+        });
+        let outer = doc(serde_json::json!({ "nodes": [ { "id": "s", "kind": "subpatch", "sub": block } ] }));
+        assert!(flatten(&outer).unwrap_err().contains("Patch out \"out\""));
+    }
+
+    /// LED data in, LED data out: the domain flows through the boundary
+    /// nodes, so a Transform outside refuses what a Patch out hands on.
+    #[test]
+    fn led_data_flows_through_a_block() {
+        let block = serde_json::json!({
+            "nodes": [
+                { "id": "snow", "kind": "random_field" },
+                { "id": "tint", "kind": "colorize" },
+                { "id": "leds", "kind": "patch_out" }
+            ],
+            "edges": [
+                { "from": { "node": "snow", "port": "out" }, "to": { "node": "tint", "port": "in" } },
+                { "from": { "node": "tint", "port": "out" }, "to": { "node": "leds", "port": "in" } }
+            ]
+        });
+        let outer = doc(serde_json::json!({
+            "nodes": [
+                { "id": "s", "kind": "subpatch", "sub": block },
+                { "id": "t", "kind": "transform" },
+                { "id": "o", "kind": "output" }
+            ],
+            "edges": [
+                { "from": { "node": "s", "port": "leds" }, "to": { "node": "t", "port": "in" } },
+                { "from": { "node": "t", "port": "out" }, "to": { "node": "o", "port": "in" } }
+            ]
+        }));
+        let errs = crate::validate::validate(&outer).unwrap_err();
+        assert!(matches!(errs[..], [crate::validate::PatchError::LedSampled { .. }]), "{errs:?}");
     }
 }

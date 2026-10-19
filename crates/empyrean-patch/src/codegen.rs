@@ -208,7 +208,7 @@ fn preview_style(node: &NodeInst) -> Option<PreviewStyle> {
     // A Code node previews its principal output; built-ins their `out`.
     let shape = match node.code() {
         Some(def) => def.principal().map(|p| p.shape),
-        None => registry::lookup(&node.kind)?.output_shape("out"),
+        None => node.output_shape("out"),
     };
     match shape {
         Some(s) if s.is_color_field() => Some(PreviewStyle::Color),
@@ -797,7 +797,7 @@ impl Gen<'_> {
             // A stream/texture source: no function of its own.
             return Ok(());
         }
-        let ret = match registry::lookup(kind).and_then(|t| t.output_shape("out")) {
+        let ret = match self.doc.nodes[i].output_shape("out") {
             Some(s) if s.is_grey_field() => "f32",
             _ => "vec4f",
         };
@@ -936,6 +936,20 @@ impl Gen<'_> {
                     kal = self.p(i, "kaleido"),
                     input = self.color_input(i, "in", "c"),
                 )
+            }
+            // A Sub-patch's inlet or outlet with a field shape: `in`
+            // passes through to `out`; unwired, a grey one is its Default
+            // and a colour one black.
+            "patch_in" | "patch_out" => {
+                let grey = self.doc.nodes[i].boundary_shape().is_some_and(Shape::is_grey_field);
+                let value = if !grey {
+                    self.color_input(i, "in", "c")
+                } else if self.wired(i, "in") {
+                    self.scalar_field_input(i, "in", "c")
+                } else {
+                    self.p(i, "default")
+                };
+                format!("    return {value};")
             }
             "resample" => {
                 // The input at one LED's own context: exact for LED data.
@@ -2027,6 +2041,51 @@ mod tests {
             };
             compile(&doc).unwrap_or_else(|e| panic!("{}: {e}", ty.id));
         }
+    }
+
+    /// Field-shaped Patch in / Patch out compile to pass-throughs: a grey
+    /// inlet fed a Number (the uniform adapter), an unwired grey one (its
+    /// Default), a colour outlet fed LED data. Main and preview validate.
+    #[test]
+    fn field_boundaries_compile_and_validate() {
+        let mut fed = node("fed", "patch_in");
+        fed.params.insert("shape".into(), 1.0);
+        let mut idle = node("idle", "patch_in");
+        idle.params.insert("shape".into(), 1.0);
+        idle.params.insert("default".into(), 0.5);
+        let mut leds = node("leds", "patch_out");
+        leds.params.insert("shape".into(), 4.0);
+        let doc = PatchDoc {
+            nodes: vec![
+                node("sl", "slider"),
+                fed,
+                idle,
+                node("math", "field_math"),
+                node("snow", "random_field"),
+                node("tint", "colorize"),
+                leds,
+                node("mix", "blend"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("sl", "out", "fed", "in"),
+                edge("fed", "out", "math", "a"),
+                edge("idle", "out", "math", "b"),
+                edge("snow", "out", "tint", "in"),
+                edge("tint", "out", "leds", "in"),
+                edge("math", "out", "mix", "base"),
+                edge("leds", "out", "mix", "over"),
+                edge("mix", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let prog = compile(&doc).unwrap();
+        validate_wgsl("boundaries", &prog.wgsl);
+        validate_wgsl("boundaries preview", &prog.preview_wgsl);
+        let v = validate::validate(&doc).unwrap();
+        let at = |id: &str| doc.nodes.iter().position(|n| n.id == id).unwrap();
+        assert!(v.led[at("leds")] && v.led[at("mix")], "LED data passes through");
+        assert!(!v.led[at("fed")]);
     }
 
     /// Whether WGSL text keys on the physical LED (`c.spoke`, `ctx.i` …).

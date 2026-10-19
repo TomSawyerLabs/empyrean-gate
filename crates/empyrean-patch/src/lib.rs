@@ -410,6 +410,9 @@ impl NodeInst {
     /// follows its ports; a Code node whose ports make no sense counts as
     /// CPU, so validation (which refuses it) is the only place it matters.
     pub fn is_cpu(&self) -> bool {
+        if let Some(s) = self.boundary_shape() {
+            return matches!(s, Shape::Scalar | Shape::Event);
+        }
         match self.code() {
             Some(def) => def.tier().unwrap_or(code::Tier::Cpu) == code::Tier::Cpu,
             None => registry::is_cpu_kind(&self.kind),
@@ -418,6 +421,9 @@ impl NodeInst {
 
     /// Whether this node is compiled into the patch shader (field tier).
     pub fn is_gpu(&self) -> bool {
+        if let Some(s) = self.boundary_shape() {
+            return s.is_field();
+        }
         match self.code() {
             Some(def) => def.tier() == Ok(code::Tier::Gpu),
             None => registry::is_gpu_kind(&self.kind),
@@ -471,6 +477,11 @@ impl NodeInst {
         if let Some(def) = self.code() {
             return def.input(name).map(|p| p.shape);
         }
+        if let Some(s) = self.boundary_shape()
+            && name == "in"
+        {
+            return Some(s);
+        }
         registry::lookup(&self.kind)?.input_shape(self.layer_base(name))
     }
 
@@ -478,11 +489,27 @@ impl NodeInst {
         if let Some(def) = self.code() {
             return def.output(name).map(|p| p.shape);
         }
+        if let Some(s) = self.boundary_shape() {
+            return (name == "out").then_some(s);
+        }
         registry::lookup(&self.kind)?.output_shape(name)
+    }
+
+    /// A Patch in or Patch out's shape, from its `shape` Select (see
+    /// `registry::BOUNDARY_SHAPES`): both its ports carry it, and it decides
+    /// the tier. `None` for any other node.
+    pub fn boundary_shape(&self) -> Option<Shape> {
+        registry::is_boundary(&self.kind).then(|| {
+            let i = self.param("shape").round().max(0.0) as usize;
+            registry::BOUNDARY_SHAPES[i.min(registry::BOUNDARY_SHAPES.len() - 1)]
+        })
     }
 
     /// The shaped inputs (not knobs) of this node, in declaration order.
     pub fn shaped_inputs(&self) -> Vec<(String, Shape)> {
+        if let Some(s) = self.boundary_shape() {
+            return vec![("in".to_string(), s)];
+        }
         if let Some(def) = self.code() {
             return def
                 .inputs

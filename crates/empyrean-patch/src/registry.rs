@@ -345,6 +345,27 @@ pub fn layered(kind: &str) -> &'static [&'static str] {
 /// The node kind that turns LED data into the plane (see `validate::led_nodes`).
 pub const RESAMPLE_KIND: &str = "resample";
 
+/// A Sub-patch's inlet and outlet (see `flatten`): pass-throughs, `in` to
+/// `out`, of the shape their `shape` Select picks ([`BOUNDARY_SHAPES`]).
+pub const PATCH_IN_KIND: &str = "patch_in";
+pub const PATCH_OUT_KIND: &str = "patch_out";
+
+/// Whether `kind` is a Patch in or a Patch out.
+pub fn is_boundary(kind: &str) -> bool {
+    kind == PATCH_IN_KIND || kind == PATCH_OUT_KIND
+}
+
+/// What a boundary node's `shape` Select picks, by index (the order of its
+/// labels in the registry).
+pub const BOUNDARY_SHAPES: [Shape; 6] = [
+    Shape::FieldColor,
+    Shape::FieldScalar,
+    Shape::Scalar,
+    Shape::Event,
+    Shape::LedColor,
+    Shape::LedScalar,
+];
+
 /// The field inputs a node of this kind reads somewhere other than the LED
 /// or position being drawn (Transform moves the picture), so LED data can't
 /// flow into them without Resample (see `validate::led_nodes`). A Code node's
@@ -3207,7 +3228,7 @@ pub const TYPES: &[NodeType] = &[
         label: "Sub-patch",
         category: Category::Combine,
         group: Group::Structure,
-        description: "Another patch embedded as one node (its document lives in the node's `sub`): every param its document exposes becomes an input of this node named \"{inner node}.{param}\", and whatever feeds its Output is this node's `out`. It is inlined before validation, so it costs exactly what its contents cost; nesting is limited to four levels.",
+        description: "Another patch embedded as one node (its document lives in the node's `sub`): every param its document exposes becomes an input of this node named \"{inner node}.{param}\", each Patch in inside it an input and each Patch out an output (named by that node's id), and whatever feeds its Output is this node's `out`. It is inlined before validation, so it costs exactly what its contents cost; nesting is limited to four levels.",
         inputs: &[],
         outputs: &[port(
             "out",
@@ -3215,6 +3236,60 @@ pub const TYPES: &[NodeType] = &[
             "The embedded patch's picture (what feeds its Output; black if nothing does).",
         )],
         params: &[],
+    },
+    NodeType {
+        // Its ports' shape follows `shape` (`NodeInst::boundary_shape`); the
+        // static ports are the default's. Inside a Sub-patch, `in` is fed
+        // from outside (see `flatten`).
+        id: PATCH_IN_KIND,
+        label: "Patch in",
+        category: Category::Combine,
+        group: Group::Structure,
+        description: "An input of this patch when it is used as a Sub-patch: the Sub-patch node gains an input port of the chosen shape (named by this node's id, labelled by its name), and what is wired there comes out of this node's `out`. Unwired, or with the patch open on its own, it hands on its default: Default for a Number or grey field, black for colour, no events.",
+        inputs: &[port("in", Shape::FieldColor, "Fed from outside, through the Sub-patch's port; not wired inside.")],
+        outputs: &[port("out", Shape::FieldColor, "What arrives at the Sub-patch's port (or the default).")],
+        params: &[
+            sel(
+                "shape",
+                "Shape",
+                &["Colour field", "Grey field", "Number", "Event", "Colour LEDs", "Grey LEDs"],
+                "What the port carries. LED data stays LED data inside.",
+            ),
+            num(
+                "default",
+                "Default",
+                -1000.0,
+                1000.0,
+                0.0,
+                "A Number or grey field's value while nothing is wired to the port.",
+            ),
+        ],
+    },
+    NodeType {
+        // As Patch in, facing the other way: `out` is read from outside.
+        id: PATCH_OUT_KIND,
+        label: "Patch out",
+        category: Category::Combine,
+        group: Group::Structure,
+        description: "An output of this patch when it is used as a Sub-patch: the Sub-patch node gains an output port of the chosen shape (named by this node's id, labelled by its name) carrying what is wired into this node's `in`. A patch can have several, so a Sub-patch can be a block that hands on numbers, events or fields rather than a picture. Opened on its own, the patch ignores it.",
+        inputs: &[port("in", Shape::FieldColor, "What the Sub-patch's port hands on.")],
+        outputs: &[port("out", Shape::FieldColor, "Read from outside, through the Sub-patch's port; not wired inside.")],
+        params: &[
+            sel(
+                "shape",
+                "Shape",
+                &["Colour field", "Grey field", "Number", "Event", "Colour LEDs", "Grey LEDs"],
+                "What the port carries.",
+            ),
+            num(
+                "default",
+                "Default",
+                -1000.0,
+                1000.0,
+                0.0,
+                "A Number or grey field's value while nothing is wired into `in`.",
+            ),
+        ],
     },
     NodeType {
         // A Code node's ports and body live on the instance (`NodeInst::code`,

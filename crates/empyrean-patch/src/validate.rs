@@ -458,6 +458,9 @@ pub fn sampled_input(node: &NodeInst, port: &str) -> bool {
 }
 
 fn declares_led(node: &NodeInst) -> bool {
+    if let Some(s) = node.boundary_shape() {
+        return s.is_led();
+    }
     match node.code() {
         Some(def) => def.outputs.iter().any(|p| p.shape.is_led()),
         None => registry::lookup(&node.kind).is_some_and(|t| t.outputs.iter().any(|p| p.shape.is_led())),
