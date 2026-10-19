@@ -143,9 +143,10 @@ kind that makes a picture keeps its output sampled to 64 spokes × 24 LEDs
 (drawn by `renderRing` at any size), one that makes a number or an event eight
 seconds of it with what drives it. It installs `webgpu` once into
 `node_modules/.cache`; `thumbs.test.ts` fails when a kind has neither a
-thumbnail nor a place in `ICON_ONLY`. Building the wasm while another
-worktree builds it too can swap their outputs (the machine shares one cargo
-build directory): give each its own with `CARGO_BUILD_BUILD_DIR`.
+thumbnail nor a place in `ICON_ONLY`. The `crates/` workspace keeps its
+intermediate build files in its own `target/` (`crates/.cargo/config.toml`), so
+two worktrees can build the wasm at once even where a user config shares one
+cargo build directory across projects.
 
 `test:browser` (needs the wasm build, and `bunx playwright install chromium`)
 compiles every shader the patch core can generate in Chromium: each node kind

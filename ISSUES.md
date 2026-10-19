@@ -3,19 +3,6 @@
 Short entries that seed a separate fix. Claim one by marking it
 `in progress — <thread/branch>` and committing that first.
 
-## Two worktrees building the patch wasm at once can swap their outputs
-
-This workstation's `~/.cargo/config.toml` sets a shared `build-dir`
-(`~/.cargo/build`) for every Cargo project. The wasm crate is a cdylib, whose
-intermediate file name has no hash, so two worktrees running `bun run
-build:wasm` at the same time can hand each other's `empyrean_patch_wasm.wasm`
-to wasm-bindgen. Seen 2026-10-19: palette-overhaul's wasm came out with
-field-domains' `resample` kind, and the registry tests failed on a kind that
-was not in its source. Workaround: `CARGO_BUILD_BUILD_DIR=<worktree>/crates/target/build-private`.
-A lasting fix (a per-workspace `build-dir` in `crates/.cargo/config.toml`, or
-the build script setting one) trades away some of the shared cache: Cameron's
-call.
-
 ## `GetState` re-broadcasts the full config to every client
 
 `ClientMsg::GetState` (`src-tauri/src/server.rs`, the `GetState` arm) calls

@@ -1,0 +1,9 @@
+# This workspace's intermediate build files stay in its own target/, even on a
+# machine whose user config shares one build-dir across every project. The
+# wasm crate is a cdylib, whose intermediate file has no hash in its name, so
+# two checkouts (worktrees) building it at once in a shared build-dir could
+# hand each other's wasm to wasm-bindgen (seen 2026-10-19; it produced a
+# registry with a kind the checkout didn't have). A project config wins over
+# the user's; CARGO_BUILD_BUILD_DIR still overrides both.
+[build]
+build-dir = "{workspace-root}/target/build"
