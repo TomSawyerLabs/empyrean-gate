@@ -204,9 +204,11 @@ test("Alt-drag scrubs a number live, and one undo puts it back", async ({ page }
   await expect(body).toContainText("let k = 0.5;");
 
   // Off a number, Alt-drag is still a column selection: a rectangle over two
-  // lines selects a piece of each. Looked at before Alt goes up: on CI's
-  // Linux Chromium releasing Alt takes the page's focus, and a keystroke
-  // after it lands elsewhere.
+  // lines selects a piece of each. Scrolled to the start first: with
+  // Linux's wider fonts the second line overflows the panel, the editor
+  // scrolls sideways, and a point measured from a line's box lands on the
+  // gutter.
+  await body.press("ControlOrMeta+Home");
   const lines = page.locator(".patch-side .cm-line");
   const top = (await lines.nth(0).boundingBox())!;
   const below = (await lines.nth(1).boundingBox())!;
