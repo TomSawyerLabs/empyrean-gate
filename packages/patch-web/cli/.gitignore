@@ -1,2 +1,3 @@
 empyrean-patch.mjs
 *.wasm
+.thumbnails.mjs

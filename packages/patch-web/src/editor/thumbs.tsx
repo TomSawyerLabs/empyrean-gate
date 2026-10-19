@@ -34,6 +34,11 @@ export interface ThumbData {
   traces: Record<string, TraceThumb>;
 }
 
+/** Kinds whose icon says it all: no picture, no trace (a lone Output, a
+ * note, a constant). Everything else has one; `thumbs.test.ts` holds
+ * `thumbs.gen.ts` to it. */
+export const ICON_ONLY: ReadonlySet<string> = new Set(["output", "note", "code", "subpatch", "slider", "globals"]);
+
 let loading: Promise<ThumbData | null> | null = null;
 let loaded: ThumbData | null = null;
 

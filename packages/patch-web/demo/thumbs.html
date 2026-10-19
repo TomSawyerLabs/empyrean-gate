@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>palette thumbnails</title>
+    <style>
+      html, body { margin: 0; background: #0a0814; color: #e8e6f4; font: 12px system-ui, sans-serif; }
+      main { display: grid; grid-template-columns: repeat(auto-fill, 132px); gap: 10px; padding: 12px; }
+      figure { margin: 0; padding: 6px; background: #1a1530; border-radius: 8px; display: grid; gap: 4px; justify-items: center; }
+      figcaption { color: #8a85a8; }
+      h2 { margin: 12px 12px 0; font-size: 13px; color: #8a85a8; text-transform: uppercase; letter-spacing: .06em; }
+    </style>
+  </head>
+  <body>
+    <div id="sheet"></div>
+    <script type="module" src="./thumbs.tsx"></script>
+  </body>
+</html>
