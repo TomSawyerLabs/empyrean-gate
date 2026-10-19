@@ -1,12 +1,14 @@
 // The Code node's body editor: CodeMirror 6 with a WGSL mode, completion and
 // hover docs fed by the patch core's reference (and the node's own ports),
-// and the host's errors as marks on the body's lines. One instance per
+// search and multiple selections, and the host's errors as marks on the
+// body's lines. One instance per
 // panel; the document is kept in sync with the patch (undo in the patch
 // replaces the text here, edits here go to the patch coalesced).
 
 import { useEffect, useRef } from "react";
 import { Compartment, EditorState } from "@codemirror/state";
 import {
+  crosshairCursor,
   drawSelection,
   EditorView,
   highlightActiveLine,
@@ -14,6 +16,7 @@ import {
   hoverTooltip,
   keymap,
   lineNumbers,
+  rectangularSelection,
   type Tooltip,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
@@ -36,6 +39,7 @@ import {
   type CompletionResult,
 } from "@codemirror/autocomplete";
 import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
+import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { tags as t } from "@lezer/highlight";
 import type { CodeFnRef, CodePort, CodeReference, PatchShape } from "../types";
 
@@ -180,6 +184,30 @@ const theme = EditorView.theme(
     ".cm-completionInfo": { fontFamily: "system-ui, sans-serif", maxWidth: "320px" },
     ".cm-lintRange-error": { backgroundImage: "none", textDecoration: "underline wavy #ff8a8a" },
     ".cm-diagnostic-error": { borderLeftColor: "#ff8a8a" },
+    ".cm-panels": { backgroundColor: "#1b1630", color: "#e8e4ff" },
+    ".cm-panels-top": { borderBottom: "1px solid #2a2445" },
+    ".cm-search": { fontFamily: "system-ui, sans-serif", fontSize: "12px", padding: "4px 6px" },
+    ".cm-search input, .cm-search button, .cm-search label": { margin: "2px 4px 2px 0", fontSize: "12px" },
+    ".cm-search input[type=checkbox]": { marginRight: "3px", verticalAlign: "middle" },
+    ".cm-textfield": {
+      backgroundColor: "var(--pe-bg, #0d0a1a)",
+      color: "#e8e4ff",
+      border: "1px solid #2a2445",
+      borderRadius: "3px",
+      padding: "2px 5px",
+    },
+    ".cm-button": {
+      backgroundImage: "none",
+      backgroundColor: "#2d2652",
+      color: "#e8e4ff",
+      border: "1px solid #3b3270",
+      borderRadius: "3px",
+      padding: "2px 8px",
+    },
+    ".cm-panel.cm-search [name=close]": { color: "#8a85a8", fontSize: "16px", padding: "0 6px" },
+    ".cm-searchMatch": { backgroundColor: "#f2c94c33", outline: "1px solid #f2c94c66" },
+    ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "#f2c94c66" },
+    ".cm-selectionMatch": { backgroundColor: "#7c5cff33" },
     ".code-hover": { padding: "4px 8px", maxWidth: "360px", fontFamily: "system-ui, sans-serif" },
     ".code-hover code": { fontFamily: "ui-monospace, Menlo, Consolas, monospace", color: "#82aaff" },
   },
@@ -526,6 +554,12 @@ export function CodeEditor({
           highlightActiveLineGutter(),
           highlightActiveLine(),
           drawSelection(),
+          // Several carets: Ctrl+D adds the next match, Alt-drag a column.
+          EditorState.allowMultipleSelections.of(true),
+          rectangularSelection(),
+          crosshairCursor(),
+          highlightSelectionMatches(),
+          search({ top: true }),
           history(),
           bracketMatching(),
           closeBrackets(),
@@ -536,7 +570,14 @@ export function CodeEditor({
           autocompletion({ override: [makeCompletions(getScope)], activateOnTyping: true, maxRenderedOptions: 40 }),
           makeHover(getScope),
           lintGutter(),
-          keymap.of([...closeBracketsKeymap, ...completionKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
+          keymap.of([
+            ...closeBracketsKeymap,
+            ...completionKeymap,
+            ...searchKeymap,
+            ...defaultKeymap,
+            ...historyKeymap,
+            indentWithTab,
+          ]),
           theme,
           EditorView.contentAttributes.of({ "aria-label": ariaLabel, spellcheck: "false", autocorrect: "off", autocapitalize: "off" }),
           readOnlyC.current.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
