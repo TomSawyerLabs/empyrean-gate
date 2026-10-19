@@ -60,6 +60,9 @@ function parsePatchValue(raw: unknown, depth: number): PatchDoc {
       ...(typeof n.media === "string" ? { media: n.media } : {}),
       // A Code node's ports and body; the core checks them.
       ...(n.code && typeof n.code === "object" ? { code: structuredClone(n.code) } : {}),
+      ...(typeof n.text === "string" ? { text: n.text } : {}),
+      ...(n.collapsed === true ? { collapsed: true } : {}),
+      ...(typeof n.layers === "number" && n.layers > 1 ? { layers: n.layers } : {}),
       ...(n.sub && typeof n.sub === "object"
         ? depth < MAX_SUBPATCH_DEPTH
           ? { sub: parsePatchValue(n.sub, depth + 1) }

@@ -17,4 +17,20 @@ describe("parsePatchFile", () => {
     expect(back.nodes[0]!.code).toEqual(defaultCode());
     expect(back).toEqual(doc);
   });
+
+  test("keeps a Note's text, a minimized node and a Blend's layers", () => {
+    const doc: PatchDoc = {
+      format: 5,
+      id: "p",
+      name: "Layers",
+      description: "",
+      nodes: [
+        { id: "t", kind: "note", name: "", params: {}, pos: [0, 0], text: "hello" },
+        { id: "b", kind: "blend", name: "", params: {}, pos: [1, 2], collapsed: true, layers: 3 },
+      ],
+      edges: [],
+      exposed: [],
+    };
+    expect(parsePatchFile(exportPatch(doc))).toEqual(doc);
+  });
 });
