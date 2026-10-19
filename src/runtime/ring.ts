@@ -4,7 +4,7 @@
 // TypeScript, so the same code makes an agent's snapshot in a browser, in Bun
 // and in Node.
 
-import type { Geometry } from "./gpu";
+import type { Geometry } from "./geometry";
 
 /** Fraction of the picture's short side the array's outer edge reaches (the
  * view's `VIEW_FILL`). */
