@@ -105,33 +105,50 @@ export async function startMotion(): Promise<MotionSource> {
  * (`MAX_VIDEO_DIMENSION` in src-tauri/src/protocol.rs). */
 export const VIDEO_SIZE = 256;
 
-/** A local video or image file as the patch's VIDEO texture: center-cropped to
- * a square and scaled to [`VIDEO_SIZE`], as the gate's Media tab sends it. */
+/** A local video or image file, or a camera, as the patch's VIDEO texture:
+ * center-cropped to a square and scaled to [`VIDEO_SIZE`], as the gate's
+ * Media tab sends it. */
 export class MediaTexture {
   readonly size = VIDEO_SIZE;
   private canvas = document.createElement("canvas");
   private ctx: CanvasRenderingContext2D;
-  private url: string;
+  private url: string | null;
+  private stream: MediaStream | null = null;
   private video: HTMLVideoElement | null = null;
   private image: HTMLImageElement | null = null;
   private stillDone = false;
 
-  private constructor(file: File) {
+  private constructor(file: File | null) {
     this.canvas.width = this.canvas.height = VIDEO_SIZE;
     this.ctx = this.canvas.getContext("2d", { willReadFrequently: true })!;
-    this.url = URL.createObjectURL(file);
+    this.url = file ? URL.createObjectURL(file) : null;
+  }
+
+  /** The device's camera (asks for permission; rejects when refused). */
+  static async fromCamera(): Promise<MediaTexture> {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error("This browser cannot use a camera.");
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+    const tex = new MediaTexture(null);
+    tex.stream = stream;
+    const video = document.createElement("video");
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    await video.play();
+    tex.video = video;
+    return tex;
   }
 
   static async fromFile(file: File): Promise<MediaTexture> {
     const tex = new MediaTexture(file);
     if (file.type.startsWith("image/")) {
       const img = new Image();
-      img.src = tex.url;
+      img.src = tex.url!;
       await img.decode();
       tex.image = img;
     } else {
       const video = document.createElement("video");
-      video.src = tex.url;
+      video.src = tex.url!;
       video.loop = true;
       video.muted = true;
       video.playsInline = true;
@@ -161,6 +178,8 @@ export class MediaTexture {
   dispose() {
     this.video?.pause();
     this.video = this.image = null;
-    URL.revokeObjectURL(this.url);
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+    if (this.url) URL.revokeObjectURL(this.url);
   }
 }

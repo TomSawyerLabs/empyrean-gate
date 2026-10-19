@@ -232,6 +232,14 @@ pub fn uses_touch(doc: &PatchDoc) -> bool {
     doc.nodes.iter().any(|n| TOUCH_KINDS.contains(&n.kind.as_str()))
 }
 
+/// Whether `doc` reads the host's live video (a Video in node, or a Code
+/// body that samples it), so a host knows whether to upload frames.
+pub fn uses_video(doc: &PatchDoc) -> bool {
+    doc.nodes.iter().any(|n| {
+        n.kind == "video_in" || n.code.as_ref().is_some_and(|c| c.body.contains("video_at"))
+    })
+}
+
 /// Validate + transpile a patch. The single entry point the server (activation
 /// check) and the engine (pipeline build) both use.
 pub fn compile(doc: &PatchDoc) -> Result<Program, String> {
@@ -2314,6 +2322,17 @@ mod tests {
         assert!(compile(&d).unwrap_err().contains("data:image"));
         d.nodes[0].media = Some("data:image/png;base64,AAAA".into());
         compile(&d).expect("a data URL is fine");
+    }
+
+    #[test]
+    fn uses_video_sees_video_in_and_code_that_samples_it() {
+        let mut d = PatchDoc {
+            nodes: vec![node("v", "video_in"), node("o", "output")],
+            ..Default::default()
+        };
+        assert!(uses_video(&d));
+        d.nodes[0] = node("s", "solid");
+        assert!(!uses_video(&d));
     }
 
     #[test]

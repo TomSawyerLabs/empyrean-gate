@@ -1,14 +1,15 @@
 // The editor on its own, over the real patch core and an in-memory library:
 // for working on the editor without a gate or the website. `bun run demo` in
 // packages/patch-web, then /editor.html. Renders with WebGPU where there is
-// one (live node thumbnails and the array beside the canvas); without it the
-// editor still works on the registry alone.
+// one (live node thumbnails and the array beside the canvas), driven by the
+// stand-ins: the synthetic groove, the test film and simulated visitors.
+// Without WebGPU the editor still works on the registry alone.
 
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { PatchEditor, type PatchStore, type PatchStoreEvent } from "../src/editor";
 import "../src/editor/editor.css";
-import { attachGroove, PatchRuntime } from "../src/runtime";
+import { attachGroove, attachVisitors, PatchRuntime } from "../src/runtime";
 import { loadPatchCore, type PatchCore } from "../src/runtime/core";
 import type { PatchDoc } from "../src/types";
 
@@ -80,6 +81,7 @@ let runtime: PatchRuntime | null = null;
 try {
   runtime = await PatchRuntime.create(undefined, { wasm });
   attachGroove(runtime);
+  attachVisitors(runtime);
   runtime.attach(document.querySelector<HTMLCanvasElement>("#gate")!);
   runtime.start();
 } catch {

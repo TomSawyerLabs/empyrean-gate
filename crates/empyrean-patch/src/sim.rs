@@ -313,6 +313,12 @@ impl Sim {
         codegen::uses_touch(&self.prog.doc)
     }
 
+    /// Whether the running patch reads the live video (see
+    /// [`codegen::uses_video`]).
+    pub fn uses_video(&self) -> bool {
+        codegen::uses_video(&self.prog.doc)
+    }
+
     /// The running patch's Still images: (node id, media cell, image data URL
     /// if the node has one). The host uploads each to its cell and marks it in
     /// [`Sim::image_mask`].

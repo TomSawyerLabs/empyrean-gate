@@ -306,6 +306,12 @@ impl PatchSim {
         self.sim.uses_touch()
     }
 
+    /// Whether the running patch reads the live video: upload frames only then.
+    #[wasm_bindgen(js_name = usesVideo)]
+    pub fn uses_video(&self) -> bool {
+        self.sim.uses_video()
+    }
+
     /// One raw pointer event: `phase` is `"down"`, `"move"` or `"up"`;
     /// `angle`/`radius` in the physical frame (as `screenToPolar` gives them);
     /// the toucher's color (hue < 0 = white). `source` tells devices apart
