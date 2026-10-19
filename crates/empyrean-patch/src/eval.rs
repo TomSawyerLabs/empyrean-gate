@@ -268,16 +268,19 @@ impl Runtime {
     /// A CPU node's output as of the latest `eval`, for the mini-preview
     /// amplitude meters. Unknown node/port reads as 0 (a node that has not
     /// evaluated yet is indistinguishable from one outputting zero, which is
-    /// exactly what a meter should show).
+    /// exactly what a meter should show), except a Code node's live value
+    /// (`@…`, `script::Script::probe_keys`) that has none yet: NaN, so the
+    /// editor shows nothing rather than a 0 the body never computed.
     pub fn scalar_value(&self, node: usize, port: &str) -> f32 {
         if let Some(v) = self.outputs.get(node).and_then(|o| o.get(port)) {
             return *v;
         }
+        let none = if port.starts_with('@') { f32::NAN } else { 0.0 };
         // An event port: its meter value is the running count of fires.
         self.event_counts
             .get(node)
             .and_then(|c| c.get(port))
-            .map_or(0.0, |&n| n as f32)
+            .map_or(none, |&n| n as f32)
     }
 
     /// Apply a live param change (exposed-param play surface) without any
@@ -923,10 +926,20 @@ impl Runtime {
                         .iter()
                         .map(|n| self.state[node].code_state.get(n).copied().unwrap_or(0.0))
                         .collect();
-                    let outputs = script.run(&inputs, dt, ms, &mut state);
+                    let mut probes = Vec::new();
+                    let outputs = script.run_probed(&inputs, dt, ms, &mut state, Some(&mut probes));
                     let st = &mut self.state[node];
                     for (name, v) in names.iter().zip(state) {
                         st.code_state.insert(name.clone(), finite_or(v, 0.0));
+                    }
+                    // What the editor shows beside the body: a value per
+                    // `let`/`var`/`state.` under its probe key, read like any
+                    // output by the meters (`preview_scalars`). A local this
+                    // frame did not reach keeps its last value.
+                    for (key, v) in script.probe_keys().zip(probes) {
+                        if let Some(v) = v {
+                            self.outputs[node].insert(key.to_string(), finite_or(v, 0.0));
+                        }
                     }
                     for (p, v) in def.outputs.iter().zip(outputs) {
                         match p.shape {
@@ -1878,6 +1891,52 @@ mod tests {
         rt.eval(&inp);
         assert_eq!(rt.slab[opacity], 1.0);
         assert_eq!(rt.outputs[g]["hue_amount"], 1.0);
+    }
+
+    #[test]
+    fn a_cpu_code_node_meters_its_locals_and_state_by_probe_key() {
+        // The editor's live values: each `let`/`var`/`state.` of a CPU body
+        // is on the meter list after the node's real outputs, and reads as
+        // its value (a local: its last value assigned).
+        let mut c = node("c", crate::code::KIND);
+        let out = crate::code::CodePort {
+            name: "out".into(),
+            shape: Shape::Scalar,
+            ..Default::default()
+        };
+        c.code = Some(Box::new(crate::code::CodeDef {
+            inputs: vec![],
+            outputs: vec![out],
+            body: "let a = 1.5;
+state.t += 2.0;
+out = a;".into(),
+        }));
+        let doc = PatchDoc {
+            nodes: vec![c, node("sol", "solid"), node("o", "output")],
+            edges: vec![edge("c", "out", "sol", "brightness"), edge("sol", "out", "o", "in")],
+            ..Default::default()
+        };
+        let mut rt = runtime(doc);
+        let ci = rt.doc.nodes.iter().position(|n| n.id == "c").unwrap();
+        let keys: Vec<&str> = rt
+            .prog
+            .preview_scalars
+            .iter()
+            .filter(|(n, _)| *n == ci)
+            .map(|(_, p)| p.as_str())
+            .collect();
+        assert_eq!(keys, ["out", "@1:5:a", "@state:t"]);
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let inp = inputs(&audio);
+        rt.eval(&inp);
+        rt.eval(&inp);
+        assert_eq!(rt.scalar_value(ci, "@1:5:a"), 1.5);
+        assert_eq!(rt.scalar_value(ci, "@state:t"), 4.0);
+        assert_eq!(rt.scalar_value(ci, "out"), 1.5);
+        // A live value no frame has computed: NaN (nothing to show), where an
+        // unknown port of any other kind still reads 0.
+        assert!(rt.scalar_value(ci, "@9:5:never").is_nan());
+        assert_eq!(rt.scalar_value(ci, "nope"), 0.0);
     }
 
     #[test]

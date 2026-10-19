@@ -230,6 +230,8 @@ pub struct Script {
     /// Output kinds in declaration order: `true` for an Event.
     output_events: Vec<bool>,
     state_names: Vec<String>,
+    /// What the editor can watch (see [`Script::probe_keys`]).
+    probes: Vec<(String, Slot)>,
 }
 
 impl Script {
@@ -238,11 +240,33 @@ impl Script {
         &self.state_names
     }
 
+    /// The values the editor shows beside the body, in the order
+    /// [`Script::run_probed`] reports them: every `let`/`var` as
+    /// `@<line>:<col>:<name>` (the name's position, col in bytes, both from
+    /// 1) and every `state.<name>` as `@state:<name>`.
+    pub fn probe_keys(&self) -> impl Iterator<Item = &str> {
+        self.probes.iter().map(|(k, _)| k.as_str())
+    }
+
     /// Run one frame. `inputs` are the declared inputs in order (an Event is
     /// `Bool(fired)`), `state` the slots named by [`Script::state_names`].
     /// Returns the declared outputs in order: a Scalar as `Num`, an Event
     /// as `Bool`.
     pub fn run(&self, inputs: &[Value], dt: f32, master_speed: f32, state: &mut [f32]) -> Vec<Value> {
+        self.run_probed(inputs, dt, master_speed, state, None)
+    }
+
+    /// [`Script::run`], also filling `probes` with one value per
+    /// [`Script::probe_keys`]: a local's last value this frame (`None` if
+    /// the frame never reached it), a state slot's value after the frame.
+    pub fn run_probed(
+        &self,
+        inputs: &[Value],
+        dt: f32,
+        master_speed: f32,
+        state: &mut [f32],
+        probes: Option<&mut Vec<Option<f32>>>,
+    ) -> Vec<Value> {
         debug_assert_eq!(inputs.len(), self.n_inputs);
         debug_assert_eq!(state.len(), self.state_names.len());
         let mut outputs: Vec<Value> = self
@@ -257,9 +281,18 @@ impl Script {
             dt,
             master_speed,
             locals: vec![Value::Num(0.0); self.n_locals],
+            written: vec![false; self.n_locals],
             steps: MAX_STEPS,
         };
         vm.exec(&self.stmts);
+        if let Some(out) = probes {
+            out.clear();
+            out.extend(self.probes.iter().map(|(_, slot)| match *slot {
+                Slot::Local(i) => vm.written[i].then(|| vm.locals[i].num()),
+                Slot::State(i) => Some(vm.state[i]),
+                _ => None,
+            }));
+        }
         for (v, &ev) in outputs.iter_mut().zip(&self.output_events) {
             *v = if ev { Value::Bool(v.truth()) } else { Value::Num(v.num()) };
         }
@@ -276,6 +309,7 @@ pub fn compile(def: &CodeDef) -> Result<Script, Error> {
         scopes: vec![HashMap::new()],
         n_locals: 0,
         state_names: Vec::new(),
+        probes: Vec::new(),
         depth: 0,
     };
     for (i, port) in def.inputs.iter().enumerate() {
@@ -296,6 +330,7 @@ pub fn compile(def: &CodeDef) -> Result<Script, Error> {
         n_inputs: def.inputs.len(),
         output_events: def.outputs.iter().map(|o| o.shape == Shape::Event).collect(),
         state_names: p.state_names,
+        probes: p.probes,
     })
 }
 
@@ -450,6 +485,8 @@ struct Parser {
     scopes: Vec<HashMap<String, (Slot, bool)>>,
     n_locals: usize,
     state_names: Vec<String>,
+    /// Probe key → slot, as `Script::probes`.
+    probes: Vec<(String, Slot)>,
     depth: usize,
 }
 
@@ -561,7 +598,9 @@ impl Parser {
             return self.error(format!("at most {MAX_STATE} state slots"));
         }
         self.state_names.push(name.to_string());
-        Ok(Slot::State(self.state_names.len() - 1))
+        let slot = Slot::State(self.state_names.len() - 1);
+        self.probes.push((format!("@state:{name}"), slot));
+        Ok(slot)
     }
 
     // -- statements --
@@ -646,6 +685,7 @@ impl Parser {
     /// `let`/`var` declaration, without the trailing `;`.
     fn decl(&mut self) -> Result<Stmt, Error> {
         let mutable = self.ident()? == "var";
+        let (line, col) = (self.peek().line, self.peek().col);
         let name = self.ident()?;
         if self.eat_punct(":") {
             let ty = self.ident()?;
@@ -662,7 +702,9 @@ impl Parser {
         };
         // The initializer is parsed before the name is in scope (`let x = x;`
         // refers to an outer x, as in WGSL).
+        let key = format!("@{line}:{col}:{name}");
         let slot = self.declare(name, mutable)?;
+        self.probes.push((key, slot));
         Ok(Stmt::Assign(slot, init))
     }
 
@@ -969,6 +1011,8 @@ struct Vm<'a> {
     dt: f32,
     master_speed: f32,
     locals: Vec<Value>,
+    /// Which locals were assigned this frame (their probes report).
+    written: Vec<bool>,
     /// Statements left this frame; at zero the body ends.
     steps: usize,
 }
@@ -990,7 +1034,10 @@ impl Vm<'_> {
     fn write(&mut self, slot: Slot, v: Value) {
         match slot {
             Slot::Output(i) => self.outputs[i] = v,
-            Slot::Local(i) => self.locals[i] = v,
+            Slot::Local(i) => {
+                self.locals[i] = v;
+                self.written[i] = true;
+            }
             Slot::State(i) => self.state[i] = v.num(),
             Slot::Input(_) | Slot::Dt | Slot::MasterSpeed | Slot::Pi | Slot::Tau => {}
         }
@@ -1228,6 +1275,29 @@ mod tests {
         let vals: Vec<Value> = inputs.iter().map(|(_, v)| Value::Num(*v)).collect();
         let mut state = vec![0.0; s.state_names().len()];
         s.run(&vals, 1.0 / 60.0, 1.0, &mut state)[0].num()
+    }
+
+    #[test]
+    fn probes_report_lets_vars_and_state() {
+        let body = "let a = x * 2.0;
+// a comment
+  var b = 0.0;
+if (a > 100.0) {
+  let big = 1.0;
+  b = big;
+}
+state.n += 1.0;
+out = a + b;";
+        let d = def(&[("x", Shape::Scalar)], &[("out", Shape::Scalar)], body);
+        let s = compile(&d).unwrap();
+        assert_eq!(s.probe_keys().collect::<Vec<_>>(), ["@1:5:a", "@3:7:b", "@5:7:big", "@state:n"]);
+        let mut state = vec![0.0; s.state_names().len()];
+        let mut probes = Vec::new();
+        s.run_probed(&[Value::Num(3.0)], 1.0 / 60.0, 1.0, &mut state, Some(&mut probes));
+        // `big` is in a branch this frame did not take.
+        assert_eq!(probes, [Some(6.0), Some(0.0), None, Some(1.0)]);
+        s.run_probed(&[Value::Num(60.0)], 1.0 / 60.0, 1.0, &mut state, Some(&mut probes));
+        assert_eq!(probes, [Some(120.0), Some(1.0), Some(1.0), Some(2.0)]);
     }
 
     #[test]

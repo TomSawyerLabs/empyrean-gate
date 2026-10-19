@@ -432,6 +432,16 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
                 .filter(|(_, shape)| matches!(shape, Shape::Scalar | Shape::Event))
                 .map(move |(name, _)| (i, name))
         })
+        // Then a CPU Code node's live values (`script::Script::probe_keys`),
+        // after every real meter, so they never crowd one out.
+        .chain(cpu_order.iter().copied().flat_map(|i| {
+            let n = &doc.nodes[i];
+            n.code()
+                .filter(|_| n.is_cpu())
+                .and_then(|def| crate::script::compile(def).ok())
+                .map(|s| s.probe_keys().map(|k| (i, k.to_string())).collect::<Vec<_>>())
+                .unwrap_or_default()
+        }))
         .take(MAX_PREVIEW_SCALARS)
         .collect();
 

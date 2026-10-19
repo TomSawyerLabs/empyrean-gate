@@ -1,7 +1,7 @@
 // The Code node's body editor: CodeMirror 6 with a WGSL mode, completion and
 // hover docs fed by the patch core's reference (and the node's own ports),
 // snippets, signature help, search and multiple selections, number
-// scrubbing, colour swatches, and the host's errors as marks on the body's lines (with quick
+// scrubbing, colour swatches, a CPU body's live values, and the host's errors as marks on the body's lines (with quick
 // fixes). One instance per
 // panel; the document is kept in sync with the patch (undo in the patch
 // replaces the text here, edits here go to the patch coalesced).
@@ -45,7 +45,9 @@ import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/sea
 import { tags as t } from "@lezer/highlight";
 import type { CodeFnRef, CodePort, CodeReference, PatchShape } from "../types";
 import { fixesFor, type BodyEdit, type FixContext } from "./code-fixes";
+import { liveTick, liveValues } from "./code-live";
 import { scrubbing } from "./code-scrub";
+import type { MiniSource } from "./minis-source";
 import { colourSwatches } from "./code-swatches";
 import { signatureHelp } from "./code-signature";
 import { snippetsFor } from "./code-snippets";
@@ -636,6 +638,7 @@ export function CodeEditor({
   handle,
   caret,
   autoFocus,
+  live,
 }: {
   value: string;
   onChange: (body: string) => void;
@@ -648,6 +651,9 @@ export function CodeEditor({
    * the large view's), so moving between them keeps the caret. */
   caret?: { current: { anchor: number; head: number } | null };
   autoFocus?: boolean;
+  /** Where a CPU body's live values come from (the node's meters), or null
+   * to show none. */
+  live?: { source: MiniSource; node: string } | null;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -677,6 +683,8 @@ export function CodeEditor({
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const readOnlyC = useRef(new Compartment());
+  const liveRef = useRef(live ?? null);
+  liveRef.current = live ?? null;
 
   useEffect(() => {
     if (!host.current) return;
@@ -709,6 +717,10 @@ export function CodeEditor({
           wgsl,
           syntaxHighlighting(highlight),
           colourSwatches(),
+          liveValues(() => {
+            const l = liveRef.current;
+            return l ? (key) => l.source.scalars.get(`scalar:${l.node}:${key}`)?.latest : null;
+          }),
           autocompletion({ override: [makeCompletions(getScope)], activateOnTyping: true, maxRenderedOptions: 40 }),
           makeHover(getScope),
           signatureHelp((name) => fnFor(getScope(), name)),
@@ -762,6 +774,31 @@ export function CodeEditor({
       effects: readOnlyC.current.reconfigure([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
     });
   }, [readOnly]);
+
+  // Live values: watch the meters while there are some to show, and redraw
+  // when they move (at most once a frame).
+  const liveSource = live?.source ?? null;
+  const liveNode = live?.node ?? null;
+  useEffect(() => {
+    let frame = 0;
+    const tick = () => {
+      frame ||= requestAnimationFrame(() => {
+        frame = 0;
+        viewRef.current?.dispatch({ effects: liveTick.of(null) });
+      });
+    };
+    tick();
+    if (!liveSource) return () => cancelAnimationFrame(frame);
+    liveSource.retain();
+    const off = liveSource.onChange(tick);
+    return () => {
+      off();
+      liveSource.release();
+      cancelAnimationFrame(frame);
+      // Clear what was shown.
+      queueMicrotask(() => viewRef.current?.dispatch({ effects: liveTick.of(null) }));
+    };
+  }, [liveSource, liveNode]);
 
   useEffect(() => {
     const view = viewRef.current;
