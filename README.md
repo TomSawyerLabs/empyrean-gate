@@ -265,10 +265,18 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   value across frames), so a submitted patch never runs native code. The
   body is edited in a real code editor (CodeMirror: WGSL highlighting,
   completion and hover docs read off the shader lib itself through
-  `GET /patch/code-reference`, Tab indents, Ctrl+Space; ⤢ Expand opens it
-  in a large modal, the whole screen on a phone, with the live minis beside
-  it), shader errors inside a body are marked on its own lines, and every
-  output of a Code
+  `GET /patch/code-reference`, Tab indents, Ctrl+Space), with aids for
+  writing it: snippets in the completion list (each compiled in CI), the
+  parameters of the call the caret is in, Ctrl+F search and replace,
+  Ctrl+D and Alt-drag for several carets, Alt-drag on a number to scrub it
+  live, a colour swatch (with a picker) beside every colour written in
+  literals, and, for a CPU body on air, each `let`/`var`/`state.` value at
+  the end of its line. Errors inside a body are marked on their own lines
+  with quick fixes (on the mark, and as buttons under the error). ⤢ Expand
+  opens the body in a large view (the whole screen on a phone) with the
+  live minis, A−/A+ text size, a column of everything the body can use
+  (filterable; a click inserts it at the caret), and on a touch screen a
+  key row (symbols, Tab, arrows, undo, scrub mode). Every output of a Code
   node gets a live mini (a ring per field output, a meter per scalar or
   event) on the node and beside the editor. Any built-in node's panel has
   **Convert to Code**: the node becomes a Code node in place, wires and
