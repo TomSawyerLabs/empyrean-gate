@@ -88,14 +88,14 @@ playground, the CLI's `render`, the MCP server's `snapshot`).
 5. [x] Agent: a shared `dj_deck` tool (`src/agent/dj.ts`) — read the deck,
    connect/disconnect, auto on/off, start the set at a time, deck actions;
    guide text. CLI: `render --at <s> --no-link`; MCP serves `dj_deck`.
-6. [ ] **(current)** README (patch-web), typecheck, tests; commit; merge to
-   gate master; watch CI publish web-dist.
+6. [x] README (patch-web), typecheck, tests; commit; merge to gate master;
+   watch CI publish web-dist.
 7. [x] Site (own worktree): the DJ panel (two decks with play / hold-cue /
    loop / jump / load, phrase strip, master & on-air lamps, crossfader, Auto
    DJ, LINK connected, event lamps), `set_inputs` → `dj_deck`, README,
    tests (committed on site branch `dj-sim`); after the bot's bump lands,
    rebase onto `dev`, push, verify the Preview.
-8. [ ] Gate follow-up: drop `GrooveSettings.djMix` once the site no longer
+8. [x] Gate follow-up: drop `GrooveSettings.djMix` once the site no longer
    sets it.
 
 ## Findings / gotchas
@@ -148,8 +148,17 @@ playground, the CLI's `render`, the MCP server's `snapshot`).
       (1 skipped: the no-WebGPU case), playground specs on three browsers
       (WebKit flake aside). The site's *old* code also typechecks against the
       new package (the bump bot's check).
-- [ ] Push gate master; web-dist; the bot's bump; site dev; Preview check.
-- [ ] Follow-up: drop `GrooveSettings.djMix` once site dev no longer sets it.
+- [x] Gate master 97263f5 → web-dist 609e29b → the bot's bump 9d1c436 on
+      site dev → site 5221540 (decks) + 60f659d (ISSUES) pushed to dev.
+      Preview (dev.empyreangate.org/playground) checked in Chrome with
+      WebGPU: both decks, the Auto DJ mid-set, "The patch sees" live,
+      `dj_deck` offered to the page's agent. Workers Builds green.
+- [x] `GrooveSettings.djMix` dropped (gate, after the site stopped setting
+      it).
+- Not ours, seen on the way: site dev's `test:gpu` fails "the Phone IMU node
+  can be driven by hand" since the palette overhaul arrived (its palette
+  item no longer clickable as before); reproduced on the bump commit alone,
+  noted for Agent L in the site's `.agents.txt`.
 
 ## Open questions for the user
 
