@@ -89,6 +89,9 @@ export interface SimTrack {
   /** rekordbox's mood: high tracks phrase as up/down/chorus, mid and low as
    * verse/bridge/chorus. */
   mood: "high" | "mid" | "low";
+  /** The key's root as a MIDI note (for a host that plays the set out
+   * loud); minor. */
+  root?: number;
   phrases: SimPhrase[];
   moves?: SimMove[];
 }
@@ -100,6 +103,7 @@ export const CRATE: readonly SimTrack[] = [
     title: "Ember Theory",
     artist: "Halcyon Static",
     mood: "high",
+    root: 45,
     phrases: [
       { kind: "intro", beats: 32 },
       { kind: "up", beats: 16, fill: 4 },
@@ -116,6 +120,7 @@ export const CRATE: readonly SimTrack[] = [
     title: "Tidewater",
     artist: "The Lantern Choir",
     mood: "mid",
+    root: 50,
     phrases: [
       { kind: "intro", beats: 32 },
       { kind: "verse", beats: 32 },
@@ -132,6 +137,7 @@ export const CRATE: readonly SimTrack[] = [
     title: "Low Orbit",
     artist: "Cassini Drift",
     mood: "low",
+    root: 43,
     phrases: [
       { kind: "intro", beats: 32 },
       { kind: "verse", beats: 32 },
@@ -146,6 +152,7 @@ export const CRATE: readonly SimTrack[] = [
     title: "Night Market",
     artist: "Paper Tigers Club",
     mood: "high",
+    root: 48,
     phrases: [
       { kind: "intro", beats: 32 },
       { kind: "up", beats: 32, fill: 8 },
@@ -162,6 +169,7 @@ export const CRATE: readonly SimTrack[] = [
     title: "Glasswing",
     artist: "Mirror Pilots",
     mood: "mid",
+    root: 52,
     phrases: [
       { kind: "intro", beats: 32 },
       { kind: "verse", beats: 32 },
@@ -498,6 +506,11 @@ export interface DjDeckState {
   looping: boolean;
   /** The loop's length in beats while one is set. */
   loopBeats: number | null;
+  /** The loop's playhead range (`position` units) while one is set. */
+  loopRange: [number, number] | null;
+  /** The playhead in beats from the track's start (beat number is
+   * floor(position) + 1). */
+  position: number;
   beat: number;
   beats: number;
   /** 1..4, from the beat grid. */
@@ -885,6 +898,8 @@ export class DjLinkSim {
       playMode: d.looping ? PLAY_MODES.looping : PLAY_MODES[d.mode],
       looping: d.looping,
       loopBeats: d.loop ? d.loop.end - d.loop.start : null,
+      loopRange: d.loop ? [d.loop.start, d.loop.end] : null,
+      position: d.pos,
       beat,
       beats: l?.beats ?? 0,
       beatInBar: beat > 0 ? ((beat - 1) % 4) + 1 : 0,
