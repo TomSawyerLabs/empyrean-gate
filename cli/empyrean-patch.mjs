@@ -5812,6 +5812,42 @@ import { writeFileSync as writeFileSync3 } from "node:fs";
 import { resolve as resolve3 } from "node:path";
 import { parseArgs } from "node:util";
 
+// src/groups.ts
+var GROUPS = [
+  { id: "controls", label: "Controls", blurb: "Time, sliders and the crew's master controls", layout: "list" },
+  { id: "live", label: "Live input", blurb: "Music, phone motion, touch, taps, strokes and PRO DJ LINK", layout: "list" },
+  { id: "media", label: "Media", blurb: "Video, pictures and clips", layout: "list" },
+  { id: "shape", label: "Shape a signal", blurb: "Arithmetic and shaping of one number", layout: "list" },
+  { id: "motion", label: "Motion", blurb: "Numbers that move on their own", layout: "list" },
+  { id: "random", label: "Randomness", blurb: "Random numbers, held, jittering or wandering", layout: "list" },
+  { id: "events", label: "Events", blurb: "Count, latch, delay and merge triggers; turn them into effects", layout: "list" },
+  { id: "blocks", label: "Building blocks", blurb: "Plain fields to build a look from", layout: "grid" },
+  { id: "patterns", label: "Patterns", blurb: "Finished looks, each a whole pattern on its own", layout: "grid" },
+  { id: "color", label: "Color & space", blurb: "Colour, measure, combine and move fields", layout: "list" },
+  { id: "draw", label: "Draw streams", blurb: "Paint strokes and effects onto the array", layout: "list" },
+  { id: "structure", label: "Structure", blurb: "Output, sub-patches, code and notes", layout: "list" }
+], BY_ID = new Map(GROUPS.map((g) => [g.id, g])), FALLBACK = {
+  input: "live",
+  scalar: "shape",
+  generator: "patterns",
+  field: "color",
+  combine: "color",
+  texture: "media",
+  sink: "structure",
+  code: "structure"
+};
+function groupOf(t) {
+  return BY_ID.get(t.group ?? FALLBACK[t.category]) ?? BY_ID.get(FALLBACK[t.category]);
+}
+function grouped(types) {
+  let by = /* @__PURE__ */ new Map;
+  for (let t of types) {
+    let id = groupOf(t).id;
+    by.set(id, [...by.get(id) ?? [], t]);
+  }
+  return GROUPS.filter((g) => by.has(g.id)).map((group) => ({ group, types: by.get(group.id) }));
+}
+
 // src/runtime/ring.ts
 function renderRing(rgb, geometry, options = {}) {
   let size = Math.max(16, Math.round(options.size ?? 512)), [br, bg, bb] = options.background ?? [0, 0, 0], { spokes, pixels, innerOverOuter } = geometry, acc = new Float32Array(size * size * 3), radiusPx = size / 2 * 0.96, span = radiusPx * (1 - innerOverOuter), drawn = Math.max(Math.min(32, pixels), Math.min(pixels, Math.round(span / 1.3))), spacing = span / Math.max(drawn - 1, 1), dotPx = Math.max(2, spacing * 3), reach = Math.ceil(dotPx / 2), center = size / 2;
@@ -8196,21 +8232,12 @@ function applyOne(doc, o, place) {
 }
 
 // src/agent/guide.ts
-var CATEGORY_TITLES = {
-  input: "Inputs",
-  scalar: "Control (scalar and event) operators",
-  generator: "Generators",
-  field: "Field operators",
-  combine: "Combine",
-  texture: "Textures",
-  sink: "Output",
-  code: "Code"
-};
 function nodeSummary(t) {
   return {
     kind: t.id,
     label: t.label,
     category: t.category,
+    group: groupOf(t).id,
     description: t.description ?? "",
     inputs: t.inputs.map((p) => `${p.name}:${p.shape}`),
     outputs: t.outputs.map((p) => `${p.name}:${p.shape}`),
@@ -8357,13 +8384,9 @@ out = vec4f(hsv2rgb(hue, 0.9, 1.0), 1.0);`
     add("## Links", "", `A link opens a patch in anyone's playground: \`${options.playground}#patch=<data>\`, where \`<data>\` is the patch JSON percent-encoded (\`encodeURIComponent\`), or \`z\` followed by the JSON deflate-raw compressed and base64url-encoded (shorter; what \`share_link\` makes). The patch opens as a new entry in the visitor's own library; nothing is sent anywhere.`, "");
   if (!options.brief) {
     add("## Node reference", "");
-    let order = ["input", "scalar", "generator", "field", "combine", "texture", "code", "sink"];
-    for (let cat of order) {
-      let list = core.registry.filter((t) => t.category === cat);
-      if (!list.length)
-        continue;
-      add(`## ${CATEGORY_TITLES[cat]}`, "");
-      for (let t of list)
+    for (let { group, types } of grouped(core.registry)) {
+      add(`## ${group.label}`, "", `${group.blurb}.`, "");
+      for (let t of types)
         add(nodeReference(t));
     }
   }
@@ -8421,8 +8444,8 @@ function createPatchApi(host) {
     guide(options = {}) {
       return agentGuide(core, { ...host.guide, ...options });
     },
-    nodeTypes(category) {
-      return core.registry.filter((t) => !category || t.category === category).map(nodeSummary);
+    nodeTypes(groupOrCategory) {
+      return core.registry.filter((t) => !groupOrCategory || groupOf(t).id === groupOrCategory || t.category === groupOrCategory).map(nodeSummary);
     },
     describe(kinds) {
       return kinds.map((k) => {
@@ -16839,10 +16862,10 @@ function patchTools(api, extra = []) {
     {
       name: "list_node_types",
       title: "List node types",
-      description: "Every node type in brief: kind, label, category, what it does, its ports (name:shape) and param names. Optionally one category (input, scalar, generator, field, combine, texture, code, sink).",
-      inputSchema: { type: "object", properties: { category: { type: "string" } } },
+      description: `Every node type in brief: kind, label, palette group, category, what it does, its ports (name:shape) and param names. Optionally only one palette group (${GROUPS.map((g) => g.id).join(", ")}) or one category (input, scalar, generator, field, combine, texture, code, sink).`,
+      inputSchema: { type: "object", properties: { group: { type: "string" }, category: { type: "string" } } },
       annotations: { readOnlyHint: !0 },
-      execute: async (i) => text(api.nodeTypes(typeof i.category === "string" ? i.category : void 0))
+      execute: async (i) => text(api.nodeTypes(typeof i.group === "string" ? i.group : typeof i.category === "string" ? i.category : void 0))
     },
     {
       name: "describe_node_types",
@@ -17095,7 +17118,7 @@ async function main(argv) {
         console.log(JSON.stringify(out, null, 2));
       else
         for (let t of api.nodeTypes())
-          console.log(`${t.kind.padEnd(18)} ${t.category.padEnd(10)} ${t.description || t.label}`);
+          console.log(`${t.kind.padEnd(18)} ${t.group.padEnd(10)} ${t.description || t.label}`);
       return 0;
     }
     case "presets": {
