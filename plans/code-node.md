@@ -351,6 +351,37 @@ Gotcha: a mock backend left running from a debugging session is reused
 by Playwright (`reuseExistingServer`) and serves a stale registry; check
 `netstat` for the port before trusting a palette-related failure.
 
+## Round 6 candidates: more aids in the body editor (proposed 2026-10-18)
+
+Cameron: "are there more coding aides we can add to the text area?" The
+body editor already has WGSL highlighting, line numbers, bracket matching
+and auto-close, auto-indent, Tab indent, undo/redo, Ctrl+/ comment toggle
+and Alt+↑/↓ line moves (both from CodeMirror's default keymap), completion
+(ports, `c.`, `G.`, swizzles, lib helpers with signatures), hover docs, and
+compile errors marked on their lines. Not yet built, in recommended order:
+
+1. Search and replace, select-next-occurrence (Ctrl+D), highlighting other
+   uses of the selected name, Alt-drag column select (`@codemirror/search`
+   plus view extensions; small).
+2. Snippets in completion: `for` with a literal bound (the GPU loop rule),
+   `if`/`else`, and common idioms (polar ripple, smoothstep band, hsv out).
+3. Signature help: the helper's parameters shown while typing inside its
+   `(`, with the current argument highlighted.
+4. Quick fixes on the scanner's errors (`return <value>` becomes
+   `out = …; return;`, a missing `}`, a non-literal loop bound).
+5. The "What the body can use" reference as a side column in the large
+   modal, and A−/A+ text size there.
+6. Number scrubbing: Alt-drag a numeric literal to change it, live on the
+   preview (one undo step per drag).
+7. Colour swatches beside `vec3f`/`vec4f` literals, clicking one opens a
+   picker that rewrites the literal.
+8. On phones, a key row above the keyboard: `{ } ( ) ; . = + - * /`, Tab,
+   undo.
+9. Live values for the CPU tier: each `let`'s current value as faint text
+   at the line end (needs the interpreter to report them; the largest).
+
+Waiting on Cameron's pick.
+
 ## Findings / gotchas
 
 - `codegen::leak()` interned port names as `&'static str` for `slot_of`;
