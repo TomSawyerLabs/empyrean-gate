@@ -8529,6 +8529,68 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+// cli/png.ts
+import { inflateSync } from "node:zlib";
+function decodePng(png) {
+  let view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  if (view.getUint32(0) !== 2303741511)
+    throw Error("not a PNG");
+  let width = 0, height = 0, colorType = 0, idat = [];
+  for (let at = 8;at < png.length; ) {
+    let len = view.getUint32(at), type = String.fromCharCode(...png.subarray(at + 4, at + 8)), data = png.subarray(at + 8, at + 8 + len);
+    if (type === "IHDR") {
+      width = view.getUint32(at + 8), height = view.getUint32(at + 12);
+      let depth = data[8];
+      if (colorType = data[9], depth !== 8 || data[12] !== 0 || ![0, 2, 4, 6].includes(colorType))
+        throw Error("only 8-bit, non-interlaced grey/RGB(A) PNGs");
+    } else if (type === "IDAT")
+      idat.push(data);
+    else if (type === "IEND")
+      break;
+    at += 12 + len;
+  }
+  let channels = { 0: 1, 2: 3, 4: 2, 6: 4 }[colorType], raw = inflateSync(Buffer.concat(idat)), stride = width * channels, pixels = new Uint8Array(stride * height);
+  for (let y = 0;y < height; y++) {
+    let filter = raw[y * (stride + 1)], src = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)), row = pixels.subarray(y * stride, (y + 1) * stride), up = y > 0 ? pixels.subarray((y - 1) * stride, y * stride) : null;
+    for (let x = 0;x < stride; x++) {
+      let a = x >= channels ? row[x - channels] : 0, b = up ? up[x] : 0, c = up && x >= channels ? up[x - channels] : 0, v = src[x];
+      if (filter === 1)
+        v += a;
+      else if (filter === 2)
+        v += b;
+      else if (filter === 3)
+        v += a + b >> 1;
+      else if (filter === 4) {
+        let p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      }
+      row[x] = v & 255;
+    }
+  }
+  let rgba = new Uint8Array(width * height * 4);
+  for (let i = 0;i < width * height; i++) {
+    let p = pixels.subarray(i * channels, i * channels + channels), grey = channels <= 2;
+    rgba[i * 4] = p[0], rgba[i * 4 + 1] = grey ? p[0] : p[1], rgba[i * 4 + 2] = grey ? p[0] : p[2], rgba[i * 4 + 3] = channels === 2 ? p[1] : channels === 4 ? p[3] : 255;
+  }
+  return { width, height, rgba };
+}
+var warned = !1;
+async function decodeDataUrl(dataUrl, size) {
+  let match = /^data:image\/png;base64,(.*)$/s.exec(dataUrl);
+  if (!match) {
+    if (!warned)
+      console.warn("Only PNG pictures render on the command line; others stay black.");
+    throw warned = !0, Error("not a PNG data URL");
+  }
+  let { width, height, rgba } = decodePng(Buffer.from(match[1], "base64")), side = Math.min(width, height), x0 = (width - side) / 2, y0 = (height - side) / 2, out = new Uint8Array(size * size * 4);
+  for (let y = 0;y < size; y++)
+    for (let x = 0;x < size; x++) {
+      let sx = Math.floor(x0 + (x + 0.5) * side / size), sy = Math.floor(y0 + (y + 0.5) * side / size);
+      out.set(rgba.subarray((sy * width + sx) * 4, (sy * width + sx) * 4 + 4), (y * size + x) * 4);
+    }
+  return out;
+}
+
 // wasm/patch.js
 class PatchSim {
   __destroy_into_raw() {
@@ -10128,6 +10190,18 @@ class TestFilm {
   }
   dispose() {}
 }
+function synthScope(features, t, wave, spectrum) {
+  let [level = 0, bass = 0, mid = 0, treble = 0, onset = 0] = features, out = new Float32Array(wave + spectrum);
+  for (let i = 0;i < wave; i++) {
+    let x = i / wave;
+    out[i] = 0.7 * bass * Math.sin(2 * Math.PI * (2 * x + t * 0.9)) + 0.35 * mid * Math.sin(2 * Math.PI * (9 * x + t * 2.3) + 1) + 0.18 * treble * Math.sin(2 * Math.PI * (31 * x + t * 5.1) + 2);
+  }
+  for (let k = 0;k < spectrum; k++) {
+    let f = k / (spectrum - 1), shape = bass * Math.exp(-((f - 0.06) ** 2) / 0.006) + 0.8 * mid * Math.exp(-((f - 0.35) ** 2) / 0.03) + 0.6 * treble * Math.exp(-((f - 0.75) ** 2) / 0.04), ripple = 0.85 + 0.15 * Math.sin(k * 1.7 + t * 6);
+    out[wave + k] = Math.min(1, (shape * ripple + 0.25 * onset * (1 - f)) * (0.6 + 0.6 * level));
+  }
+  return out;
+}
 
 // src/runtime/index.ts
 var GATE_GEOMETRY = { spokes: 64, pixels: 378, innerOverOuter: 0.32 }, PREVIEW_INTERVAL_MS = 100, SHAKE_TAU = 0.3, STEP_HZ = 60, MAX_CAPTURE_FRAMES = 16;
@@ -10152,6 +10226,8 @@ class PatchRuntime {
   shake = 0;
   video = new TestFilm;
   usesVideo = !1;
+  audioFeatures = null;
+  scopeT = 0;
   spokes = 0;
   pixels = 0;
   cells = /* @__PURE__ */ new Map;
@@ -10162,14 +10238,15 @@ class PatchRuntime {
   previewNodes = [];
   uploadedImages = /* @__PURE__ */ new Map;
   previewScalars = [];
-  constructor(core, gpu) {
-    this.core = core, this.gpu = gpu, this.geometry = gpu.geometry, gpu.device.lost.then((info) => {
+  decode;
+  constructor(core, gpu, decode = decodeImage) {
+    this.core = core, this.gpu = gpu, this.decode = decode, this.geometry = gpu.geometry, gpu.device.lost.then((info) => {
       this.stop(), this.setStatus({ active: !1, touch: !1, error: `The GPU was lost: ${info.message || info.reason}` });
     });
   }
   static async create(geometry = GATE_GEOMETRY, options = {}) {
     let [core, device] = await Promise.all([loadPatchCore(options.wasm), requestGateDevice(options.gpu)]);
-    return new PatchRuntime(core, new GateGpu(device, core.limits, geometry));
+    return new PatchRuntime(core, new GateGpu(device, core.limits, geometry), options.decodeImage);
   }
   getStatus() {
     return this.status;
@@ -10237,7 +10314,7 @@ class PatchRuntime {
         this.uploadedImages.delete(slot), sim.setImageLoaded(slot, !1);
         continue;
       }
-      this.uploadedImages.set(slot, media), decodeImage(media, size).then((rgba) => {
+      this.uploadedImages.set(slot, media), this.decode(media, size).then((rgba) => {
         if (this.uploadedImages.get(slot) !== media || this.sim !== sim)
           return;
         this.gpu.writeImage(slot, rgba), sim.setImageLoaded(slot, !0);
@@ -10343,6 +10420,12 @@ class PatchRuntime {
       slab: sim.slab()
     }), this.stopMic)
       this.gpu.writeScope(sim.scope());
+    else if (this.audioFeatures) {
+      let { scopeWave, scopeSpectrum, scopeFloats, audioSources } = this.core.limits;
+      this.scopeT += dt;
+      let scope = new Float32Array(scopeFloats * audioSources);
+      scope.set(synthScope(this.audioFeatures, this.scopeT, scopeWave, scopeSpectrum)), this.gpu.writeScope(scope);
+    }
     if (this.gpu.render(), this.miniRefs > 0 && now - this.lastPreview >= PREVIEW_INTERVAL_MS)
       this.lastPreview = now, this.refreshMinis(sim);
   }
@@ -10371,6 +10454,8 @@ class PatchRuntime {
     this.sim?.fireDjEvent(index);
   }
   setAudio(source, features) {
+    if (source === 0)
+      this.audioFeatures = features;
     this.sim?.setAudio(source, features);
   }
   get micActive() {
@@ -10481,7 +10566,11 @@ async function headlessRuntime() {
   let gpu = await loadWebGpu();
   if (!gpu)
     return null;
-  let runtime = await PatchRuntime.create(GATE_GEOMETRY, { gpu, wasm: wasmBytes() });
+  let runtime = await PatchRuntime.create(GATE_GEOMETRY, {
+    gpu,
+    wasm: wasmBytes(),
+    decodeImage: decodeDataUrl
+  });
   return { runtime, groove: attachGroove(runtime) };
 }
 function fileHost(core, runtime, file) {

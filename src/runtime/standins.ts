@@ -14,6 +14,10 @@ import { GROOVE_BPM } from "./groove";
 import type { Motion, MotionSource } from "./inputs";
 import type { PatchRuntime } from "./index";
 
+/** What the visitors need of a host: a `PatchRuntime`, or anything that can
+ * step a patch and take its inputs the same way. */
+export type VisitorHost = Pick<PatchRuntime, "onFrame" | "onRestart" | "getStatus" | "trigger" | "touch" | "draw">;
+
 /** Where Video in's picture comes from: a file, a camera, or a stand-in. */
 export interface VideoSource {
   /** Side of the square frames it gives. */
@@ -177,7 +181,7 @@ const polar = (x: number, y: number) => ({ angle: Math.atan2(y, x), radius: Math
  * the dice restart with `runtime.restart()`.
  */
 export function attachVisitors(
-  runtime: PatchRuntime,
+  runtime: VisitorHost,
   initial: Partial<VisitorSettings> = {},
   seed = 7,
 ): { settings: VisitorSettings; stop(): void } {
@@ -339,4 +343,33 @@ export function syntheticMotion(now: () => number = () => performance.now(), see
     },
     stop() {},
   };
+}
+
+/**
+ * A scope (waveform, then spectrum, as the patch core's audio analysis lays
+ * it out) to go with audio features that came without samples, such as the
+ * synthetic groove's: Waveform and Spectrum then move with the music instead
+ * of lying flat. `features` in `setAudio` order (level, bass, mid, treble,
+ * onset, …); `t` in seconds.
+ */
+export function synthScope(features: Float32Array, t: number, wave: number, spectrum: number): Float32Array {
+  const [level = 0, bass = 0, mid = 0, treble = 0, onset = 0] = features;
+  const out = new Float32Array(wave + spectrum);
+  for (let i = 0; i < wave; i++) {
+    const x = i / wave;
+    out[i] =
+      0.7 * bass * Math.sin(2 * Math.PI * (2 * x + t * 0.9)) +
+      0.35 * mid * Math.sin(2 * Math.PI * (9 * x + t * 2.3) + 1) +
+      0.18 * treble * Math.sin(2 * Math.PI * (31 * x + t * 5.1) + 2);
+  }
+  for (let k = 0; k < spectrum; k++) {
+    const f = k / (spectrum - 1);
+    const shape =
+      bass * Math.exp(-((f - 0.06) ** 2) / 0.006) +
+      0.8 * mid * Math.exp(-((f - 0.35) ** 2) / 0.03) +
+      0.6 * treble * Math.exp(-((f - 0.75) ** 2) / 0.04);
+    const ripple = 0.85 + 0.15 * Math.sin(k * 1.7 + t * 6);
+    out[wave + k] = Math.min(1, (shape * ripple + 0.25 * onset * (1 - f)) * (0.6 + 0.6 * level));
+  }
+  return out;
 }
