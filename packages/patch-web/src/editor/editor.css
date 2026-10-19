@@ -1419,10 +1419,11 @@
 
 /* margin: auto is what centres a modal dialog; it is spelled out because a
    host page's reset (the site's `* { margin: 0 }`) otherwise pins the
-   dialog to the top-left corner. */
+   dialog to the top-left corner. No width cap, like the canvas behind it
+   (Cameron: a big screen gets a big editor). */
 .code-modal {
   margin: auto;
-  width: min(96vw, 1400px);
+  width: 96vw;
   height: 94vh;
   height: 94dvh;
   max-width: none;

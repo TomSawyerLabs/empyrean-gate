@@ -295,7 +295,8 @@ on the site): on empyreangate.org the modal sat in the top-left corner at
 1200×900. The site's `root.css` reset (`*, ::before, ::after { margin: 0 }`)
 removes the user-agent `margin: auto` that centres a modal dialog; the gate
 app has no such reset, so the spec never saw it. `.code-modal` now sets
-`margin: auto` itself, grows to min(96vw, 1400px) × 94dvh, and below 640 px
+`margin: auto` itself, grows to 96vw × 94dvh (first capped at 1400 px;
+Cameron, 2026-10-19: no width cap, like the canvas), and below 640 px
 wide or 500 px tall it is the whole screen (100vw × 100dvh, no border,
 safe-area padding). ⤢ Expand and Done get bigger touch targets. Two spec
 cases inject the site's reset: centred and nearly the window at 1400×900,

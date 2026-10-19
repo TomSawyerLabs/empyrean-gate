@@ -212,7 +212,7 @@ test("the body opens in a large modal, edits there reach the patch, Esc comes ba
 // The site's root.css resets every margin, the dialog's centring included.
 const HOST_RESET = "*, ::before, ::after { margin: 0; padding: 0; }";
 
-test("the large modal is centred and nearly the window under a host's margin reset", async ({ page }) => {
+test("the large modal is centred and nearly the window, uncapped, under a host's margin reset", async ({ page }) => {
   const sent: string[] = [];
   const node = await newPatchWithCode(page, sent);
   await page.addStyleTag({ content: HOST_RESET });
@@ -225,6 +225,9 @@ test("the large modal is centred and nearly the window under a host's margin res
   expect(box.height).toBeGreaterThan(800);
   expect(Math.abs(box.x + box.width / 2 - 700)).toBeLessThan(2);
   expect(Math.abs(box.y + box.height / 2 - 450)).toBeLessThan(2);
+  // No width cap: a wide window gets a wide editor (96% of it).
+  await page.setViewportSize({ width: 2400, height: 1200 });
+  await expect.poll(async () => Math.round((await modal.boundingBox())!.width)).toBe(2304);
 });
 
 test("on a phone the large modal is the whole screen", async ({ page }) => {
