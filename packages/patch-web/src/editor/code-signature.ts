@@ -20,7 +20,7 @@ export interface CallSite {
 }
 
 /** `text` with comments blanked to spaces (offsets kept). */
-function blankComments(text: string): string {
+export function blankComments(text: string): string {
   return text.replace(/\/\/[^\n]*|\/\*[\s\S]*?(\*\/|$)/g, (m) => m.replace(/[^\n]/g, " "));
 }
 

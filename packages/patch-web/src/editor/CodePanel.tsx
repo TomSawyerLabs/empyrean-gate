@@ -5,7 +5,8 @@
 // and as a mark on the body's line. See plans/code-node.md.
 
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { CodeEditor, diagnosticsFor, type CodeScope } from "./CodeEditor";
+import { applyEdits, CodeEditor, diagnosticsFor, scopeNames, type CodeScope } from "./CodeEditor";
+import { fixesFor, type FixContext } from "./code-fixes";
 import { NodeContext } from "./context";
 import { MiniMeter, MiniRing } from "./minis";
 import {
@@ -197,9 +198,40 @@ export function CodePanel({
     () => ({ tier, inputs: def.inputs, outputs: def.outputs, reference }),
     [tier, def.inputs, def.outputs, reference],
   );
+  const fixContext: FixContext = useMemo(
+    () => ({
+      outputs: [...def.outputs].sort((a, b) => Number(b.name === "out") - Number(a.name === "out")).map((p) => p.name),
+      names: scopeNames(scope),
+      tier,
+    }),
+    [def.outputs, scope, tier],
+  );
   const diagnostics = useMemo(
-    () => diagnosticsFor(error, [node.id, node.name].filter(Boolean), def.body),
-    [error, node.id, node.name, def.body],
+    () => diagnosticsFor(error, [node.id, node.name].filter(Boolean), def.body, fixContext),
+    [error, node.id, node.name, def.body, fixContext],
+  );
+  // The same fixes as buttons under the error, for a touch screen (no hover
+  // over the mark) and for whoever reads the error there first.
+  const fixes = useMemo(
+    () =>
+      canEdit
+        ? diagnostics.flatMap((d) => fixesFor(d.message, d.from, def.body, fixContext)).slice(0, 4)
+        : [],
+    [canEdit, diagnostics, def.body, fixContext],
+  );
+  const errorLine = mine && (
+    <div className="code-error">
+      <p>⚠ {mine}</p>
+      {fixes.length > 0 && (
+        <div className="code-fixes">
+          {fixes.map((f, i) => (
+            <button key={i} type="button" onClick={() => setBody(applyEdits(def.body, f.changes))}>
+              {f.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
   const principal = def.outputs.find((p) => p.name === "out") ?? def.outputs[0];
 
@@ -363,7 +395,7 @@ export function CodePanel({
         </div>
         {expanded ? <p className="hint code-body-away">Editing in the large view.</p> : editor}
       </div>
-      {!expanded && mine && <p className="code-error">⚠ {mine}</p>}
+      {!expanded && errorLine}
       {expanded && (
         <dialog
           ref={dialogRef}
@@ -384,7 +416,7 @@ export function CodePanel({
           </div>
           {minisRow}
           <div className="code-modal-body">{editor}</div>
-          {mine && <p className="code-error">⚠ {mine}</p>}
+          {errorLine}
         </dialog>
       )}
       <details className="code-ref">

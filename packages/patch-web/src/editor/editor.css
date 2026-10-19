@@ -1280,6 +1280,30 @@
   word-break: break-word;
 }
 
+.code-error p {
+  margin: 0;
+}
+
+/* Quick fixes for the error (code-fixes.ts), also offered on the mark. */
+.code-fixes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.code-fixes button {
+  font-size: 11px;
+  padding: 2px 8px;
+  white-space: normal;
+}
+
+@media (pointer: coarse) {
+  .code-fixes button {
+    min-height: 32px;
+  }
+}
+
 .code-minis {
   display: flex;
   flex-wrap: wrap;

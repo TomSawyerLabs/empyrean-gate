@@ -91,3 +91,30 @@ test("inside a call, its signature shows with the argument being typed in bold",
   await expect(sig.locator("code")).toHaveText("vec4f(x, y, z, w)");
   await expect(sig.locator("b")).toHaveText("x");
 });
+
+test("an error's quick fixes are buttons under it and actions on its mark", async ({ page }) => {
+  // The mock does not compile bodies; it reports what a real host would for
+  // the body typed below (the GPU check's wording for line 2).
+  const client = `code-fixes-${Date.now()}`;
+  await page.addInitScript((id) => localStorage.setItem("empyrean-client-id", id), client);
+  await page.request.post(`/mock/status?client=${client}`, {
+    data: {
+      patch_error:
+        "Code node \"fixme\" line 1:9: unresolved call target 'hsv2rbg'\n" +
+        'Code node "fixme" line 2:1: return a value: assign the output by name instead (`out = …;`), then `return;` if the body must stop early',
+    },
+  });
+  const { panel, body } = await codeNode(page);
+  await panel.getByLabel("Name", { exact: true }).fill("fixme");
+  await body.fill("let w = hsv2rbg(0.5, 1.0, 1.0);\nreturn vec4f(w, 1.0);");
+
+  const buttons = panel.locator(".code-fixes button");
+  await expect(buttons).toHaveText(["Change to `hsv2rgb`", "Assign `out` instead"]);
+  await buttons.filter({ hasText: "Assign" }).click();
+  await expect(body).toHaveText("let w = hsv2rbg(0.5, 1.0, 1.0);out = vec4f(w, 1.0);");
+
+  // The other through the mark's own tooltip.
+  await panel.locator(".cm-lintRange-error").first().hover();
+  await panel.locator(".cm-tooltip-lint .cm-diagnosticAction", { hasText: "Change to `hsv2rgb`" }).click();
+  await expect(body).toHaveText("let w = hsv2rgb(0.5, 1.0, 1.0);out = vec4f(w, 1.0);");
+});

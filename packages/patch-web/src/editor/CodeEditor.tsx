@@ -38,10 +38,11 @@ import {
   type CompletionContext,
   type CompletionResult,
 } from "@codemirror/autocomplete";
-import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
+import { lintGutter, lintKeymap, setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { tags as t } from "@lezer/highlight";
 import type { CodeFnRef, CodePort, CodeReference, PatchShape } from "../types";
+import { fixesFor, type BodyEdit, type FixContext } from "./code-fixes";
 import { signatureHelp } from "./code-signature";
 import { snippetsFor } from "./code-snippets";
 
@@ -186,6 +187,17 @@ const theme = EditorView.theme(
     ".cm-completionInfo": { fontFamily: "system-ui, sans-serif", maxWidth: "320px" },
     ".cm-lintRange-error": { backgroundImage: "none", textDecoration: "underline wavy #ff8a8a" },
     ".cm-diagnostic-error": { borderLeftColor: "#ff8a8a" },
+    ".cm-diagnosticAction": {
+      backgroundColor: "#2d2652",
+      color: "#e8e4ff",
+      border: "1px solid #3b3270",
+      borderRadius: "3px",
+      padding: "1px 8px",
+      marginLeft: "0",
+      marginRight: "6px",
+      marginTop: "4px",
+      font: "inherit",
+    },
     ".cm-panels": { backgroundColor: "#1b1630", color: "#e8e4ff" },
     ".cm-panels-top": { borderBottom: "1px solid #2a2445" },
     ".cm-search": { fontFamily: "system-ui, sans-serif", fontSize: "12px", padding: "4px 6px" },
@@ -525,7 +537,12 @@ function makeHover(scope: () => CodeScope) {
  * `Code node "<name or id>" line L:C …` (see the crate's `relocate_error`
  * and `script::Error`); anything about another node or without a line is
  * left to the panel's text. */
-export function diagnosticsFor(error: string | null | undefined, names: string[], body: string): Diagnostic[] {
+export function diagnosticsFor(
+  error: string | null | undefined,
+  names: string[],
+  body: string,
+  fix?: FixContext,
+): Diagnostic[] {
   if (!error) return [];
   const out: Diagnostic[] = [];
   const re = /Code node "([^"]+)":? line (\d+):(\d+):? ?/g;
@@ -544,9 +561,52 @@ export function diagnosticsFor(error: string | null | undefined, names: string[]
     const tail = error.slice(m.index + m[0].length);
     const next = tail.search(/Code node "|\n/);
     const message = (next >= 0 ? tail.slice(0, next) : tail).replace(/;\s*$/, "").trim();
-    out.push({ from: start, to: start + wordLen, severity: "error", message: message || "error here" });
+    // Quick fixes (code-fixes.ts), worked out again against the text as it
+    // is when one is applied.
+    const actions = fix
+      ? fixesFor(message, start, body, fix).map((f) => ({
+          name: f.name,
+          apply(view: EditorView, from: number) {
+            const now = fixesFor(message, from, view.state.doc.toString(), fix).find((x) => x.name === f.name);
+            if (now) view.dispatch({ changes: sortedEdits(now.changes), userEvent: "input.fix" });
+          },
+        }))
+      : undefined;
+    out.push({ from: start, to: start + wordLen, severity: "error", message: message || "error here", actions });
   }
   return out;
+}
+
+/** Edits in document order, as CodeMirror wants them. */
+export function sortedEdits(changes: BodyEdit[]): BodyEdit[] {
+  return [...changes].sort((a, b) => a.from - b.from || a.to - b.to);
+}
+
+/** `body` with `changes` (in its own coordinates) applied. */
+export function applyEdits(body: string, changes: BodyEdit[]): string {
+  let s = body;
+  for (const c of sortedEdits(changes).reverse()) s = s.slice(0, c.from) + c.insert + s.slice(c.to);
+  return s;
+}
+
+/** Every name the body can use, for "did you mean". */
+export function scopeNames(s: CodeScope): string[] {
+  const names: string[] = [];
+  for (const p of s.inputs) {
+    names.push(p.name, ...portFns(p).map((f) => f.name));
+    if (p.shape === "points" || p.shape === "effects") names.push(`${p.name}_count`);
+  }
+  names.push(...s.outputs.map((p) => p.name));
+  const ref = s.reference;
+  if (s.tier === "cpu") {
+    names.push("dt", "state", "master_speed", "PI", "TAU", ...(ref?.cpu_builtins ?? []).map((f) => f.name));
+  } else {
+    names.push("c", "G", "PI", "TAU", ...(ref?.globals ?? []).map((g) => g.name));
+    names.push(...(ref?.helpers ?? []).filter((h) => !h.name.startsWith("_")).map((h) => h.name));
+    names.push("f32", "u32", "i32", "bool", "vec2f", "vec3f", "vec4f");
+  }
+  names.push(...WGSL_BUILTINS.map((b) => b.name));
+  return names;
 }
 
 // --- the component -----------------------------------------------------------
@@ -607,6 +667,7 @@ export function CodeEditor({
             ...closeBracketsKeymap,
             ...completionKeymap,
             ...searchKeymap,
+            ...lintKeymap,
             ...defaultKeymap,
             ...historyKeymap,
             indentWithTab,
