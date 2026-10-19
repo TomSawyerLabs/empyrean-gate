@@ -2,8 +2,8 @@
 
 Status: **done** (2026-10-19). Gate master up to 43aa016; site dev
 4d486cb + bot bump 840f077; checked on the dev Preview (groups, thumbnails,
-People, Hue pull, no sideways scroll). Waiting only on Cameron's review of
-the calls listed under "Open questions".
+People, Hue pull, no sideways scroll). Cameron's calls answered; v0.16.0
+released.
 
 ## Goal
 
@@ -171,11 +171,13 @@ Randomness group; visitors stay off by default; cut a release ("sure.
 patch?" — version level asked back); fix the build race (done:
 `crates/.cargo/config.toml` gives the workspace its own build-dir).
 
-1. Release version: v0.16.0 recommended (format 7 and new kinds), or
-   v0.15.1 as asked?
+Release: Cameron picked v0.16.0. Tagged at d37802d after the local release
+checks (one flaky spec of Agent M's fixed test-only, 3f97ab1); the Release
+run passed on all three platforms, 18 assets, published.
 
-Cosmetic, not done: in the site's narrower palette, a few long names break
-mid-word in the thumbnail grid ("Interferen-ce").
+The mid-word breaks under thumbnails: Chrome does not hyphenate those words,
+so the palette is 232 px with a thin scrollbar and 10 px tile labels; every
+current name fits a line (measured on the Preview in Chrome).
 
 ## Things not to do
 
