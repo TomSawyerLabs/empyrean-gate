@@ -63,14 +63,15 @@ whose shapes it uses.
    codegen (field pass-through, default); not convertible. Done.
 2. Flatten: ports by id, rewiring through `{sub}/{id}`, errors for a missing
    port or an outlet id that collides with `out`. Validate/flatten tests,
-   naga, eval. Done. ← next: step 3
+   naga, eval. Done (`f8cc944`).
 3. Editor: hide the outer-facing port on each boundary node; Sub-patch
    ports from the inner inlets/outlets (shapes, labels); `out` only when it
    means something; the domain mirror knows outlets. Icons, ICON_ONLY
-   thumbnails, mock registry, a behaviour spec.
-4. Agent guide, README (gate and site), plan.
-5. Checks, merge, web-dist bump, Preview check (Cameron logged in to Access
-   in the T3 browser pane).
+   thumbnails, mock registry, a behaviour spec. Done (`15658c9`): also a
+   wire dropped on empty canvas offers a Patch out / Patch in already
+   shaped to it.
+4. Agent guide, gate README: done. Site README and plan after the merge.
+5. Checks, merge, web-dist bump, Preview check. ← current
 
 ## Findings / gotchas
 
@@ -81,10 +82,28 @@ whose shapes it uses.
   ports come from the copy in `sub`, so a source that drops an inlet leaves
   outer wires to a missing port, which flatten reports (as it does for a
   dropped exposed knob today).
+- The editor's drag-time domain check doesn't look inside a Sub-patch: LED
+  data into an inlet whose inside feeds a Transform is refused by
+  `validate` (on the inlined patch), not while dragging. Fine for now.
+- `patch-connect` filtered the chooser by "outp" and expected only Output;
+  Patch out matches too, so it types "outpu" now.
+- The Sub-patch keeps `out` unless its patch has Patch outs and no Output,
+  so every sub-patch from before this looks the same.
+- A Patch out fits every wire exactly, so the connect chooser listed it
+  first everywhere; boundary suggestions are now last (`481b55c`). The
+  chooser filter searches descriptions too, so "outp" finds Patch out
+  ("an output of this patch") as well as Output.
+- The browser shader corpus (`browser/corpus.ts`) wired every kind by its
+  static ports; Patch in/out need the select's shape, as in the editor.
+- Field domains checked on the real dev Preview in Cameron's Chrome
+  (2026-10-19, WebGPU): an old-style patch got its Resample, LED wires
+  dotted, the folded snow renders. It left a patch "LED check (agent)" in
+  that browser's playground library.
 
 ## Progress log
 
-- [ ] Steps 1–5
+- [x] Steps 1–3 (2026-10-19)
+- [ ] Steps 4–5
 
 ## Open questions for Cameron
 
