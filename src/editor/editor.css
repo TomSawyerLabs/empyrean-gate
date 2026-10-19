@@ -349,11 +349,14 @@
   padding: 8px 4px;
 }
 
-/* The foot: whichever kind is hovered or focused. */
+/* The foot: whichever kind is hovered or focused. A fixed height, so that
+   hovering an entry never moves the list under the pointer. */
 .palette-details {
+  flex: none;
+  box-sizing: border-box;
+  height: clamp(96px, 26%, 180px);
   border-top: 1px solid #2a2445;
   padding: 8px;
-  max-height: 40%;
   overflow-y: auto;
   font-size: 12px;
 }
@@ -381,6 +384,10 @@
 }
 
 .palette-details-desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   margin: 0;
   line-height: 1.45;
   color: var(--pe-text, #e8e6f4);
