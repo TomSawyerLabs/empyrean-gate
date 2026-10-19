@@ -8713,6 +8713,9 @@ class PatchSim {
   usesTouch() {
     return wasm.patchsim_usesTouch(this.__wbg_ptr) !== 0;
   }
+  usesVideo() {
+    return wasm.patchsim_usesVideo(this.__wbg_ptr) !== 0;
+  }
   wgsl() {
     let deferred1_0, deferred1_1;
     try {
@@ -9500,11 +9503,20 @@ class MediaTexture {
   canvas = document.createElement("canvas");
   ctx;
   url;
+  stream = null;
   video = null;
   image = null;
   stillDone = !1;
   constructor(file) {
-    this.canvas.width = this.canvas.height = VIDEO_SIZE, this.ctx = this.canvas.getContext("2d", { willReadFrequently: !0 }), this.url = URL.createObjectURL(file);
+    this.canvas.width = this.canvas.height = VIDEO_SIZE, this.ctx = this.canvas.getContext("2d", { willReadFrequently: !0 }), this.url = file ? URL.createObjectURL(file) : null;
+  }
+  static async fromCamera() {
+    if (!navigator.mediaDevices?.getUserMedia)
+      throw Error("This browser cannot use a camera.");
+    let stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: !1 }), tex = new MediaTexture(null);
+    tex.stream = stream;
+    let video = document.createElement("video");
+    return video.srcObject = stream, video.muted = !0, video.playsInline = !0, await video.play(), tex.video = video, tex;
   }
   static async fromFile(file) {
     let tex = new MediaTexture(file);
@@ -9534,8 +9546,62 @@ class MediaTexture {
     return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   }
   dispose() {
-    this.video?.pause(), this.video = this.image = null, URL.revokeObjectURL(this.url);
+    if (this.video?.pause(), this.video = this.image = null, this.stream?.getTracks().forEach((t) => t.stop()), this.stream = null, this.url)
+      URL.revokeObjectURL(this.url);
   }
+}
+
+// src/runtime/standins.ts
+function hsv(h, s, v) {
+  let f = (n) => {
+    let k = (n + h * 6) % 6;
+    return v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
+  };
+  return [f(5), f(3), f(1)];
+}
+var smooth = (e0, e1, x) => {
+  let t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+
+class TestFilm {
+  size;
+  t = 0;
+  rgba;
+  constructor(size = 128) {
+    this.size = size, this.rgba = new Uint8Array(size * size * 4);
+  }
+  reset() {
+    this.t = 0;
+  }
+  frame(dt) {
+    this.t += dt;
+    let { size, rgba } = this, t = this.t, hueDrift = 0.04 * Math.sin(t * 0.05), sunX = 0.5 + 0.32 * Math.sin(t * 0.11), sunY = 0.42 + 0.08 * Math.cos(t * 0.11), ballX = t * 0.17 % 1.2 - 0.1, hill = (x, depth) => depth === 0 ? 0.66 + 0.05 * Math.sin((x + t * 0.03) * 7.1) + 0.03 * Math.sin((x + t * 0.03) * 17.3 + 1) : 0.78 + 0.06 * Math.sin((x + t * 0.08) * 5.3 + 2) + 0.025 * Math.sin((x + t * 0.08) * 23.1), ballY = hill(ballX, 1) - 0.05 - 0.22 * Math.abs(Math.sin(t * 2.4));
+    for (let py = 0;py < size; py++) {
+      let y = (py + 0.5) / size;
+      for (let px = 0;px < size; px++) {
+        let x = (px + 0.5) / size, k = smooth(0.05, 0.7, y), [r, g, b] = hsv((0.66 - 0.58 * k + hueDrift + 1) % 1, 0.75 - 0.2 * k, 0.25 + 0.7 * k), sx = Math.floor(x * 40), sy = Math.floor(y * 40), star = Math.sin(sx * 12.9898 + sy * 78.233) * 43758.5453;
+        if (y < 0.4 && star - Math.floor(star) > 0.985) {
+          let tw = 0.5 + 0.5 * Math.sin(t * 3 + sx * 1.7 + sy);
+          r += tw * (1 - k), g += tw * (1 - k), b += tw * (1 - k);
+        }
+        let ds = Math.hypot(x - sunX, (y - sunY) * 1), glow = Math.exp(-ds * 7) * 0.6, disc = 1 - smooth(0.07, 0.085, ds);
+        if (r += glow + disc, g += glow * 0.7 + disc * 0.85, b += glow * 0.3 + disc * 0.4, y > hill(x, 0))
+          [r, g, b] = hsv((0.8 + hueDrift) % 1, 0.6, 0.28);
+        if (y > hill(x, 1))
+          [r, g, b] = hsv((0.75 + hueDrift) % 1, 0.7, 0.12);
+        let db = Math.hypot(x - ballX, y - ballY);
+        if (db < 0.045) {
+          let shade = 1 - db / 0.06;
+          [r, g, b] = [0.4 + 0.6 * shade, 0.95 * shade, 0.8 * shade];
+        }
+        let o = (py * size + px) * 4;
+        rgba[o] = Math.min(255, r * 255), rgba[o + 1] = Math.min(255, g * 255), rgba[o + 2] = Math.min(255, b * 255), rgba[o + 3] = 255;
+      }
+    }
+    return rgba;
+  }
+  dispose() {}
 }
 
 // src/runtime/index.ts
@@ -9559,7 +9625,8 @@ class PatchRuntime {
   stopMic = null;
   motion = null;
   shake = 0;
-  media = null;
+  video = new TestFilm;
+  usesVideo = !1;
   spokes = 0;
   pixels = 0;
   cells = /* @__PURE__ */ new Map;
@@ -9633,7 +9700,7 @@ class PatchRuntime {
     }
     if (this.syncImages(sim), this.previewNodes = sim.previewNodes(), this.previewScalars = JSON.parse(sim.previewScalars()), shader)
       this.clearMinis();
-    this.setStatus({ active: !0, touch: sim.usesTouch(), error: null });
+    this.usesVideo = sim.usesVideo(), this.setStatus({ active: !0, touch: sim.usesTouch(), error: null });
   }
   syncImages(sim) {
     let wanted = JSON.parse(sim.images()), size = this.core.limits.imageSize;
@@ -9689,7 +9756,7 @@ class PatchRuntime {
     let doc = this.doc;
     if (!doc)
       return;
-    this.sim?.free(), this.sim = null, this.shake = 0, this.restartListeners.forEach((l) => l()), await this.setPatch(doc);
+    this.sim?.free(), this.sim = null, this.shake = 0, this.video.reset?.(), this.restartListeners.forEach((l) => l()), await this.setPatch(doc);
   }
   async readFrame() {
     for (;; ) {
@@ -9736,10 +9803,10 @@ class PatchRuntime {
       this.shake = Math.min(3, this.shake + m.shake), sim.setMotion(m.yaw, m.pitch, m.roll, this.shake);
     } else if (this.shake > 0)
       sim.setMotion(0, 0, 0, this.shake);
-    if (this.shake *= Math.exp(-dt / SHAKE_TAU), this.media) {
-      let rgba = this.media.frame();
+    if (this.shake *= Math.exp(-dt / SHAKE_TAU), this.usesVideo) {
+      let rgba = this.video.frame(dt);
       if (rgba)
-        this.gpu.writeVideo(this.media.size, this.media.size, rgba), sim.setVideo(this.media.size, this.media.size);
+        this.gpu.writeVideo(this.video.size, this.video.size, rgba), sim.setVideo(this.video.size, this.video.size);
     }
     if (this.frameListeners.forEach((l) => l(dt)), sim.step(dt), this.gpu.write({
       globals: sim.globals(),
@@ -9768,6 +9835,9 @@ class PatchRuntime {
   }
   setMaster(brightness, speed) {
     this.sim?.setMaster(brightness, speed);
+  }
+  setHuePull(target, amount, loose = 0) {
+    this.sim?.setHuePull(target, amount, loose);
   }
   setDjLink(values) {
     this.sim?.setDjLink(values);
@@ -9804,11 +9874,10 @@ class PatchRuntime {
     this.motion?.stop(), this.motion = source;
   }
   async setMedia(file) {
-    if (this.media?.dispose(), this.media = null, !file) {
-      this.sim?.setVideo(0, 0);
-      return;
-    }
-    this.media = await MediaTexture.fromFile(file);
+    this.setVideoSource(file ? await MediaTexture.fromFile(file) : null);
+  }
+  setVideoSource(source) {
+    this.video.dispose(), this.video = source ?? new TestFilm;
   }
   retain() {
     this.miniRefs += 1;
@@ -9837,7 +9906,7 @@ class PatchRuntime {
     });
   }
   dispose() {
-    this.stop(), this.stopMicrophone(), this.stopMotion(), this.media?.dispose(), this.sim?.free(), this.sim = null, this.gpu.destroy(), this.gpu.device.destroy();
+    this.stop(), this.stopMicrophone(), this.stopMotion(), this.video.dispose(), this.sim?.free(), this.sim = null, this.gpu.destroy(), this.gpu.device.destroy();
   }
 }
 async function decodeImage(dataUrl, size) {

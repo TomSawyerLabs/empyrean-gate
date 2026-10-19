@@ -41,6 +41,7 @@ export const patchsim_touches: (a: number) => [number, number];
 export const patchsim_triggerEffect: (a: number, b: number, c: number) => [number, number];
 export const patchsim_update: (a: number, b: number, c: number) => [number, number, number, number];
 export const patchsim_usesTouch: (a: number) => number;
+export const patchsim_usesVideo: (a: number) => number;
 export const patchsim_wgsl: (a: number) => [number, number];
 export const presets: () => [number, number];
 export const registry: () => [number, number];

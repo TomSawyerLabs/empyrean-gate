@@ -445,6 +445,14 @@ export class PatchSim {
         return ret !== 0;
     }
     /**
+     * Whether the running patch reads the live video: upload frames only then.
+     * @returns {boolean}
+     */
+    usesVideo() {
+        const ret = wasm.patchsim_usesVideo(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * The main compute shader: one invocation per LED, writes packed RGB to
      * binding 4.
      * @returns {string}

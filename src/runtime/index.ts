@@ -13,6 +13,7 @@ import {
   type Motion,
   type MotionSource,
 } from "./inputs";
+import { TestFilm, type VideoSource } from "./standins";
 
 export { loadPatchCore, type Limits, type PatchCore } from "./core";
 export { requestGateDevice, screenToPolar, ShaderError, WebGpuUnavailable, type Geometry } from "./gpu";
@@ -36,6 +37,14 @@ export {
   type RingOptions,
 } from "./ring";
 export { MediaTexture, VIDEO_SIZE, type Motion, type MotionSource } from "./inputs";
+export {
+  attachVisitors,
+  seeded,
+  syntheticMotion,
+  TestFilm,
+  type VideoSource,
+  type VisitorSettings,
+} from "./standins";
 
 /** The gate as built (`src-tauri/src/config.rs` defaults). */
 export const GATE_GEOMETRY: Geometry = { spokes: 64, pixels: 378, innerOverOuter: 8 / 25 };
@@ -128,7 +137,10 @@ export class PatchRuntime implements MiniSource {
   private stopMic: (() => void) | null = null;
   private motion: { read: () => Motion; stop: () => void } | null = null;
   private shake = 0;
-  private media: MediaTexture | null = null;
+  /** Video in's picture: a file or camera when a host sets one, otherwise
+   * the stand-in film. Frames are uploaded only while the patch reads them. */
+  private video: VideoSource = new TestFilm();
+  private usesVideo = false;
 
   // MiniSource
   spokes = 0;
@@ -245,6 +257,7 @@ export class PatchRuntime implements MiniSource {
     this.previewNodes = sim.previewNodes();
     this.previewScalars = JSON.parse(sim.previewScalars()) as [string, string][];
     if (shader) this.clearMinis();
+    this.usesVideo = sim.usesVideo();
     this.setStatus({ active: true, touch: sim.usesTouch(), error: null });
   }
 
@@ -327,6 +340,7 @@ export class PatchRuntime implements MiniSource {
     this.sim?.free();
     this.sim = null;
     this.shake = 0;
+    this.video.reset?.();
     this.restartListeners.forEach((l) => l());
     await this.setPatch(doc);
   }
@@ -394,11 +408,11 @@ export class PatchRuntime implements MiniSource {
     }
     this.shake *= Math.exp(-dt / SHAKE_TAU);
 
-    if (this.media) {
-      const rgba = this.media.frame();
+    if (this.usesVideo) {
+      const rgba = this.video.frame(dt);
       if (rgba) {
-        this.gpu.writeVideo(this.media.size, this.media.size, rgba);
-        sim.setVideo(this.media.size, this.media.size);
+        this.gpu.writeVideo(this.video.size, this.video.size, rgba);
+        sim.setVideo(this.video.size, this.video.size);
       }
     }
 
@@ -479,6 +493,13 @@ export class PatchRuntime implements MiniSource {
     this.sim?.setMaster(brightness, speed);
   }
 
+  /** The master hue pull, as the crew sets it on the gate: every colour is
+   * pulled toward `target` (turns) by `amount` (0 = off, 1 = all the way);
+   * `loose` 0..1 lets far-off hues keep their identity as flourishes. */
+  setHuePull(target: number, amount: number, loose = 0) {
+    this.sim?.setHuePull(target, amount, loose);
+  }
+
   /** PRO DJ LINK stand-in: the 18 scalars in `setDjLink` order. */
   setDjLink(values: Float32Array) {
     this.sim?.setDjLink(values);
@@ -533,15 +554,17 @@ export class PatchRuntime implements MiniSource {
     this.motion = source;
   }
 
-  /** Use a local video or image file as the VIDEO texture; null to clear. */
+  /** Use a local video or image file as the VIDEO texture; null goes back
+   * to the stand-in film. */
   async setMedia(file: File | null) {
-    this.media?.dispose();
-    this.media = null;
-    if (!file) {
-      this.sim?.setVideo(0, 0);
-      return;
-    }
-    this.media = await MediaTexture.fromFile(file);
+    this.setVideoSource(file ? await MediaTexture.fromFile(file) : null);
+  }
+
+  /** Where Video in's picture comes from (a file, a camera); null goes back
+   * to the stand-in film. The previous source is disposed. */
+  setVideoSource(source: VideoSource | null) {
+    this.video.dispose();
+    this.video = source ?? new TestFilm();
   }
 
   // --- MiniSource -------------------------------------------------------------
@@ -590,7 +613,7 @@ export class PatchRuntime implements MiniSource {
     this.stop();
     this.stopMicrophone();
     this.stopMotion();
-    this.media?.dispose();
+    this.video.dispose();
     this.sim?.free();
     this.sim = null;
     this.gpu.destroy();

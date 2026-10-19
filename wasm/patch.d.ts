@@ -174,6 +174,10 @@ export class PatchSim {
      */
     usesTouch(): boolean;
     /**
+     * Whether the running patch reads the live video: upload frames only then.
+     */
+    usesVideo(): boolean;
+    /**
      * The main compute shader: one invocation per LED, writes packed RGB to
      * binding 4.
      */
@@ -287,6 +291,7 @@ export interface InitOutput {
     readonly patchsim_triggerEffect: (a: number, b: number, c: number) => [number, number];
     readonly patchsim_update: (a: number, b: number, c: number) => [number, number, number, number];
     readonly patchsim_usesTouch: (a: number) => number;
+    readonly patchsim_usesVideo: (a: number) => number;
     readonly patchsim_wgsl: (a: number) => [number, number];
     readonly presets: () => [number, number];
     readonly registry: () => [number, number];
