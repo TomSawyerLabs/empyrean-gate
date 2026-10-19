@@ -238,3 +238,60 @@ test("a colour in literals gets a swatch, and picking rewrites it as one step", 
   await body.press("ControlOrMeta+z");
   await expect(body).toHaveText("out = vec4f(1.0, 0.5, 0.0, 1.0);");
 });
+
+test.describe("on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("the large view has a key row, and scrub mode makes a drag on a number scrub", async ({ page }) => {
+    await page.goto("/#patch");
+    await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+    await page.locator(".patch-name-chip").click();
+    await page.getByRole("button", { name: "＋ Blank patch" }).click();
+    await page.getByRole("button", { name: "Add node" }).click();
+    const group = page.locator(".palette-group", { has: page.locator("h4", { hasText: "Structure" }) });
+    await group.getByRole("button", { name: "Code" }).click();
+    await page.locator(".pnode.cat-code").click();
+    await page.getByRole("button", { name: /settings/ }).click();
+    await page.locator(".patch-side.patch-sheet").getByRole("button", { name: "Open the body in a bigger editor" }).click();
+    const modal = page.locator("dialog.code-modal");
+    const body = modal.getByLabel("Body (WGSL)");
+    const keys = modal.getByRole("toolbar", { name: "Code keys" });
+    await expect(keys).toBeVisible();
+
+    await body.fill("let k = 0.5;\nout = vec4f");
+    await body.press("ControlOrMeta+End");
+    await keys.getByRole("button", { name: "(", exact: true }).click();
+    // The key goes through CodeMirror's input handlers: `(` brings its `)`.
+    await expect(body).toHaveText("let k = 0.5;out = vec4f()");
+    await expect(body).toBeFocused();
+    await body.press("ControlOrMeta+Home");
+    await keys.getByRole("button", { name: "Tab" }).click();
+    await expect(body).toHaveText("  let k = 0.5;out = vec4f()");
+
+    // Scrub mode: a touch drag on the number changes it.
+    const scrub = keys.getByRole("button", { name: "Scrub numbers by dragging" });
+    await scrub.click();
+    await expect(scrub).toHaveAttribute("aria-pressed", "true");
+    await page.evaluate(() => {
+      const content = document.querySelector("dialog.code-modal .cm-content")!;
+      const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+      let box: DOMRect | null = null;
+      for (let n = walker.nextNode(); n && !box; n = walker.nextNode()) {
+        const i = n.textContent!.indexOf("0.5");
+        if (i < 0) continue;
+        const r = document.createRange();
+        r.setStart(n, i);
+        r.setEnd(n, i + 3);
+        box = r.getBoundingClientRect();
+      }
+      const x = box!.x + box!.width / 2;
+      const y = box!.y + box!.height / 2;
+      const ev = (type: string, dx: number) =>
+        new PointerEvent(type, { pointerType: "touch", clientX: x + dx, clientY: y, bubbles: true, cancelable: true });
+      content.dispatchEvent(ev("pointerdown", 0));
+      window.dispatchEvent(ev("pointermove", 20));
+      window.dispatchEvent(ev("pointerup", 20));
+    });
+    await expect(body).toHaveText("  let k = 1.0;out = vec4f()");
+  });
+});
