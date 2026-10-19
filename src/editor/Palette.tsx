@@ -339,7 +339,7 @@ function Entry({
     >
       {layout === "grid" ? (
         <span className="palette-tile-pic">
-          {ring ? <RingThumb data={thumbs!} kind={t.id} size={compact ? 88 : 56} /> : <NodeIcon kind={t.id} category={t.category} size={24} />}
+          {ring ? <RingThumb data={thumbs!} kind={t.id} size={compact ? 104 : 72} fill /> : <NodeIcon kind={t.id} category={t.category} size={24} />}
         </span>
       ) : (
         <NodeIcon kind={t.id} category={t.category} />

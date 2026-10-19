@@ -77,8 +77,9 @@ export function hasThumb(data: ThumbData | null, kind: string): boolean {
 
 const ringCache = new Map<string, ImageData>();
 
-/** A kind's ring picture, `size` CSS pixels square. */
-export function RingThumb({ data, kind, size }: { data: ThumbData; kind: string; size: number }) {
+/** A kind's ring picture, `size` CSS pixels square; with `fill`, as wide as
+ * its box (`size` then only sets the drawing's resolution). */
+export function RingThumb({ data, kind, size, fill = false }: { data: ThumbData; kind: string; size: number; fill?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -97,7 +98,14 @@ export function RingThumb({ data, kind, size }: { data: ThumbData; kind: string;
     canvas.height = px;
     canvas.getContext("2d")?.putImageData(image, 0, 0);
   }, [data, kind, size]);
-  return <canvas ref={ref} className="thumb-ring" style={{ width: size, height: size }} aria-hidden="true" />;
+  return (
+    <canvas
+      ref={ref}
+      className={fill ? "thumb-ring thumb-ring-fill" : "thumb-ring"}
+      style={fill ? undefined : { width: size, height: size }}
+      aria-hidden="true"
+    />
+  );
 }
 
 function path(line: TraceLine, w: number, h: number, pad: number): string {
