@@ -44,7 +44,7 @@ Preview. First, audit what ships today.
    `browser/corpus.ts`, `browser/shaders.spec.ts`, `playwright.config.ts`,
    `bun run test:browser`.
 4. Wire it into the `patch-web` CI job; confirm it runs on the Ubuntu runner.
-   ← current (SwiftShader on Linux is unproven until the runner does it)
+   Done: PR #5's Checks run, 3 passed in 34 s on ubuntu-latest.
 5. README and plan updates. Done.
 
 ## Findings / gotchas
@@ -89,7 +89,7 @@ Preview. First, audit what ships today.
 - [x] Audit the corpus in Chrome (nothing Tint refuses; Perlin hangs SwiftShader)
 - [x] Fix failures (branchless `perlin_grad`; Convert refuses a too-wide Blend)
 - [x] Browser spec (3 tests, ~45 s locally; both regressions caught)
-- [ ] CI: confirm SwiftShader WebGPU on the Ubuntu runner
+- [x] CI: SwiftShader WebGPU works on ubuntu-latest (PR #5, run 39185905932: 3 passed, 34 s)
 - [x] README / plan
 
 ## Open questions for the user
