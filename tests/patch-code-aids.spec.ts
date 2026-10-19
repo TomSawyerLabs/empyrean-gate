@@ -203,21 +203,20 @@ test("Alt-drag scrubs a number live, and one undo puts it back", async ({ page }
   await body.press("ControlOrMeta+z");
   await expect(body).toContainText("let k = 0.5;");
 
-  // Off a number, Alt-drag is still a column selection: a caret per line.
+  // Off a number, Alt-drag is still a column selection: a rectangle over two
+  // lines selects a piece of each. Looked at before Alt goes up: on CI's
+  // Linux Chromium releasing Alt takes the page's focus, and a keystroke
+  // after it lands elsewhere.
   const lines = page.locator(".patch-side .cm-line");
   const top = (await lines.nth(0).boundingBox())!;
   const below = (await lines.nth(1).boundingBox())!;
   await page.keyboard.down("Alt");
   await page.mouse.move(top.x + 10, top.y + top.height / 2);
   await page.mouse.down();
-  await page.mouse.move(top.x + 10, below.y + below.height / 2, { steps: 4 });
+  await page.mouse.move(top.x + 40, below.y + below.height / 2, { steps: 4 });
   await page.mouse.up();
+  await expect(page.locator(".patch-side .cm-selectionBackground")).toHaveCount(2);
   await page.keyboard.up("Alt");
-  // What a caret per line does (counting the drawn carets is not reliable
-  // on Linux): one keystroke lands on both lines. Typed through the body,
-  // which refocuses it: on Linux the Alt press can leave the page unfocused.
-  await body.pressSequentially("#");
-  await expect(body).toHaveText(/^[^;#]*#[^;#]*;[^;#]*#[^#]*$/);
 });
 
 test("a colour in literals gets a swatch, and picking rewrites it as one step", async ({ page }) => {
