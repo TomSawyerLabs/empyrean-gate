@@ -4,6 +4,7 @@
 // from the patch core itself (registry, shapes, Code reference, limits), so
 // it describes exactly the build it ships with.
 
+import { grouped, groupOf } from "../groups";
 import type { PatchCore } from "../runtime/core";
 import { MAX_CODE_BYTES, MAX_CODE_PORTS, type PatchNodeType, type PatchParamDef } from "../types";
 
@@ -17,23 +18,13 @@ export interface GuideOptions {
   brief?: boolean;
 }
 
-const CATEGORY_TITLES: Record<PatchNodeType["category"], string> = {
-  input: "Inputs",
-  scalar: "Control (scalar and event) operators",
-  generator: "Generators",
-  field: "Field operators",
-  combine: "Combine",
-  texture: "Textures",
-  sink: "Output",
-  code: "Code",
-};
-
 /** One line about a node type: what an agent needs to pick one. */
 export function nodeSummary(t: PatchNodeType) {
   return {
     kind: t.id,
     label: t.label,
     category: t.category,
+    group: groupOf(t).id,
     description: t.description ?? "",
     inputs: t.inputs.map((p) => `${p.name}:${p.shape}`),
     outputs: t.outputs.map((p) => `${p.name}:${p.shape}`),
@@ -316,12 +307,9 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
 
   if (!options.brief) {
     add("## Node reference", "");
-    const order: PatchNodeType["category"][] = ["input", "scalar", "generator", "field", "combine", "texture", "code", "sink"];
-    for (const cat of order) {
-      const list = core.registry.filter((t) => t.category === cat);
-      if (!list.length) continue;
-      add(`## ${CATEGORY_TITLES[cat]}`, "");
-      for (const t of list) add(nodeReference(t));
+    for (const { group, types } of grouped(core.registry)) {
+      add(`## ${group.label}`, "", `${group.blurb}.`, "");
+      for (const t of types) add(nodeReference(t));
     }
   }
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";

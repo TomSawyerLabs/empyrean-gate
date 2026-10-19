@@ -4,6 +4,7 @@
 // (WebMCP, `registerWebMcp`) and served over stdio by the command line's
 // MCP server, so a tool means the same thing wherever an agent meets it.
 
+import { GROUPS } from "../groups";
 import { toBase64 } from "../runtime/ring";
 import type { PatchApi } from "./api";
 import { OP_NAMES, type PatchOp } from "./edit";
@@ -109,11 +110,17 @@ export function patchTools(api: PatchApi, extra: AgentTool[] = []): AgentTool[] 
       name: "list_node_types",
       title: "List node types",
       description:
-        "Every node type in brief: kind, label, category, what it does, its ports (name:shape) and param names. " +
-        "Optionally one category (input, scalar, generator, field, combine, texture, code, sink).",
-      inputSchema: { type: "object", properties: { category: { type: "string" } } },
+        "Every node type in brief: kind, label, palette group, category, what it does, its ports (name:shape) and " +
+        `param names. Optionally only one palette group (${GROUPS.map((g) => g.id).join(", ")}) or one ` +
+        "category (input, scalar, generator, field, combine, texture, code, sink).",
+      inputSchema: { type: "object", properties: { group: { type: "string" }, category: { type: "string" } } },
       annotations: { readOnlyHint: true },
-      execute: async (i) => text(api.nodeTypes(typeof i.category === "string" ? i.category : undefined)),
+      execute: async (i) =>
+        text(
+          api.nodeTypes(
+            typeof i.group === "string" ? i.group : typeof i.category === "string" ? i.category : undefined,
+          ),
+        ),
     },
     {
       name: "describe_node_types",

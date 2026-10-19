@@ -69,7 +69,7 @@ async function main(argv: string[]): Promise<number> {
       const api = createPatchApi(fileHost(core, null));
       const out = positionals.length ? api.describe(positionals) : api.nodeTypes();
       if (values.json || positionals.length) console.log(JSON.stringify(out, null, 2));
-      else for (const t of api.nodeTypes()) console.log(`${t.kind.padEnd(18)} ${t.category.padEnd(10)} ${t.description || t.label}`);
+      else for (const t of api.nodeTypes()) console.log(`${t.kind.padEnd(18)} ${t.group.padEnd(10)} ${t.description || t.label}`);
       return 0;
     }
     case "presets": {

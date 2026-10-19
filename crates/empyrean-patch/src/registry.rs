@@ -73,6 +73,74 @@ pub enum Category {
     Code,
 }
 
+/// Where the palette shows a kind: grouped by what a person reaches for, not
+/// by how it evaluates (that is [`Category`]). Serialized as the lowercase
+/// ids in [`palette_json`]; the editor holds each group's label, icon and
+/// order (patch-web `src/groups.ts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Group {
+    /// `controls`: time, sliders and the crew's master controls.
+    Controls,
+    /// `live`: music, phone motion, touch, taps, strokes and PRO DJ LINK.
+    Live,
+    /// `media`: video, pictures, clips and sampling a texture.
+    Media,
+    /// `shape`: arithmetic and shaping of a Scalar.
+    Shape,
+    /// `motion`: Scalars that move on their own (LFO, envelope, sequencer).
+    Motion,
+    /// `random`: random Scalars.
+    Random,
+    /// `events`: counting, latching, delaying and merging events, and
+    /// turning them into effects.
+    Events,
+    /// `blocks`: plain fields to build looks from (solid, gradients, the
+    /// pixel's position, noise, masks, last frame).
+    Blocks,
+    /// `patterns`: finished looks, each a whole pattern on its own.
+    Patterns,
+    /// `color`: colouring, measuring, combining and moving fields.
+    Color,
+    /// `draw`: renderers for the Points and Effects streams.
+    Draw,
+    /// `structure`: Output, Sub-patch, Code and Note.
+    Structure,
+}
+
+impl Group {
+    pub const ALL: [Group; 12] = [
+        Group::Controls,
+        Group::Live,
+        Group::Media,
+        Group::Shape,
+        Group::Motion,
+        Group::Random,
+        Group::Events,
+        Group::Blocks,
+        Group::Patterns,
+        Group::Color,
+        Group::Draw,
+        Group::Structure,
+    ];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Group::Controls => "controls",
+            Group::Live => "live",
+            Group::Media => "media",
+            Group::Shape => "shape",
+            Group::Motion => "motion",
+            Group::Random => "random",
+            Group::Events => "events",
+            Group::Blocks => "blocks",
+            Group::Patterns => "patterns",
+            Group::Color => "color",
+            Group::Draw => "draw",
+            Group::Structure => "structure",
+        }
+    }
+}
+
 /// A remark on the canvas: text in `NodeInst::text`, no ports, never run.
 pub const NOTE_KIND: &str = "note";
 
@@ -167,6 +235,8 @@ pub struct NodeType {
     pub id: &'static str,
     pub label: &'static str,
     pub category: Category,
+    /// The palette group it is listed under.
+    pub group: Group,
     /// What the node does and outputs, what its inputs mean, and when to use
     /// it: one to three sentences.
     pub description: &'static str,
@@ -240,7 +310,7 @@ pub fn split_layer(kind: &str, name: &str) -> Option<(&'static str, u32)> {
 /// The palette serialized for the editor (`GET /patch/registry`). Shapes use
 /// the same snake_case names as patch JSON; `kind` is `"number"` or
 /// `{"select": [labels…]}`. Nodes, ports and params each carry a
-/// `description`.
+/// `description`; nodes also their palette `group` ([`Group::id`]).
 pub fn palette_json() -> serde_json::Value {
     use serde_json::json;
     let shape = |s: Shape| serde_json::to_value(s).expect("shape serializes");
@@ -274,6 +344,7 @@ pub fn palette_json() -> serde_json::Value {
                     "id": t.id,
                     "label": t.label,
                     "category": category(t.category),
+                    "group": t.group.id(),
                     "description": t.description,
                     // Whether "Convert to Code" is offered (see `convert`).
                     "convertible": crate::convert::convertible(t.id),
@@ -507,6 +578,7 @@ pub const TYPES: &[NodeType] = &[
         id: "time",
         label: "Time",
         category: Category::Input,
+        group: Group::Controls,
         description: "A clock. In Forever mode `out` counts up from Start at Rate per second (× master speed); Loop wraps from Start to End, Ping-pong bounces between them, Once stops at End. `phase` is the 0..1 position through Start→End and `wrap` fires at each loop, bounce or arrival — wire `out` into a knob for steady motion, `phase` for repeating sweeps.",
         inputs: &[port(
             "reset",
@@ -575,6 +647,7 @@ pub const TYPES: &[NodeType] = &[
         id: "slider",
         label: "Slider",
         category: Category::Input,
+        group: Group::Controls,
         description: "One knob as a Scalar: outputs Value. Use it to drive several inputs from one control, or as a knob to expose on the Control tab.",
         inputs: &[],
         outputs: &[port("out", Shape::Scalar, "The slider's value.")],
@@ -594,6 +667,7 @@ pub const TYPES: &[NodeType] = &[
         id: "globals",
         label: "Gate globals",
         category: Category::Input,
+        group: Group::Controls,
         description: "The crew's master controls as the gate applies them outside the patch: brightness (the Output is already scaled by it), speed (the multiplier every integrated param already follows) and the master hue pull. Use it to react to them — e.g. dim accents as the crew dims the gate; you never need it to apply them.",
         inputs: &[],
         outputs: &[
@@ -624,6 +698,7 @@ pub const TYPES: &[NodeType] = &[
         id: "audio",
         label: "Audio",
         category: Category::Input,
+        group: Group::Live,
         description: "Live analysis of one audio input: loudness, three bands, onsets and a tracked beat clock. Levels are normalised by a slow automatic gain so they read 0..1 at any volume. Wire bands into brightness or size knobs, `beat_phase` into Beat rings' front, or `beat` into an Envelope or Event effect.",
         inputs: &[],
         outputs: &[
@@ -684,6 +759,7 @@ pub const TYPES: &[NodeType] = &[
         id: "imu",
         label: "Phone IMU",
         category: Category::Input,
+        group: Group::Live,
         description: "Motion of the phone that currently holds the gate's motion control (phones take turns; a phone sends motion once enabled in its Settings). Outputs hold their last values; all read 0 until a phone has sent any.",
         inputs: &[],
         outputs: &[
@@ -716,6 +792,7 @@ pub const TYPES: &[NodeType] = &[
         id: "tap",
         label: "Effect taps",
         category: Category::Input,
+        group: Group::Live,
         description: "Fires whenever anyone triggers an effect from a client: effect pads, keys, a tap on the preview with the tap tool. Not raw touch (that is the Touch node), and not effects fired by this patch's own Event effect nodes.",
         inputs: &[],
         outputs: &[port(
@@ -730,6 +807,7 @@ pub const TYPES: &[NodeType] = &[
         id: "touch",
         label: "Touch",
         category: Category::Input,
+        group: Group::Live,
         description: "Raw touch from every connected client, following one finger. A patch with any Touch, Touch mask or Touch glow node owns the touch surface: clients send it raw touches instead of applying their own tap or pen tool, so Triggered effects and Touch strokes stop receiving taps and strokes. Outputs hold their last values after the finger lifts.",
         inputs: &[],
         outputs: &[
@@ -805,6 +883,7 @@ pub const TYPES: &[NodeType] = &[
         id: "dj_link",
         label: "PRO DJ LINK",
         category: Category::Input,
+        group: Group::Live,
         description: "Pioneer PRO DJ LINK state from the CDJs and mixer on the gate's network: transport, on-air and crossfade, beat in bar, rekordbox phrases, and an event per transport change. Only the desktop gate has a LINK (elsewhere everything reads 0 unless a host simulates it); use `active` to fall back to other inputs.",
         inputs: &[],
         outputs: &[
@@ -944,6 +1023,7 @@ pub const TYPES: &[NodeType] = &[
         id: "event_effect",
         label: "Event effect",
         category: Category::ScalarOp,
+        group: Group::Events,
         // The effects it fires are a stream: they show only where `effects`
         // is wired into a Render effects (through any further Event effects
         // chained on `in`, which merges the upstream stream into this one).
@@ -1074,6 +1154,7 @@ pub const TYPES: &[NodeType] = &[
         id: "touch_dabs",
         label: "Touch strokes",
         category: Category::Input,
+        group: Group::Live,
         description: "The live-draw strokes clients paint with their pen tool, as a Points stream (each dab keeps its pen, colour and size). Wire it into Render points to draw them. No strokes arrive while the patch reads raw touch (any Touch, Touch mask or Touch glow node).",
         inputs: &[],
         outputs: &[port(
@@ -1087,6 +1168,7 @@ pub const TYPES: &[NodeType] = &[
         id: "effects_in",
         label: "Triggered effects",
         category: Category::Input,
+        group: Group::Live,
         description: "The show effects clients trigger (effect pads, keys, taps on the preview), as an Effects stream. Wire it into Render effects, or into an Event effect's `in`: nothing reaches the Output unless it is wired.",
         inputs: &[],
         outputs: &[port(
@@ -1100,6 +1182,7 @@ pub const TYPES: &[NodeType] = &[
         id: "video_in",
         label: "Video in",
         category: Category::Input,
+        group: Group::Media,
         description: "The live video frame the host provides (a camera or video playing on the gate or in the playground), as a Texture. Map it onto the ring with Texture sample; transparent while no video plays.",
         inputs: &[],
         outputs: &[port("tex", Shape::Texture, "The current video frame (RGBA).")],
@@ -1109,6 +1192,7 @@ pub const TYPES: &[NodeType] = &[
         id: "image_in",
         label: "Still image in",
         category: Category::Input,
+        group: Group::Media,
         description: "A still picture stored in the patch itself (the node's `media`: a 256×256 data:image URL), as a Texture for Texture sample. A patch carries at most four Still images and Clips together.",
         inputs: &[],
         outputs: &[port(
@@ -1125,6 +1209,7 @@ pub const TYPES: &[NodeType] = &[
         id: "clip",
         label: "Clip",
         category: Category::Input,
+        group: Group::Media,
         description: "A short looping animation stored in the patch: `media` is a 256×256 sprite sheet with its frames in a grid, row by row from the top left. It loops or ping-pongs at FPS (integrated, so speed changes never jump) or follows Scrub; map it onto the ring with Texture sample. Counts toward the four-picture limit with Still images.",
         inputs: &[],
         outputs: &[port("tex", Shape::Texture, "The current frame (RGBA).")],
@@ -1173,6 +1258,7 @@ pub const TYPES: &[NodeType] = &[
         id: "scalar_math",
         label: "Math",
         category: Category::ScalarOp,
+        group: Group::Shape,
         description: "Control-rate arithmetic on A and B (wire Scalars in or set the knobs); unary ops use A only. A result that is not finite (dividing by 0, say) outputs 0.",
         inputs: &[],
         outputs: &[port("out", Shape::Scalar, "The result.")],
@@ -1214,6 +1300,7 @@ pub const TYPES: &[NodeType] = &[
         id: "lfo",
         label: "LFO",
         category: Category::ScalarOp,
+        group: Group::Motion,
         description: "A low-frequency oscillator: a repeating wave between Min and Max at Rate cycles per second (× master speed). Its phase survives edits, so changing the rate never jumps.",
         inputs: &[],
         outputs: &[port("out", Shape::Scalar, "The wave, between Min and Max.")],
@@ -1240,6 +1327,7 @@ pub const TYPES: &[NodeType] = &[
         id: "smooth",
         label: "Smooth",
         category: Category::ScalarOp,
+        group: Group::Shape,
         description: "Eases its output toward In with a one-pole low-pass filter, taking the jitter and steps out of audio bands, touch or stepped values.",
         inputs: &[],
         outputs: &[port("out", Shape::Scalar, "The smoothed value.")],
@@ -1259,6 +1347,7 @@ pub const TYPES: &[NodeType] = &[
         id: "envelope",
         label: "Envelope",
         category: Category::ScalarOp,
+        group: Group::Motion,
         description: "An attack/decay envelope: each `trigger` restarts it from 0, rising linearly to Peak over Attack seconds, then decaying exponentially. Outputs 0 until first triggered; wire audio `beat` or Touch `down` in for flashes and pulses.",
         inputs: &[port("trigger", Shape::Event, "Restarts the envelope from 0.")],
         outputs: &[port("out", Shape::Scalar, "The envelope value, 0..Peak.")],
@@ -1288,6 +1377,7 @@ pub const TYPES: &[NodeType] = &[
         id: "map_range",
         label: "Map range",
         category: Category::ScalarOp,
+        group: Group::Shape,
         description: "Linearly maps In from In min..In max onto Out min..Out max: out = Out min + (In − In min) / (In max − In min) × (Out max − Out min). An inverted range flips the mapping; Clamp keeps the result inside the out range.",
         inputs: &[],
         outputs: &[port("out", Shape::Scalar, "The mapped value.")],
@@ -1337,6 +1427,7 @@ pub const TYPES: &[NodeType] = &[
         id: "mix",
         label: "Mix",
         category: Category::ScalarOp,
+        group: Group::Shape,
         description: "A linear crossfade between two values: out = A + (B − A) × Mix.",
         inputs: &[],
         outputs: &[port("out", Shape::Scalar, "The blended value.")],
@@ -1357,6 +1448,7 @@ pub const TYPES: &[NodeType] = &[
         id: "clamp",
         label: "Clamp",
         category: Category::ScalarOp,
+        group: Group::Shape,
         description: "Holds In between Min and Max (either may be the larger).",
         inputs: &[],
         outputs: &[port("out", Shape::Scalar, "In, limited to the range.")],
@@ -1372,6 +1464,7 @@ pub const TYPES: &[NodeType] = &[
         id: "random",
         label: "Random",
         category: Category::ScalarOp,
+        group: Group::Random,
         description: "A random value in Min..Max, drawn anew on every `trigger` and also Rate times a second when Rate > 0 (× master speed); Glide eases from one value to the next. Seeded from the node id, so a saved patch replays the same sequence.",
         inputs: &[port("trigger", Shape::Event, "Draws a new value now.")],
         outputs: &[
@@ -1412,6 +1505,7 @@ pub const TYPES: &[NodeType] = &[
         id: "full_random",
         label: "Full random",
         category: Category::ScalarOp,
+        group: Group::Random,
         description: "White noise: a fresh random value in Min..Max on every frame, uncorrelated with the last. Bell piles the values toward the middle. For jitter and flicker; Random holds a value, Random walk and Smooth noise wander.",
         inputs: &[],
         outputs: &[port("out", Shape::Scalar, "This frame's value.")],
@@ -1431,6 +1525,7 @@ pub const TYPES: &[NodeType] = &[
         id: "random_walk",
         label: "Random walk",
         category: Category::ScalarOp,
+        group: Group::Random,
         description: "A value that wanders by tiny random steps every frame (Brownian motion), kept within Min..Max, optionally pulled back toward the middle; a `step` event also makes one bigger random jump. Starts in the middle. Good for slow, natural drift of any knob.",
         inputs: &[
             port("step", Shape::Event, "Jumps by a random amount up to ±Jump now."),
@@ -1477,6 +1572,7 @@ pub const TYPES: &[NodeType] = &[
         id: "smooth_noise",
         label: "Smooth noise",
         category: Category::ScalarOp,
+        group: Group::Random,
         description: "Perlin noise over time: a smooth, never-repeating wander in Min..Max, built from Harmonics layers of noise at rising speeds. Roughness sets how much the faster layers add (low = lazy swells, high = nervous detail). The scalar sibling of Perlin noise.",
         inputs: &[],
         outputs: &[port("out", Shape::Scalar, "The current value.")],
@@ -1521,6 +1617,7 @@ pub const TYPES: &[NodeType] = &[
         id: "counter",
         label: "Counter",
         category: Category::ScalarOp,
+        group: Group::Events,
         description: "Counts `count` events. With Wrap at above 0 it wraps back to 0 on reaching it and fires `wrap`, which also makes it an every-Nth-event divider; `phase` is count / Wrap at.",
         inputs: &[
             port("count", Shape::Event, "Adds one."),
@@ -1560,6 +1657,7 @@ pub const TYPES: &[NodeType] = &[
         id: "toggle",
         label: "Toggle",
         category: Category::ScalarOp,
+        group: Group::Events,
         description: "A latch: `toggle` flips it, `set` turns it on and `clear` turns it off (several in one frame apply in that order); `on` and `off` fire on each change. Use it to switch things with a tap, or to gate events through Merge events' Open.",
         inputs: &[
             port("toggle", Shape::Event, "Flips the state."),
@@ -1582,6 +1680,7 @@ pub const TYPES: &[NodeType] = &[
         id: "threshold",
         label: "Threshold",
         category: Category::ScalarOp,
+        group: Group::Shape,
         description: "Turns a Scalar into events: `rise` fires when In climbs above Level (plus half the Hysteresis), `fall` when it drops below Level (minus half); `out` is 1 while above. Hysteresis stops a noisy signal from chattering — use it to fire effects from an audio band.",
         inputs: &[],
         outputs: &[
@@ -1606,6 +1705,7 @@ pub const TYPES: &[NodeType] = &[
         id: "delay",
         label: "Delay",
         category: Category::ScalarOp,
+        group: Group::Events,
         description: "Delays events: each `in` event comes out Seconds later, then again every Seconds for Echoes more times. Real seconds (master speed does not apply); at most 64 events wait at once.",
         inputs: &[port("in", Shape::Event, "Events to delay.")],
         outputs: &[port(
@@ -1636,6 +1736,7 @@ pub const TYPES: &[NodeType] = &[
         id: "event_merge",
         label: "Merge events",
         category: Category::ScalarOp,
+        group: Group::Events,
         description: "Fires `out` whenever any of a..d fires, while Open is on: merge several triggers into one, or gate a stream of events by wiring a Toggle's `out` into Open.",
         inputs: &[
             port("a", Shape::Event, "An event to merge."),
@@ -1661,6 +1762,7 @@ pub const TYPES: &[NodeType] = &[
         id: "sequence",
         label: "Step sequencer",
         category: Category::ScalarOp,
+        group: Group::Motion,
         description: "Each `step` event advances through the first Steps values (Step 1..Step 8) and wraps, firing `wrap`; `out` is the current step's value and `index` its 0-based position. Wire beats into `step` for patterns that change with the music.",
         inputs: &[
             port("step", Shape::Event, "Advances one step."),
@@ -1699,6 +1801,7 @@ pub const TYPES: &[NodeType] = &[
         id: "solid",
         label: "Solid",
         category: Category::Generator,
+        group: Group::Blocks,
         description: "One colour over the whole array, fully opaque. Use it as a background, as a flat colour to Blend with, or as a tint to Multiply over a pattern.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -1708,6 +1811,7 @@ pub const TYPES: &[NodeType] = &[
         id: "gradient",
         label: "Gradient",
         category: Category::Generator,
+        group: Group::Blocks,
         description: "A Field<f32> ramp across the array: along each spoke (Inner at the inner end, Outer at the rim) or once around the ring (Inner at angle 0, reaching Outer a full turn later). Feed it to Colorize, Palette, Field math or a mask.",
         inputs: &[],
         outputs: &[port("out", Shape::FieldScalar, "The ramp value at each pixel.")],
@@ -1740,6 +1844,7 @@ pub const TYPES: &[NodeType] = &[
         id: "noise_field",
         label: "Noise field",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "Drifting fractal simplex noise, thresholded into soft clouds and coloured by the noise value; the alpha follows the clouds. A good organic base layer.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -1771,6 +1876,7 @@ pub const TYPES: &[NodeType] = &[
         id: "radial_waves",
         label: "Radial waves",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "Concentric rings rippling outward from the centre, built from up to eight harmonics; the hue shifts with radius by Hue range.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -1810,6 +1916,7 @@ pub const TYPES: &[NodeType] = &[
         id: "spiral",
         label: "Spiral",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "Spiral arms turning around the centre: Twist curls them with radius and Speed spins them (negative reverses). The hue shifts slightly toward the rim.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -1848,6 +1955,7 @@ pub const TYPES: &[NodeType] = &[
         id: "gradient_radial",
         label: "Radial gradient",
         category: Category::Generator,
+        group: Group::Blocks,
         description: "Fully lit hue bands from the centre to the rim, scrolling toward the centre over time (Drift). The simplest colourful background.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -1877,6 +1985,7 @@ pub const TYPES: &[NodeType] = &[
         id: "noise_color",
         label: "Color noise",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "Three independent simplex noises as red, green and blue, leaning 60% toward the Hue/Saturation tint: shifting multicoloured clouds, fully opaque.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -1913,6 +2022,7 @@ pub const TYPES: &[NodeType] = &[
         id: "perlin_noise",
         label: "Perlin noise",
         category: Category::Generator,
+        group: Group::Blocks,
         description: "Classic Perlin gradient noise as a grey 0..1 field, evolving over time: Harmonics layers (octaves) at rising detail, Roughness and Spacing shaping how they stack, and a Style for soft clouds, billows or sharp ridges. Wire it into Colorize or Palette for colour, into Field math as a mask, or straight into Output as grey.",
         inputs: &[],
         outputs: &[port(
@@ -1989,6 +2099,7 @@ pub const TYPES: &[NodeType] = &[
         id: "random_field",
         label: "Full random field",
         category: Category::Generator,
+        group: Group::Blocks,
         description: "Static: an independent random grey value 0..1 for every LED (or every spoke, or every ring), re-rolled Rate times a second. Keys on the physical LED, so Transform does not move it. A mask for glitter and glitches, or TV snow straight into Output.",
         inputs: &[],
         outputs: &[port(
@@ -2025,6 +2136,7 @@ pub const TYPES: &[NodeType] = &[
         id: "plasma",
         label: "Plasma",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "The classic demoscene plasma: overlapping sine waves across the disc, giving smoothly morphing blobs whose brightness and hue follow the wave sum. Fully opaque.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2048,6 +2160,7 @@ pub const TYPES: &[NodeType] = &[
         id: "spoke_chase",
         label: "Spoke chase",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "A bright head on every spoke running along it with an exponential tail, each spoke offset at random and tinted by Hue range: rain or comets running along the spokes.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2091,6 +2204,7 @@ pub const TYPES: &[NodeType] = &[
         id: "touch_mask",
         label: "Touch mask",
         category: Category::Generator,
+        group: Group::Blocks,
         description: "Every held (and recently lifted) finger as a soft blob in a 0..1 Field<f32> mask, the strongest blob winning where they overlap. Use it as a mask for Colorize, Field math or Blend so touch reveals or paints a pattern. Reading touch makes the patch own the touch surface (see Touch).",
         inputs: &[],
         outputs: &[port(
@@ -2104,6 +2218,7 @@ pub const TYPES: &[NodeType] = &[
         id: "touch_glow",
         label: "Touch glow",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "The same finger blobs as Touch mask, each in its toucher's own colour (white for clients without one), summed into a colour field whose alpha is the coverage. Reading touch makes the patch own the touch surface (see Touch).",
         inputs: &[],
         outputs: &[port(
@@ -2117,6 +2232,7 @@ pub const TYPES: &[NodeType] = &[
         id: "sparkle",
         label: "Sparkle",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "Glitter: random LEDs flash and fade, each LED re-rolling its chance every twinkle; hues spread by Hue range. It keys on the physical LED, so Transform does not move it.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2148,6 +2264,7 @@ pub const TYPES: &[NodeType] = &[
         id: "beat_rings",
         label: "Beat rings",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "One soft ring at Front along the radius, dimming to half as it reaches the far end, its hue shifting with position. Wire audio `beat_phase` into Front for a ring per beat, or an Envelope or Time phase for other sweeps.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2192,6 +2309,7 @@ pub const TYPES: &[NodeType] = &[
         id: "breathe",
         label: "Breathe",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "The whole array pulsing slowly in white between Depth floor and full brightness. It is uncoloured: Multiply-blend it over a pattern to make that pattern breathe.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2219,6 +2337,7 @@ pub const TYPES: &[NodeType] = &[
         id: "rainbow",
         label: "Rainbow",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "A hue wheel around the ring (repeated Turns times), optionally shifting toward the rim by Hue range; Speed rotates the colours. Fully opaque.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2263,6 +2382,7 @@ pub const TYPES: &[NodeType] = &[
         id: "wedges",
         label: "Wedges",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "Bright pie slices with dark gaps around the ring, soft-edged, sheared into a pinwheel by Twist and rotating with Speed; each slice is half Hue, half Hue + Hue range. Flash lights the gaps too (wire audio onset in for an on-beat flash).",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2325,6 +2445,7 @@ pub const TYPES: &[NodeType] = &[
         id: "interference",
         label: "Interference",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "Two point sources orbiting the centre, their circular waves interfering into moving moiré fringes.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2372,6 +2493,7 @@ pub const TYPES: &[NodeType] = &[
         id: "fire",
         label: "Fire",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "Flames licking inward from the rim: fractal noise rising along each spoke, hottest at the outer edge, the hottest parts paling toward white. Hue sets the flame colour — near 0 (red-orange) for classic fire; the default 0.6 burns blue.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2417,6 +2539,7 @@ pub const TYPES: &[NodeType] = &[
         id: "cosmic_drift",
         label: "Cosmic drift",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "A deep-space flight: dim nebula clouds and filaments drifting past, with six bright travellers streaking outward along curving lanes. Fully opaque.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2470,6 +2593,7 @@ pub const TYPES: &[NodeType] = &[
         id: "earth_current",
         label: "Forest canopy",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "Layered canopy leaves swaying in the wind, with shadowed depths and sunlit highlights; green by default (Shadow green and Leaf hue set the colours). Fully opaque.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2538,6 +2662,7 @@ pub const TYPES: &[NodeType] = &[
         id: "meteors",
         label: "Meteors",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "Meteors shooting along random spokes with fading tails, each spoke launching at random times.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2582,6 +2707,7 @@ pub const TYPES: &[NodeType] = &[
         id: "warp",
         label: "Warp",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "A hyperspace starfield: short star streaks rushing outward along the spokes, brighter toward the rim. Colours stay pale (saturation × 0.6).",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2619,6 +2745,7 @@ pub const TYPES: &[NodeType] = &[
         id: "waveform",
         label: "Waveform",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "An oscilloscope ring: a circle whose radius wobbles with the live audio waveform, traced once around the ring; Drift rotates the trace.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2678,6 +2805,7 @@ pub const TYPES: &[NodeType] = &[
         id: "spectrum",
         label: "Spectrum",
         category: Category::Generator,
+        group: Group::Patterns,
         description: "A radial spectrum analyser: 64 log-spaced frequency bars around the ring, lows to highs, each growing along its spokes with that band's energy.",
         inputs: &[],
         outputs: COLOR_OUT,
@@ -2728,6 +2856,7 @@ pub const TYPES: &[NodeType] = &[
         id: "coordinate",
         label: "Coordinate",
         category: Category::Generator,
+        group: Group::Blocks,
         description: "The pixel's own position as a Field<f32>, for building custom gradients and masks with Field math, Colorize or Palette. After a Transform it reports the transformed position (except Spoke, which stays physical).",
         inputs: &[],
         outputs: &[port(
@@ -2772,6 +2901,7 @@ pub const TYPES: &[NodeType] = &[
         id: "feedback",
         label: "Feedback",
         category: Category::Generator,
+        group: Group::Blocks,
         description: "What the array showed last frame at this pixel (the final, mastered picture) times Decay — downstream of a Transform, at the transformed position. Blend new content over it (Blend max or add, with a Transform zoom or spin in between) for trails, echoes and tunnels. Black in node thumbnails.",
         inputs: &[],
         outputs: &[port(
@@ -2793,6 +2923,7 @@ pub const TYPES: &[NodeType] = &[
         id: "transform",
         label: "Transform",
         category: Category::FieldOp,
+        group: Group::Color,
         description: "Moves where everything upstream is sampled: rotate, spin, zoom, an N-way kaleidoscope and a left/right mirror, for any colour field (generators, video, feedback). Nodes that key on the physical LED or spoke (Sparkle, and the per-spoke randomness of Spoke chase, Meteors and Warp) only partly follow it.",
         inputs: &[port("in", Shape::FieldColor, "The colour field to transform.")],
         outputs: &[port("out", Shape::FieldColor, "The transformed field.")],
@@ -2841,6 +2972,7 @@ pub const TYPES: &[NodeType] = &[
         id: "colorize",
         label: "Colorize",
         category: Category::FieldOp,
+        group: Group::Color,
         description: "Turns a Field<f32> into colour: brightness follows the value (× Brightness), hue is Hue + value × Hue range, alpha is the value clamped to 0..1. A Scalar wired into `in` colours the whole array uniformly.",
         inputs: &[port(
             "in",
@@ -2866,6 +2998,7 @@ pub const TYPES: &[NodeType] = &[
         id: "field_math",
         label: "Field math",
         category: Category::FieldOp,
+        group: Group::Color,
         description: "Per-pixel arithmetic on two Field<f32> inputs: (A op B) × Gain + Offset. A Scalar wired into A or B becomes a uniform field; an unwired input reads 0.",
         inputs: &[
             port("a", Shape::FieldScalar, "First operand (the only one for invert)."),
@@ -2917,6 +3050,7 @@ pub const TYPES: &[NodeType] = &[
         id: "luminance",
         label: "Brightness of",
         category: Category::FieldOp,
+        group: Group::Color,
         description: "Measures a colour field back into a Field<f32> (perceived luminance, the brightest channel, or the alpha coverage) to drive masks, Field math or Palette from any pattern or video.",
         inputs: &[port("in", Shape::FieldColor, "The colour field to measure.")],
         outputs: &[port("out", Shape::FieldScalar, "The measurement at each pixel.")],
@@ -2931,6 +3065,7 @@ pub const TYPES: &[NodeType] = &[
         id: "color_adjust",
         label: "Color adjust",
         category: Category::FieldOp,
+        group: Group::Color,
         description: "Adjusts a colour field in HSV (shift hue, scale saturation and brightness), then applies contrast around mid-grey and an optional invert. Alpha passes through.",
         inputs: &[port("in", Shape::FieldColor, "The colour field to adjust.")],
         outputs: COLOR_OUT,
@@ -2980,6 +3115,7 @@ pub const TYPES: &[NodeType] = &[
         id: "palette",
         label: "Palette",
         category: Category::FieldOp,
+        group: Group::Color,
         description: "Maps a Field<f32> through a smooth cosine colour ramp (after Inigo Quilez); the ramp repeats every 1 / Cycles of input, and alpha is the input clamped to 0..1. A Scalar wired into `in` gives one uniform colour.",
         inputs: &[port(
             "in",
@@ -3021,6 +3157,7 @@ pub const TYPES: &[NodeType] = &[
         id: "subpatch",
         label: "Sub-patch",
         category: Category::Combine,
+        group: Group::Structure,
         description: "Another patch embedded as one node (its document lives in the node's `sub`): every param its document exposes becomes an input of this node named \"{inner node}.{param}\", and whatever feeds its Output is this node's `out`. It is inlined before validation, so it costs exactly what its contents cost; nesting is limited to four levels.",
         inputs: &[],
         outputs: &[port(
@@ -3036,6 +3173,7 @@ pub const TYPES: &[NodeType] = &[
         id: "code",
         label: "Code",
         category: Category::Code,
+        group: Group::Structure,
         description: "A node whose ports and body you write (stored in the node's `code`). If every port is a Scalar or Event, the body (a WGSL subset) runs on the CPU every frame; if it outputs a field, the WGSL body is compiled into the patch shader and runs per pixel. Scalar inputs are knobs like a built-in node's params.",
         inputs: &[],
         outputs: &[],
@@ -3045,6 +3183,7 @@ pub const TYPES: &[NodeType] = &[
         id: "note",
         label: "Note",
         category: Category::Code,
+        group: Group::Structure,
         description: "A remark on the canvas (`text` on the node): no ports, never run. For explaining a patch, a sub-patch, or a Code node to the next person.",
         inputs: &[],
         outputs: &[],
@@ -3054,6 +3193,7 @@ pub const TYPES: &[NodeType] = &[
         id: "blend",
         label: "Blend",
         category: Category::Combine,
+        group: Group::Color,
         description: "Combines colour fields: Over is applied to Base with the chosen mode at Opacity. The result's alpha is Over's coverage composited over Base's. A Blend can stack more layers (`layers` on the node, up to 8): layer k adds Over k, Mode k and Opacity k, applied in turn on top; an unwired one is skipped.",
         inputs: &[
             port("base", Shape::FieldColor, "The lower layer."),
@@ -3082,6 +3222,7 @@ pub const TYPES: &[NodeType] = &[
         id: "render_points",
         label: "Render points",
         category: Category::FieldOp,
+        group: Group::Draw,
         description: "Draws a Points stream (Touch strokes) as glowing marks, each in its own pen or all in one Pen, scaled by Size and Intensity. Unwired, it is black.",
         inputs: &[port("points", Shape::Points, "The strokes to draw.")],
         outputs: COLOR_OUT,
@@ -3117,6 +3258,7 @@ pub const TYPES: &[NodeType] = &[
         id: "render_effects",
         label: "Render effects",
         category: Category::FieldOp,
+        group: Group::Draw,
         description: "Draws an Effects stream (Triggered effects and/or Event effect chains) into a colour field, scaled by Size and Intensity. Only effects from the sources wired in are drawn; unwired, it is black.",
         inputs: &[port("effects", Shape::Effects, "The effects to draw.")],
         outputs: COLOR_OUT,
@@ -3144,6 +3286,7 @@ pub const TYPES: &[NodeType] = &[
         id: "texture_sample",
         label: "Texture sample",
         category: Category::Texture,
+        group: Group::Media,
         description: "Maps a Texture (Video in, Still image in, Clip) onto the disc: the picture's square spans the ring, its edges touching the rim, with zoom, rotation and kaleidoscope plus saturation and brightness. Outside the picture is transparent; unwired, it is black.",
         inputs: &[port("tex", Shape::Texture, "The texture to sample.")],
         outputs: COLOR_OUT,
@@ -3195,6 +3338,7 @@ pub const TYPES: &[NodeType] = &[
         id: "output",
         label: "Output",
         category: Category::Sink,
+        group: Group::Structure,
         description: "The patch's one sink: the colour field wired into `in` is what the gate shows. It is scaled by Master, then by the crew's master brightness and hue pull, soft-clipped above 0.8 and sent to the LEDs; nothing that is not wired here is drawn.",
         inputs: &[port(
             "in",
@@ -3333,5 +3477,17 @@ mod tests {
         assert!(solid["description"].as_str().is_some_and(|s| !s.is_empty()));
         assert!(solid["outputs"][0]["description"].is_string());
         assert!(solid["params"][0]["description"].is_string());
+        assert_eq!(solid["group"], "blocks");
+    }
+
+    #[test]
+    fn every_group_is_used() {
+        for g in Group::ALL {
+            assert!(
+                TYPES.iter().any(|t| t.group == g),
+                "no node is in group {}",
+                g.id()
+            );
+        }
     }
 }

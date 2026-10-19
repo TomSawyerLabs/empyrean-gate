@@ -4,6 +4,7 @@
 // playground, the gate app and the command-line server each provide a host;
 // `tools.ts` turns this into tool definitions (WebMCP, MCP).
 
+import { groupOf } from "../groups";
 import type { PatchCore } from "../runtime/core";
 import type { Geometry } from "../runtime/gpu";
 import type { CaptureOptions, CapturedFrame } from "../runtime/index";
@@ -108,9 +109,11 @@ export function createPatchApi(host: PatchHost) {
       return agentGuide(core, { ...host.guide, ...options });
     },
 
-    /** Every node type, briefly; or those of one category. */
-    nodeTypes(category?: string) {
-      return core.registry.filter((t) => !category || t.category === category).map(nodeSummary);
+    /** Every node type, briefly; or those of one palette group or category. */
+    nodeTypes(groupOrCategory?: string) {
+      return core.registry
+        .filter((t) => !groupOrCategory || groupOf(t).id === groupOrCategory || t.category === groupOrCategory)
+        .map(nodeSummary);
     },
 
     /** The full definitions (ports, params, ranges, descriptions). */

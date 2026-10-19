@@ -47,6 +47,21 @@ export interface PatchParamDef {
   description?: string;
 }
 
+/** A palette group's id (crate `registry::Group::id`). */
+export type PatchGroup =
+  | "controls"
+  | "live"
+  | "media"
+  | "shape"
+  | "motion"
+  | "random"
+  | "events"
+  | "blocks"
+  | "patterns"
+  | "color"
+  | "draw"
+  | "structure";
+
 /** One palette entry from the node registry (`GET /patch/registry` on the
  * gate, `registry()` in the wasm build). */
 export interface PatchNodeType {
@@ -60,6 +75,10 @@ export interface PatchNodeType {
    * `opacity2`). The instance's count is `PatchNode.layers`. */
   layered?: { names: string[]; max: number };
   category: "input" | "scalar" | "generator" | "field" | "combine" | "texture" | "sink" | "code";
+  /** The palette group it is listed under (crate `registry::Group`; labels
+   * and order in `groups.ts`). Optional: older gates send none, and
+   * `groupOf` falls back on the category. */
+  group?: PatchGroup;
   /** What the node does, what its inputs mean, and when to use it (one to
    * three sentences). Optional: older gates send none. */
   description?: string;
