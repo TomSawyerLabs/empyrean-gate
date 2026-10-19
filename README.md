@@ -244,9 +244,9 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   Brightness of, Color adjust, Palette, Transform, Resample, Colorize, Blend), inputs
   (audio features, beats, touch, IMU, PRO DJ LINK, video, still images and
   Clips: short loops stored in the patch as a sprite sheet) and control-rate
-  tools (Time, LFO, Math, Map range, Mix, Clamp, Smooth, Envelope, Random,
-  the noise sources Full random, Random walk and Smooth noise, and
-  the event tools Counter, Toggle, Threshold, Delay, Merge, Step sequencer)
+  tools (Time, LFO, Math, Map range, Mix, Clamp, Smooth, Envelope, Random
+  in four modes: Hold, Every frame, Walk and Smooth, and the event tools
+  Counter, Toggle, Threshold, Delay, Merge, Step sequencer)
   into a typed dataflow whose sink is the array. Fields come in two domains:
   the plane (defined at every position, so Transform can move them) and the
   LEDs (defined only at the physical LEDs, like Full random field, drawn as a
@@ -307,6 +307,17 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   rather than another Blend, and its side panel lists the layers top first to
   raise, lower, remove or add. Any node minimizes (− in its corner) to its
   mini with bare port dots (`plans/auto-blend.md`).
+  The **palette** groups the node kinds by what they are for (Controls,
+  Live input, Media, Shape a signal, Motion, Events, Building blocks,
+  Patterns, Color & space, Draw streams, Structure), each fold remembered;
+  Building blocks and Patterns are a grid of thumbnails, and every kind has
+  an icon (also on its node and in its panel) and a picture or a trace of
+  what it does. A filter on top (`/` focuses it, Enter adds the best match)
+  finds kinds by name, group or description, and also by a Select option:
+  "walk" offers Random set to Walk. Recently added kinds come first, the
+  hovered kind is described at the foot, and kinds can be dragged onto the
+  canvas. The thumbnails are rendered from a showcase patch per kind
+  (`bun run thumbnails` in `packages/patch-web`; `plans/palette-overhaul.md`).
   Patches save as JSON files under the config dir and activate live (the layer
   stack renders when no patch is active); sixteen built-in presets seed the
   palette.

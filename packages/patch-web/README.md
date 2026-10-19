@@ -15,21 +15,36 @@ control-rate evaluator, effect and audio analysis. This package only hosts it.
   answering with events), the node palette, presets, and optionally a
   `MiniSource` for live node thumbnails and meters. Also patch file helpers:
   `savePatchToDisk`, `openPatchFromDisk`, `parsePatchFile`, `exportPatch`.
+  The palette groups kinds by the registry's `group` (labels and order in
+  `groups.ts`, `GROUPS` / `grouped` / `groupOf`), with an icon per kind
+  (`NodeIcon`, `GroupIcon`) and a thumbnail per kind (`thumbs.gen.ts`, loaded
+  lazily as its own chunk). Ports and params with a `when` belong to some
+  modes of their kind only (`applies`).
 - `@empyrean-gate/patch-web/editor.css` — the editor's styles (imported by the
   editor itself). Colors are `--pe-*` custom properties with the gate's palette
   as defaults.
 - `@empyrean-gate/patch-web/runtime` — `PatchRuntime.create()` loads the wasm
   core and a WebGPU device; `setPatch(doc)` runs or live-edits a patch;
   `attach(canvas)` shows it; inputs: `trigger` (effects), `draw` (strokes),
-  `startMic`, `startMotion`, `setMedia` (local video/image), `setDjLink` /
-  `fireDjEvent`, `setMaster`. It is also a `MiniSource` for the editor.
+  `startMic`, `startMotion`, `setMedia` (local video/image), `setVideoSource`
+  (`MediaTexture.fromCamera()`, or null for the stand-in film), `setDjLink` /
+  `fireDjEvent`, `setMaster`, `setHuePull`. It is also a `MiniSource` for the
+  editor. Every input has a stand-in, so every node kind does something
+  anywhere: Video in plays `TestFilm` (dusk over rolling hills) until a file
+  or camera is chosen; `attachVisitors(runtime)` brings simulated people who
+  tap effects on the beat, draw strokes and, when the patch owns touch, touch
+  with a finger or two; `syntheticMotion()` is a dancer's phone; and while no
+  microphone is on, Waveform and Spectrum get a scope made from the audio
+  features (`synthScope`). All are seeded and clocked by patch time, so a
+  capture repeats.
   `loadPatchCore()` alone gives the registry, presets and `validate()` without
   a GPU. For someone who cannot watch it: `step(dt)`, `restart()`,
   `readFrame()` and `capture({ frames, interval, warmup, restart })`, which
   steps the patch through patch time at a steady 60 Hz and reads each frame
   back; `renderRing`, `contactSheet`, `encodePng` and `frameStats` turn
   frames into PNGs and numbers without a GPU view. `PatchRuntime.create(geometry,
-  { gpu, wasm })` runs without a browser (Node, with the `webgpu` package).
+  { gpu, wasm, decodeImage })` runs without a browser (Node, with the `webgpu`
+  package; the command line decodes PNG pictures with `cli/png.ts`).
   For music without music, `attachGroove(runtime)` plays a simulated PRO DJ
   LINK set (`DjLinkSim`, returned as `dj`) when there is no gate: two CDJs
   and a mixer at 122 BPM, an Auto DJ mixing a crate of invented tracks with
@@ -116,8 +131,21 @@ bun run build:wasm      # crates/empyrean-patch-wasm -> ./wasm (gitignored)
 bun run build:cli       # cli/ -> cli/empyrean-patch.mjs (gitignored)
 bun run typecheck
 bun run test:browser    # every shader the core generates, through Chrome's compiler
-bun run demo            # every preset on a bare WebGPU page, port 28150
+bun run demo            # port 28150: every preset on a bare WebGPU page (/),
+                        # the editor over the real core (/editor.html), and
+                        # every palette thumbnail (/thumbs.html)
+bun run thumbnails      # regenerate src/editor/thumbs.gen.ts
 ```
+
+`thumbnails` renders each node kind in a small showcase patch
+(`scripts/thumbnails-render.ts`) on the stand-ins, with Dawn under Node: a
+kind that makes a picture keeps its output sampled to 64 spokes × 24 LEDs
+(drawn by `renderRing` at any size), one that makes a number or an event eight
+seconds of it with what drives it. It installs `webgpu` once into
+`node_modules/.cache`; `thumbs.test.ts` fails when a kind has neither a
+thumbnail nor a place in `ICON_ONLY`. Building the wasm while another
+worktree builds it too can swap their outputs (the machine shares one cargo
+build directory): give each its own with `CARGO_BUILD_BUILD_DIR`.
 
 `test:browser` (needs the wasm build, and `bunx playwright install chromium`)
 compiles every shader the patch core can generate in Chromium: each node kind
