@@ -129,6 +129,16 @@
   position: relative;
 }
 
+/* The canvas and the palette are for dragging, tapping and panning, not text
+ * to copy: React Flow keeps its nodes unselectable, but a drag that started on
+ * the globals card or a palette entry painted a selection across both. The
+ * inspector beside them (names, descriptions, code) stays selectable. */
+.patch-canvas,
+.patch-palette {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .patch-empty {
   display: flex;
   align-items: center;
