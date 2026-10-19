@@ -306,6 +306,9 @@ export function CodePanel({
       handle={editorRef}
       caret={caret}
       autoFocus={expanded}
+      // A CPU body on air shows its values; not while it has an error (they
+      // would be the last good body's).
+      live={live && tier === "cpu" && !mine ? { source: minis!, node: id } : null}
     />
   );
   const minisRow = live && def.outputs.length > 0 && (
