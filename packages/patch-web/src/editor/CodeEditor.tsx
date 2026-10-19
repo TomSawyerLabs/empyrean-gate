@@ -5,8 +5,8 @@
 // panel; the document is kept in sync with the patch (undo in the patch
 // replaces the text here, edits here go to the patch coalesced).
 
-import { useEffect, useRef } from "react";
-import { Compartment, EditorState } from "@codemirror/state";
+import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
+import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
 import {
   crosshairCursor,
   drawSelection,
@@ -32,6 +32,7 @@ import {
 import {
   autocompletion,
   closeBrackets,
+  snippet,
   closeBracketsKeymap,
   completionKeymap,
   type Completion,
@@ -250,7 +251,7 @@ const SHAPE_WORD: Record<PatchShape, string> = {
 };
 
 /** WGSL builtins worth offering (the GPU tier), with signatures. */
-const WGSL_BUILTINS: CodeFnRef[] = [
+export const WGSL_BUILTINS: CodeFnRef[] = [
   ["abs", "abs(x)", "Absolute value, per component."],
   ["floor", "floor(x)", "Round down."],
   ["ceil", "ceil(x)", "Round up."],
@@ -299,7 +300,7 @@ const WGSL_BUILTINS: CodeFnRef[] = [
   ["i32", "i32(x)", "Convert to i32."],
 ].map(([name, signature, doc]) => ({ name, signature, doc }));
 
-const CTX_FALLBACK: { name: string; type: string; doc: string }[] = [
+export const CTX_FALLBACK: { name: string; type: string; doc: string }[] = [
   { name: "theta", type: "f32", doc: "spoke angle, radians" },
   { name: "r01", type: "f32", doc: "0 = outer end of the spoke, 1 = inner end" },
   { name: "rn", type: "f32", doc: "radius, 1 = outer edge" },
@@ -343,7 +344,7 @@ function ctxNames(doc: string): Set<string> {
 
 /** The functions an input port gives the body: `<name>_at` to sample it
  * elsewhere, and a buffer's `<name>_on`. */
-function portFns(p: CodePort): CodeFnRef[] {
+export function portFns(p: CodePort): CodeFnRef[] {
   const n = p.name;
   switch (p.shape) {
     case "points":
@@ -611,6 +612,17 @@ export function scopeNames(s: CodeScope): string[] {
 
 // --- the component -----------------------------------------------------------
 
+/** What a host can do to the editor from outside it (the reference
+ * column, the phone key row). */
+export interface CodeEditorHandle {
+  /** Replace the selection with `text`, the caret `caret` characters into
+   * it (default: after it), and focus the editor. */
+  insert(text: string, caret?: number): void;
+  /** Insert a snippet (CodeMirror template) at the selection. */
+  insertSnippet(template: string): void;
+  view(): EditorView | null;
+}
+
 export function CodeEditor({
   value,
   onChange,
@@ -618,6 +630,9 @@ export function CodeEditor({
   scope,
   diagnostics,
   ariaLabel,
+  handle,
+  caret,
+  autoFocus,
 }: {
   value: string;
   onChange: (body: string) => void;
@@ -625,9 +640,35 @@ export function CodeEditor({
   scope: CodeScope;
   diagnostics: Diagnostic[];
   ariaLabel: string;
+  handle?: Ref<CodeEditorHandle>;
+  /** Where the selection is kept between instances (the panel's editor and
+   * the large view's), so moving between them keeps the caret. */
+  caret?: { current: { anchor: number; head: number } | null };
+  autoFocus?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  useImperativeHandle(
+    handle,
+    () => ({
+      insert(text, caret = text.length) {
+        const view = viewRef.current;
+        if (!view || view.state.readOnly) return;
+        const { from, to } = view.state.selection.main;
+        view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + caret }, userEvent: "input" });
+        view.focus();
+      },
+      insertSnippet(template) {
+        const view = viewRef.current;
+        if (!view || view.state.readOnly) return;
+        const { from, to } = view.state.selection.main;
+        snippet(template)(view, null, from, to);
+        view.focus();
+      },
+      view: () => viewRef.current,
+    }),
+    [],
+  );
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
   const onChangeRef = useRef(onChange);
@@ -637,10 +678,13 @@ export function CodeEditor({
   useEffect(() => {
     if (!host.current) return;
     const getScope = () => scopeRef.current;
+    const kept = caret?.current;
+    const clamp = (n: number) => Math.max(0, Math.min(n, value.length));
     const view = new EditorView({
       parent: host.current,
       state: EditorState.create({
         doc: value,
+        selection: kept ? EditorSelection.single(clamp(kept.anchor), clamp(kept.head)) : undefined,
         extensions: [
           lineNumbers(),
           highlightActiveLineGutter(),
@@ -677,11 +721,17 @@ export function CodeEditor({
           readOnlyC.current.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onChangeRef.current(u.state.doc.toString());
+            if (caret && (u.docChanged || u.selectionSet)) {
+              const { anchor, head } = u.state.selection.main;
+              caret.current = { anchor, head };
+            }
           }),
         ],
       }),
     });
     viewRef.current = view;
+    if (kept) view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: "center" }) });
+    if (autoFocus) view.focus();
     return () => {
       view.destroy();
       viewRef.current = null;

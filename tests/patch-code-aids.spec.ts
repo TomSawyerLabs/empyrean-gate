@@ -118,3 +118,41 @@ test("an error's quick fixes are buttons under it and actions on its mark", asyn
   await panel.locator(".cm-tooltip-lint .cm-diagnosticAction", { hasText: "Change to `hsv2rgb`" }).click();
   await expect(body).toHaveText("let w = hsv2rgb(0.5, 1.0, 1.0);out = vec4f(w, 1.0);");
 });
+
+test("the large view lists what the body can use beside it, and sets its text size", async ({ page }) => {
+  const { panel, body } = await codeNode(page);
+  await body.fill("out = vec4f(");
+  await body.press("ControlOrMeta+End");
+  await panel.getByRole("button", { name: "Open the body in a bigger editor" }).click();
+  const modal = page.locator("dialog.code-modal");
+  const big = modal.getByLabel("Body (WGSL)");
+  const column = modal.getByRole("complementary", { name: "What the body can use" });
+  await expect(column).toBeVisible();
+
+  // A helper goes in at the caret, the caret inside its parentheses.
+  await column.getByLabel("Filter what the body can use").fill("hsv");
+  await column.locator(".code-refcol-item", { hasText: "hsv2rgb" }).click();
+  await big.pressSequentially("0.5, 1.0, 1.0");
+  await expect(big).toHaveText("out = vec4f(hsv2rgb(0.5, 1.0, 1.0)");
+  // A snippet from the list, at the caret too.
+  await big.press("ControlOrMeta+End");
+  await big.pressSequentially("), 1.0);\n");
+  await column.getByLabel("Filter what the body can use").fill("ripple");
+  await column.locator(".code-refcol-item", { hasText: "ripple" }).click();
+  await expect(big).toContainText("let wave = sin(c.rn * 12.0");
+
+  // Text size, remembered.
+  const scroller = modal.locator(".cm-scroller");
+  const size = () => scroller.evaluate((e) => getComputedStyle(e).fontSize);
+  expect(await size()).toBe("14px");
+  await modal.getByRole("button", { name: "Larger text" }).click();
+  await modal.getByRole("button", { name: "Larger text" }).click();
+  expect(await size()).toBe("16px");
+  await modal.getByRole("button", { name: "Reference" }).click();
+  await expect(column).toHaveCount(0);
+  await modal.getByRole("button", { name: "Done" }).click();
+  await panel.getByRole("button", { name: "Open the body in a bigger editor" }).click();
+  await expect(modal.locator(".cm-scroller")).toBeVisible();
+  expect(await size()).toBe("16px");
+  await expect(column).toHaveCount(0);
+});
