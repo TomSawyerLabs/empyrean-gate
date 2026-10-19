@@ -1695,10 +1695,15 @@ function Editor({
   // Open where the host says (its URL), or reopen the live patch when
   // returning to this tab. Subscribe first so a fast local response cannot
   // arrive before the editor is listening. A built-in waits for the presets.
+  // The host's location counts once: after a delete the editor falls back to
+  // the live patch (or nothing), not to wherever the page first opened.
+  const initialUsed = useRef(false);
   useEffect(() => {
     if (!ready || rootRef.current || requestedId.current) return;
-    const want = initialLocation ?? (activeId ? { patch: activeId, path: [] } : null);
+    const initial = initialUsed.current ? null : initialLocation;
+    const want = initial ?? (activeId ? { patch: activeId, path: [] } : null);
     if (!want || (isBuiltin(want.patch) && presets.length === 0)) return;
+    if (initial) initialUsed.current = true;
     goTo(want, "replace");
   }, [activeId, initialLocation, presets, ready, goTo]);
 
