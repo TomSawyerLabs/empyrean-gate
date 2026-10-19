@@ -1,6 +1,7 @@
 # Palette overhaul — fewer, better-sorted node types, with pictures
 
-Status: **in progress** (started 2026-10-18).
+Status: **gate side done and on master (55b85c8); site stand-in UI waiting
+on the web-dist bump** (started 2026-10-18).
 
 ## Goal
 
@@ -54,8 +55,19 @@ groove.ts's DJ part.
   24 samples per kind), drawn client-side by `runtime/ring.ts renderRing`, so
   they are tiny and crisp at any DPR. Rendered PNGs were ~6–14 KB each at
   96 px (prototype, 2026-10-18), ~0.5 MB for the set.
+- Merges (my call, within "do 4"): Gradient and Radial gradient are *not*
+  duplicates (grey ramp vs colour bands), but Radial gradient is exactly
+  Rainbow with 0 turns, so it folds into Rainbow. The Random family folds into
+  Random with a Mode. With Random alone, the Randomness group went: Random is
+  in Motion (11 groups, 69 kinds).
+- Mode-only ports/params are a general registry feature (`When`), not a
+  Random special case; the palette search also matches Select options so
+  "walk" still finds Random · Walk.
+- Simulated visitors default **off** on the site (they would change how the
+  presets that render effects look); every visitor-driven node's panel
+  offers the switch.
 
-## Groups
+## Groups (as built)
 
 | id | Label | Kinds |
 | --- | --- | --- |
@@ -63,11 +75,10 @@ groove.ts's DJ part.
 | live | Live input | audio, imu, touch, touch_dabs, tap, effects_in, dj_link |
 | media | Media | video_in, image_in, clip, texture_sample |
 | shape | Shape a signal | scalar_math, map_range, mix, clamp, smooth, threshold |
-| motion | Motion | lfo, envelope, sequence |
-| random | Randomness | random, full_random, random_walk, smooth_noise |
+| motion | Motion | lfo, envelope, sequence, random (Hold / Every frame / Walk / Smooth) |
 | events | Events | counter, toggle, delay, event_merge, event_effect |
-| blocks | Building blocks | solid, gradient, gradient_radial, coordinate, perlin_noise, random_field, touch_mask, feedback |
-| patterns | Patterns | rainbow, plasma, spiral, radial_waves, wedges, interference, spoke_chase, breathe, sparkle, noise_field, noise_color, fire, meteors, warp, cosmic_drift, earth_current, beat_rings, waveform, spectrum, touch_glow |
+| blocks | Building blocks | solid, gradient, coordinate, perlin_noise, random_field, touch_mask, feedback (+ resample, field-domains) |
+| patterns | Patterns | rainbow (Turns 0 = the old Radial gradient), plasma, spiral, radial_waves, wedges, interference, spoke_chase, breathe, sparkle, noise_field, noise_color, fire, meteors, warp, cosmic_drift, earth_current, beat_rings, waveform, spectrum, touch_glow |
 | color | Color & space | colorize, palette, color_adjust, luminance, field_math, transform, blend |
 | draw | Draw streams | render_points, render_effects |
 | structure | Structure | subpatch, code, note, output |
@@ -87,20 +98,25 @@ groove.ts's DJ part.
 ## Plan / steps
 
 1. ✅ Survey, worktree, `.agents.txt` entries, this plan.
-2. ✅ Registry `group` + TS type + `GROUPS`; tests (fd27af6).
-3. ✅ Icons (`editor/icons.tsx`) for every kind and group; coverage test.
-4. ✅ `Palette.tsx`: filter + keyboard, Recent, collapsible groups (remembered),
-   details strip, Patterns/Blocks thumbnail grid, Sub-patches group; icons on
-   canvas nodes, wire-drop popover, node panel; drag onto the canvas
-   (21070d2). Spec `patch-palette`.
-5. ◀ Stand-ins (moved before thumbnails: the showcase patches for Video in,
-   Touch strokes, Triggered effects need them).
-6. Thumbnail generator (`scripts/thumbnails.ts`): atlas + scalar traces;
-   showcase params/inputs per kind.
-7. Merges: Random family → Random (Mode), Gradient + Radial → Gradient
-   (Shape); format 7 migration; presets, convert, docs.
-8. Docs (READMEs, agent guide), behaviour spec, push, site README/plan,
-   Preview check.
+2. ✅ Registry `group` + TS type + `GROUPS` (gate a1dfea9).
+3. ✅ Icons for every kind and group, coverage test (3cc6382).
+4. ✅ `Palette.tsx`: filter + keyboard, Recent, folds, details strip,
+   thumbnail grid, drag onto the canvas; icons on nodes, panel, chooser
+   (3cc6382); new nodes clear of the globals card, the foot holds still
+   (1ddc1fa). Spec `patch-palette`.
+5. ✅ Stand-ins: TestFilm + camera, visitors, hue pull, synthetic motion
+   (efd2588); synthetic scope, PNG pictures headless (5413395-ish, rebased).
+6. ✅ Thumbnails: `bun run thumbnails`, 44 rings + 20 traces, test, review
+   page `demo/thumbs.html`.
+7. ✅ Merges, format 7, `When`, option search (55b85c8).
+8. ◀ Site: People fieldset (simulated visitors), Video in source buttons
+   (film / camera / file), Hue pull + Pull toward in the globals card,
+   site motion.ts replaced by patch-web's; specs. Written in the site
+   worktree `.t3/worktrees/empyreangate.org/palette-overhaul` (branch
+   `palette-overhaul`), **not committed yet**: it needs a web-dist with
+   1ddc1fa (node placement) or two site specs fail, so wait for the bot's
+   bump on `dev`, rebase, run `tests/playground.spec.ts`, push to `dev`.
+9. Site README + `plans/pattern-playground.md` line; Preview check.
 
 ## Findings / gotchas
 
@@ -115,6 +131,21 @@ groove.ts's DJ part.
   timeout; serially (or 2 workers) they pass. Re-run alone before believing.
 - `demo/editor.html` (`bun run demo` in patch-web) is the editor over the real
   registry with SwiftShader WebGPU: the quickest visual check.
+- **Shared cargo build dir**: `~/.cargo/config.toml` puts every project's
+  intermediates in one `build-dir`; the wasm cdylib's file has no hash, so
+  two worktrees building at once swapped outputs (my wasm had field-domains'
+  `resample`). Build with `CARGO_BUILD_BUILD_DIR=<worktree>/crates/target/build-private`.
+- `EMPYREAN_UPDATE_PRESETS=1 cargo test` rewrites presets through serde
+  (6,000-line diff, hand formatting lost). Edit preset JSON as text instead.
+- The browser shader corpus wired every input of a kind; with modes it must
+  wire only the mode's (`applies`), or Convert to Code is (rightly) refused.
+- The gate's frontend typecheck runs without a wasm build: the editor must
+  never import `runtime/core.ts` (even as a type). `Geometry` lives in
+  `runtime/geometry.ts` for that.
+- A palette foot that changes height on hover moved entries out from under
+  the pointer between mouse-down and mouse-up: fixed height.
+- Visitors' taps are seeded and sparse (~0.6/s): thumbnail captures of
+  effects take the brightest of 16 frames over ~5 s.
 - `cli/host.ts loadWebGpu` resolves `webgpu` next to the bundle or from the
   cwd: run the bundled generator with cwd = a dir that has `webgpu`
   installed (scratch: `%TEMP%\empyrean-dawn`).
@@ -122,13 +153,15 @@ groove.ts's DJ part.
 ## Progress log
 
 - [x] Survey + plan
-- [x] Groups (fd27af6)
-- [x] Icons (21070d2)
-- [x] Palette UI (21070d2)
-- [ ] Thumbnails
-- [ ] Stand-ins
-- [ ] Merges
-- [ ] Docs, spec, push, Preview
+- [x] Groups
+- [x] Icons
+- [x] Palette UI
+- [x] Stand-ins (runtime)
+- [x] Thumbnails
+- [x] Merges (format 7)
+- [x] Gate READMEs
+- [ ] Site UI for the stand-ins (written, waiting on the web-dist bump)
+- [ ] Site README, plan line, Preview check
 
 ## Open questions for the user
 
@@ -138,5 +171,7 @@ groove.ts's DJ part.
 
 - Don't hide any node kind in any host.
 - Don't edit `groove.ts`'s DJ deck or the site's DJ fieldset (Agent K).
+- Don't run `EMPYREAN_UPDATE_PRESETS=1` to bump preset formats (see above).
+- Don't build the wasm without a private build dir while other agents work.
 - Don't bump the site's `bun.lock` by hand (the bot does).
 - Don't use `title=` for descriptions.
