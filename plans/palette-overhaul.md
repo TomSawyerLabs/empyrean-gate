@@ -166,15 +166,13 @@ groove.ts's DJ part.
 
 ## Open questions for the user
 
-1. Calls I made inside "do 4": Radial gradient folded into Rainbow (Turns 0)
-   instead of into Gradient (they differ: colour bands vs a grey ramp); the
-   Randomness group went once Random was one kind. Keep? (Recommend yes.)
-2. Simulated visitors start **off** on the site, so presets that render
-   effects look as on a quiet night. On by default instead? (Recommend off.)
-3. Format 7: the released gate (v0.15.0) refuses patches saved by the
-   playground now, until the next release. Cut one when convenient?
-4. The shared cargo build dir race (gate ISSUES.md): fix per workspace, or
-   keep the workaround?
+Answered 2026-10-19 (Cameron): keep the Rainbow fold and the dropped
+Randomness group; visitors stay off by default; cut a release ("sure.
+patch?" — version level asked back); fix the build race (done:
+`crates/.cargo/config.toml` gives the workspace its own build-dir).
+
+1. Release version: v0.16.0 recommended (format 7 and new kinds), or
+   v0.15.1 as asked?
 
 Cosmetic, not done: in the site's narrower palette, a few long names break
 mid-word in the thumbnail grid ("Interferen-ce").
@@ -184,6 +182,6 @@ mid-word in the thumbnail grid ("Interferen-ce").
 - Don't hide any node kind in any host.
 - Don't edit `groove.ts`'s DJ deck or the site's DJ fieldset (Agent K).
 - Don't run `EMPYREAN_UPDATE_PRESETS=1` to bump preset formats (see above).
-- Don't build the wasm without a private build dir while other agents work.
+- (Fixed) The wasm build no longer shares a cargo build-dir across worktrees.
 - Don't bump the site's `bun.lock` by hand (the bot does).
 - Don't use `title=` for descriptions.
