@@ -18,6 +18,14 @@
 //! Overlays are added with Blend (add), effects first, as the epilogue did.
 //! One difference remains: an Output `master` other than 1 now also scales
 //! them (the epilogue added them after it).
+//!
+//! **LED data into Transform** (plans/field-domains.md) is a repair every
+//! document gets, not a format change, so a gate that predates it still opens
+//! what the newer one saves. Before field domains, LED data (Full random
+//! field, a Code node reading `c.spoke` or `c.i`) could be wired into an
+//! input that reads its source elsewhere (Transform's `in`), which then
+//! didn't move it. `validate` refuses that now, so a Resample (Nearest) goes
+//! in between: the patch stays valid, and Transform moves the LED cells too.
 
 use crate::{Edge, NodeInst, PATCH_FORMAT, PatchDoc, PortRef};
 use std::collections::BTreeMap;
@@ -32,19 +40,54 @@ pub fn migrate(doc: &mut PatchDoc) -> bool {
             changed |= migrate(sub);
         }
     }
-    if doc.format >= PATCH_FORMAT {
+    if doc.format > PATCH_FORMAT {
         return changed;
     }
-    if doc.format <= 1 {
-        v1_to_v2(doc);
+    if doc.format < PATCH_FORMAT {
+        if doc.format <= 1 {
+            v1_to_v2(doc);
+        }
+        if doc.format <= 2 {
+            v2_to_v3(doc);
+        }
+        // 3 → 4 adds fields (`sub`, Clip nodes), 4 → 5 `code`, 5 → 6 `text`:
+        // additions only, nothing that exists changes.
+        doc.format = PATCH_FORMAT;
+        changed = true;
     }
-    if doc.format <= 2 {
-        v2_to_v3(doc);
+    changed |= resample_led_sampling(doc);
+    changed
+}
+
+/// Put a Resample (Nearest) between LED data and each input that reads it
+/// elsewhere (see the module notes). One wire at a time, judged afresh: once
+/// a Transform is fed the plane, what follows it is plane too.
+fn resample_led_sampling(doc: &mut PatchDoc) -> bool {
+    let mut changed = false;
+    loop {
+        let led = crate::validate::led_nodes(doc);
+        let at = |id: &str| doc.nodes.iter().position(|n| n.id == id);
+        let wrong = doc.edges.iter().find(|e| {
+            let (Some(f), Some(t)) = (at(&e.from.node), at(&e.to.node)) else {
+                return false;
+            };
+            led[f]
+                && crate::validate::carries_field(&doc.nodes[f], &e.from.port)
+                && crate::validate::sampled_input(&doc.nodes[t], &e.to.port)
+        });
+        let Some(e) = wrong.cloned() else {
+            return changed;
+        };
+        let (Some(f), Some(t)) = (at(&e.from.node), at(&e.to.node)) else {
+            return changed;
+        };
+        let (a, b) = (doc.nodes[f].pos, doc.nodes[t].pos);
+        let mid = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+        let rs = add_node(doc, "resample", crate::registry::RESAMPLE_KIND, mid, &[("mode", 0.0)]);
+        wire(doc, port(&rs, "out"), e.to.clone());
+        wire(doc, e.from.clone(), port(&rs, "in"));
+        changed = true;
     }
-    // 3 → 4 adds fields (`sub`, Clip nodes), 4 → 5 `code`, 5 → 6 `text`:
-    // additions only, nothing that exists changes.
-    doc.format = PATCH_FORMAT;
-    true
 }
 
 /// **2 → 3**: a Still image node used to show whatever the host's live
@@ -309,5 +352,40 @@ mod tests {
             assert_eq!(p.format, PATCH_FORMAT, "{} not migrated", p.name);
             compile(p).unwrap_or_else(|e| panic!("{}: {e}", p.name));
         }
+    }
+
+    /// A current-format patch saved before field domains, with TV snow fed
+    /// through two Transforms: one Resample goes in before the first, the
+    /// second needs none (the first now hands on the plane), and it validates.
+    #[test]
+    fn led_data_into_transform_gets_a_resample() {
+        let mut doc: PatchDoc = serde_json::from_value(serde_json::json!({
+            "format": PATCH_FORMAT,
+            "nodes": [
+                { "id": "snow", "kind": "random_field", "pos": [0, 0] },
+                { "id": "tint", "kind": "colorize", "pos": [200, 0] },
+                { "id": "spin", "kind": "transform", "pos": [400, 100] },
+                { "id": "zoom", "kind": "transform", "pos": [600, 100] },
+                { "id": "o", "kind": "output", "pos": [800, 100] }
+            ],
+            "edges": [
+                { "from": { "node": "snow", "port": "out" }, "to": { "node": "tint", "port": "in" } },
+                { "from": { "node": "tint", "port": "out" }, "to": { "node": "spin", "port": "in" } },
+                { "from": { "node": "spin", "port": "out" }, "to": { "node": "zoom", "port": "in" } },
+                { "from": { "node": "zoom", "port": "out" }, "to": { "node": "o", "port": "in" } }
+            ]
+        }))
+        .unwrap();
+        assert!(crate::validate::validate(&doc).is_err(), "refused as saved");
+        assert!(migrate(&mut doc));
+        crate::validate::validate(&doc).expect("valid once repaired");
+        let rs: Vec<&NodeInst> = doc.nodes.iter().filter(|n| n.kind == crate::registry::RESAMPLE_KIND).collect();
+        assert_eq!(rs.len(), 1);
+        assert_eq!(rs[0].pos, [300.0, 50.0], "between the two it joins");
+        assert_eq!(upstream(&doc, &rs[0].id, "in"), Some(port("tint", "out")));
+        assert_eq!(upstream(&doc, "spin", "in"), Some(port(&rs[0].id, "out")));
+        assert_eq!(doc.format, PATCH_FORMAT, "a repair, not a format change");
+        // Idempotent.
+        assert!(!migrate(&mut doc));
     }
 }

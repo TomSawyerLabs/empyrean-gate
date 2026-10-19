@@ -363,12 +363,7 @@ pub fn validate(doc: &PatchDoc) -> Result<Validated, Vec<PatchError>> {
         errors.push(PatchError::Cycle { nodes: on_cycle });
     }
 
-    // Domains need a dependency order, so only an acyclic graph is judged.
-    let led = if order.len() == doc.nodes.len() {
-        led_nodes(doc, &order)
-    } else {
-        vec![false; doc.nodes.len()]
-    };
+    let led = led_nodes(doc);
     for e in &doc.edges {
         let (Some(&fi), Some(&ti)) = (index.get(e.from.node.as_str()), index.get(e.to.node.as_str())) else {
             continue;
@@ -389,32 +384,61 @@ pub fn validate(doc: &PatchDoc) -> Result<Validated, Vec<PatchError>> {
     Ok(Validated { order, output, led })
 }
 
-/// Which nodes hand on LED data (indexed like `doc.nodes`; `order` is a
-/// dependency order, every node after the ones feeding it). A node does when
+/// Which nodes hand on LED data (indexed like `doc.nodes`). A node does when
 /// it declares an LED output (Full random field, a Code node's `led_*`
 /// port), when it is a GPU Code node that keys on the physical LED (`c.spoke`
-/// or `c.i`), or when a field wire brings it LED data. Resample never does:
-/// turning LED data into the plane is its whole job. Only field wires carry
-/// the domain on, so a node that measures LED data into a Scalar hands on a
-/// plain Scalar. A node's field outputs all share its domain.
-pub fn led_nodes(doc: &PatchDoc, order: &[usize]) -> Vec<bool> {
+/// or `c.i`), when it is a Sub-patch whose inner Output is fed LED data, or
+/// when a field wire brings it LED data. Resample never does: turning LED
+/// data into the plane is its whole job. Only field wires carry the domain
+/// on, so a node that measures LED data into a Scalar hands on a plain
+/// Scalar. A node's field outputs all share its domain. Solved to a fixed
+/// point, so it needs no ordering and ends on a graph with a cycle too (which
+/// `validate` refuses anyway); the editor mirrors it (patch-web
+/// `editor/domains.ts`).
+pub fn led_nodes(doc: &PatchDoc) -> Vec<bool> {
     let index: HashMap<&str, usize> = doc.nodes.iter().enumerate().map(|(i, n)| (n.id.as_str(), i)).collect();
-    let mut led = vec![false; doc.nodes.len()];
-    for &i in order {
-        let n = &doc.nodes[i];
-        if n.kind == registry::RESAMPLE_KIND {
-            continue;
+    let mut led: Vec<bool> = doc
+        .nodes
+        .iter()
+        .map(|n| {
+            n.kind != registry::RESAMPLE_KIND
+                && (declares_led(n) || n.code().is_some_and(|d| d.reads_leds()) || subpatch_led(n))
+        })
+        .collect();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for e in &doc.edges {
+            let (Some(&f), Some(&t)) = (index.get(e.from.node.as_str()), index.get(e.to.node.as_str())) else {
+                continue;
+            };
+            if led[f]
+                && !led[t]
+                && doc.nodes[t].kind != registry::RESAMPLE_KIND
+                && carries_field(&doc.nodes[f], &e.from.port)
+            {
+                led[t] = true;
+                changed = true;
+            }
         }
-        led[i] = declares_led(n)
-            || n.code().is_some_and(|d| d.reads_leds())
-            || doc.edges.iter().any(|e| {
-                e.to.node == n.id
-                    && index
-                        .get(e.from.node.as_str())
-                        .is_some_and(|&f| led[f] && carries_field(&doc.nodes[f], &e.from.port))
-            });
     }
     led
+}
+
+/// A Sub-patch hands on LED data when what feeds its inner Output does. Its
+/// other inputs are knobs, which carry none.
+fn subpatch_led(node: &NodeInst) -> bool {
+    let Some(inner) = node.sub.as_deref() else {
+        return false;
+    };
+    let Some(output) = inner.nodes.iter().find(|n| n.kind == "output") else {
+        return false;
+    };
+    let Some(feed) = inner.edges.iter().find(|e| e.to.node == output.id && e.to.port == "in") else {
+        return false;
+    };
+    let led = led_nodes(inner);
+    inner.nodes.iter().position(|n| n.id == feed.from.node).is_some_and(|i| led[i])
 }
 
 /// The shape a node's output really carries: its declared shape, moved onto
@@ -440,7 +464,7 @@ fn declares_led(node: &NodeInst) -> bool {
     }
 }
 
-fn carries_field(node: &NodeInst, port: &str) -> bool {
+pub(crate) fn carries_field(node: &NodeInst, port: &str) -> bool {
     node.output_shape(port).is_some_and(Shape::is_field)
 }
 

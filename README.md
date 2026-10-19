@@ -241,13 +241,18 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   generators (including Coordinate, Feedback, Perlin noise with 1-8
   harmonics in Smooth, Billowy or Ridged styles, and Full random field:
   per-LED, per-spoke or per-ring static), field ops (Field math,
-  Brightness of, Color adjust, Palette, Transform, Colorize, Blend), inputs
+  Brightness of, Color adjust, Palette, Transform, Resample, Colorize, Blend), inputs
   (audio features, beats, touch, IMU, PRO DJ LINK, video, still images and
   Clips: short loops stored in the patch as a sprite sheet) and control-rate
   tools (Time, LFO, Math, Map range, Mix, Clamp, Smooth, Envelope, Random,
   the noise sources Full random, Random walk and Smooth noise, and
   the event tools Counter, Toggle, Threshold, Delay, Merge, Step sequencer)
-  into a typed dataflow whose sink is the array. A saved patch or a preset can
+  into a typed dataflow whose sink is the array. Fields come in two domains:
+  the plane (defined at every position, so Transform can move them) and the
+  LEDs (defined only at the physical LEDs, like Full random field, drawn as a
+  dotted wire); LED data can't go where it would be read between the LEDs
+  (Transform's input) until Resample turns it into the plane. Design notes:
+  `plans/field-domains.md`. A saved patch or a preset can
   be dropped into another as a **Sub-patch** node whose inputs are its exposed
   knobs. It arrives *linked*: it follows its source, so saving that patch
   updates every patch using it, until **Clone for this project** makes it
@@ -257,7 +262,7 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   offers the clone or a copy instead. **📁 Patches** browses the built-ins
   and your library as a tree (patches unfold to their Sub-patches), by topic
   (Sound, DJ, Touch…, from the nodes a patch uses) or as one list. A **Code** node is written rather than wired up: declare its inputs
-  and outputs (scalars, events, grey or colour fields) and type a WGSL body
+  and outputs (scalars, events, grey or colour fields or LEDs) and type a WGSL body
   that sets the outputs by name. With a field output it is pasted into the
   shader (scalar inputs are knobs, field inputs can be resampled with
   `name_at(ctx)`); with scalar/event ports only it runs on the CPU every

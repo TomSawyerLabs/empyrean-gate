@@ -106,6 +106,17 @@ None open. (Answered 2026-10-18; see Decisions.)
   Rewriting them on a position-derived LED cell gives the same look at the
   LEDs and makes them move with Transform.
 - `Shape::Pixels` is reserved and used by no port. Left alone.
+- **Saved patches could already wire LED data into Transform** (Full random
+  field shipped earlier on 2026-10-18; Code nodes could read `c.spoke`), and
+  the gate won't run a patch that fails validation. `migrate` now puts a
+  Resample (Nearest) in between, on every document, without a format bump:
+  a bump would rewrite every preset, collide with Agent L's planned format
+  migration, and make new files unreadable on gates that haven't updated.
+  Look change: Transform now moves those LED cells (it used to leave them).
+- `led_nodes` is a fixed point (no ordering), so `migrate` can use it before
+  anything is validated; it knows Sub-patches (inner Output's feed).
+- The Bash tool collapses `\` inside heredocs: Python edit scripts that
+  contain backslashes go in a file (Write tool), not a heredoc.
 
 ## Plan / steps
 
@@ -124,10 +135,11 @@ None open. (Answered 2026-10-18; see Decisions.)
    class and CSS, drag-time refusal, Code panel shape choices, agent guide.
    Tests. Done: `editor/domains.ts` (+ tests), dotted LED wires and square
    ports, drag-time refusal, spec `patch-led-data`.
-7. Docs: shape descriptions, agent guide, gate README, site README/plan.
-   ← current (shape descriptions and agent guide done)
+7. Docs: shape descriptions, agent guide, gate README (done), site
+   README/plan (after merge). Plus the `migrate` repair above.
 8. Checks (cargo test, clippy, bun test, typecheck, behaviour + browser
    shader specs), merge to gate master, web-dist bump, Preview check.
+   ← current
 9. Then: sub-patch inlets/outlets.
 
 ## Future work (not this round)
