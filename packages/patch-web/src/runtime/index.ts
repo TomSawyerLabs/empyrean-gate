@@ -5,7 +5,7 @@
 import { pushScalar, type MiniScalar, type MiniSource } from "../editor/minis-source";
 import type { PatchDoc } from "../types";
 import { loadPatchCore, type PatchCore, type PatchSim } from "./core";
-import { GateGpu, requestGateDevice, ShaderError, WebGpuUnavailable, type Geometry } from "./gpu";
+import { GateGpu, requestGateDevice, ShaderError, WebGpuUnavailable, type Geometry, type GridPasses } from "./gpu";
 import {
   MediaTexture,
   startMicrophone,
@@ -275,7 +275,12 @@ export class PatchRuntime implements MiniSource {
       this.pending = true;
       this.pendingGen = gen;
       try {
-        await this.gpu.setProgram(sim.wgsl(), sim.previewWgsl(), sim.previewNodes().length);
+        await this.gpu.setProgram(
+          sim.wgsl(),
+          sim.previewWgsl(),
+          sim.previewNodes().length,
+          JSON.parse(sim.gridPasses()) as GridPasses,
+        );
       } catch (e) {
         if (this.pendingGen === gen) this.pending = false;
         if (gen !== this.generation) return;

@@ -112,6 +112,28 @@ export function shaderCorpus(core: PatchCore): CorpusEntry[] {
       }
     }
   }
+  // Rendered textures in a chain into the Output, so `main` reads a grid.
+  entries.push({
+    label: "rendered textures chained",
+    doc: doc(
+      "rendered textures",
+      [
+        node("p", "plasma"),
+        node("r", "render_texture"),
+        node("b", "texture_blur"),
+        node("t", "texture_trails"),
+        node("s", "texture_sample"),
+        node("o", "output"),
+      ],
+      [
+        { from: { node: "p", port: "out" }, to: { node: "r", port: "in" } },
+        { from: { node: "r", port: "tex" }, to: { node: "b", port: "tex" } },
+        { from: { node: "b", port: "tex" }, to: { node: "t", port: "tex" } },
+        { from: { node: "t", port: "tex" }, to: { node: "s", port: "tex" } },
+        { from: { node: "s", port: "out" }, to: { node: "o", port: "in" } },
+      ],
+    ),
+  });
   for (const p of core.presets) entries.push({ label: `preset "${p.name}"`, doc: p });
   entries.push(...snippetDocs(core.limits.patchFormat, into.name));
   return entries;

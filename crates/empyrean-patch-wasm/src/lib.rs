@@ -210,6 +210,21 @@ impl PatchSim {
         self.sim.program().preview_wgsl.clone()
     }
 
+    /// The grid passes to dispatch, in order, before `main` each frame, and
+    /// the bytes of the grid buffer (binding 11) they use:
+    /// `{"bytes": n, "passes": [{"entry": name, "cells": n}, ...]}`. No
+    /// passes and 0 bytes for a patch that renders no texture.
+    #[wasm_bindgen(js_name = gridPasses)]
+    pub fn grid_passes(&self) -> String {
+        let prog = self.sim.program();
+        let passes: Vec<serde_json::Value> = prog
+            .grid_passes
+            .iter()
+            .map(|p| json!({ "entry": p.entry, "cells": p.cells }))
+            .collect();
+        json!({ "bytes": prog.grid_bytes, "passes": passes }).to_string()
+    }
+
     /// The key of each preview cell, in cell order: a node id, or
     /// `"<id>:<port>"` for a Code node's extra field outputs (the mini is
     /// `node:<key>`).

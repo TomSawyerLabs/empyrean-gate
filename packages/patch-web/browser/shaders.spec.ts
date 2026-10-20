@@ -23,6 +23,8 @@ interface Shader {
   code: string;
   /** Which corpus entries generate it, `label (main)` / `label (thumbnails)`. */
   labels: string[];
+  /** Its entry points: the grid passes (rendered textures), then `main`. */
+  entries: string[];
 }
 
 let page: Page;
@@ -41,12 +43,16 @@ test.beforeAll(async ({ browser }) => {
       refused.push(`${label}: ${e instanceof Error ? e.message : String(e)}`);
       continue;
     }
+    // Both modules carry the grid passes (the gate's thumbnail bus runs
+    // them with its own buffers).
+    const grids = (JSON.parse(sim.gridPasses()) as { passes: { entry: string }[] }).passes;
+    const entries = [...grids.map((p) => p.entry), "main"];
     for (const [code, which] of [
       [sim.wgsl(), "main"],
       [sim.previewWgsl(), "thumbnails"],
     ] as const) {
       if (!code) continue;
-      const shader = shaders.get(code) ?? { code, labels: [] };
+      const shader = shaders.get(code) ?? { code, labels: [], entries };
       shader.labels.push(`${label} (${which})`);
       shaders.set(code, shader);
     }
@@ -106,23 +112,25 @@ test("every shader builds a pipeline in time", async () => {
   const failures: string[] = [];
   for (const shader of shaders.values()) {
     const result = await page.evaluate(
-      async ([code, budget]) => {
+      async ([code, budget, entries]) => {
         const device = (globalThis as unknown as { device: GPUDevice }).device;
         const module = device.createShaderModule({ code });
         // One Tint refuses is the test above's to report.
         const info = await module.getCompilationInfo();
         if (info.messages.some((m) => m.type === "error")) return { error: null };
-        const built = device
-          .createComputePipelineAsync({ layout: "auto", compute: { module, entryPoint: "main" } })
-          .then(
-            () => null,
-            (e: unknown) => String(e),
-          );
+        const built = Promise.all(
+          entries.map((entryPoint) =>
+            device.createComputePipelineAsync({ layout: "auto", compute: { module, entryPoint } }),
+          ),
+        ).then(
+          () => null,
+          (e: unknown) => String(e),
+        );
         const late = new Promise<"late">((r) => setTimeout(() => r("late"), budget));
         const outcome = await Promise.race([built, late]);
         return outcome === "late" ? { late: true, error: null } : { late: false, error: outcome };
       },
-      [shader.code, BUILD_BUDGET_MS] as const,
+      [shader.code, BUILD_BUDGET_MS, shader.entries] as const,
     );
     if (result.late) {
       // SwiftShader is still compiling it, and every build after it would
