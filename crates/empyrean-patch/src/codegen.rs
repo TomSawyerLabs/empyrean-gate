@@ -129,10 +129,12 @@ impl GridAlloc {
 }
 
 /// The GRID regions a node's rendered texture takes; 0 for anything else.
+/// A Code node that renders a Texture keeps its last frame, as Trails does.
 fn grid_regions(node: &NodeInst) -> u32 {
     match node.kind.as_str() {
         "render_texture" => 1,
         "texture_blur" | "texture_trails" => 2,
+        _ if node.code().is_some_and(|d| d.texture_output().is_some()) => 2,
         _ => 0,
     }
 }
@@ -743,8 +745,11 @@ impl Gen<'_> {
     fn code_fn(&self, code: &mut String, i: usize) -> Result<CodeLines, String> {
         let node = &self.doc.nodes[i];
         let def = node.code().ok_or("Code node without code")?;
-        let ty = |s: Shape| if s.is_color_field() { "vec4f" } else { "f32" };
-        let zero = |s: Shape| if s.is_color_field() { "vec4f(0.0)" } else { "0.0" };
+        // A Texture output is one cell's RGBA.
+        let rgba = |s: Shape| s.is_color_field() || s == Shape::Texture;
+        let ty = |s: Shape| if rgba(s) { "vec4f" } else { "f32" };
+        let zero = |s: Shape| if rgba(s) { "vec4f(0.0)" } else { "0.0" };
+        let texture = def.texture_output().map(|p| p.name.as_str());
         let fields: Vec<&str> = def
             .inputs
             .iter()
@@ -810,6 +815,27 @@ impl Gen<'_> {
                 }
             }
         }
+        // A body that renders a Texture reads that texture's last frame:
+        // `<out>_at(uv)` bilinear, `<out>_cell(dx, dy)` a neighbour of the
+        // cell being rendered (set by its grid pass), transparent outside.
+        if texture.is_some() {
+            let g = self.grids.iter().find(|g| g.node == i).ok_or("texture Code node without a grid")?;
+            let (last, res) = (g.second(), g.res);
+            writeln!(
+                code,
+                "var<private> n{i}_k: u32;\n\
+                 fn n{i}_last(uv: vec2f) -> vec4f {{\n    return grid_at({last}u, {res}u, uv);\n}}\n\
+                 fn n{i}_cell(dx: i32, dy: i32) -> vec4f {{\n\
+                 \x20   let x = i32(n{i}_k % {res}u) + dx;\n\
+                 \x20   let y = i32(n{i}_k / {res}u) + dy;\n\
+                 \x20   if x < 0 || y < 0 || x >= {res} || y >= {res} {{\n\
+                 \x20       return vec4f(0.0);\n\
+                 \x20   }}\n\
+                 \x20   return GRID[{last}u + u32(y) * {res}u + u32(x)];\n\
+                 }}"
+            )
+            .unwrap();
+        }
         writeln!(code, "fn n{i}_all(c: Ctx) -> N{i}Out {{").unwrap();
         writeln!(code, "    let _unused = c.rn;").unwrap();
         for p in &def.outputs {
@@ -842,7 +868,7 @@ impl Gen<'_> {
         code.push_str("    {\n");
         let first = code.matches('\n').count() + 1;
         let count = def.body.split('\n').count();
-        code.push_str(&code::rewrite_body(&def.body, i, &fields, &effects, &record));
+        code.push_str(&code::rewrite_body(&def.body, i, &fields, &effects, texture, &record));
         code.push_str("\n    }\n");
         let record = def
             .outputs
@@ -1804,6 +1830,20 @@ impl Gen<'_> {
                     ),
                     format!("    GRID[{last}u + k] = GRID[{base}u + k];", last = g.second()),
                 ],
+                // A Code node's body, once per cell; then this frame becomes
+                // the last, which the body reads as `<out>_at` / `<out>_cell`.
+                "code" => {
+                    let def = self.doc.nodes[i].code().expect("a Code node has code");
+                    let out = &def.texture_output().expect("grid_regions: a texture output").name;
+                    vec![
+                        format!(
+                            "    n{i}_k = k;\n\
+                             \x20   let c = plane_ctx(uv_pos(grid_uv(k, {res}u)));\n\
+                             \x20   grid_put({base}u + k, n{i}_all(c).{out});"
+                        ),
+                        format!("    GRID[{last}u + k] = GRID[{base}u + k];", last = g.second()),
+                    ]
+                }
                 _ => unreachable!("grid_regions names the grid kinds"),
             };
             for (n, body) in bodies.iter().enumerate() {
@@ -2891,6 +2931,64 @@ mod tests {
             assert!(prog.preview_wgsl.contains(&format!("fn {e}(")), "{e}");
         }
         assert!(prog.preview_cells.iter().any(|c| c.node == at("tr")), "Trails gets a thumbnail");
+    }
+
+    /// A Code node that renders a Texture: a Life-like automaton reading its
+    /// own last frame by cell and by uv, seeded from a field and a video
+    /// texture, then blurred and sampled onto the disc. One pass for the
+    /// body, one keeping the last frame; valid WGSL in both modules.
+    #[test]
+    fn a_code_node_renders_a_texture_cell_by_cell() {
+        let mut life = node("life", code::KIND);
+        life.code = Some(Box::new(code_def(
+            &[("seed", Shape::FieldColor), ("cam", Shape::Texture), ("rate", Shape::Scalar)],
+            &[("out", Shape::Texture)],
+            "var n = 0.0;\n\
+             for (var dy = -1; dy <= 1; dy++) {\n\
+             \x20   for (var dx = -1; dx <= 1; dx++) {\n\
+             \x20       if dx != 0 || dy != 0 { n += out_cell(dx, dy).a; }\n\
+             \x20   }\n\
+             }\n\
+             let alive = out_cell(0, 0).a > 0.5;\n\
+             let next = select(f32(n == 3.0), f32(n == 2.0 || n == 3.0), alive);\n\
+             let fresh = max(next, step(0.98, seed.r * rate));\n\
+             let glow = out_at(pos_uv(c.pos * 0.99)).rgb * 0.9 + cam_at(pos_uv(c.pos)).rgb * 0.1;\n\
+             out = vec4f(max(glow, vec3f(fresh)), fresh);",
+        )));
+        let doc = PatchDoc {
+            nodes: vec![
+                node("noise", "noise_field"),
+                node("v", "video_in"),
+                life,
+                node("b", "texture_blur"),
+                node("ts", "texture_sample"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("noise", "out", "life", "seed"),
+                edge("v", "tex", "life", "cam"),
+                edge("life", "out", "b", "tex"),
+                edge("b", "tex", "ts", "tex"),
+                edge("ts", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let prog = compile(&doc).unwrap();
+        validate_wgsl("code texture", &prog.wgsl);
+        validate_wgsl("code texture preview", &prog.preview_wgsl);
+        let at = |id: &str| doc.nodes.iter().position(|n| n.id == id).unwrap();
+        let (l, b) = (at("life"), at("b"));
+        let entries: Vec<&str> = prog.grid_passes.iter().map(|p| p.entry.as_str()).collect();
+        assert_eq!(
+            entries,
+            [format!("grid_{l}_0"), format!("grid_{l}_1"), format!("grid_{b}_0"), format!("grid_{b}_1")]
+        );
+        assert_eq!(prog.grid_passes[0].cells, 128 * 128);
+        // Blur samples the Code node's region; the body reads the second.
+        let region = crate::abi::GRID_REGION_CELLS;
+        assert!(prog.wgsl.contains(&format!("grid_at({region}u, 128u, uv)")), "the last frame");
+        assert!(prog.wgsl.contains("grid_at(0u, 128u, uv"), "Blur reads the Code node's texture");
+        assert!(prog.preview_cells.iter().any(|c| c.node == l), "the Code node gets a thumbnail");
     }
 
     /// A patch of plain fields stays one dispatch.

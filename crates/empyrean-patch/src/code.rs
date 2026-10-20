@@ -41,7 +41,9 @@ pub struct CodePort {
     /// GPU-tier node, which takes no event inputs and has only field outputs).
     /// led_scalar and led_color are GPU-tier too: an output so declared is
     /// LED data whatever the body reads; an input so declared takes the same
-    /// wires as its field twin.
+    /// wires as its field twin. A texture output is GPU-tier and the node's
+    /// only output: the body then runs once per cell of a rendered texture.
+    /// points, effects and texture are inputs a GPU body reads.
     pub shape: Shape,
     /// Scalar inputs only: the knob's lowest value.
     pub min: f32,
@@ -110,9 +112,19 @@ impl CodeDef {
         self.output("out").or_else(|| self.outputs.first())
     }
 
-    /// The tier the ports imply, or why they imply none. Points, Effects,
-    /// Texture and Pixels ports are refused: each needs its own binding
-    /// idiom in the body (a follow-up).
+    /// The Texture this node renders, when its one output is a Texture: then
+    /// its body runs once per cell of that texture (a grid pass) instead of
+    /// once per LED, and may read the texture's last frame.
+    pub fn texture_output(&self) -> Option<&CodePort> {
+        match self.outputs.as_slice() {
+            [p] if p.shape == Shape::Texture => Some(p),
+            _ => None,
+        }
+    }
+
+    /// The tier the ports imply, or why they imply none. Points and Effects
+    /// are inputs only (those streams come from the host); a Texture output
+    /// must be the node's only one.
     pub fn tier(&self) -> Result<Tier, String> {
         if self.outputs.is_empty() {
             return Err("a Code node needs at least one output".into());
@@ -120,10 +132,17 @@ impl CodeDef {
         let field = |s: Shape| s.is_field();
         let control = |s: Shape| matches!(s, Shape::Scalar | Shape::Event);
         let buffer = |s: Shape| matches!(s, Shape::Points | Shape::Effects | Shape::Texture);
+        let texture = self.outputs.iter().any(|p| p.shape == Shape::Texture);
+        if texture && self.outputs.len() > 1 {
+            return Err(
+                "a Code node that makes a Texture makes only that: its body runs once per texture cell, not per LED; split it into two nodes"
+                    .into(),
+            );
+        }
         for p in &self.outputs {
-            if !field(p.shape) && !control(p.shape) {
+            if !field(p.shape) && !control(p.shape) && p.shape != Shape::Texture {
                 return Err(format!(
-                    "output \"{}\": a Code node cannot make {:?} (those streams come from the host); it makes fields, scalars or events",
+                    "output \"{}\": a Code node cannot make {:?} (those streams come from the host); it makes fields, a texture, scalars or events",
                     p.name, p.shape
                 ));
             }
@@ -133,8 +152,8 @@ impl CodeDef {
                 return Err(format!("input \"{}\": {:?} is not an input a Code node can take", p.name, p.shape));
             }
         }
-        if self.outputs.iter().any(|p| field(p.shape)) {
-            for p in &self.outputs {
+        if texture || self.outputs.iter().any(|p| field(p.shape)) {
+            for p in self.outputs.iter().filter(|_| !texture) {
                 if !field(p.shape) {
                     return Err(format!(
                         "output \"{}\": a Code node that makes a field runs on the GPU, where a {:?} output cannot exist; split it into two nodes",
@@ -145,8 +164,9 @@ impl CodeDef {
             for p in &self.inputs {
                 if p.shape == Shape::Event {
                     return Err(format!(
-                        "input \"{}\": events only reach CPU nodes; a Code node that makes a field runs on the GPU",
-                        p.name
+                        "input \"{}\": events only reach CPU nodes; a Code node that makes a {} runs on the GPU",
+                        p.name,
+                        if texture { "texture" } else { "field" }
                     ));
                 }
             }
@@ -166,11 +186,13 @@ impl CodeDef {
 
     /// Whether a GPU body reads field input `name` somewhere else
     /// (`name_at(…)`), which LED data can't support (see
-    /// `validate::led_nodes`). Comments don't count.
+    /// `validate::led_nodes`). A body that renders a Texture reads every
+    /// input between the LEDs, at its cells. Comments don't count.
     pub fn samples(&self, name: &str) -> bool {
         let at = format!("{name}_at");
         matches!(self.tier(), Ok(Tier::Gpu))
-            && tokens(&self.body).iter().any(|t| t.kind == TokKind::Ident && t.text == at)
+            && (self.texture_output().is_some()
+                || tokens(&self.body).iter().any(|t| t.kind == TokKind::Ident && t.text == at))
     }
 
     /// Whether a GPU body keys on the physical LED (`c.spoke` or `c.i`), so
@@ -228,6 +250,26 @@ impl CodeDef {
             }
             Tier::Gpu => {
                 check_gpu_body(self)?;
+                if let Some(out) = self.texture_output() {
+                    if self.reads_leds() {
+                        return Err(
+                            "a Code node that makes a Texture runs once per texture cell, not per LED: `c.spoke` and `c.i` mean nothing there (`c.pos` is the cell's place)"
+                                .into(),
+                        );
+                    }
+                    if let Some(p) = self.inputs.iter().find(|p| p.shape.is_led()) {
+                        return Err(format!(
+                            "input \"{}\" is LED data, defined only at the LEDs, and a texture's cells lie between them: declare it a field and wire it through Resample",
+                            p.name
+                        ));
+                    }
+                    let cell = format!("{}_cell", out.name);
+                    if self.inputs.iter().any(|p| p.name == cell) {
+                        return Err(format!(
+                            "input \"{cell}\": that name is taken by `{cell}(dx, dy)`, which reads the texture's last frame"
+                        ));
+                    }
+                }
                 // LED data has nothing between the LEDs to read.
                 if let Some(p) = self.inputs.iter().find(|p| p.shape.is_led() && self.samples(&p.name)) {
                     return Err(format!(
@@ -333,11 +375,20 @@ fn generated_name(name: &str) -> bool {
 /// The body with every `<field input>_at` identifier replaced by that
 /// node's resampling function `n<node>_in_<field input>`, and every bare
 /// `return;` replaced by `return <record>;` so a body can end early (the
-/// generated function returns its outputs as a record). Comments are copied
-/// through untouched; nothing else in the text changes. WGSL has no string
-/// literals, so identifiers and comments are the only lexical structure
-/// that matters.
-pub fn rewrite_body(body: &str, node: usize, field_inputs: &[&str], effects_inputs: &[&str], record: &str) -> String {
+/// generated function returns its outputs as a record). For a node that
+/// renders a Texture (`texture`, its output's name), `<texture>_at` and
+/// `<texture>_cell` become `n<node>_last` and `n<node>_cell`, which read the
+/// texture's last frame. Comments are copied through untouched; nothing
+/// else in the text changes. WGSL has no string literals, so identifiers
+/// and comments are the only lexical structure that matters.
+pub fn rewrite_body(
+    body: &str,
+    node: usize,
+    field_inputs: &[&str],
+    effects_inputs: &[&str],
+    texture: Option<&str>,
+    record: &str,
+) -> String {
     let mut out = String::with_capacity(body.len() + 64);
     let bytes = body.as_bytes();
     let mut i = 0;
@@ -361,7 +412,11 @@ pub fn rewrite_body(body: &str, node: usize, field_inputs: &[&str], effects_inpu
                 out.push_str("return ");
                 out.push_str(record);
             } else {
-                if let Some(base) = ident.strip_suffix("_at").filter(|b| field_inputs.contains(b)) {
+                if texture.is_some_and(|t| ident.strip_suffix("_at") == Some(t)) {
+                    out.push_str(&format!("n{node}_last"));
+                } else if texture.is_some_and(|t| ident.strip_suffix("_cell") == Some(t)) {
+                    out.push_str(&format!("n{node}_cell"));
+                } else if let Some(base) = ident.strip_suffix("_at").filter(|b| field_inputs.contains(b)) {
                     out.push_str(&format!("n{node}_in_{base}"));
                 } else if let Some(base) = ident.strip_suffix("_on").filter(|b| effects_inputs.contains(b)) {
                     out.push_str(&format!("n{node}_on_{base}"));
@@ -508,7 +563,7 @@ pub fn check_gpu_body(def: &CodeDef) -> Result<(), String> {
                         return Err(at(t, "return a value: assign the output by name instead (`out = …;`), then `return;` if the body must stop early"));
                     }
                 }
-                "OUT" | "P" | "PREVIEW" | "finish" | "main" => {
+                "OUT" | "P" | "PREVIEW" | "GRID" | "grid_put" | "finish" | "main" => {
                     // `P` as a struct member (`x.P`) is someone's own name.
                     if !prev.is_some_and(|p| p.text == ".") {
                         return Err(at(t, format!("`{}` belongs to the engine; a body reads its inputs and sets its outputs", t.text)));
@@ -870,28 +925,65 @@ mod tests {
                 outputs: vec![port("b", shape)],
                 body: String::new(),
             };
-            assert!(out.check().is_err(), "{shape:?} output");
+            // A Texture is the one buffer a body can make (a grid pass).
+            assert_eq!(out.check().is_ok(), shape == Shape::Texture, "{shape:?} output");
         }
+    }
+
+    #[test]
+    fn a_texture_output_is_the_only_output_and_reads_between_the_leds() {
+        let tex = |body: &str, inputs: Vec<CodePort>, outputs: Vec<CodePort>| CodeDef {
+            inputs,
+            outputs,
+            body: body.into(),
+        };
+        let one = || vec![port("out", Shape::Texture)];
+        let ok = tex("out = vec4f(out_cell(1, 0).rgb, 1.0) + out_at(pos_uv(c.pos)) * 0.5;", vec![], one());
+        assert_eq!(ok.check().unwrap(), Tier::Gpu);
+        assert_eq!(ok.texture_output().map(|p| p.name.as_str()), Some("out"));
+        // Every field input is read at the cells, between the LEDs.
+        let f = tex("out = img;", vec![port("img", Shape::FieldColor)], one());
+        assert!(f.samples("img"));
+        assert!(tex("", vec![], vec![port("out", Shape::Texture), port("o2", Shape::FieldColor)])
+            .check()
+            .unwrap_err()
+            .contains("only that"));
+        assert!(tex("", vec![port("e", Shape::Event)], one()).check().unwrap_err().contains("events"));
+        assert!(tex("out = vec4f(f32(c.spoke));", vec![], one()).check().unwrap_err().contains("per texture cell"));
+        assert!(tex("out = snow;", vec![port("snow", Shape::LedColor)], one())
+            .check()
+            .unwrap_err()
+            .contains("Resample"));
+        assert!(tex("", vec![port("out_cell", Shape::Scalar)], one()).check().unwrap_err().contains("last frame"));
+        // A body can't reach the textures behind its port.
+        assert!(tex("GRID[0] = vec4f(1.0);", vec![], one()).check().unwrap_err().contains("engine"));
+        assert!(tex("grid_put(0u, vec4f(1.0));", vec![], one()).check().unwrap_err().contains("engine"));
+        // Its own `_at` / `_cell` read the last frame; an input's `_at` its source.
+        assert_eq!(
+            rewrite_body("out = out_at(uv) + out_cell(-1, 0) + img_at(uv); // out_at", 4, &["img"], &[], Some("out"), "R"),
+            "out = n4_last(uv) + n4_cell(-1, 0) + n4_in_img(uv); // out_at"
+        );
+        assert_eq!(rewrite_body("o_cell(0, 0)", 4, &[], &[], None, "R"), "o_cell(0, 0)");
     }
 
     #[test]
     fn body_rewrite_touches_only_resample_calls() {
         let body = "// img_at in a comment stays\nlet s = img_at(ctx_transform(c, 0.1, 1.0, 0.0, 0.0));\n/* mask_at */ out = s * mask_at(c).x + 1e5 + img;";
-        let got = rewrite_body(body, 7, &["img", "mask"], &[], "N7Out(out)");
+        let got = rewrite_body(body, 7, &["img", "mask"], &[], None, "N7Out(out)");
         assert_eq!(
             got,
             "// img_at in a comment stays\nlet s = n7_in_img(ctx_transform(c, 0.1, 1.0, 0.0, 0.0));\n/* mask_at */ out = s * n7_in_mask(c).x + 1e5 + img;"
         );
         // A port that is not a field input is left alone.
-        assert_eq!(rewrite_body("x_at(c)", 1, &["img"], &[], "R"), "x_at(c)");
+        assert_eq!(rewrite_body("x_at(c)", 1, &["img"], &[], None, "R"), "x_at(c)");
         // Unicode in a comment survives.
-        assert_eq!(rewrite_body("// héllo\nout = 1.0;", 1, &[], &[], "R"), "// héllo\nout = 1.0;");
+        assert_eq!(rewrite_body("// héllo\nout = 1.0;", 1, &[], &[], None, "R"), "// héllo\nout = 1.0;");
         // An Effects input's `_on` form.
-        assert_eq!(rewrite_body("if fx_on(e) { let E = fx_at(e); }", 2, &["fx"], &["fx"], "R"), "if n2_on_fx(e) { let E = n2_in_fx(e); }");
+        assert_eq!(rewrite_body("if fx_on(e) { let E = fx_at(e); }", 2, &["fx"], &["fx"], None, "R"), "if n2_on_fx(e) { let E = n2_in_fx(e); }");
         // A bare return becomes a return of the record; `return x;` is left
         // for the compiler to refuse; a `returned` identifier is untouched.
         assert_eq!(
-            rewrite_body("if a { return; }\nreturn ;\nreturn x;\nlet returned = 1.0;", 3, &[], &[], "N3Out(out)"),
+            rewrite_body("if a { return; }\nreturn ;\nreturn x;\nlet returned = 1.0;", 3, &[], &[], None, "N3Out(out)"),
             "if a { return N3Out(out); }\nreturn N3Out(out) ;\nreturn x;\nlet returned = 1.0;"
         );
     }

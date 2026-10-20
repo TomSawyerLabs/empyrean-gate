@@ -14,6 +14,7 @@ import { MiniMeter, MiniRing } from "./minis";
 import {
   CODE_INPUT_SHAPES,
   CODE_OUTPUT_SHAPES,
+  codeTextureOutput,
   codeTier,
   isFieldShape,
   isPortName,
@@ -520,7 +521,7 @@ export function CodePanel({
       )}
       <details className="code-ref">
         <summary>What the body can use</summary>
-        <CodeRefNotes tier={tier} />
+        <CodeRefNotes tier={tier} texture={codeTextureOutput(def)?.name} />
       </details>
     </div>
   );

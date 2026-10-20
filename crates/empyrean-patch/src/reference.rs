@@ -66,11 +66,12 @@ pub fn code_reference_json() -> serde_json::Value {
     serde_json::to_value(reference()).expect("reference serializes")
 }
 
-/// Documented, but not for a body: the entry points and the output writer.
-const INTERNAL_FNS: &[&str] = &["finish", "main"];
+/// Documented, but not for a body: the entry points, the output writer and
+/// the rendered textures' plumbing (a body reads a texture through its port).
+const INTERNAL_FNS: &[&str] = &["finish", "main", "grid_uv", "grid_put", "grid_texel", "grid_at"];
 /// Bindings a body has no business with: the output buffer, the parameter
-/// slab (knobs arrive by name) and the preview flag.
-const INTERNAL_GLOBALS: &[&str] = &["OUT", "P", "PREVIEW"];
+/// slab (knobs arrive by name), the preview flag and the rendered textures.
+const INTERNAL_GLOBALS: &[&str] = &["OUT", "P", "PREVIEW", "GRID"];
 
 fn ident_at(s: &str) -> &str {
     let n = s

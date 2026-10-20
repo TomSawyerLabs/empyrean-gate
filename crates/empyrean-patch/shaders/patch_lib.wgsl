@@ -584,8 +584,15 @@ fn grid_uv(k: u32, res: u32) -> vec2f {
     return (vec2f(f32(k % res), f32(k / res)) + 0.5) / f32(res);
 }
 
+/// The position (`c.pos`'s frame) of texture coordinate `uv`.
 fn uv_pos(uv: vec2f) -> vec2f {
     return vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+}
+
+/// The texture coordinate (0..1, y down; what a Texture's `_at` takes) of a
+/// position: the disc's square spans the texture.
+fn pos_uv(pos: vec2f) -> vec2f {
+    return vec2f(0.5 + pos.x * 0.5, 0.5 - pos.y * 0.5);
 }
 
 fn grid_put(cell: u32, v: vec4f) {

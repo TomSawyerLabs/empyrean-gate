@@ -496,12 +496,13 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
     .map((p) => (data.led ? { ...p, shape: onLeds(p.shape) } : p));
   const primary = outs.find((p) => p.name === "out") ?? (outs.length === 1 ? outs[0] : undefined);
   const showRing = live && primary !== undefined && RING_SHAPES.includes(primary.shape);
-  // A Code node thumbnails every field output: the principal one as the
-  // node's own cell, the others by port (`node:<id>:<port>`).
+  // A Code node thumbnails every field output, or the texture it renders:
+  // the principal one as the node's own cell, the others by port
+  // (`node:<id>:<port>`).
   const rings: { mini: string; label: string }[] =
     live && node.kind === CODE_KIND
       ? outs
-          .filter((p) => isFieldShape(p.shape))
+          .filter((p) => isFieldShape(p.shape) || p.shape === "texture")
           .map((p) => ({
             mini: p.name === primary?.name ? `node:${data.mini}` : `node:${data.mini}:${p.name}`,
             label: p.name,

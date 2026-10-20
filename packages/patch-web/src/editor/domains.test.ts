@@ -127,4 +127,13 @@ describe("sampled inputs", () => {
     // A CPU-tier body has no LEDs to key on.
     expect(codeReadsLeds(codeDef([], [["out", "scalar"]], "out = c.i;"))).toBe(false);
   });
+
+  test("a body that renders a texture reads every field input between the LEDs", () => {
+    const tex = codeDef([["img", "field_color"]], [["out", "texture"]], "out = img;");
+    expect(codeSamples(tex, "img")).toBe(true);
+    // Its one output; with another beside it the core refuses the node.
+    expect(codeSamples(codeDef([["img", "field_color"]], [["out", "texture"], ["o2", "field_color"]], "out = img;"), "img")).toBe(
+      false,
+    );
+  });
 });

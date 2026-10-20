@@ -11,6 +11,7 @@ import {
   PATCH_OUT_KIND,
   SUBPATCH_KIND,
   boundaryShape,
+  codeTextureOutput,
   codeTier,
   isFieldShape,
   isLedShape,
@@ -34,9 +35,11 @@ function code(body: string): string {
 }
 
 /** Whether a GPU Code body reads field input `name` somewhere else
- * (`name_at(…)`): crate `CodeDef::samples`. */
+ * (`name_at(…)`), or renders a texture, whose cells lie between the LEDs:
+ * crate `CodeDef::samples`. */
 export function codeSamples(def: CodeDef, name: string): boolean {
   if (codeTier(def) !== "gpu") return false;
+  if (codeTextureOutput(def)) return true;
   return new RegExp(`(?<![A-Za-z0-9_])${name}_at(?![A-Za-z0-9_])`).test(code(def.body));
 }
 

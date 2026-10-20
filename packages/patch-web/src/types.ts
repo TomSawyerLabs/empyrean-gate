@@ -327,7 +327,8 @@ export const CODE_INPUT_SHAPES: readonly PatchShape[] = [
   "effects",
   "texture",
 ];
-/** Shapes a Code node's outputs may have: what a body can make. */
+/** Shapes a Code node's outputs may have: what a body can make. A texture
+ * output is the node's only one (its body runs once per texture cell). */
 export const CODE_OUTPUT_SHAPES: readonly PatchShape[] = [
   "scalar",
   "event",
@@ -335,6 +336,7 @@ export const CODE_OUTPUT_SHAPES: readonly PatchShape[] = [
   "field_color",
   "led_scalar",
   "led_color",
+  "texture",
 ];
 /** @deprecated use CODE_INPUT_SHAPES / CODE_OUTPUT_SHAPES */
 export const CODE_SHAPES = CODE_OUTPUT_SHAPES;
@@ -346,21 +348,31 @@ export const MAX_CODE_PORTS = 16;
 
 /** Where a Code node runs, by its ports — mirrors `CodeDef::tier` in Rust:
  * `"cpu"` when every port is Scalar/Event, `"gpu"` when every output is a
- * field and no input is an Event, otherwise `null` (the core refuses it). */
+ * field (or the one output is a texture) and no input is an Event,
+ * otherwise `null` (the core refuses it). */
 export function codeTier(def: CodeDef): "cpu" | "gpu" | null {
   const field = isFieldShape;
   const control = (s: PatchShape) => s === "scalar" || s === "event";
   const buffer = (s: PatchShape) => s === "points" || s === "effects" || s === "texture";
   if (def.outputs.length === 0) return null;
-  for (const p of def.outputs) if (!field(p.shape) && !control(p.shape)) return null;
+  const texture = def.outputs.some((p) => p.shape === "texture");
+  if (texture && def.outputs.length > 1) return null;
+  for (const p of def.outputs) if (!field(p.shape) && !control(p.shape) && p.shape !== "texture") return null;
   for (const p of def.inputs) if (!field(p.shape) && !control(p.shape) && !buffer(p.shape)) return null;
-  if (def.outputs.some((p) => field(p.shape))) {
-    if (def.outputs.some((p) => !field(p.shape))) return null;
+  if (texture || def.outputs.some((p) => field(p.shape))) {
+    if (!texture && def.outputs.some((p) => !field(p.shape))) return null;
     if (def.inputs.some((p) => p.shape === "event")) return null;
     return "gpu";
   }
   if (def.inputs.some((p) => field(p.shape) || buffer(p.shape))) return null;
   return "cpu";
+}
+
+/** The texture a Code node renders, when its one output is a texture (crate
+ * `CodeDef::texture_output`): its body then runs once per texture cell. */
+export function codeTextureOutput(def: CodeDef): CodePort | undefined {
+  const [only, ...rest] = def.outputs;
+  return only?.shape === "texture" && rest.length === 0 ? only : undefined;
 }
 
 /** A Code node's input ports (every declared input). */
