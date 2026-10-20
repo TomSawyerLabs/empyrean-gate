@@ -503,6 +503,15 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   the status HUD tells you it's actually transmitting.
   Multicast and controller unicast are exclusive destination modes, so a configured
   receiver never gets duplicate sequence-identical packets.
+- **Controllers by IP or by MAC.** Each line of the unicast controller list is either
+  an IP, used exactly as written, or a MAC address. A MAC entry needs no static IP or
+  DHCP reservation: a background resolver finds the box with Advatek discovery,
+  follows it when its lease moves, and remembers it across restarts
+  (`controller-addresses.json` next to the config) so a restart sends at once. Until
+  a MAC is found, that controller's universes are sent multicast, so its spokes still
+  light. **Test → Controllers on the network** shows where every controller's sACN
+  is going and how that address was learned, and a scanned box can be assigned to a
+  controller position with one tap.
 - **A well-behaved sACN source.** The CID (source identity) is generated once and
   persisted, as the spec requires — so restarts and handovers look like the *same*
   source instead of a second one fighting the first in every receiver's merge for
@@ -861,7 +870,14 @@ frame, so "output enabled" never tells you a PixLite is listening. The tab asks 
 directly: a broadcast probe on UDP 49150 for Mk1/Mk2, the multicast "DiscProt"
 exchange on 49151 for Mk3/Mk4, and a passive listen on the E1.31 discovery group for
 *other* sACN sources. Replies are reconciled against the controller list in Settings
-into found / missing / unexpected. Scanning is read-only and safe during a show.
+into found / missing / unexpected — IP entries by address, MAC entries by MAC. Scanning
+is read-only and safe during a show.
+
+**Assigning boxes.** To use MAC addressing, scan, light one controller's spokes with
+the one-controller selection to see which box is which, and pick **Use as controller
+N** on that box's row. The **Where sACN goes** list then shows each controller's
+current address: a fixed IP, found by MAC, last run's address (not re-confirmed yet),
+or not found (sent multicast meanwhile).
 
 **Detecting a rival source.** Separately from that one-shot scan, the backend listens
 continuously for other E1.31 sources on the universes we transmit, and compares their
@@ -899,7 +915,8 @@ nothing on a network full of healthy controllers otherwise. Authorize now adds t
 inbound UDP rule alongside the existing one.
 
 `bun scripts/fake-pixlite.ts` stands up a fake Mk3 responder, so discovery can be
-exercised without hardware.
+exercised without hardware. `bun scripts/addressing-test.ts` drives a running backend
+and a fake through MAC resolution end to end.
 
 ## Live-show guards
 
@@ -921,8 +938,9 @@ its backing square under a tap.
 ## Safety notes
 
 - **sACN output is OFF by default** — enable it in Settings → sACN output. 192
-  universes at 60 fps is real traffic; unicast to controller IPs is preferred over
-  multicast.
+  universes at 60 fps is real traffic; unicast to the controllers is preferred over
+  multicast (the PixLites are 10/100, and a flood of every universe overruns small
+  switches' per-port buffers — see `plans/gate-network.md`).
 - Everything about the geometry (spoke count, pixels, radii, universe layout) is
   config, editable live in Settings and persisted to the user config dir. The
   defaults reproduce the patch the rig is already wired to: 378 px per spoke, 170

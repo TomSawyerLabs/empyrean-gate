@@ -1548,6 +1548,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     };
 
     let mut epoch = u32::MAX;
+    let mut address_epoch = u64::MAX;
     let mut output_cfg_key = String::new();
     // Phases live in SharedState so a handover can transplant them; the engine
     // loop is their only writer.
@@ -1801,9 +1802,16 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             }
         }
         let current_epoch = state.epoch();
-        if current_epoch != epoch {
+        // A MAC-addressed controller found or moved re-plans the sender just like
+        // a config change does (see `addressing`).
+        let current_address_epoch = state.address_epoch.load(Ordering::SeqCst);
+        if current_epoch != epoch || current_address_epoch != address_epoch {
             epoch = current_epoch;
-            let key = serde_json::to_string(&(&cfg.geometry, &cfg.output)).unwrap_or_default();
+            address_epoch = current_address_epoch;
+            let key = format!(
+                "{}#{current_address_epoch}",
+                serde_json::to_string(&(&cfg.geometry, &cfg.output)).unwrap_or_default()
+            );
             if key != output_cfg_key {
                 output_cfg_key = key;
                 engine.ensure_capacity(cfg.geometry.pixel_count() as u32);
@@ -1814,7 +1822,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     ready.ensure_capacity(cfg.geometry.pixel_count() as u32);
                 }
                 if let Some(s) = sacn.as_mut() {
-                    s.configure(&cfg.geometry, &cfg.output);
+                    s.configure(&cfg.geometry, &cfg.output, &state.addresses.read());
                     let mut st = state.status.lock();
                     st.sacn_universes = s.universe_count();
                     st.sacn_error = s.error_message();

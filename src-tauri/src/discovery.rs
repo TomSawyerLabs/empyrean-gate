@@ -29,9 +29,10 @@
 //! not from the parsed body, so a wrong offset degrades the model/firmware text
 //! rather than losing the controller.
 
+use crate::addressing::{ControllerRef, parse_entry, parse_mac};
 use crate::config::AppConfig;
 use serde::Serialize;
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::time::{Duration, Instant};
 
@@ -66,7 +67,7 @@ pub struct FoundController {
     pub outputs: u32,
     pub temperature_c: Option<f32>,
     pub dhcp: Option<bool>,
-    /// True when `ip` appears in `output.controllers`.
+    /// True when `output.controllers` names this controller, by IP or by MAC.
     pub expected: bool,
 }
 
@@ -85,7 +86,7 @@ pub struct DiscoveryResult {
     pub scanned_interface: String,
     pub duration_ms: u32,
     pub found: Vec<FoundController>,
-    /// Configured controller IPs that did not answer.
+    /// Controller entries (IPs or MACs) that nothing answered for.
     pub missing: Vec<String>,
     /// Controllers that answered but are not in `output.controllers`.
     pub unexpected: Vec<String>,
@@ -290,36 +291,42 @@ fn listen_socket(interface: Ipv4Addr, port: u16, broadcast: bool) -> std::io::Re
     Ok(socket.into())
 }
 
-/// Scan for controllers. Blocking for roughly `duration`; call it off the async
-/// runtime (see `server.rs`).
-pub fn scan(cfg: &AppConfig, duration: Duration) -> DiscoveryResult {
+/// What one round of probes heard.
+#[derive(Default)]
+struct Heard {
+    /// Keyed by `identity`, so two boxes answering from one address (an IP
+    /// conflict) are both reported, and one box answering both probes is not.
+    controllers: BTreeMap<String, FoundController>,
+    sources: BTreeMap<String, SacnSourceSeen>,
+    errors: Vec<String>,
+}
+
+/// One physical box: its MAC when the reply carried a readable one, else the
+/// address it answered from.
+fn identity(c: &FoundController) -> String {
+    parse_mac(&c.mac)
+        .map(|m| crate::addressing::mac_text(&m))
+        .unwrap_or_else(|| c.ip.clone())
+}
+
+/// Send the controller probes (and, with `listen_sacn`, watch the E1.31 discovery
+/// group) for roughly `duration`. Blocking; never call it on the async runtime.
+/// Callers must hold `SharedState::probe_lock` — two probers on these ports at
+/// once get ambiguous delivery of the broadcast legacy replies on Windows.
+fn probe(interface: Ipv4Addr, duration: Duration, listen_sacn: bool, own_cid: &str) -> Heard {
     let started = Instant::now();
-    let interface: Ipv4Addr = cfg.output.interface.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
-    let mut result = DiscoveryResult {
-        scanned_interface: if cfg.output.interface.is_empty() {
-            "default".into()
-        } else {
-            cfg.output.interface.clone()
-        },
-        ..Default::default()
-    };
-
-    // Our own CID, so we do not report ourselves as a competing source.
-    let own_cid = uuid::Uuid::parse_str(&cfg.output.cid)
-        .map(|u| u.to_string())
-        .unwrap_or_default();
-
+    let mut heard = Heard::default();
     let mut sockets: Vec<(&'static str, UdpSocket)> = Vec::new();
 
     match listen_socket(interface, LEGACY_PORT, true) {
         Ok(s) => {
             let dest = SocketAddrV4::new(Ipv4Addr::BROADCAST, LEGACY_PORT);
             if let Err(e) = s.send_to(&legacy_request(), dest) {
-                result.errors.push(format!("Advatek broadcast probe failed: {e}"));
+                heard.errors.push(format!("Advatek broadcast probe failed: {e}"));
             }
             sockets.push(("legacy", s));
         }
-        Err(e) => result
+        Err(e) => heard
             .errors
             .push(format!("cannot open UDP {LEGACY_PORT} for Mk1/Mk2 discovery: {e}")),
     }
@@ -327,40 +334,40 @@ pub fn scan(cfg: &AppConfig, duration: Duration) -> DiscoveryResult {
     match listen_socket(interface, DISCPROT_PORT, false) {
         Ok(s) => {
             if let Err(e) = s.join_multicast_v4(&DISCPROT_REPLY_GROUP, &interface) {
-                result
+                heard
                     .errors
                     .push(format!("cannot join {DISCPROT_REPLY_GROUP} for Mk3+ replies: {e}"));
             }
             let dest = SocketAddrV4::new(DISCPROT_REQUEST_GROUP, DISCPROT_PORT);
             if let Err(e) = s.send_to(&discprot_request(), dest) {
-                result.errors.push(format!("Mk3+ discovery probe failed: {e}"));
+                heard.errors.push(format!("Mk3+ discovery probe failed: {e}"));
             }
             sockets.push(("discprot", s));
         }
-        Err(e) => result
+        Err(e) => heard
             .errors
             .push(format!("cannot open UDP {DISCPROT_PORT} for Mk3+ discovery: {e}")),
     }
 
-    match listen_socket(interface, SACN_PORT, false) {
-        Ok(s) => {
-            if let Err(e) = s.join_multicast_v4(&SACN_DISCOVERY_GROUP, &interface) {
-                result
-                    .errors
-                    .push(format!("cannot join the sACN discovery group: {e}"));
+    if listen_sacn {
+        match listen_socket(interface, SACN_PORT, false) {
+            Ok(s) => {
+                if let Err(e) = s.join_multicast_v4(&SACN_DISCOVERY_GROUP, &interface) {
+                    heard
+                        .errors
+                        .push(format!("cannot join the sACN discovery group: {e}"));
+                }
+                sockets.push(("sacn", s));
             }
-            sockets.push(("sacn", s));
+            Err(e) => heard
+                .errors
+                .push(format!("cannot listen on UDP {SACN_PORT} for other sACN sources: {e}")),
         }
-        Err(e) => result
-            .errors
-            .push(format!("cannot listen on UDP {SACN_PORT} for other sACN sources: {e}")),
     }
 
     // Round-robin the sockets with short read timeouts until the deadline. Three
     // short-lived sockets do not justify three threads.
     let deadline = started + duration;
-    let mut by_ip: std::collections::BTreeMap<String, FoundController> = Default::default();
-    let mut sources: std::collections::BTreeMap<String, SacnSourceSeen> = Default::default();
     let mut buf = [0u8; 2048];
 
     while Instant::now() < deadline {
@@ -378,21 +385,21 @@ pub fn scan(cfg: &AppConfig, duration: Duration) -> DiscoveryResult {
                 match *kind {
                     "legacy" => {
                         if let Some(c) = parse_legacy_reply(data, *from.ip()) {
-                            by_ip.entry(c.ip.clone()).or_insert(c);
+                            heard.controllers.entry(identity(&c)).or_insert(c);
                         }
                     }
                     "discprot" => {
                         if let Some(c) = parse_discprot_reply(data, *from.ip()) {
                             // A Mk3+ reply is richer than a legacy one, so let it
                             // replace an entry the other probe already made.
-                            by_ip.insert(c.ip.clone(), c);
+                            heard.controllers.insert(identity(&c), c);
                         }
                     }
                     _ => {
                         if let Some(s) = parse_sacn_discovery(data, *from.ip())
                             && s.cid != own_cid
                         {
-                            sources.insert(s.cid.clone(), s);
+                            heard.sources.insert(s.cid.clone(), s);
                         }
                     }
                 }
@@ -402,33 +409,73 @@ pub fn scan(cfg: &AppConfig, duration: Duration) -> DiscoveryResult {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
+    heard
+}
 
-    let expected: BTreeSet<String> = cfg
-        .output
-        .controllers
-        .iter()
-        .filter(|ip| !ip.is_empty())
-        .cloned()
-        .collect();
+/// Controllers only, no sACN listen — what the address resolver runs. Returns the
+/// controllers heard and any non-fatal socket problems.
+pub fn probe_controllers(interface: &str, duration: Duration) -> (Vec<FoundController>, Vec<String>) {
+    let interface: Ipv4Addr = interface.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
+    let heard = probe(interface, duration, false, "");
+    (heard.controllers.into_values().collect(), heard.errors)
+}
 
-    result.found = by_ip
-        .into_values()
-        .map(|mut c| {
-            c.expected = expected.contains(&c.ip);
-            c
-        })
-        .collect();
-    let seen: BTreeSet<String> = result.found.iter().map(|c| c.ip.clone()).collect();
-    result.missing = expected.difference(&seen).cloned().collect();
-    result.unexpected = result
-        .found
+/// Mark which found controllers the controller list expects, and list the
+/// entries nobody answered for. An IP entry matches the address a reply came
+/// from; a MAC entry matches the MAC the controller reported, wherever it is.
+/// Returns `(missing, unexpected)`.
+pub fn reconcile(entries: &[String], found: &mut [FoundController]) -> (Vec<String>, Vec<String>) {
+    let refs: Vec<(String, ControllerRef)> = entries
         .iter()
-        .filter(|c| !c.expected)
-        .map(|c| c.ip.clone())
+        .map(|e| (e.trim().to_string(), parse_entry(e)))
+        .filter(|(_, r)| *r != ControllerRef::Empty)
         .collect();
-    result.other_sources = sources.into_values().collect();
-    result.duration_ms = started.elapsed().as_millis() as u32;
-    result
+    let matches = |r: &ControllerRef, c: &FoundController| match r {
+        ControllerRef::Ip(ip) => c.ip == ip.to_string(),
+        ControllerRef::Mac(mac) => parse_mac(&c.mac) == Some(*mac),
+        ControllerRef::Empty | ControllerRef::Invalid => false,
+    };
+    for c in found.iter_mut() {
+        c.expected = refs.iter().any(|(_, r)| matches(r, c));
+    }
+    let mut missing: Vec<String> = refs
+        .iter()
+        .filter(|(_, r)| !found.iter().any(|c| matches(r, c)))
+        .map(|(text, _)| text.clone())
+        .collect();
+    missing.sort();
+    missing.dedup();
+    let unexpected = found.iter().filter(|c| !c.expected).map(|c| c.ip.clone()).collect();
+    (missing, unexpected)
+}
+
+/// Scan for controllers and other sACN sources, reconciled against the config.
+/// Blocking for roughly `duration`; call it off the async runtime (see
+/// `server.rs`), holding `SharedState::probe_lock`.
+pub fn scan(cfg: &AppConfig, duration: Duration) -> DiscoveryResult {
+    let started = Instant::now();
+    let interface: Ipv4Addr = cfg.output.interface.parse().unwrap_or(Ipv4Addr::UNSPECIFIED);
+    // Our own CID, so we do not report ourselves as a competing source.
+    let own_cid = uuid::Uuid::parse_str(&cfg.output.cid)
+        .map(|u| u.to_string())
+        .unwrap_or_default();
+
+    let heard = probe(interface, duration, true, &own_cid);
+    let mut found: Vec<FoundController> = heard.controllers.into_values().collect();
+    let (missing, unexpected) = reconcile(&cfg.output.controllers, &mut found);
+    DiscoveryResult {
+        scanned_interface: if cfg.output.interface.is_empty() {
+            "default".into()
+        } else {
+            cfg.output.interface.clone()
+        },
+        duration_ms: started.elapsed().as_millis() as u32,
+        found,
+        missing,
+        unexpected,
+        other_sources: heard.sources.into_values().collect(),
+        errors: heard.errors,
+    }
 }
 
 #[cfg(test)]
@@ -601,5 +648,23 @@ mod tests {
 
         // A data packet on the same port is not a discovery advertisement.
         assert!(parse_sacn_discovery(&[0u8; 638], IP).is_none());
+    }
+
+    #[test]
+    fn reconcile_matches_ip_entries_by_address_and_mac_entries_by_mac() {
+        let mut found = vec![
+            FoundController { ip: "10.0.0.5".into(), mac: "00:50:C2:00:00:05".into(), ..Default::default() },
+            // A MAC entry finds its box wherever DHCP put it, in any spelling.
+            FoundController { ip: "10.0.0.77".into(), mac: "00:50:c2:00:00:06".into(), ..Default::default() },
+            FoundController { ip: "10.0.0.99".into(), mac: "00:50:C2:00:00:99".into(), ..Default::default() },
+        ];
+        let entries: Vec<String> = ["10.0.0.5", "0050.c200.0006", "", "00:50:C2:00:00:07", "10.0.0.8"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let (missing, unexpected) = reconcile(&entries, &mut found);
+        assert!(found[0].expected && found[1].expected && !found[2].expected);
+        assert_eq!(missing, vec!["00:50:C2:00:00:07".to_string(), "10.0.0.8".to_string()]);
+        assert_eq!(unexpected, vec!["10.0.0.99".to_string()]);
     }
 }

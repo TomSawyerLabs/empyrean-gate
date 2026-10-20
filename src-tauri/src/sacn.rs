@@ -23,6 +23,11 @@
 //! stream-termination packets rather than left to the receiver's 2.5 s source-loss
 //! timeout, which would otherwise hold the last frame lit.
 //!
+//! Destinations: multicast mode sends every universe to its 239.255.u.u group.
+//! Unicast mode sends each spoke's universes to the controller entry that owns it
+//! — an IP as written, or a MAC resolved by `addressing`. A MAC not found yet has
+//! its universes multicast meanwhile, so an unresolved box still lights.
+//!
 //! Discovery: while transmitting, the universe list is advertised on the E1.31
 //! discovery universe every 10 s, so sACNView and controller UIs can see this source.
 //!
@@ -32,6 +37,7 @@
 //! stride can exceed what the pixels need, leaving reserved universes dark between
 //! spokes to match a controller patch (see `OutputConfig::universe_stride`).
 
+use crate::addressing::{AddressBook, Destination};
 use crate::config::{GeometryConfig, OutputConfig};
 use crate::geometry;
 use std::collections::{HashMap, HashSet};
@@ -140,8 +146,8 @@ impl SacnSender {
     }
 
     /// (Re)build the socket, packet templates, and destinations. Call on config
-    /// changes, not per frame.
-    pub fn configure(&mut self, geo: &GeometryConfig, out: &OutputConfig) {
+    /// changes and when `book` moves a MAC-addressed controller, not per frame.
+    pub fn configure(&mut self, geo: &GeometryConfig, out: &OutputConfig, book: &AddressBook) {
         let cid = cid_bytes(&out.cid);
         let source_name = pad_source_name(&out.source_name);
 
@@ -154,11 +160,20 @@ impl SacnSender {
             // Destination mode is exclusive. The old UI exposed multicast and
             // controller IPs independently, which sent every packet twice when
             // both were configured (same sequence number, wasted wire traffic).
-            let unicast = (!out.multicast)
-                .then(|| geometry::controller_for_spoke(out, spoke))
-                .flatten()
-                .and_then(|ip| ip.parse::<Ipv4Addr>().ok())
-                .map(|ip| SocketAddrV4::new(ip, SACN_PORT));
+            // The one exception is a MAC entry not resolved yet: its universes go
+            // multicast *instead of* unicast, never as well as.
+            let destination = if out.multicast {
+                Destination::Fallback
+            } else {
+                geometry::controller_for_spoke(out, spoke)
+                    .map(|entry| crate::addressing::destination(entry, book))
+                    .unwrap_or(Destination::Nowhere)
+            };
+            let unicast = match destination {
+                Destination::Unicast(ip) => Some(SocketAddrV4::new(ip, SACN_PORT)),
+                _ => None,
+            };
+            let to_group = destination == Destination::Fallback;
             for u in 0..ups {
                 let first_pixel = u * ppu;
                 if first_pixel >= geo.pixels_per_spoke {
@@ -166,9 +181,8 @@ impl SacnSender {
                 }
                 let count = ppu.min(geo.pixels_per_spoke - first_pixel);
                 let universe = out.start_universe + (spoke * stride + u) as u16;
-                let multicast = out
-                    .multicast
-                    .then(|| SocketAddrV4::new(multicast_group(universe), SACN_PORT));
+                let multicast =
+                    to_group.then(|| SocketAddrV4::new(multicast_group(universe), SACN_PORT));
                 plan.push(UniversePlan {
                     universe,
                     packet: build_data_template(
@@ -271,7 +285,8 @@ impl SacnSender {
 
         self.sync = (out.sync_universe != 0).then(|| {
             let mut dests = Vec::new();
-            if out.multicast {
+            // Multicast mode, or any controller on the multicast fallback.
+            if self.plan.iter().any(|p| p.multicast.is_some()) {
                 dests.push(SocketAddrV4::new(
                     multicast_group(out.sync_universe),
                     SACN_PORT,
@@ -778,7 +793,7 @@ mod tests {
             ..Default::default()
         };
         let mut s = SacnSender::new().unwrap();
-        s.configure(&geo, &out);
+        s.configure(&geo, &out, &AddressBook::default());
 
         assert_eq!(s.plan.len(), 64 * 3, "378 px at 170/universe = 3 per spoke");
         let universes: Vec<u16> = s.plan.iter().map(|p| p.universe).collect();
@@ -797,7 +812,7 @@ mod tests {
     fn reconfigure_carries_sequence_numbers_and_drops_dead_universes() {
         let mut s = SacnSender::new().unwrap();
         let (geo, out) = offline(2);
-        s.configure(&geo, &out);
+        s.configure(&geo, &out, &AddressBook::default());
         assert_eq!(s.plan.len(), 2, "one universe per spoke");
 
         let rgb = vec![0u8; 2 * 4 * 3];
@@ -809,7 +824,7 @@ mod tests {
 
         // Shrink to one spoke: universe 1 survives, universe 2 is retired.
         let (geo, out) = offline(1);
-        s.configure(&geo, &out);
+        s.configure(&geo, &out, &AddressBook::default());
         assert_eq!(s.plan.len(), 1);
         assert_eq!(s.plan[0].universe, 1);
         assert_eq!(
@@ -833,7 +848,7 @@ mod tests {
             let mut s = SacnSender::new().unwrap();
             let (geo, mut out) = offline(2);
             out.sync_universe = 100; // exercise the sync counter too (no destinations)
-            s.configure(&geo, &out);
+            s.configure(&geo, &out, &AddressBook::default());
             s.resume_after(last_sent);
             s.send_frame(&vec![0u8; 2 * 4 * 3]);
 
@@ -862,12 +877,12 @@ mod tests {
     fn a_changed_cid_retires_every_universe() {
         let mut s = SacnSender::new().unwrap();
         let (geo, out) = offline(2);
-        s.configure(&geo, &out);
+        s.configure(&geo, &out, &AddressBook::default());
         s.send_frame(&[0u8; 2 * 4 * 3]);
 
         let (geo, mut out) = offline(2);
         out.cid = "ffffffff-89ab-cdef-0123-456789abcdef".into();
-        s.configure(&geo, &out);
+        s.configure(&geo, &out, &AddressBook::default());
         // Same universes, but a new identity: sequences start over with the new CID.
         assert_eq!(s.plan.len(), 2);
         assert_eq!(s.plan[0].sequence, 0);
@@ -888,13 +903,91 @@ mod tests {
         out.controllers = vec!["127.0.0.1".into()];
 
         out.multicast = true;
-        sender.configure(&geo, &out);
+        sender.configure(&geo, &out, &AddressBook::default());
         assert!(sender.plan[0].multicast.is_some());
         assert!(sender.plan[0].unicast.is_none());
 
         out.multicast = false;
-        sender.configure(&geo, &out);
+        sender.configure(&geo, &out, &AddressBook::default());
         assert!(sender.plan[0].multicast.is_none());
         assert!(sender.plan[0].unicast.is_some());
+    }
+
+    const MAC: crate::addressing::Mac = [0x00, 0x50, 0xC2, 0x00, 0x00, 0x02];
+
+    /// Two controllers, one spoke each: an IP entry and a MAC entry.
+    fn mixed() -> (GeometryConfig, OutputConfig) {
+        let (geo, mut out) = offline(2);
+        out.strings_per_controller = 1;
+        out.controllers = vec!["10.0.0.1".into(), "00:50:c2:00:00:02".into()];
+        out.sync_universe = 100;
+        (geo, out)
+    }
+
+    #[test]
+    fn a_resolved_mac_entry_unicasts_to_its_discovered_address() {
+        let mut sender = SacnSender::new().unwrap();
+        let (geo, out) = mixed();
+        let mut book = AddressBook::default();
+        book.observe(MAC, Ipv4Addr::new(10, 0, 0, 77), 0);
+        sender.configure(&geo, &out, &book);
+
+        assert_eq!(
+            sender.plan[0].unicast,
+            Some(SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), SACN_PORT))
+        );
+        assert_eq!(
+            sender.plan[1].unicast,
+            Some(SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 77), SACN_PORT))
+        );
+        assert!(sender.plan.iter().all(|p| p.multicast.is_none()));
+        let (_, sync_dests) = sender.sync.as_ref().unwrap();
+        assert_eq!(
+            sync_dests.len(),
+            2,
+            "sync goes to both controllers, no group"
+        );
+    }
+
+    #[test]
+    fn an_unresolved_mac_entry_falls_back_to_multicast_for_its_universes_only() {
+        let mut sender = SacnSender::new().unwrap();
+        let (geo, out) = mixed();
+        sender.configure(&geo, &out, &AddressBook::default());
+
+        // The IP entry is untouched by the fallback.
+        assert!(sender.plan[0].unicast.is_some());
+        assert!(sender.plan[0].multicast.is_none());
+        // The unresolved box still lights: its universe goes to its group.
+        assert!(sender.plan[1].unicast.is_none());
+        assert_eq!(
+            sender.plan[1].multicast,
+            Some(SocketAddrV4::new(
+                multicast_group(sender.plan[1].universe),
+                SACN_PORT
+            ))
+        );
+        let (_, sync_dests) = sender.sync.as_ref().unwrap();
+        assert!(sync_dests.contains(&SocketAddrV4::new(multicast_group(100), SACN_PORT)));
+        assert!(sync_dests.contains(&SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), SACN_PORT)));
+    }
+
+    #[test]
+    fn resolving_a_mac_keeps_the_stream_and_its_sequence() {
+        let mut sender = SacnSender::new().unwrap();
+        let (geo, out) = mixed();
+        sender.configure(&geo, &out, &AddressBook::default());
+        sender.streaming = true; // as if frames had gone out
+        for p in sender.plan.iter_mut() {
+            p.sequence = 42;
+        }
+
+        let mut book = AddressBook::default();
+        book.observe(MAC, Ipv4Addr::new(10, 0, 0, 77), 0);
+        sender.configure(&geo, &out, &book);
+        // Same universes, same source: a moved destination is not a new stream.
+        assert_eq!(sender.plan.len(), 2);
+        assert!(sender.plan.iter().all(|p| p.sequence == 42));
+        assert!(sender.plan[1].unicast.is_some());
     }
 }

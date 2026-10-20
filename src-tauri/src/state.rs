@@ -674,6 +674,13 @@ pub struct SharedState {
     /// One scan at a time — a second request while one is in flight is answered
     /// from the running scan rather than putting more probes on the wire.
     pub discovery_running: AtomicBool,
+    /// Held by whoever is probing the controller-discovery ports (a manual scan
+    /// or the address resolver), so two probers never share them.
+    pub probe_lock: Mutex<()>,
+    /// MAC -> current IP for controller entries given as MACs (see `addressing`).
+    pub addresses: RwLock<crate::addressing::AddressBook>,
+    /// Bumped when `addresses` changes where sACN should go; the engine re-plans.
+    pub address_epoch: AtomicU64,
     pub status: Mutex<RuntimeStatus>,
     pub shutdown: AtomicBool,
     /// Per-layer animation phases, owned by the engine loop but shared so a
@@ -850,6 +857,11 @@ impl SharedState {
             game: Mutex::new(crate::game::GameControl::default()),
             last_discovery: Mutex::new(None),
             discovery_running: AtomicBool::new(false),
+            probe_lock: Mutex::new(()),
+            addresses: RwLock::new(crate::addressing::AddressBook::load(
+                &crate::addressing::cache_path(),
+            )),
+            address_epoch: AtomicU64::new(0),
             status: Mutex::new(RuntimeStatus::default()),
             shutdown: AtomicBool::new(false),
             layer_phases: Mutex::new(Vec::new()),

@@ -3,6 +3,7 @@
 //! optional shell (skipped in `--headless` mode) whose webview is just another
 //! WebSocket client of the local server.
 
+pub mod addressing;
 pub mod audio;
 pub mod autostart;
 pub mod config;
@@ -169,6 +170,8 @@ pub fn start_backend() -> Backend {
     // during it — the instance we are displacing is a peer on our own universes
     // and gets filtered out by CID like any other copy of us.
     sacnwatch::spawn(state.clone());
+    // Keeps MAC-addressed controllers' IPs current (read-only probes).
+    addressing::spawn(state.clone());
 
     if takeover {
         // Two-phase takeover. Phase 1 (old instance keeps sending): fetch its

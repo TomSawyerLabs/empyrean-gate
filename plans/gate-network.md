@@ -109,7 +109,8 @@ high.
 - [x] PixLite model confirmed: E4-S Mk3, 10/100 (repo corrected, `8ad289e`)
 - [x] Gateway confirmed: UCG, Network app on-prem
 - [ ] Choose the node-box switch (needs the PoE load and the heat answer)
-- [ ] Controller addressing: fixed IPs + MAC-keyed discovery
+- [x] Controller addressing: fixed IPs + MAC-keyed discovery (built; awaiting
+      a first run on the real boxes)
       (`plans/controller-addressing.md`)
 - [ ] Later: UniFi per-port STP / BPDU options for the WAN port profile
 

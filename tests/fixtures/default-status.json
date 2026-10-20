@@ -145,6 +145,7 @@
     "roster_truncated": 0
   },
   "discovery_running": false,
+  "controller_addresses": [],
   "peer": {
     "role": "",
     "connected": false,

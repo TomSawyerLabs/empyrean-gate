@@ -774,6 +774,9 @@ export interface RuntimeStatus {
   public: PublicStatus;
   /** True while a controller scan is in flight. */
   discovery_running: boolean;
+  /** Where each `output.controllers` entry's universes go, and how that
+   *  address was learned. */
+  controller_addresses: ControllerAddressStatus[];
   /** Leader/follower/backup relationship (both roles publish it). */
   peer: PeerStatusInfo;
   diagnostics_path: string;
@@ -931,6 +934,24 @@ export interface GameModeStatus {
   doom?: DoomStatus | null;
   /** Why the last game ended by itself, for a few seconds after. */
   ended?: string | null;
+}
+
+// --- controller addressing (mirrors src-tauri/src/addressing.rs) ---
+
+/** One `output.controllers` entry: an IP used as written, or a MAC found by discovery. */
+export interface ControllerAddressStatus {
+  /** Position in the list; controller N drives spokes N × strings_per_controller …. */
+  index: number;
+  entry: string;
+  kind: "empty" | "ip" | "mac" | "invalid";
+  /** Where its universes are unicast now. */
+  ip: string | null;
+  /** "configured" (an IP entry), "discovered" (heard this run), "cached" (last run's
+   *  answer, not re-confirmed yet), "fallback" (MAC not found: sent multicast meanwhile),
+   *  "invalid", "empty". */
+  source: "configured" | "discovered" | "cached" | "fallback" | "invalid" | "empty";
+  /** Seconds since discovery last heard this MAC. */
+  seen_secs_ago: number | null;
 }
 
 // --- controller discovery (mirrors src-tauri/src/discovery.rs) ---

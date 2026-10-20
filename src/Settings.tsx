@@ -34,6 +34,7 @@ import { generateCodeWord } from "./deviceNames";
 import { HIDDEN_GAMES } from "./gameCatalog";
 import { BRC_EVENT_CATEGORIES } from "./ambientScenes";
 import LayerColorControls from "./LayerColor";
+import { entryKind, parseControllerList } from "./controllerAddress";
 
 export default function Settings() {
   const { config } = useGate();
@@ -1829,6 +1830,7 @@ function OutputPanel({ config }: { config: AppConfig }) {
   const out = config.output;
   const commit = (patch: Partial<AppConfig["output"]>) =>
     client.setConfig({ ...config, output: { ...out, ...patch } });
+  const invalidControllers = out.controllers.filter((c) => entryKind(c) === "invalid");
 
   // LED-wire fps ceiling: 800 kbps WS281x, 24 bits/px + ~300 µs reset per frame.
   const pxPerString = config.geometry.pixels_per_spoke;
@@ -2057,7 +2059,7 @@ function OutputPanel({ config }: { config: AppConfig }) {
           onClick={() => commit({ multicast: false })}
         >
           Unicast
-          <span>Only the controller IPs below</span>
+          <span>Only the controllers below</span>
         </button>
       </div>
       <p className="hint">
@@ -2066,26 +2068,34 @@ function OutputPanel({ config }: { config: AppConfig }) {
       </p>
       <label className="field-col">
         <span>
-          Controller IPs (one per line, in spoke order; controller N drives{" "}
-          {out.strings_per_controller} spokes, N×{out.strings_per_controller}…N×
+          Controllers — IP or MAC address, one per line, in spoke order (controller N
+          drives {out.strings_per_controller} spokes, N×{out.strings_per_controller}…N×
           {out.strings_per_controller}+{Math.max(1, out.strings_per_controller) - 1})
         </span>
         <textarea
+          // Remount when the list changes elsewhere (the Test tab's "use as").
+          key={out.controllers.join("\n")}
           rows={6}
           defaultValue={out.controllers.join("\n")}
-          onBlur={(e) =>
-            commit({
-              controllers: e.target.value
-                .split("\n")
-                .map((s) => s.trim())
-                .filter((s) => s.length > 0),
-            })
-          }
-          placeholder={"10.0.0.101\n10.0.0.102\n…"}
+          onBlur={(e) => commit({ controllers: parseControllerList(e.target.value) })}
+          placeholder={"10.0.0.101\n00:50:C2:12:34:56\n…"}
         />
       </label>
-      {!out.multicast && out.controllers.length === 0 && (
-        <p className="warn">Unicast is selected but no controller IPs are configured.</p>
+      <p className="hint">
+        An IP is used exactly as written. A MAC address makes the box findable wherever
+        DHCP puts it: Empyrean asks the network where that box is, follows it when its
+        address changes, and remembers it across restarts. Until a MAC is found, its
+        spokes are sent multicast so they still light. A blank line leaves that
+        controller's spokes without a destination.
+      </p>
+      {invalidControllers.length > 0 && (
+        <p className="warn">
+          Not an IP or MAC address (nothing is sent for these controllers' spokes):{" "}
+          {invalidControllers.join(", ")}
+        </p>
+      )}
+      {!out.multicast && out.controllers.every((c) => entryKind(c) === "empty") && (
+        <p className="warn">Unicast is selected but no controllers are configured.</p>
       )}
     </section>
   );

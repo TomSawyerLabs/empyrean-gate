@@ -1184,6 +1184,9 @@ pub struct RuntimeStatus {
     pub public: PublicStatus,
     /// True while a controller scan is in flight, so the Scan button can say so.
     pub discovery_running: bool,
+    /// Where each `output.controllers` entry's universes are going, and how
+    /// that address was learned (see `addressing`).
+    pub controller_addresses: Vec<crate::addressing::ControllerAddressStatus>,
     /// Leader/follower/backup relationship (see `PeerStatusInfo`).
     pub peer: PeerStatusInfo,
     /// Current bounded persistent log and whether it could be opened.

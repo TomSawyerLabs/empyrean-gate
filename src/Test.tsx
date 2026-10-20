@@ -15,7 +15,9 @@ import { useEffect, useRef, useState } from "react";
 import GateCanvas from "./GateCanvas";
 import { contenders, peerLabel, peerVerdict, universeRange } from "./sacnPeers";
 import { useGate, useThrottled } from "./state";
+import { assignMac, canonicalMac } from "./controllerAddress";
 import type {
+  ControllerAddressStatus,
   DiscoveryResult,
   SpokeSelect,
   TestConfig,
@@ -497,7 +499,7 @@ export default function Test() {
           <div className="control-group">
             <label>
               Spoke (0 – {spokes - 1}) — controller {spokeController + 1}
-              {out.controllers[spokeController] ? ` at ${out.controllers[spokeController]}` : ""}
+              {controllerWhere(spokeController, out.controllers, status?.controller_addresses)}
             </label>
             <Stepper
               value={local.spoke}
@@ -515,9 +517,8 @@ export default function Test() {
               Controller {local.controller + 1} of {controllers} — spokes{" "}
               {local.controller * perController}–
               {Math.min(spokes, (local.controller + 1) * perController) - 1}
-              {out.controllers[local.controller]
-                ? ` at ${out.controllers[local.controller]}`
-                : " (no address configured)"}
+              {controllerWhere(local.controller, out.controllers, status?.controller_addresses) ||
+                " (no address configured)"}
             </label>
             <Stepper
               value={local.controller}
@@ -697,13 +698,121 @@ function OtherSources() {
   );
 }
 
+/// " at 10.0.0.5", " at 00:50:C2:… (10.0.0.77)" or "" for a controller position.
+function controllerWhere(
+  index: number,
+  controllers: string[],
+  addresses: ControllerAddressStatus[] | undefined,
+): string {
+  const entry = controllers[index]?.trim();
+  if (!entry) return "";
+  const a = addresses?.find((x) => x.index === index);
+  if (a?.kind === "mac") return ` at ${entry} (${a.ip ?? "not found yet"})`;
+  return ` at ${entry}`;
+}
+
+/// "12 s", "5 min", "26 h".
+function ago(secs: number): string {
+  if (secs < 90) return `${secs} s`;
+  if (secs < 90 * 60) return `${Math.round(secs / 60)} min`;
+  return `${Math.round(secs / 3600)} h`;
+}
+
+const SOURCE_TEXT: Record<ControllerAddressStatus["source"], string> = {
+  configured: "fixed IP",
+  discovered: "found by MAC",
+  cached: "last run's address — not re-confirmed yet",
+  fallback: "not found yet — its spokes are sent multicast meanwhile",
+  invalid: "not an IP or MAC address — nothing is sent",
+  empty: "no address — nothing is sent",
+};
+
+/// Where each controller entry's universes are going right now. MAC entries are
+/// resolved continuously in the background, so this is live, not a scan result.
+function ControllerAddresses() {
+  const { config, status } = useGate();
+  const addresses = status?.controller_addresses ?? [];
+  if (!config || addresses.length === 0) return null;
+  const per = Math.max(1, config.output.strings_per_controller);
+  const spokes = config.geometry.spokes;
+  return (
+    <div className="controller-list">
+      <h3>Where sACN goes</h3>
+      {config.output.multicast && (
+        <p className="hint">
+          Multicast is selected in Settings, so these addresses are not in use right now.
+        </p>
+      )}
+      <ul className="controller-grid">
+        {addresses.map((a) => {
+          const first = a.index * per;
+          const last = Math.min(spokes, first + per) - 1;
+          const trouble = a.source === "fallback" || a.source === "invalid" || a.source === "empty";
+          return (
+            <li key={a.index} className="controller-item">
+              <span className="controller-name">
+                {trouble ? "⚠" : "✓"} Controller {a.index + 1}
+                {first <= last ? ` — spokes ${first}–${last}` : ""}
+                {a.ip ? ` → ${a.ip}` : ""}
+              </span>
+              <span className={`universe-range${trouble ? " warn-text" : ""}`}>
+                {[
+                  (a.kind === "mac" || a.kind === "invalid") && a.entry,
+                  SOURCE_TEXT[a.source],
+                  a.seen_secs_ago !== null && `seen ${ago(a.seen_secs_ago)} ago`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/// Writes a found box's MAC into the controller list at a chosen position — the
+/// "this box is controller 7" step, after identifying it with the one-controller
+/// test pattern.
+function UseAsController({ mac }: { mac: string }) {
+  const { client, config } = useGate();
+  const [index, setIndex] = useState(0);
+  if (!config) return null;
+  const per = Math.max(1, config.output.strings_per_controller);
+  const count = Math.max(1, Math.ceil(config.geometry.spokes / per));
+  return (
+    <span className="universe-range">
+      Use as controller{" "}
+      <select value={index} onChange={(e) => setIndex(Number(e.target.value))}>
+        {Array.from({ length: count }, (_, i) => (
+          <option key={i} value={i}>
+            {i + 1}
+            {config.output.controllers[i]?.trim() ? ` (replaces ${config.output.controllers[i].trim()})` : ""}
+          </option>
+        ))}
+      </select>{" "}
+      <button
+        onClick={() =>
+          client.setConfig({
+            ...config,
+            output: { ...config.output, controllers: assignMac(config.output.controllers, index, mac) },
+          })
+        }
+      >
+        Use
+      </button>
+    </span>
+  );
+}
+
 /// Controller discovery. Read-only — vendor probes and passive listening only —
 /// so it needs no arming and is safe to run during a show.
 function Discovery() {
   const { client, config, status } = useGate();
   const [result, setResult] = useState<DiscoveryResult | null>(null);
   const running = status?.discovery_running ?? false;
-  const expected = (config?.output.controllers ?? []).filter((ip) => ip);
+  const expected = (config?.output.controllers ?? []).filter((e) => e.trim());
 
   useEffect(
     () =>
@@ -720,9 +829,11 @@ function Discovery() {
         sACN is fire-and-forget: nothing acknowledges a frame, so "output enabled" never
         tells you a controller is listening. This asks the Advatek boxes directly — a
         broadcast probe for Mk1/Mk2 and a multicast one for Mk3/Mk4 — and compares the
-        answers against the {expected.length} address{expected.length === 1 ? "" : "es"}{" "}
-        configured in Settings. It also listens for any other sACN source on the wire.
+        answers against the {expected.length} controller{expected.length === 1 ? "" : "s"}{" "}
+        configured in Settings, by IP or by MAC. It also listens for any other sACN
+        source on the wire.
       </p>
+      <ControllerAddresses />
       <button className="primary" disabled={running} onClick={() => client.discoverControllers()}>
         {running ? "Scanning…" : "Scan for controllers"}
       </button>
@@ -768,7 +879,7 @@ function Discovery() {
               <h3>Answered</h3>
               <ul className="controller-grid">
                 {result.found.map((c) => (
-                  <li key={c.ip} className="controller-item">
+                  <li key={`${c.ip}|${c.mac}`} className="controller-item">
                     <span className="controller-name">
                       {c.expected ? "✓" : "⚠"} {c.ip}
                       {c.nickname ? ` — ${c.nickname}` : ""}
@@ -791,6 +902,7 @@ function Discovery() {
                         static IP that did not take, or a stale DHCP lease.
                       </span>
                     )}
+                    {!c.expected && canonicalMac(c.mac) && <UseAsController mac={c.mac} />}
                   </li>
                 ))}
               </ul>

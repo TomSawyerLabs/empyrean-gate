@@ -74,15 +74,23 @@ Entries can be mixed freely in one list.
 
 ## Plan / steps
 
-1. [ ] `addressing.rs`: entry parsing + MAC normalisation + unit tests
-2. [ ] Address book + cache file + resolver thread
-3. [ ] `SacnSender::configure` uses the book; fallback multicast; tests
-4. [ ] Engine reconfigure on `address_epoch`; status publishing
-5. [ ] Discovery reconciliation by MAC; manual scan feeds the book
-6. [ ] UI: Settings hint/validation, Test tab address table + "use as"
-7. [ ] E2E against `scripts/fake-pixlite.ts`: a MAC entry resolves and sACN
-       reaches the fake's address
-8. [ ] README
+1. [x] `addressing.rs`: entry parsing + MAC normalisation + unit tests
+2. [x] Address book + cache file + resolver thread
+3. [x] `SacnSender::configure` uses the book; fallback multicast; tests
+4. [x] Engine reconfigure on `address_epoch`; status publishing
+5. [x] Discovery reconciliation by MAC; manual scan feeds the book
+6. [x] UI: Settings hint/validation (`src/controllerAddress.ts`, mirrored parser
+       with `bun test`), Test tab "Where sACN goes" list + "Use as controller N"
+7. [x] E2E `scripts/addressing-test.ts` against a headless backend and
+       `scripts/fake-pixlite.ts`: the resolver finds a MAC with no manual scan,
+       an unknown MAC sits on fallback, empty/invalid entries are reported, scan
+       reconciliation matches by MAC, the cache file remembers both boxes.
+       Output stays off, so it does not prove packets reach the fake — that is the
+       sender unit tests' job.
+8. [x] README
+9. [ ] **Real E4-S Mk3 validation** — the whole discovery path, this included, has
+       still only met the fake. First time on the rig: put two boxes in by MAC,
+       watch "Where sACN goes", and power-cycle one to see it re-found.
 
 ## Findings / gotchas
 
@@ -92,6 +100,17 @@ Entries can be mixed freely in one list.
 - Legacy-protocol replies on 49150 are broadcast; two sockets bound to the same
   port on Windows get ambiguous delivery. That is why the resolver and the manual
   scan must not probe at the same time.
+
+- **Discovery keyed controllers by source IP**, so two boxes answering from one
+  address collapsed into one entry (seen with the fake, which answers for two
+  boxes from one IP; on a real network it would hide one side of an IP
+  conflict). Now keyed by MAC, falling back to IP.
+- The Settings textarea used to drop blank lines, which silently shifted every
+  later controller's spokes. Interior blank lines are now kept, since position
+  is what assigns spokes; "Use as controller N" pads with blanks.
+- `scripts/testmode-test.ts` had been failing since `ea03565` (arming crossfades
+  for 0.75 s; it asserted the first frames). Fixed in `78d3a51`. Neither e2e
+  script runs in CI.
 
 ## Open questions for the user
 

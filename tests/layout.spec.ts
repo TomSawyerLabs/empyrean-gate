@@ -316,6 +316,47 @@ for (const viewport of VIEWPORTS) {
       ).toEqual([]);
     });
 
+    // The Test tab's "Where sACN goes" list, with every kind of entry and the
+    // longest source text (a MAC on the multicast fallback).
+    test("test tab fits with controller addresses", async ({ page }) => {
+      const clientId = `layout-addresses-${viewport.name}`;
+      await page.addInitScript(
+        (id) => localStorage.setItem("empyrean-client-id", id),
+        clientId,
+      );
+      const mac = (n: number, ip: string | null, source: string, seen: number | null) => ({
+        index: n,
+        entry: `00:1D:2E:00:00:${(16 + n).toString(16).toUpperCase()}`,
+        kind: "mac",
+        ip,
+        source,
+        seen_secs_ago: seen,
+      });
+      await page.request.post(`/mock/status?client=${clientId}`, {
+        data: {
+          controller_addresses: [
+            { index: 0, entry: "10.255.0.101", kind: "ip", ip: "10.255.0.101", source: "configured", seen_secs_ago: null },
+            mac(1, "10.255.0.177", "discovered", 12),
+            mac(2, "10.255.0.178", "cached", 86400),
+            mac(3, null, "fallback", null),
+            { index: 4, entry: "", kind: "empty", ip: null, source: "empty", seen_secs_ago: null },
+            { index: 5, entry: "pixlite-6", kind: "invalid", ip: null, source: "invalid", seen_secs_ago: null },
+          ],
+        },
+      });
+      await page.goto("/#test");
+      await expect(page.locator('.app[data-connected="yes"]')).toBeAttached();
+      await expect(page.getByText("Where sACN goes")).toBeVisible();
+      await page.waitForTimeout(250);
+
+      const problems = await overflows(page, false);
+      expect(
+        problems,
+        `Clipped or overflowing regions with controller addresses at ${viewport.width}x${viewport.height}:\n` +
+          problems.map((p) => `  [${p.axis}] ${p.element} — ${p.detail}`).join("\n"),
+      ).toEqual([]);
+    });
+
     // Game mode's two stateful layouts: the banner with its ▶ Play join path
     // (on every tab — Live is the tightest), and the Games tab's active play
     // surface (how-to text, join line, color chips).

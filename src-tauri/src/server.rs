@@ -2876,7 +2876,14 @@ async fn handle_msg(
                 state2.broadcast_state(); // light up the "scanning…" state now
                 tokio::task::spawn_blocking(move || {
                     let cfg = state2.config.read().clone();
-                    let result = crate::discovery::scan(&cfg, std::time::Duration::from_secs(3));
+                    // Waits out a background resolver probe (≤ 1.5 s) rather than
+                    // sharing the discovery ports with it.
+                    let result = {
+                        let _ports = state2.probe_lock.lock();
+                        crate::discovery::scan(&cfg, std::time::Duration::from_secs(3))
+                    };
+                    // Anything the scan heard updates MAC-addressed controllers now.
+                    crate::addressing::record(&state2, &result.found);
                     log::info!(
                         "controller scan: {} found, {} missing, {} other sACN source(s)",
                         result.found.len(),
