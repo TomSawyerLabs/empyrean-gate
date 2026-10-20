@@ -70,8 +70,9 @@ whose shapes it uses.
    thumbnails, mock registry, a behaviour spec. Done (`15658c9`): also a
    wire dropped on empty canvas offers a Patch out / Patch in already
    shaped to it.
-4. Agent guide, gate README: done. Site README and plan after the merge.
-5. Checks, merge, web-dist bump, Preview check. ← current
+4. Agent guide, gate README, site README and plan (site `770e358`). Done.
+5. Checks, merge, web-dist bump, Preview check. Merged (`f8cc944` to
+   `66bab1c`), checked on dev. The block thumbnail fix below. ← current
 
 ## Findings / gotchas
 
@@ -99,11 +100,19 @@ whose shapes it uses.
   (2026-10-19, WebGPU): an old-style patch got its Resample, LED wires
   dotted, the folded snow renders. It left a patch "LED check (agent)" in
   that browser's playground library.
+- Blocks checked on dev (2026-10-19, same browser): the Sub-patch shows its
+  inlet and outlets by name ("Picture", "Folded") and renders. Its own
+  thumbnail was black: with no Output inside, nothing took the Sub-patch's
+  id, so flatten made it a black Solid. Now the block's first field-shaped
+  Patch out takes that id (it stays a pass-through), so the thumbnail shows
+  what the block hands on. Left a patch "Block check (agent)" in that
+  library.
 
 ## Progress log
 
 - [x] Steps 1–3 (2026-10-19)
-- [ ] Steps 4–5
+- [x] Step 4 (2026-10-19)
+- [ ] Step 5: block thumbnail fix to merge, bump, recheck
 
 ## Open questions for Cameron
 

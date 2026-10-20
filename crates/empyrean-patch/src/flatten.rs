@@ -9,7 +9,9 @@
 //!   node wired into the inner Output), which takes the sub-patch's own id so
 //!   wires from `{sub}.out` and the node's thumbnail keep working;
 //! - an inner Output with nothing wired in (or an empty sub-patch) becomes a
-//!   black Solid, so the node renders as nothing rather than failing;
+//!   black Solid, so the node renders as nothing rather than failing; a
+//!   block with no Output at all lets its first field Patch out be the root,
+//!   so the node's thumbnail shows what the block hands on;
 //! - wires and exposed entries of the outer document that point at a
 //!   sub-patch port are rewritten to the inner node and param, and
 //!   [`Flat::aliases`] remembers the mapping for live param changes;
@@ -20,7 +22,7 @@
 //!   is a wire judged (and adapted) on its own.
 
 use crate::registry::{PATCH_IN_KIND, PATCH_OUT_KIND};
-use crate::{Edge, NodeInst, PatchDoc, PortRef};
+use crate::{Edge, NodeInst, PatchDoc, PortRef, Shape};
 use std::collections::HashMap;
 
 /// The node kind that embeds another document.
@@ -121,6 +123,20 @@ fn flatten_at(
                         n.id, r.node, r.port
                     ));
                 }
+                // No Output at all: a block. Its first field Patch out
+                // stands for the node (thumbnail, and `out` if wired).
+                let root = root.or_else(|| {
+                    if output.is_some() {
+                        return None;
+                    }
+                    own.nodes
+                        .iter()
+                        .find(|m| m.kind == PATCH_OUT_KIND && m.boundary_shape().is_some_and(Shape::is_field))
+                        .map(|m| PortRef {
+                            node: m.id.clone(),
+                            port: "out".to_string(),
+                        })
+                });
                 let rename = |id: &str| -> String {
                     if root.as_ref().is_some_and(|r| r.node == id) {
                         n.id.clone()
@@ -417,14 +433,14 @@ mod tests {
         }));
         let flat = flatten(&outer).unwrap();
         let edges = edges_of(&flat.doc);
-        for e in ["p.out>s/img.in", "s/folded.out>mix.base", "s/level.out>tint.in", "s/img.out>s/fold.in"] {
+        for e in ["p.out>s/img.in", "s.out>mix.base", "s/level.out>tint.in", "s/img.out>s/fold.in"] {
             assert!(edges.contains(&e.to_string()), "{e} in {edges:?}");
         }
-        // The boundary nodes stay, as pass-throughs; there is no root to
-        // take the Sub-patch's id (no Output inside), so it renders nothing.
+        // The boundary nodes stay, as pass-throughs. With no Output inside,
+        // the first field Patch out takes the Sub-patch's id (its thumbnail).
         let kinds: Vec<(&str, &str)> = flat.doc.nodes.iter().map(|n| (n.id.as_str(), n.kind.as_str())).collect();
         assert!(kinds.contains(&("s/img", "patch_in")) && kinds.contains(&("s/level", "patch_out")));
-        assert!(kinds.contains(&("s", "solid")));
+        assert!(kinds.contains(&("s", "patch_out")));
         compile(&outer).expect("compiles");
 
         // Ports are by id: a name is only a label.
