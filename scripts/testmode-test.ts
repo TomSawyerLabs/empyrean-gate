@@ -171,6 +171,9 @@ send({ type: "set_test_mode", active: true });
 await waitFor("test mode to arm", () => status?.test?.active);
 console.log("  OK  armed");
 
+// Arming crossfades show -> test frame over TEST_FADE_SECS (0.75 s, engine/mod.rs;
+// plans/no-hard-cuts.md). Only a settled frame is exactly the pattern.
+await sleep(1000);
 expectLit(await nextFrame(), [], "blackout lights nothing");
 
 // ------------------------------------------------------------- Nth pixel
