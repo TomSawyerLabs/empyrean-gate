@@ -257,6 +257,9 @@ pub fn is_gpu_kind(kind: &str) -> bool {
             | "color_adjust"
             | "palette"
             | "texture_sample"
+            | "render_texture"
+            | "texture_blur"
+            | "texture_trails"
             | "output"
     )
 }
@@ -373,6 +376,8 @@ pub const BOUNDARY_SHAPES: [Shape; 6] = [
 pub fn sampled_inputs(kind: &str) -> &'static [&'static str] {
     match kind {
         "transform" => &["in"],
+        // Rendered at grid cells, not at the LEDs.
+        "render_texture" => &["in"],
         _ => &[],
     }
 }
@@ -565,6 +570,19 @@ const fn sel(
         description,
         when: None,
     }
+}
+
+/// A rendered texture's size. Append only: patches store the index.
+const RESOLUTION: ParamDef = sel(
+    "resolution",
+    "Resolution",
+    &["128 × 128", "256 × 256", "64 × 64"],
+    "Cells a side: more is sharper and costs more each frame.",
+);
+
+/// The cells a side `resolution` (an index into [`RESOLUTION`]) means.
+pub fn grid_resolution(index: u32) -> u32 {
+    [128, 256, 64][index.min(2) as usize]
 }
 
 const fn port(name: &'static str, shape: Shape, description: &'static str) -> PortDef {
@@ -3455,6 +3473,97 @@ pub const TYPES: &[NodeType] = &[
                 1.0,
                 "Brightness multiplier.",
             ),
+        ],
+    },
+    // Textures the patch renders itself: each a grid pass before the LEDs,
+    // into its own region of GRID (see codegen `GridAlloc`).
+    NodeType {
+        id: "render_texture",
+        label: "Render to texture",
+        category: Category::Texture,
+        group: Group::Media,
+        description: "Renders a colour field into a stored picture once a frame, its square spanning the disc with its edges touching the rim, Resolution cells a side: a Texture for Blur, Trails, Texture sample or a Code node. The field is rendered at the cells, not the LEDs, so LED data needs a Resample first. A patch's own textures share a budget of 16 (Blur and Trails count two).",
+        inputs: &[port("in", Shape::FieldColor, "The field to render.")],
+        outputs: &[port("tex", Shape::Texture, "The rendered picture (RGBA).")],
+        params: &[RESOLUTION],
+    },
+    NodeType {
+        id: "texture_blur",
+        label: "Blur",
+        category: Category::Texture,
+        group: Group::Media,
+        description: "A Gaussian blur of a Texture (Render to texture, Video in, Still image in, Clip, Trails), into a picture of its own at Resolution. Radius is in the disc's radii: 0.1 softens, 0.5 is a wash.",
+        inputs: &[port("tex", Shape::Texture, "The texture to blur.")],
+        outputs: &[port("tex", Shape::Texture, "The blurred picture (RGBA).")],
+        params: &[
+            num(
+                "radius",
+                "Radius",
+                0.0,
+                1.0,
+                0.1,
+                "How far the blur reaches, in the disc's radii (the rim is 1 from the centre).",
+            ),
+            RESOLUTION,
+        ],
+    },
+    NodeType {
+        id: "texture_trails",
+        label: "Trails",
+        category: Category::Texture,
+        group: Group::Media,
+        description: "Video feedback: each frame the last frame comes back, faded and moved (zoom, spin, drift), with the new picture combined on top, so anything that moves leaves trails. Times are in seconds, so it looks the same at any frame rate.",
+        inputs: &[port("tex", Shape::Texture, "The new picture each frame.")],
+        outputs: &[port("tex", Shape::Texture, "The picture with its trails (RGBA).")],
+        params: &[
+            num(
+                "fade",
+                "Fade (s)",
+                0.02,
+                20.0,
+                1.0,
+                "Seconds for the trails to fade to half.",
+            ),
+            // Append only: patches store the index.
+            sel(
+                "mode",
+                "Combine",
+                &["max", "add", "over"],
+                "How the new picture meets the trails: max keeps the brighter, add sums them, over lays the new picture on by its alpha.",
+            ),
+            num(
+                "zoom",
+                "Zoom (×/s)",
+                0.25,
+                4.0,
+                1.0,
+                "Above 1 the trails grow outward, below 1 they shrink inward, by this factor each second.",
+            ),
+            num(
+                "spin",
+                "Spin (turns/s)",
+                -2.0,
+                2.0,
+                0.0,
+                "How fast the trails turn, in turns per second.",
+            ),
+            num(
+                "drift_x",
+                "Drift X",
+                -2.0,
+                2.0,
+                0.0,
+                "Sideways drift in disc radii per second (positive is right).",
+            ),
+            num(
+                "drift_y",
+                "Drift Y",
+                -2.0,
+                2.0,
+                0.0,
+                "Vertical drift in disc radii per second (positive is up).",
+            ),
+            RESOLUTION,
         ],
     },
     // -- Sink ---------------------------------------------------------------

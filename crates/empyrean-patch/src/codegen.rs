@@ -1,7 +1,11 @@
 //! Graph → WGSL transpiler. Field nodes stay SYMBOLIC: each becomes a WGSL
 //! function over the per-pixel `Ctx`, composed by direct calls, so a whole
 //! patch still renders in one compute dispatch with zero per-frame GPU state
-//! (the TiXL model — see plans/node-graph.md).
+//! (the TiXL model — see plans/node-graph.md). The exception is a texture the
+//! patch renders itself (Render to texture, Blur, Trails): each owns a region
+//! of the grid buffer (binding 11) and fills it in grid passes, entry points
+//! the host dispatches before `main` (`Program::grid_passes`;
+//! plans/xy-grid.md). A patch without one stays a single dispatch.
 //!
 //! Scalar/Event nodes run on the CPU (patch/eval.rs). Every value crossing the
 //! CPU→GPU boundary gets a slot in the parameter slab (binding 8): each Number
@@ -65,6 +69,14 @@ pub struct Program {
     /// Still image nodes and their media cell (1..=MAX_PATCH_IMAGES), in
     /// document order; the host uploads each node's image to its cell.
     pub images: Vec<(usize, u32)>,
+    /// Entry points to dispatch, in order, before `main` (and, on a host
+    /// that renders previews with their own buffers, before the preview
+    /// `main`): each fills part of a texture the patch renders itself. Empty
+    /// for a patch without one, which stays a single dispatch.
+    pub grid_passes: Vec<GridPass>,
+    /// Bytes of the grid buffer (binding 11) the passes use; 0 without any.
+    /// Hosts bind at least one cell and clear it when the program changes.
+    pub grid_bytes: usize,
     /// The document this program was generated from, with every sub-patch
     /// inlined: every node index above refers to it.
     pub doc: PatchDoc,
@@ -86,6 +98,43 @@ pub struct SlabSlot {
     pub wired: Option<(usize, String)>,
     /// Integrate the value over time (× master speed) into a phase.
     pub integrate: bool,
+}
+
+/// One grid pass: an entry point of both `wgsl` and `preview_wgsl`, run with
+/// one invocation per cell (`cells.div_ceil(256)` workgroups).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GridPass {
+    pub entry: String,
+    pub cells: u32,
+}
+
+/// A texture the patch renders: its node, the first GRID cell of its
+/// regions, its size a side, and how many regions it takes (Blur's scratch,
+/// Trails' last frame follow the first).
+#[derive(Debug, Clone, Copy)]
+struct GridAlloc {
+    node: usize,
+    base: u32,
+    res: u32,
+}
+
+impl GridAlloc {
+    /// The cell after the first region (Blur's scratch, Trails' last frame).
+    fn second(&self) -> u32 {
+        self.base + crate::abi::GRID_REGION_CELLS as u32
+    }
+    fn cells(&self) -> u32 {
+        self.res * self.res
+    }
+}
+
+/// The GRID regions a node's rendered texture takes; 0 for anything else.
+fn grid_regions(node: &NodeInst) -> u32 {
+    match node.kind.as_str() {
+        "render_texture" => 1,
+        "texture_blur" | "texture_trails" => 2,
+        _ => 0,
+    }
 }
 
 /// One mini-preview cell: a node's principal output (`port` None: its `out`,
@@ -204,6 +253,9 @@ fn preview_style(node: &NodeInst) -> Option<PreviewStyle> {
         "effects_in" | "event_effect" => return Some(PreviewStyle::Effects),
         "video_in" | "image_in" | "clip" => return Some(PreviewStyle::Texture),
         _ => {}
+    }
+    if grid_regions(node) > 0 {
+        return Some(PreviewStyle::Texture);
     }
     // A Code node previews its principal output; built-ins their `out`.
     let shape = match node.code() {
@@ -353,9 +405,33 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         .zip(1u32..)
         .map(|((i, _), slot)| (i, slot))
         .collect();
+    // Rendered textures take GRID regions in graph order, so each pass runs
+    // after the ones it reads.
+    let mut grids: Vec<GridAlloc> = Vec::new();
+    let mut regions = 0u32;
+    for &i in &gpu_order {
+        let node = &doc.nodes[i];
+        let n = grid_regions(node);
+        if n == 0 {
+            continue;
+        }
+        grids.push(GridAlloc {
+            node: i,
+            base: regions * crate::abi::GRID_REGION_CELLS as u32,
+            res: registry::grid_resolution(node.params.get("resolution").copied().unwrap_or(0.0).max(0.0) as u32),
+        });
+        regions += n;
+    }
+    if regions as usize > crate::abi::MAX_GRID_REGIONS {
+        return Err(format!(
+            "patch renders too many textures ({regions} of {} grid regions; Blur and Trails take two)",
+            crate::abi::MAX_GRID_REGIONS
+        ));
+    }
     let g = Gen {
         doc,
         images: &images,
+        grids: &grids,
         wires: &wires,
         slot_of: &slot_of,
         symbolic: false,
@@ -378,6 +454,8 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
     // functions (and therefore the same parameter-slab layout) with a per-node
     // thumbnail main instead of the composited one.
     let mut preview_code = code.clone();
+    let grid_passes = g.grid_fns(&mut code, false);
+    g.grid_fns(&mut preview_code, true);
     g.main_fn(&mut code, output)?;
 
     // Field nodes and the stream/texture sources in graph order, then the
@@ -456,6 +534,8 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         preview_scalars,
         code_lines,
         images,
+        grid_passes,
+        grid_bytes: regions as usize * crate::abi::GRID_REGION_CELLS * crate::abi::GRID_CELL_BYTES,
         doc: PatchDoc::default(),
         aliases: HashMap::new(),
     })
@@ -464,6 +544,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
 struct Gen<'a> {
     doc: &'a PatchDoc,
     images: &'a [(usize, u32)],
+    grids: &'a [GridAlloc],
     wires: &'a HashMap<(usize, String), (usize, String)>,
     slot_of: &'a HashMap<(usize, String), usize>,
     /// "Convert to Code" mode: knob refs are the knob's (port) name, field
@@ -480,6 +561,7 @@ pub fn builtin_body(doc: &PatchDoc, node: usize) -> Result<String, String> {
     let g = Gen {
         doc,
         images: &[],
+        grids: &[],
         wires: &wires,
         slot_of: &slot_of,
         symbolic: true,
@@ -505,6 +587,9 @@ impl Gen<'_> {
     /// the Still image's own media cell, or the current frame of the Clip's
     /// sheet. Anything else reads as the live video.
     fn texture_source_expr(&self, from: usize) -> String {
+        if let Some(g) = self.grids.iter().find(|g| g.node == from) {
+            return format!("grid_at({}u, {}u, uv)", g.base, g.res);
+        }
         let slot = self
             .images
             .iter()
@@ -1420,6 +1505,8 @@ impl Gen<'_> {
             // A Clip is a Still image whose sheet holds frames; sampled by
             // Texture sample through `clip_at`.
             "clip" => return Ok(String::new()),
+            // Rendered in grid passes (`grid_fns`); read through `grid_at`.
+            "render_texture" | "texture_blur" | "texture_trails" => return Ok(String::new()),
             "coordinate" => {
                 let which = match self.select(i, "which") {
                     // rn runs inner_over_outer..1; after a Transform it is the
@@ -1640,6 +1727,104 @@ impl Gen<'_> {
         )
         .unwrap();
         Ok(())
+    }
+}
+
+impl Gen<'_> {
+    /// The grid passes, appended to `code` in graph order: one or two entry
+    /// points per rendered texture, one invocation per cell. In the preview
+    /// module they set PREVIEW, as its `main` does.
+    fn grid_fns(&self, code: &mut String, preview: bool) -> Vec<GridPass> {
+        let mut passes = Vec::new();
+        for g in self.grids {
+            let i = g.node;
+            let (base, res, cells) = (g.base, g.res, g.cells());
+            let src = match self.upstream(i, "tex") {
+                Some((from, _)) => self.texture_source_expr(*from),
+                None => "vec4f(0.0)".to_string(),
+            };
+            let bodies: Vec<String> = match self.doc.nodes[i].kind.as_str() {
+                "render_texture" => vec![format!(
+                    "    let c = plane_ctx(uv_pos(grid_uv(k, {res}u)));\n\
+                     \x20   grid_put({base}u + k, {input});",
+                    input = self.color_input(i, "in", "c"),
+                )],
+                // Separable Gaussian, 33 taps a pass: the source along x into
+                // the scratch region, then that along y into its own.
+                "texture_blur" => {
+                    let blur = |dir: &str, sample: &str, to: u32| {
+                        format!(
+                            "    let uv0 = grid_uv(k, {res}u);\n\
+                             \x20   let r = max({radius}, 0.0) * 0.5;\n\
+                             \x20   var acc = vec4f(0.0);\n\
+                             \x20   var wsum = 0.0;\n\
+                             \x20   for (var t = -16; t <= 16; t++) {{\n\
+                             \x20       let s = f32(t) / 16.0;\n\
+                             \x20       let w = exp(-4.5 * s * s);\n\
+                             \x20       let uv = uv0 + {dir} * (s * r);\n\
+                             \x20       acc += w * {sample};\n\
+                             \x20       wsum += w;\n\
+                             \x20   }}\n\
+                             \x20   grid_put({to}u + k, acc / wsum);",
+                            radius = self.p(i, "radius"),
+                        )
+                    };
+                    vec![
+                        blur("vec2f(1.0, 0.0)", &src, g.second()),
+                        blur("vec2f(0.0, 1.0)", &format!("grid_at({}u, {res}u, uv)", g.second()), base),
+                    ]
+                }
+                // Last frame (the second region), moved and faded, under the
+                // new picture; then this frame becomes the last.
+                "texture_trails" => vec![
+                    format!(
+                        "    let uv = grid_uv(k, {res}u);\n\
+                         \x20   let p = uv_pos(uv);\n\
+                         \x20   let dt = G.dt;\n\
+                         \x20   let keep = exp2(-dt / max({fade}, 0.001));\n\
+                         \x20   let a = -{spin} * TAU * dt;\n\
+                         \x20   let q = (p - vec2f({dx}, {dy}) * dt) / pow(max({zoom}, 0.01), dt);\n\
+                         \x20   let back = vec2f(q.x * cos(a) - q.y * sin(a), q.x * sin(a) + q.y * cos(a));\n\
+                         \x20   let old = grid_at({last}u, {res}u, vec2f(0.5 + back.x * 0.5, 0.5 - back.y * 0.5)) * keep;\n\
+                         \x20   let fresh = {src};\n\
+                         \x20   var v = max(old, fresh);\n\
+                         \x20   switch {mode}u {{\n\
+                         \x20       case 1u: {{ v = min(old + fresh, vec4f(16.0)); }}\n\
+                         \x20       case 2u: {{ v = vec4f(mix(old.rgb, fresh.rgb, fresh.a), fresh.a + old.a * (1.0 - fresh.a)); }}\n\
+                         \x20       default: {{}}\n\
+                         \x20   }}\n\
+                         \x20   grid_put({base}u + k, v);",
+                        fade = self.p(i, "fade"),
+                        spin = self.p(i, "spin"),
+                        dx = self.p(i, "drift_x"),
+                        dy = self.p(i, "drift_y"),
+                        zoom = self.p(i, "zoom"),
+                        last = g.second(),
+                        mode = self.select(i, "mode"),
+                    ),
+                    format!("    GRID[{last}u + k] = GRID[{base}u + k];", last = g.second()),
+                ],
+                _ => unreachable!("grid_regions names the grid kinds"),
+            };
+            for (n, body) in bodies.iter().enumerate() {
+                let entry = format!("grid_{i}_{n}");
+                let flag = if preview { "    PREVIEW = true;\n" } else { "" };
+                write!(
+                    code,
+                    "\n@compute @workgroup_size(256)\n\
+                     fn {entry}(@builtin(global_invocation_id) gid: vec3u) {{\n\
+                     \x20   let k = gid.x;\n\
+                     \x20   if k >= {cells}u {{\n\
+                     \x20       return;\n\
+                     \x20   }}\n\
+                     {flag}{body}\n\
+                     }}\n",
+                )
+                .unwrap();
+                passes.push(GridPass { entry, cells });
+            }
+        }
+        passes
     }
 }
 
@@ -2647,5 +2832,126 @@ mod tests {
             .find(|s| s.param.is_none())
             .expect("adapter slot exists");
         assert_eq!(slot.wired.as_ref().unwrap().1, "out");
+    }
+
+    /// Render to texture, Blur and Trails (and Blur of the video): grid
+    /// passes in graph order, two each for Blur and Trails, regions counted
+    /// into `grid_bytes`; both modules validate.
+    #[test]
+    fn rendered_textures_compile_into_grid_passes() {
+        let mut big = node("r", "render_texture");
+        big.params.insert("resolution".into(), 1.0);
+        let mut trails = node("tr", "texture_trails");
+        trails.params.insert("mode".into(), 2.0);
+        let doc = PatchDoc {
+            nodes: vec![
+                node("p", "plasma"),
+                big,
+                node("b", "texture_blur"),
+                trails,
+                node("ts", "texture_sample"),
+                node("v", "video_in"),
+                node("vb", "texture_blur"),
+                node("ts2", "texture_sample"),
+                node("mix", "blend"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("p", "out", "r", "in"),
+                edge("r", "tex", "b", "tex"),
+                edge("b", "tex", "tr", "tex"),
+                edge("tr", "tex", "ts", "tex"),
+                edge("v", "tex", "vb", "tex"),
+                edge("vb", "tex", "ts2", "tex"),
+                edge("ts", "out", "mix", "base"),
+                edge("ts2", "out", "mix", "over"),
+                edge("mix", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let prog = compile(&doc).unwrap();
+        validate_wgsl("grids", &prog.wgsl);
+        validate_wgsl("grids preview", &prog.preview_wgsl);
+        let at = |id: &str| doc.nodes.iter().position(|n| n.id == id).unwrap();
+        let entries: Vec<&str> = prog.grid_passes.iter().map(|p| p.entry.as_str()).collect();
+        assert_eq!(entries.len(), 7, "{entries:?}");
+        // Graph order: each pass after the passes it reads.
+        let pos = |e: String| entries.iter().position(|x| *x == e).unwrap();
+        let (r, b, tr) = (at("r"), at("b"), at("tr"));
+        assert!(pos(format!("grid_{r}_0")) < pos(format!("grid_{b}_0")));
+        assert!(pos(format!("grid_{b}_0")) < pos(format!("grid_{b}_1")));
+        assert!(pos(format!("grid_{b}_1")) < pos(format!("grid_{tr}_0")));
+        let cells = |e: String| prog.grid_passes[pos(e)].cells;
+        assert_eq!(cells(format!("grid_{r}_0")), 256 * 256);
+        assert_eq!(cells(format!("grid_{b}_0")), 128 * 128);
+        let region = crate::abi::GRID_REGION_CELLS * crate::abi::GRID_CELL_BYTES;
+        assert_eq!(prog.grid_bytes, 7 * region);
+        // The preview module carries the same passes, flagged as previews.
+        for e in &entries {
+            assert!(prog.preview_wgsl.contains(&format!("fn {e}(")), "{e}");
+        }
+        assert!(prog.preview_cells.iter().any(|c| c.node == at("tr")), "Trails gets a thumbnail");
+    }
+
+    /// A patch of plain fields stays one dispatch.
+    #[test]
+    fn a_patch_without_rendered_textures_has_no_grid_pass() {
+        let doc = PatchDoc {
+            nodes: vec![node("p", "plasma"), node("o", "output")],
+            edges: vec![edge("p", "out", "o", "in")],
+            ..Default::default()
+        };
+        let prog = compile(&doc).unwrap();
+        assert!(prog.grid_passes.is_empty());
+        assert_eq!(prog.grid_bytes, 0);
+    }
+
+    #[test]
+    fn too_many_rendered_textures_are_refused() {
+        let mut nodes = vec![node("p", "plasma"), node("r", "render_texture")];
+        let mut edges = vec![edge("p", "out", "r", "in")];
+        let mut from = "r".to_string();
+        for k in 0..8 {
+            let id = format!("b{k}");
+            nodes.push(node(&id, "texture_blur"));
+            edges.push(edge(&from, "tex", &id, "tex"));
+            from = id;
+        }
+        nodes.extend([node("ts", "texture_sample"), node("o", "output")]);
+        edges.extend([edge(&from, "tex", "ts", "tex"), edge("ts", "out", "o", "in")]);
+        let doc = PatchDoc {
+            nodes,
+            edges,
+            ..Default::default()
+        };
+        let err = compile(&doc).unwrap_err();
+        assert!(err.contains("too many textures"), "{err}");
+    }
+
+    /// Render to texture renders at grid cells, so LED data must be
+    /// resampled first, as into a Transform.
+    #[test]
+    fn led_data_into_render_to_texture_needs_a_resample() {
+        let mut leds = node("leds", "patch_in");
+        leds.params.insert("shape".into(), 4.0);
+        let doc = PatchDoc {
+            nodes: vec![
+                leds,
+                node("r", "render_texture"),
+                node("ts", "texture_sample"),
+                node("o", "output"),
+            ],
+            edges: vec![
+                edge("leds", "out", "r", "in"),
+                edge("r", "tex", "ts", "tex"),
+                edge("ts", "out", "o", "in"),
+            ],
+            ..Default::default()
+        };
+        let errs = validate::validate(&doc).unwrap_err();
+        assert!(
+            matches!(errs[..], [validate::PatchError::LedSampled { .. }]),
+            "{errs:?}"
+        );
     }
 }

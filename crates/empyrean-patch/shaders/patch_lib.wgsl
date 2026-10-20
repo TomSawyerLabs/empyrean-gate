@@ -136,6 +136,12 @@ struct Touch {
 /// layer stack's game grid, unused here. 32 = crate::touch::MAX_TOUCHES.
 @group(0) @binding(10) var<uniform> TOUCH: array<Touch, 32>;
 
+/// Textures the patch renders itself (abi::GRID_*): regions of up to
+/// GRID_SIZE² cells of RGBA, written by the grid passes
+/// that run before `main` and read by `grid_at`. Only patches with a grid
+/// node use it (the gate binds it in the patch pipeline's own layout).
+@group(0) @binding(11) var<storage, read_write> GRID: array<vec4f>;
+
 const PI: f32 = 3.14159265359;
 const TAU: f32 = 6.28318530718;
 
@@ -560,6 +566,49 @@ fn led_cell(c: Ctx) -> vec2u {
     let spoke = u32(p.x + 0.5) % max(G.spokes, 1u);
     let i = u32(clamp(p.y + 0.5, 0.0, f32(max(G.pixels, 1u)) - 0.5));
     return vec2u(spoke, i);
+}
+
+/// The context of a point of the plane that need not be an LED (a grid
+/// cell): `pos` as given, the LED fields from the LED nearest it.
+fn plane_ctx(pos: vec2f) -> Ctx {
+    let rn = length(pos);
+    let theta = atan2(pos.y, pos.x);
+    let r01 = clamp((1.0 - rn) / max(1.0 - G.inner_over_outer, 0.001), 0.0, 1.0);
+    let led = led_cell(Ctx(0u, 0u, theta, r01, rn, pos));
+    return Ctx(led.x, led.y, theta, r01, rn, pos);
+}
+
+/// Where cell `k` of a `res`² grid sits: its uv (0..1, y down) at the
+/// cell's centre. Texture uv spans the disc's square: pos = (2u - 1, 1 - 2v).
+fn grid_uv(k: u32, res: u32) -> vec2f {
+    return (vec2f(f32(k % res), f32(k / res)) + 0.5) / f32(res);
+}
+
+fn uv_pos(uv: vec2f) -> vec2f {
+    return vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+}
+
+fn grid_put(cell: u32, v: vec4f) {
+    GRID[cell] = v;
+}
+
+fn grid_texel(base: u32, res: u32, x: u32, y: u32) -> vec4f {
+    return GRID[base + min(y, res - 1u) * res + min(x, res - 1u)];
+}
+
+/// A texture the patch rendered: the `res`² grid at cell `base` of GRID, at
+/// `uv` (0..1, y down), bilinear between cell centres; transparent outside.
+fn grid_at(base: u32, res: u32, uv: vec2f) -> vec4f {
+    if any(uv < vec2f(0.0)) || any(uv > vec2f(1.0)) {
+        return vec4f(0.0);
+    }
+    let p = clamp(uv * f32(res) - 0.5, vec2f(0.0), vec2f(f32(res - 1u)));
+    let p0 = vec2u(floor(p));
+    let p1 = min(p0 + vec2u(1u), vec2u(res - 1u));
+    let f = fract(p);
+    let a = mix(grid_texel(base, res, p0.x, p0.y), grid_texel(base, res, p1.x, p0.y), f.x);
+    let b = mix(grid_texel(base, res, p0.x, p1.y), grid_texel(base, res, p1.x, p1.y), f.x);
+    return mix(a, b, f.y);
 }
 
 /// Domain transform for the Transform node: rotate (radians), zoom, N-way

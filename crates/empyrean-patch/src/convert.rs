@@ -24,8 +24,18 @@ pub fn convertible(kind: &str) -> bool {
             kind,
             // The stream and texture sources have no function of their own;
             // Output is the sink. Resample reads its input at other LEDs,
-            // which a Code node's `in_at` may not do with LED data.
-            "touch_dabs" | "effects_in" | "video_in" | "image_in" | "clip" | "output" | "resample"
+            // which a Code node's `in_at` may not do with LED data. The
+            // rendered textures run as grid passes, not field functions.
+            "touch_dabs"
+                | "effects_in"
+                | "video_in"
+                | "image_in"
+                | "clip"
+                | "output"
+                | "resample"
+                | "render_texture"
+                | "texture_blur"
+                | "texture_trails"
         )
 }
 

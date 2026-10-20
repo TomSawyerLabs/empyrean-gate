@@ -165,6 +165,18 @@ pub const IMAGE_SIZE: usize = 256;
 pub const MEDIA_CELLS: usize = 1 + crate::MAX_PATCH_IMAGES;
 pub const MEDIA_BUFFER_BYTES: usize = MEDIA_CELLS * IMAGE_SIZE * IMAGE_SIZE * 4;
 
+/// The grid buffer (binding 11, `GRID` in WGSL) holds the textures a patch
+/// renders itself (Render to texture, Blur, Trails, a Code node's Texture
+/// output), one region each, at most `GRID_SIZE`² cells of RGBA (`vec4f`).
+/// Written by the patch's grid passes, never by the host, which sizes
+/// it to `Program::grid_bytes` (at least one cell) and clears it on a new
+/// program.
+pub const GRID_SIZE: usize = 256;
+pub const GRID_REGION_CELLS: usize = GRID_SIZE * GRID_SIZE;
+pub const GRID_CELL_BYTES: usize = 16;
+/// Regions one patch may use (16 MiB).
+pub const MAX_GRID_REGIONS: usize = 16;
+
 /// Floats per audio source in the SCOPE buffer (binding 6): a waveform ring of
 /// `SCOPE_WAVE` samples, then `SCOPE_SPECTRUM` spectrum bins.
 pub const SCOPE_WAVE: usize = 256;
