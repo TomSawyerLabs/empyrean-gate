@@ -160,6 +160,9 @@ export class GateGpu {
 
   private layout: GPUBindGroupLayout;
   private main: GPUComputePipeline | null = null;
+  /** Bumped per `setProgram`, so a slower earlier call cannot install its
+   * pipelines over a later one's. */
+  private programSeq = 0;
   private mainBind: GPUBindGroup | null = null;
   private preview: GPUComputePipeline | null = null;
   private previewBind: GPUBindGroup | null = null;
@@ -252,6 +255,7 @@ export class GateGpu {
    * compiler's messages if the WGSL is rejected (which would be a codegen bug:
    * the same shader is naga-validated in the crate's tests). */
   async setProgram(wgsl: string, previewWgsl: string, previewCells: number): Promise<void> {
+    const seq = ++this.programSeq;
     const pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [this.layout] });
     const build = async (label: string, code: string) => {
       const module = this.device.createShaderModule({ label, code });
@@ -278,6 +282,8 @@ export class GateGpu {
     const main = await build("patch", wgsl);
     const preview = previewWgsl ? await build("patch preview", previewWgsl) : null;
 
+    // Superseded while compiling: the newer program installs itself.
+    if (seq !== this.programSeq) return;
     this.main = main;
     this.mainBind = this.bindGroup(this.globals, this.out);
     this.preview = preview;
