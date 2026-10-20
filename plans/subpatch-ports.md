@@ -72,7 +72,8 @@ whose shapes it uses.
    shaped to it.
 4. Agent guide, gate README, site README and plan (site `770e358`). Done.
 5. Checks, merge, web-dist bump, Preview check. Merged (`f8cc944` to
-   `66bab1c`), checked on dev. The block thumbnail fix below. ← current
+   `66bab1c`), checked on dev. The block thumbnail fix (`b38be9b`), site
+   web-dist `13fb1d5`. Done.
 
 ## Findings / gotchas
 
@@ -106,13 +107,20 @@ whose shapes it uses.
   id, so flatten made it a black Solid. Now the block's first field-shaped
   Patch out takes that id (it stays a pass-through), so the thumbnail shows
   what the block hands on. Left a patch "Block check (agent)" in that
-  library.
+  library. The fix was checked locally: the site's dev server with
+  `PATCH_WEB_DIR` pointed at this worktree, installed Chrome headless with
+  WebGPU (as in the site's `playwright.gpu.config.ts`), a Plasma → block →
+  Output file opened through "Open file…": the Sub-patch's thumbnail shows
+  the plasma, no page errors.
+- The crate is not rustfmt- or clippy-clean on master (other commits'
+  lines) and CI checks neither, so don't "fix" formatting in passing.
 
 ## Progress log
 
 - [x] Steps 1–3 (2026-10-19)
 - [x] Step 4 (2026-10-19)
-- [ ] Step 5: block thumbnail fix to merge, bump, recheck
+- [x] Step 5 (2026-10-19): merged, web-dist bumped, checked; the block
+  thumbnail fix too
 
 ## Open questions for Cameron
 
