@@ -9,7 +9,7 @@ answer:
 - Which physical spoke is logical spoke 17? Which controller drives it?
 - Is `pixels_per_spoke` actually 378? Where does universe 7 start?
 - Are the strings really fed from the outside?
-- Which of the 16 PixLite Mk4-S are actually on the network, and are they the
+- Which of the 16 PixLite E4-S Mk3 are actually on the network, and are they the
   ones we expect?
 
 ## Status
@@ -129,7 +129,7 @@ elevated Authorize script therefore also adds
 | `src/Test.tsx` | The tab |
 | `src/App.tsx` | Tab entry + the global armed banner |
 | `scripts/testmode-test.ts` | E2E against a live backend |
-| `scripts/fake-pixlite.ts` | Fake Mk4 responder, for testing discovery without hardware |
+| `scripts/fake-pixlite.ts` | Fake Mk3 responder, for testing discovery without hardware |
 
 ## Verification
 
@@ -155,7 +155,7 @@ elevated Authorize script therefore also adds
 
 ## Not yet done
 
-- **Real PixLite Mk4-S validation.** Everything above is verified against the
+- **Real PixLite E4-S Mk3 validation.** Everything above is verified against the
   protocol, a fake responder, and loopback sACN — not against the actual boxes.
   The legacy (Mk1/Mk2) discovery path in particular is covered only by parser
   unit tests; the fake speaks DiscProt only, because a legacy fake would have to

@@ -73,7 +73,7 @@ pub struct OutputConfig {
     /// Universes allocated per spoke — the spacing between consecutive spokes'
     /// start universes. 0 = pack tightly, using only what the pixels need.
     /// The existing rig is patched 6 per spoke while only 3 carry data (378 px at
-    /// 170/universe): the 16 PixLite Mk4 boxes have 8 outputs each and only every
+    /// 170/universe): the 16 PixLite E4-S Mk3 boxes have 8 outputs each and only every
     /// other output is wired today, so the controller map already reserves the
     /// second half of each block for the planned doubling. Spoke N therefore
     /// starts at `start_universe + N * 6` — 1, 7, 13 … 379 — and universes

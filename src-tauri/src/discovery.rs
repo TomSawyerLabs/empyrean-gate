@@ -13,7 +13,7 @@
 //!    `255.255.255.255:49150` carrying `"Advatech" 00 00 01 06`. Replies come back
 //!    on the same port with `data[10] == 0x02` and a struct version in `data[11]`
 //!    (4, 5, 6 or 8).
-//! 2. **Advatek DiscProt** (Mk3 and Mk4 — what this installation uses) — a 34-byte
+//! 2. **Advatek DiscProt** (Mk3 and Mk4 — this installation is E4-S Mk3) — a 34-byte
 //!    request multicast to `239.255.251.1:49151`; replies arrive on the separate
 //!    group `239.255.251.2:49151` as `"DiscProt" 21 02 <u16 version> <JSON>`.
 //! 3. **Passive E1.31 source watch** — join the sACN universe-discovery group
@@ -551,7 +551,7 @@ mod tests {
     #[test]
     fn discprot_reply_parses_the_json_body() {
         let p = discprot_reply(
-            r#"{"ipAddr":"192.168.1.50","prodName":"PixLite 16 Mk4-S",
+            r#"{"ipAddr":"192.168.1.50","prodName":"PixLite E4-S Mk3",
                 "fwVer":"1.2.3","nickname":"Spoke 1-4","macAddr":"00:1D:2E:3F:40:51"}"#,
         );
         let c = parse_discprot_reply(&p, IP).expect("a DiscProt reply");
@@ -562,7 +562,7 @@ mod tests {
             "a controller answering from a different address than it claims is \
              a misconfiguration worth surfacing, not a detail to discard"
         );
-        assert_eq!(c.model, "PixLite 16 Mk4-S");
+        assert_eq!(c.model, "PixLite E4-S Mk3");
         assert_eq!(c.firmware, "1.2.3");
         assert_eq!(c.nickname, "Spoke 1-4");
         assert_eq!(c.mac, "00:1D:2E:3F:40:51");

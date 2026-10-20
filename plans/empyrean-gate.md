@@ -11,7 +11,7 @@ keyboard/mouse/touch. CI builds a standalone binary (no installer/updater).
 ## Physical installation (defaults; ALL configurable in-app — user is unsure of exact numbers)
 
 - 64 spokes of LED strip in a radial array ("wagon wheel" viewed from below).
-- 16× Advatek Pixlite Mk4-S controllers. Each box has **8 outputs but only 4 are
+- 16× Advatek PixLite E4-S Mk3 controllers. Each box has **8 outputs but only 4 are
   wired** — every other output — giving 64 strings, 1 string = 1 spoke. The unused
   half is deliberate: the rig is intended to double to 128 spokes later.
 - **378 px per spoke** (confirmed 2026-08-23 against the existing controller patch;

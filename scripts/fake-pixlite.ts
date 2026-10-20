@@ -33,7 +33,7 @@ socket.on("message", (data, from) => {
   for (let i = 0; i < count; i++) {
     const body = JSON.stringify({
       ipAddr: `10.7.0.${10 + i}`,
-      prodName: "PixLite 16 Mk4-S",
+      prodName: "PixLite E4-S Mk3",
       fwVer: "1.4.2",
       nickname: `Spokes ${i * 4}-${i * 4 + 3}`,
       macAddr: `00:1D:2E:00:00:${(0x10 + i).toString(16).padStart(2, "0").toUpperCase()}`,

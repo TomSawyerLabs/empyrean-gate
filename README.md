@@ -2,7 +2,7 @@
 
 GPU pattern generator and sACN pixel driver for the **Empyrean Gate** — a radial array
 of lights above a dance floor: 64 spokes of LED strip (378 px each, fed from the
-outside) in a 50 ft diameter ring, driven by 16× Advatek PixLite Mk4-S controllers over
+outside) in a 50 ft diameter ring, driven by 16× Advatek PixLite E4-S Mk3 controllers over
 sACN (E1.31).
 
 Every frame is computed from scratch on the GPU (wgpu locked to **Vulkan** — no
@@ -898,7 +898,7 @@ so the firewall drops them until the **Authorize** button has been used — a sc
 nothing on a network full of healthy controllers otherwise. Authorize now adds that
 inbound UDP rule alongside the existing one.
 
-`bun scripts/fake-pixlite.ts` stands up a fake Mk4 responder, so discovery can be
+`bun scripts/fake-pixlite.ts` stands up a fake Mk3 responder, so discovery can be
 exercised without hardware.
 
 ## Live-show guards
