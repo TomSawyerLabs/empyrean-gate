@@ -218,8 +218,9 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
     "**Two domains.** Fields live on the *plane* (`field_*`: defined at every position, so Transform can move them) " +
       "or on the *LEDs* (`led_*`: defined only at the gate's physical LEDs, such as `random_field`, or a Code node " +
       "that reads `c.spoke` or `c.i`). A node fed LED data hands on LED data, and a field input takes either. The one " +
-      "exception is an input that reads its source at other positions: Transform's `in`, or a Code node's input whose " +
-      "`x_at` the body calls. LED data can't go there; put a `resample` node in between, which turns it into a plane " +
+      "exception is an input that reads its source at other positions: Transform's `in`, `render_texture`'s `in`, a " +
+      "Code node's input whose `x_at` the body calls, or any field input of a Code node that renders a texture. LED " +
+      "data can't go there; put a `resample` node in between, which turns it into a plane " +
       "picture (the nearest LED, or a blend of the four around).",
     "",
   );
@@ -263,8 +264,8 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
       "```",
       "",
       "- **Two tiers, chosen by the ports.** With a field output it runs on the GPU once per LED: every output must be " +
-        "a field, and no input may be an event. With only scalar and event ports it runs on the CPU once per frame. " +
-        "Anything else is refused.",
+        "a field, and no input may be an event. With one `texture` output it runs on the GPU once per texture cell " +
+        "(below). With only scalar and event ports it runs on the CPU once per frame. Anything else is refused.",
       "- **Assign outputs, don't return them:** `out = …;`. Outputs start at zero; unassigned ones stay so.",
       "- A scalar input is a knob as well (its `min`/`max`/`default`; its value in the node's `params`).",
       `- Port names: letters, digits and \`_\`, starting with a letter, no \`__\`, not ending in \`_at\`. At most ${MAX_CODE_PORTS} ports each way; the body at most ${MAX_CODE_BYTES} bytes.`,
@@ -278,6 +279,14 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
         "`vec4f`: RGB plus coverage in `.a` (how much it covers what is under it when blended). `G` (globals) and " +
         "`AUDIO[0]` (the music: `level`, `bass`, `mid`, `treble`, `onset`, `beat_phase`, `bpm`) are readable; " +
         "`return` is not allowed.",
+      "",
+      "**Texture output** (one `texture` output, nothing beside it): the body renders a 128 × 128 picture, run once " +
+        "per cell. `c` is the cell's centre (`c.pos`, `c.rn`, `c.theta`, `c.r01`; `c.spoke` and `c.i` are refused), " +
+        "the output is the cell's RGBA, and `out_at(uv)` (bilinear) and `out_cell(dx, dy)` (a neighbouring cell, " +
+        "exactly) read the texture as it was last frame, transparent at first and outside: cellular automata, " +
+        "reaction-diffusion, feedback (`out` stands for the output's name). Field inputs are read at the cells, so " +
+        "LED data needs a `resample` first; a `texture` input `x` is its colour at the cell, `x_at(uv)` anywhere. " +
+        "`pos_uv(c.pos)` is the cell's uv. Show it through `texture_sample` (or `texture_blur`, `texture_trails`).",
       "",
       "**CPU tier** (scalar/event ports only): a WGSL subset, interpreted: `let`/`var`, assignment, `if`/`else`, " +
         "`for`/`while`/`loop`, `break`/`continue`/`return`; values are `f32` or `bool` only (no vectors, no " +

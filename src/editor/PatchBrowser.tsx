@@ -23,6 +23,7 @@ const TOPICS: { label: string; kinds: string[] }[] = [
   { label: "Touch", kinds: ["tap", "touch", "touch_dabs", "touch_mask", "touch_glow", "event_effect", "effects_in"] },
   { label: "Phone motion", kinds: ["imu"] },
   { label: "Video and images", kinds: ["video_in", "image_in", "clip", "texture_sample"] },
+  { label: "Trails and blur", kinds: ["render_texture", "texture_blur", "texture_trails"] },
   {
     label: "Noise and chance",
     kinds: ["random", "noise_field", "noise_color", "perlin_noise", "random_field"],

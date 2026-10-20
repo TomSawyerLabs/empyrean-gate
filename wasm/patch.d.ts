@@ -45,6 +45,13 @@ export class PatchSim {
      */
     globals(): Uint8Array;
     /**
+     * The grid passes to dispatch, in order, before `main` each frame, and
+     * the bytes of the grid buffer (binding 11) they use:
+     * `{"bytes": n, "passes": [{"entry": name, "cells": n}, ...]}`. No
+     * passes and 0 bytes for a patch that renders no texture.
+     */
+    gridPasses(): string;
+    /**
      * The running patch's Still images as JSON
      * `[{"node": id, "slot": cell, "media": dataUrl | null}]`: upload each
      * node's picture (IMAGE_SIZE², RGBA) to its cell of the media buffer and
@@ -265,6 +272,7 @@ export interface InitOutput {
     readonly patchsim_feedAudio: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly patchsim_fireDjEvent: (a: number, b: number) => void;
     readonly patchsim_globals: (a: number) => [number, number];
+    readonly patchsim_gridPasses: (a: number) => [number, number];
     readonly patchsim_images: (a: number) => [number, number];
     readonly patchsim_new: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly patchsim_previewGlobals: (a: number) => [number, number];

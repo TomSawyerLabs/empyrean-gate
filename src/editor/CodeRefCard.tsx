@@ -3,7 +3,7 @@
 // group and filterable, each one inserted at the caret by a click.
 
 import { useMemo, useState } from "react";
-import { CTX_FALLBACK, portFns, WGSL_BUILTINS, type CodeScope } from "./CodeEditor";
+import { CTX_FALLBACK, outputFns, portFns, WGSL_BUILTINS, type CodeScope } from "./CodeEditor";
 import { snippetTemplates } from "./code-snippets";
 
 export interface RefItem {
@@ -42,7 +42,10 @@ export function refGroups(s: CodeScope): RefGroup[] {
     else node.push(word(p.name, `input · ${p.shape.replace("_", " ")}`));
     for (const f of portFns(p)) node.push(call(f.name, f.signature.slice(f.name.length), f.doc));
   }
-  for (const p of s.outputs) node.push(word(p.name, `output · ${p.shape.replace("_", " ")} — assign it`));
+  for (const p of s.outputs) {
+    node.push(word(p.name, `output · ${p.shape.replace("_", " ")} — assign it`));
+    for (const f of outputFns(p)) node.push(call(f.name, f.signature.slice(f.name.length), f.doc));
+  }
 
   const snippets = snippetTemplates(s).map((x) => ({ label: x.label, detail: x.detail, doc: x.info, snippet: x.template }));
   const fnItems = (fns: { name: string; signature: string; doc: string }[]) =>
@@ -137,8 +140,9 @@ export function CodeRefColumn({
   );
 }
 
-/** The notes on what a body can use, per tier (the panel's card). */
-export function CodeRefNotes({ tier }: { tier: "cpu" | "gpu" | null }) {
+/** The notes on what a body can use, per tier (the panel's card).
+ * `texture`: the node renders a texture, named so. */
+export function CodeRefNotes({ tier, texture }: { tier: "cpu" | "gpu" | null; texture?: string }) {
   return (
     <ul>
       <li>
@@ -149,6 +153,17 @@ export function CodeRefNotes({ tier }: { tier: "cpu" | "gpu" | null }) {
       </li>
       {tier === "gpu" ? (
         <>
+          {texture && (
+            <li>
+              This node renders a 128 × 128 texture: the body runs once per cell, and <code>c</code> is
+              the cell's centre (<code>c.pos</code>, <code>c.rn</code>, <code>c.theta</code>,{" "}
+              <code>c.r01</code>; not <code>c.spoke</code> or <code>c.i</code>). Assign the cell's RGBA
+              to <code>{texture}</code>; <code>{texture}_at(uv)</code> reads the texture as it was last
+              frame and <code>{texture}_cell(dx, dy)</code> last frame's neighbouring cells (transparent
+              at first and outside), which is what a cellular automaton needs.{" "}
+              <code>pos_uv(c.pos)</code> is this cell's uv.
+            </li>
+          )}
           <li>
             <code>c</code>, this pixel: <code>c.theta</code> (angle), <code>c.r01</code> (0 = outer
             end, 1 = inner), <code>c.rn</code> (radius, 1 = outer edge), <code>c.pos</code> (x, y),{" "}

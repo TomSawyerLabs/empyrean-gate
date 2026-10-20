@@ -15,6 +15,7 @@ export const patchsim_effects: (a: number) => [number, number];
 export const patchsim_feedAudio: (a: number, b: number, c: number, d: number, e: number) => void;
 export const patchsim_fireDjEvent: (a: number, b: number) => void;
 export const patchsim_globals: (a: number) => [number, number];
+export const patchsim_gridPasses: (a: number) => [number, number];
 export const patchsim_images: (a: number) => [number, number];
 export const patchsim_new: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
 export const patchsim_previewGlobals: (a: number) => [number, number];

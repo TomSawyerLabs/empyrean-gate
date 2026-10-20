@@ -349,6 +349,21 @@ function ctxNames(doc: string): Set<string> {
   return names;
 }
 
+/** The functions a texture output gives the body: its own last frame, at a
+ * uv or by neighbouring cell (crate `code::rewrite_body`). */
+export function outputFns(p: CodePort): CodeFnRef[] {
+  if (p.shape !== "texture") return [];
+  const n = p.name;
+  return [
+    { name: `${n}_at`, signature: `${n}_at(uv: vec2f) -> vec4f`, doc: `This texture as it was last frame, at uv (0..1, y down); transparent at first.` },
+    {
+      name: `${n}_cell`,
+      signature: `${n}_cell(dx: i32, dy: i32) -> vec4f`,
+      doc: `Last frame's cell dx right and dy down of this one, exactly; transparent outside the texture.`,
+    },
+  ];
+}
+
 /** The functions an input port gives the body: `<name>_at` to sample it
  * elsewhere, and a buffer's `<name>_on`. */
 export function portFns(p: CodePort): CodeFnRef[] {
@@ -440,6 +455,7 @@ function makeCompletions(scope: () => CodeScope) {
     }
     for (const p of s.outputs) {
       options.push({ label: p.name, type: "variable", detail: `output · ${SHAPE_WORD[p.shape]}`, boost: 3 });
+      for (const fn of outputFns(p)) options.push(fnCompletion(fn, 2));
     }
     if (s.tier === "cpu") {
       options.push(
@@ -604,7 +620,7 @@ export function scopeNames(s: CodeScope): string[] {
     names.push(p.name, ...portFns(p).map((f) => f.name));
     if (p.shape === "points" || p.shape === "effects") names.push(`${p.name}_count`);
   }
-  names.push(...s.outputs.map((p) => p.name));
+  for (const p of s.outputs) names.push(p.name, ...outputFns(p).map((f) => f.name));
   const ref = s.reference;
   if (s.tier === "cpu") {
     names.push("dt", "state", "master_speed", "PI", "TAU", ...(ref?.cpu_builtins ?? []).map((f) => f.name));

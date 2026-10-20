@@ -8344,7 +8344,7 @@ function agentGuide(core, options = {}) {
   add("## Workflow", "", "1. Read this guide; skim the node types (`list_node_types`) and the presets (`list_presets`).", "2. Start from a preset close to the idea (`open_preset`, or `get_preset` to read one), or write a patch from scratch.", "3. Apply it (`set_patch`, or small changes to the open patch with `edit_patch`). A patch without the open patch's `id` opens as a new one; one with it (from `get_patch`) replaces it. A patch that does not validate is *not* applied; the errors say why.", "4. Look at it (`snapshot`: several frames over time, as pictures and numbers). Patterns move: look at more than one frame.", "5. Refine, look again. Name it and describe it (`edit_patch` with `set_info`).", "6. Hand it over: a link (`share_link`) opens it in anyone's playground. Sending it to the crew is the person's", "   decision: they press **Submit** in the playground themselves. Never try to submit on their behalf.", "", "The person may be editing the same patch in the editor while you work; `get_patch` before an edit if time has passed.", "Every change you make is one undo step in their editor.", ""), add("## The patch document", "", "A patch is JSON (the same file the gate saves and opens). Minimal example:", "", "```json", pretty(EXAMPLE), "```", "", `- \`format\`: ${limits.patchFormat} (current). Older documents are upgraded on the way in.`, "- `id`: leave empty for a new patch; the store assigns one.", "- `nodes[]`: `id` (unique in the patch, short: `bow`, `n3`), `kind` (a node type), `name` (a label, may be empty), `params` (knob values by param name; missing ones take the default), `pos` (canvas position; all `[0, 0]` or `arrange: true` lays the graph out for you), `collapsed: true` to show it minimized in the editor (looks only), and on a Blend `layers` (1..8, default 1): layer k > 1 adds the input `over{k}`, the select `mode{k}` and the knob `opacity{k}`, each applied in turn on top of the layers below. Stack several pictures in one Blend rather than chaining Blends.", "- `edges[]`: `{ from: { node, port }, to: { node, port } }`, from an output port to an input port. An input takes one wire.", "- `exposed[]`: knobs promoted to the gate's Control surface (phones on the dance floor can play them).", "- A Still image or Clip node carries its picture in `media` (a data URL); a Sub-patch node its document in `sub`; a Code node its ports and body in `code`.", `- Limits: at most ${limits.maxNodes} nodes and ${limits.maxEdges} edges.`, "", "**Every Number param is also an input port of the same name** (shape `scalar`): wire a scalar into it and the wire drives it; unwired, the knob value is used. Select params (a list of options, by index) are not wirable. Params marked *a rate* are speeds: the gate integrates them over time, so changing one never makes the picture jump.", "", "A patch has one `output` node (at most one; without it nothing shows), and the picture is what reaches its `in`.", "", "**Blocks.** A patch used as a Sub-patch can take and hand on more than a picture: each `patch_in` node inside it is an input port of the Sub-patch, and each `patch_out` an output port, named by that node's `id` (its `name` is only the label). Their `shape` select (0 colour field, 1 grey field, 2 number, 3 event, 4 colour LEDs, 5 grey LEDs) sets what the port carries. Inside, wire from a `patch_in`'s `out` and into a `patch_out`'s `in`; outside, wire to and from the Sub-patch's ports by those ids. An unwired `patch_in` hands on its `default` (number or grey), black or no events, so the patch also runs on its own. A block with `patch_out`s needs no `output`.", ""), add("## Wire shapes", "");
   for (let s of core.shapes)
     add(`- **\`${s.id}\`** (${s.label}): ${s.description}`);
-  if (add("", "A wire connects ports of the same shape, plus two automatic adapters: `scalar` → `field_scalar` (a constant " + "field) and `field_scalar` → `field_color` (grayscale).", "", "**Two domains.** Fields live on the *plane* (`field_*`: defined at every position, so Transform can move them) or on the *LEDs* (`led_*`: defined only at the gate's physical LEDs, such as `random_field`, or a Code node that reads `c.spoke` or `c.i`). A node fed LED data hands on LED data, and a field input takes either. The one exception is an input that reads its source at other positions: Transform's `in`, or a Code node's input whose `x_at` the body calls. LED data can't go there; put a `resample` node in between, which turns it into a plane picture (the nearest LED, or a blend of the four around).", ""), add("## Inputs the gate provides", "", "Music drives most patterns. On the gate, `audio` follows the sound system and `dj_link` the DJ's decks (Pioneer PRO DJ LINK). In the playground (and in `snapshot`) a simulated DJ set stands in for both: two decks at 122 BPM mixing a crate of tracks, with rekordbox phrases (intro, up, chorus, down, outro, verse, bridge), fill-ins, loops, hot-cue jumps and crossfades, every `dj_link` output and event moving as the gate would read them, and a synthetic groove on `audio` that follows the set (a breakdown drops the kick; the visitor's microphone can replace it). Off the gate's network `dj_link.active` is 0 and the rest reads 0 (`mix` holds 0.5): fall back to `audio` there. Taps and strokes on the gate's touch screens arrive through `effects_in` / `touch_dabs` (render them with `render_effects` / `render_points` and blend them over the picture, as most presets do, so people can play with the pattern).", ""), code) {
+  if (add("", "A wire connects ports of the same shape, plus two automatic adapters: `scalar` → `field_scalar` (a constant " + "field) and `field_scalar` → `field_color` (grayscale).", "", "**Two domains.** Fields live on the *plane* (`field_*`: defined at every position, so Transform can move them) or on the *LEDs* (`led_*`: defined only at the gate's physical LEDs, such as `random_field`, or a Code node that reads `c.spoke` or `c.i`). A node fed LED data hands on LED data, and a field input takes either. The one exception is an input that reads its source at other positions: Transform's `in`, `render_texture`'s `in`, a Code node's input whose `x_at` the body calls, or any field input of a Code node that renders a texture. LED data can't go there; put a `resample` node in between, which turns it into a plane picture (the nearest LED, or a blend of the four around).", ""), add("## Inputs the gate provides", "", "Music drives most patterns. On the gate, `audio` follows the sound system and `dj_link` the DJ's decks (Pioneer PRO DJ LINK). In the playground (and in `snapshot`) a simulated DJ set stands in for both: two decks at 122 BPM mixing a crate of tracks, with rekordbox phrases (intro, up, chorus, down, outro, verse, bridge), fill-ins, loops, hot-cue jumps and crossfades, every `dj_link` output and event moving as the gate would read them, and a synthetic groove on `audio` that follows the set (a breakdown drops the kick; the visitor's microphone can replace it). Off the gate's network `dj_link.active` is 0 and the rest reads 0 (`mix` holds 0.5): fall back to `audio` there. Taps and strokes on the gate's touch screens arrive through `effects_in` / `touch_dabs` (render them with `render_effects` / `render_points` and blend them over the picture, as most presets do, so people can play with the pattern).", ""), code) {
     add("## The Code node", "", "When no node does what you want, write it: a `code` node declares its own ports and a body in **WGSL**.", "", "```json", pretty({
       id: "swirl",
       kind: "code",
@@ -8357,7 +8357,7 @@ function agentGuide(core, options = {}) {
         body: `let hue = fract(c.theta / TAU + c.r01 * twist + G.time * 0.05);
 out = vec4f(hsv2rgb(hue, 0.9, 1.0), 1.0);`
       }
-    }), "```", "", "- **Two tiers, chosen by the ports.** With a field output it runs on the GPU once per LED: every output must be a field, and no input may be an event. With only scalar and event ports it runs on the CPU once per frame. Anything else is refused.", "- **Assign outputs, don't return them:** `out = …;`. Outputs start at zero; unassigned ones stay so.", "- A scalar input is a knob as well (its `min`/`max`/`default`; its value in the node's `params`).", `- Port names: letters, digits and \`_\`, starting with a letter, no \`__\`, not ending in \`_at\`. At most ${MAX_CODE_PORTS} ports each way; the body at most ${MAX_CODE_BYTES} bytes.`, "- Errors (parse, shader compile) are reported against your body's own lines: `validate_patch`, or `set_patch`'s `runtimeError`.", "", "**GPU tier** (a field output): the body is pasted into a WGSL function for one LED. `c` is this LED (`Ctx`, below). A field input `x` is the upstream field at this LED (`f32` for `field_scalar`, `vec4f` for `field_color`); `x_at(ctx)` samples it anywhere else (warps, offsets, blurs), which LED data can't feed. A body that reads `c.spoke` or `c.i` keys on the physical LED, so its outputs are LED data; key on `led_cell(c)` (the nearest LED to the position) instead to stay on the plane. A `field_color` output is a `vec4f`: RGB plus coverage in `.a` (how much it covers what is under it when blended). `G` (globals) and `AUDIO[0]` (the music: `level`, `bass`, `mid`, `treble`, `onset`, `beat_phase`, `bpm`) are readable; `return` is not allowed.", "", "**CPU tier** (scalar/event ports only): a WGSL subset, interpreted: `let`/`var`, assignment, `if`/`else`, `for`/`while`/`loop`, `break`/`continue`/`return`; values are `f32` or `bool` only (no vectors, no `const`, `fn`, `struct` or `switch`). An event input reads true on the frame it fires; set an event output true to fire it. `dt` is seconds since the last frame, `state.<name>` keeps a number across frames. Every loop is bounded (10,000 steps a frame), so a body can never hang the gate.", "");
+    }), "```", "", "- **Two tiers, chosen by the ports.** With a field output it runs on the GPU once per LED: every output must be a field, and no input may be an event. With one `texture` output it runs on the GPU once per texture cell (below). With only scalar and event ports it runs on the CPU once per frame. Anything else is refused.", "- **Assign outputs, don't return them:** `out = …;`. Outputs start at zero; unassigned ones stay so.", "- A scalar input is a knob as well (its `min`/`max`/`default`; its value in the node's `params`).", `- Port names: letters, digits and \`_\`, starting with a letter, no \`__\`, not ending in \`_at\`. At most ${MAX_CODE_PORTS} ports each way; the body at most ${MAX_CODE_BYTES} bytes.`, "- Errors (parse, shader compile) are reported against your body's own lines: `validate_patch`, or `set_patch`'s `runtimeError`.", "", "**GPU tier** (a field output): the body is pasted into a WGSL function for one LED. `c` is this LED (`Ctx`, below). A field input `x` is the upstream field at this LED (`f32` for `field_scalar`, `vec4f` for `field_color`); `x_at(ctx)` samples it anywhere else (warps, offsets, blurs), which LED data can't feed. A body that reads `c.spoke` or `c.i` keys on the physical LED, so its outputs are LED data; key on `led_cell(c)` (the nearest LED to the position) instead to stay on the plane. A `field_color` output is a `vec4f`: RGB plus coverage in `.a` (how much it covers what is under it when blended). `G` (globals) and `AUDIO[0]` (the music: `level`, `bass`, `mid`, `treble`, `onset`, `beat_phase`, `bpm`) are readable; `return` is not allowed.", "", "**Texture output** (one `texture` output, nothing beside it): the body renders a 128 × 128 picture, run once " + "per cell. `c` is the cell's centre (`c.pos`, `c.rn`, `c.theta`, `c.r01`; `c.spoke` and `c.i` are refused), the output is the cell's RGBA, and `out_at(uv)` (bilinear) and `out_cell(dx, dy)` (a neighbouring cell, exactly) read the texture as it was last frame, transparent at first and outside: cellular automata, reaction-diffusion, feedback (`out` stands for the output's name). Field inputs are read at the cells, so LED data needs a `resample` first; a `texture` input `x` is its colour at the cell, `x_at(uv)` anywhere. `pos_uv(c.pos)` is the cell's uv. Show it through `texture_sample` (or `texture_blur`, `texture_trails`).", "", "**CPU tier** (scalar/event ports only): a WGSL subset, interpreted: `let`/`var`, assignment, `if`/`else`, `for`/`while`/`loop`, `break`/`continue`/`return`; values are `f32` or `bool` only (no vectors, no `const`, `fn`, `struct` or `switch`). An event input reads true on the frame it fires; set an event output true to fire it. `dt` is seconds since the last frame, `state.<name>` keeps a number across frames. Every loop is bounded (10,000 steps a frame), so a body can never hang the gate.", "");
     let fields = (name) => (code.structs.find((x) => x.name === name)?.fields ?? []).filter((f) => !f.name.startsWith("_")), ctx = fields("Ctx");
     if (ctx.length) {
       add("`c: Ctx`, this LED:", "");
@@ -8657,6 +8657,15 @@ class PatchSim {
     let ret = wasm.patchsim_globals(this.__wbg_ptr);
     var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     return wasm.__wbindgen_free(ret[0], ret[1] * 1, 1), v1;
+  }
+  gridPasses() {
+    let deferred1_0, deferred1_1;
+    try {
+      let ret = wasm.patchsim_gridPasses(this.__wbg_ptr);
+      return deferred1_0 = ret[0], deferred1_1 = ret[1], getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+      wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
   }
   images() {
     let deferred1_0, deferred1_1;
@@ -9790,11 +9799,14 @@ class GateGpu {
   video;
   slab;
   touches;
+  grid;
   previewOut = null;
   previewRead = null;
   previewBusy = !1;
   layout;
   main = null;
+  programSeq = 0;
+  gridPasses = [];
   mainBind = null;
   preview = null;
   previewBind = null;
@@ -9806,7 +9818,7 @@ class GateGpu {
   constructor(device, limits, geometry) {
     this.device = device, this.limits = limits, this.geometry = geometry;
     let leds = geometry.spokes * geometry.pixels, U = GPUBufferUsage, buf = (size, usage) => device.createBuffer({ size: Math.max(16, Math.ceil(size / 4) * 4), usage });
-    this.globals = buf(limits.globalsBytes, U.UNIFORM | U.COPY_DST), this.previewGlobals = buf(limits.globalsBytes, U.UNIFORM | U.COPY_DST), this.audio = buf(limits.audioBytes, U.UNIFORM | U.COPY_DST), this.fx = buf(limits.effectBytes * limits.maxEffects, U.STORAGE | U.COPY_DST), this.out = buf(leds * 8, U.STORAGE | U.COPY_SRC), this.dabs = buf(limits.dabBytes * limits.maxDabs, U.STORAGE | U.COPY_DST), this.scope = buf(limits.scopeFloats * limits.audioSources * 4, U.STORAGE | U.COPY_DST), this.video = buf(limits.mediaBufferBytes, U.STORAGE | U.COPY_DST), this.slab = buf(limits.maxSlabFloats * 4, U.STORAGE | U.COPY_DST), this.touches = buf(limits.touchBytes * limits.maxTouches, U.UNIFORM | U.COPY_DST);
+    this.globals = buf(limits.globalsBytes, U.UNIFORM | U.COPY_DST), this.previewGlobals = buf(limits.globalsBytes, U.UNIFORM | U.COPY_DST), this.audio = buf(limits.audioBytes, U.UNIFORM | U.COPY_DST), this.fx = buf(limits.effectBytes * limits.maxEffects, U.STORAGE | U.COPY_DST), this.out = buf(leds * 8, U.STORAGE | U.COPY_SRC), this.dabs = buf(limits.dabBytes * limits.maxDabs, U.STORAGE | U.COPY_DST), this.scope = buf(limits.scopeFloats * limits.audioSources * 4, U.STORAGE | U.COPY_DST), this.video = buf(limits.mediaBufferBytes, U.STORAGE | U.COPY_DST), this.slab = buf(limits.maxSlabFloats * 4, U.STORAGE | U.COPY_DST), this.touches = buf(limits.touchBytes * limits.maxTouches, U.UNIFORM | U.COPY_DST), this.grid = buf(0, U.STORAGE);
     let C = GPUShaderStage.COMPUTE, ro = { type: "read-only-storage" };
     this.layout = device.createBindGroupLayout({
       label: "patch",
@@ -9819,7 +9831,8 @@ class GateGpu {
         { binding: 6, visibility: C, buffer: ro },
         { binding: 7, visibility: C, buffer: ro },
         { binding: 8, visibility: C, buffer: ro },
-        { binding: 10, visibility: C, buffer: { type: "uniform" } }
+        { binding: 10, visibility: C, buffer: { type: "uniform" } },
+        { binding: 11, visibility: C, buffer: { type: "storage" } }
       ]
     }), this.viewLayout = device.createBindGroupLayout({
       label: "gate view",
@@ -9851,22 +9864,28 @@ class GateGpu {
       primitive: { topology: "triangle-list" }
     });
   }
-  async setProgram(wgsl, previewWgsl, previewCells) {
-    let pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [this.layout] }), build = async (label, code) => {
+  async setProgram(wgsl, previewWgsl, previewCells, grid = { bytes: 0, passes: [] }) {
+    let seq = ++this.programSeq, pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [this.layout] }), build = async (label, code, entries = []) => {
       let module = this.device.createShaderModule({ label, code }), errors = (await module.getCompilationInfo()).messages.filter((m) => m.type === "error");
       if (errors.length)
         throw new ShaderError(`${label} shader failed to compile`, errors.map((m) => `wgsl:${m.lineNum}:${m.linePos} ${m.message}`));
       try {
-        return await this.device.createComputePipelineAsync({
+        return await Promise.all([...entries, "main"].map((entryPoint) => this.device.createComputePipelineAsync({
           label,
           layout: pipelineLayout,
-          compute: { module, entryPoint: "main" }
-        });
+          compute: { module, entryPoint }
+        })));
       } catch (e) {
         throw new ShaderError(`${label} pipeline failed`, [String(e)]);
       }
-    }, main = await build("patch", wgsl), preview = previewWgsl ? await build("patch preview", previewWgsl) : null;
-    if (this.main = main, this.mainBind = this.bindGroup(this.globals, this.out), this.preview = preview, this.previewCells = preview ? previewCells : 0, this.previewOut?.destroy(), this.previewRead?.destroy(), this.previewOut = this.previewRead = this.previewBind = null, preview && previewCells > 0) {
+    }, built = await build("patch", wgsl, grid.passes.map((p) => p.entry)), main = built.pop(), preview = previewWgsl ? (await build("patch preview", previewWgsl))[0] : null;
+    if (seq !== this.programSeq)
+      return;
+    if (this.main = main, this.gridPasses = built.map((pipeline, k) => ({ pipeline, cells: grid.passes[k].cells })), this.grid.destroy(), this.grid = this.device.createBuffer({
+      label: "grid",
+      size: Math.max(16, grid.bytes),
+      usage: GPUBufferUsage.STORAGE
+    }), this.mainBind = this.bindGroup(this.globals, this.out), this.preview = preview, this.previewCells = preview ? previewCells : 0, this.previewOut?.destroy(), this.previewRead?.destroy(), this.previewOut = this.previewRead = this.previewBind = null, preview && previewCells > 0) {
       let bytes = previewCells * this.geometry.spokes * this.miniPixels() * 4;
       this.previewOut = this.device.createBuffer({
         size: bytes,
@@ -9892,7 +9911,8 @@ class GateGpu {
         { binding: 6, resource: { buffer: this.scope } },
         { binding: 7, resource: { buffer: this.video } },
         { binding: 8, resource: { buffer: this.slab } },
-        { binding: 10, resource: { buffer: this.touches } }
+        { binding: 10, resource: { buffer: this.touches } },
+        { binding: 11, resource: { buffer: this.grid } }
       ]
     });
   }
@@ -9933,7 +9953,10 @@ class GateGpu {
     if (!this.main || !this.mainBind)
       return;
     let enc = this.device.createCommandEncoder({ label: "patch frame" }), pass = enc.beginComputePass();
-    pass.setPipeline(this.main), pass.setBindGroup(0, this.mainBind), pass.dispatchWorkgroups(Math.ceil(this.geometry.spokes * this.geometry.pixels / 256)), pass.end();
+    pass.setBindGroup(0, this.mainBind);
+    for (let { pipeline, cells } of this.gridPasses)
+      pass.setPipeline(pipeline), pass.dispatchWorkgroups(Math.ceil(cells / 256));
+    pass.setPipeline(this.main), pass.dispatchWorkgroups(Math.ceil(this.geometry.spokes * this.geometry.pixels / 256)), pass.end();
     for (let view of this.views.values())
       this.drawView(enc, view);
     this.device.queue.submit([enc.finish()]);
@@ -10044,6 +10067,7 @@ class GateGpu {
       this.video,
       this.slab,
       this.touches,
+      this.grid,
       this.previewOut,
       this.previewRead,
       this.frameRead
@@ -10308,7 +10332,7 @@ class PatchRuntime {
     if (shader) {
       this.pending = !0, this.pendingGen = gen;
       try {
-        await this.gpu.setProgram(sim.wgsl(), sim.previewWgsl(), sim.previewNodes().length);
+        await this.gpu.setProgram(sim.wgsl(), sim.previewWgsl(), sim.previewNodes().length, JSON.parse(sim.gridPasses()));
       } catch (e) {
         if (this.pendingGen === gen)
           this.pending = !1;

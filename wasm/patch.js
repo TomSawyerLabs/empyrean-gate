@@ -114,6 +114,25 @@ export class PatchSim {
         return v1;
     }
     /**
+     * The grid passes to dispatch, in order, before `main` each frame, and
+     * the bytes of the grid buffer (binding 11) they use:
+     * `{"bytes": n, "passes": [{"entry": name, "cells": n}, ...]}`. No
+     * passes and 0 bytes for a patch that renders no texture.
+     * @returns {string}
+     */
+    gridPasses() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.patchsim_gridPasses(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * The running patch's Still images as JSON
      * `[{"node": id, "slot": cell, "media": dataUrl | null}]`: upload each
      * node's picture (IMAGE_SIZE², RGBA) to its cell of the media buffer and

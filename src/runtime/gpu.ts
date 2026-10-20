@@ -24,6 +24,13 @@ export interface FrameData {
 
 export class WebGpuUnavailable extends Error {}
 
+/** A patch's grid passes (`PatchSim.gridPasses()`): entry points to run, in
+ * order, before `main`, and the bytes of the grid buffer they fill. */
+export interface GridPasses {
+  bytes: number;
+  passes: { entry: string; cells: number }[];
+}
+
 /** Fraction of the canvas's short side the array's outer edge reaches. */
 const VIEW_FILL = 0.96;
 
@@ -154,12 +161,19 @@ export class GateGpu {
   private video: GPUBuffer;
   private slab: GPUBuffer;
   private touches: GPUBuffer;
+  /** Binding 11: the textures the patch renders itself, sized per patch. */
+  private grid: GPUBuffer;
   private previewOut: GPUBuffer | null = null;
   private previewRead: GPUBuffer | null = null;
   private previewBusy = false;
 
   private layout: GPUBindGroupLayout;
   private main: GPUComputePipeline | null = null;
+  /** Bumped per `setProgram`, so a slower earlier call cannot install its
+   * pipelines over a later one's. */
+  private programSeq = 0;
+  /** The patch's grid passes, dispatched before `main` each frame. */
+  private gridPasses: { pipeline: GPUComputePipeline; cells: number }[] = [];
   private mainBind: GPUBindGroup | null = null;
   private preview: GPUComputePipeline | null = null;
   private previewBind: GPUBindGroup | null = null;
@@ -197,6 +211,7 @@ export class GateGpu {
     // A fixed-length uniform array in the shader (storage buffers are at the
     // default per-stage limit on the gate's shared layout).
     this.touches = buf(limits.touchBytes * limits.maxTouches, U.UNIFORM | U.COPY_DST);
+    this.grid = buf(0, U.STORAGE);
 
     const C = GPUShaderStage.COMPUTE;
     const ro = { type: "read-only-storage" } as const;
@@ -212,6 +227,7 @@ export class GateGpu {
         { binding: 7, visibility: C, buffer: ro },
         { binding: 8, visibility: C, buffer: ro },
         { binding: 10, visibility: C, buffer: { type: "uniform" } },
+        { binding: 11, visibility: C, buffer: { type: "storage" } },
       ],
     });
 
@@ -251,9 +267,16 @@ export class GateGpu {
   /** Build the pipelines for a compiled patch. Throws [`ShaderError`] with the
    * compiler's messages if the WGSL is rejected (which would be a codegen bug:
    * the same shader is naga-validated in the crate's tests). */
-  async setProgram(wgsl: string, previewWgsl: string, previewCells: number): Promise<void> {
+  async setProgram(
+    wgsl: string,
+    previewWgsl: string,
+    previewCells: number,
+    grid: GridPasses = { bytes: 0, passes: [] },
+  ): Promise<void> {
+    const seq = ++this.programSeq;
     const pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [this.layout] });
-    const build = async (label: string, code: string) => {
+    // One pipeline per entry point of the module, `main` last.
+    const build = async (label: string, code: string, entries: string[] = []) => {
       const module = this.device.createShaderModule({ label, code });
       const info = await module.getCompilationInfo();
       const errors = info.messages.filter((m) => m.type === "error");
@@ -265,20 +288,41 @@ export class GateGpu {
         );
       }
       try {
-        return await this.device.createComputePipelineAsync({
-          label,
-          layout: pipelineLayout,
-          compute: { module, entryPoint: "main" },
-        });
+        return await Promise.all(
+          [...entries, "main"].map((entryPoint) =>
+            this.device.createComputePipelineAsync({
+              label,
+              layout: pipelineLayout,
+              compute: { module, entryPoint },
+            }),
+          ),
+        );
       } catch (e) {
         throw new ShaderError(`${label} pipeline failed`, [String(e)]);
       }
     };
 
-    const main = await build("patch", wgsl);
-    const preview = previewWgsl ? await build("patch preview", previewWgsl) : null;
+    const built = await build(
+      "patch",
+      wgsl,
+      grid.passes.map((p) => p.entry),
+    );
+    const main = built.pop()!;
+    // Previews read the textures the main passes rendered (same patch), so
+    // a thumbnail never advances Trails a second time.
+    const preview = previewWgsl ? (await build("patch preview", previewWgsl))[0] : null;
 
+    // Superseded while compiling: the newer program installs itself.
+    if (seq !== this.programSeq) return;
     this.main = main;
+    this.gridPasses = built.map((pipeline, k) => ({ pipeline, cells: grid.passes[k].cells }));
+    // A new program starts from clear textures (Trails' last frame too).
+    this.grid.destroy();
+    this.grid = this.device.createBuffer({
+      label: "grid",
+      size: Math.max(16, grid.bytes),
+      usage: GPUBufferUsage.STORAGE,
+    });
     this.mainBind = this.bindGroup(this.globals, this.out);
     this.preview = preview;
     this.previewCells = preview ? previewCells : 0;
@@ -316,6 +360,7 @@ export class GateGpu {
         { binding: 7, resource: { buffer: this.video } },
         { binding: 8, resource: { buffer: this.slab } },
         { binding: 10, resource: { buffer: this.touches } },
+        { binding: 11, resource: { buffer: this.grid } },
       ],
     });
   }
@@ -367,8 +412,14 @@ export class GateGpu {
     if (!this.main || !this.mainBind) return;
     const enc = this.device.createCommandEncoder({ label: "patch frame" });
     const pass = enc.beginComputePass();
-    pass.setPipeline(this.main);
     pass.setBindGroup(0, this.mainBind);
+    // The rendered textures first, in graph order: each dispatch sees the
+    // writes of the ones before it.
+    for (const { pipeline, cells } of this.gridPasses) {
+      pass.setPipeline(pipeline);
+      pass.dispatchWorkgroups(Math.ceil(cells / 256));
+    }
+    pass.setPipeline(this.main);
     pass.dispatchWorkgroups(Math.ceil((this.geometry.spokes * this.geometry.pixels) / 256));
     pass.end();
     for (const view of this.views.values()) this.drawView(enc, view);
@@ -537,6 +588,7 @@ export class GateGpu {
       this.video,
       this.slab,
       this.touches,
+      this.grid,
       this.previewOut,
       this.previewRead,
       this.frameRead,

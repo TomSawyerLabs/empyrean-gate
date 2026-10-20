@@ -72,6 +72,8 @@ export function snippetTemplates(scope: CodeScope): CodeSnippet[] {
   }
 
   const colour = out?.shape !== "field_scalar";
+  // A texture's body runs per cell, which is no LED: no `c.spoke` there.
+  const texture = out?.shape === "texture";
   const assign = (grey: string) => (colour ? `${o} = vec4f(vec3f(${grey}), 1.0);` : `${o} = ${grey};`);
   list.push(
     snip("if", "if (${condition}) {\n\t${}\n}", "if block"),
@@ -92,8 +94,28 @@ export function snippetTemplates(scope: CodeScope): CodeSnippet[] {
       "let ${1:band} = smoothstep(${2:0.4}, ${3:0.5}, c.r01) * (1.0 - smoothstep(${4:0.5}, ${5:0.6}, c.r01));",
       "a soft ring between two radii",
     ),
-    snip("spokes", "let ${1:even} = f32(c.spoke % ${2:2u} == 0u);", "every other spoke"),
   );
+  if (texture) {
+    list.push(
+      snip(
+        "life",
+        "var ${1:n} = 0.0;\nfor (var dy = -1; dy <= 1; dy++) {\n\tfor (var dx = -1; dx <= 1; dx++) {\n\t\tif (dx != 0 || dy != 0) {\n\t\t\t${1:n} += " +
+          `${o}_cell(dx, dy).a;\n\t\t}\n\t}\n}\nlet \${2:alive} = ${o}_cell(0, 0).a > 0.5;\n` +
+          "let ${3:next} = select(f32(${1:n} == 3.0), f32(${1:n} == 2.0 || ${1:n} == 3.0), ${2:alive});\n" +
+          `${o} = vec4f(vec3f(\${3:next}), \${3:next});`,
+        "a Game of Life step",
+        `Counts the eight cells alive last frame (alpha over 0.5) and applies Conway's rule. Seed it by taking the max with something drawn.`,
+      ),
+      snip(
+        "trail",
+        `${o} = max(${o}_at(pos_uv(c.pos * \${1:0.98})) * \${2:0.95}, \${3:vec4f(0.0)});`,
+        "last frame, zoomed and faded, under something new",
+        `${o}_at(uv) reads this texture as it was last frame; pos_uv(pos) is a position's uv.`,
+      ),
+    );
+  } else {
+    list.push(snip("spokes", "let ${1:even} = f32(c.spoke % ${2:2u} == 0u);", "every other spoke"));
+  }
   if (colour) {
     list.push(
       snip(
@@ -153,6 +175,16 @@ export const SNIPPET_NODES: { tier: string; def: Omit<CodeDef, "body"> }[] = [
     },
   },
   {
+    tier: "GPU texture",
+    def: {
+      inputs: [
+        { name: "img", shape: "field_color", min: 0, max: 1, default: 0 },
+        { name: "cam", shape: "texture", min: 0, max: 1, default: 0 },
+      ],
+      outputs: [{ name: "out", shape: "texture", min: 0, max: 1, default: 0 }],
+    },
+  },
+  {
     tier: "GPU grey",
     def: {
       inputs: [{ name: "grey", shape: "field_scalar", min: 0, max: 1, default: 0 }],
@@ -176,11 +208,13 @@ export const SNIPPET_NODES: { tier: string; def: Omit<CodeDef, "body"> }[] = [
 
 /** One patch per snippet per node above: the snippet expanded at its
  * defaults as the node's whole body (after PRELUDE). A GPU node feeds the
- * Output (input `into`); a CPU node stands beside one. */
+ * Output (input `into`), a texture through a Texture sample; a CPU node
+ * stands beside one. */
 export function snippetDocs(format: number, into: string): { label: string; doc: PatchDoc }[] {
   const docs: { label: string; doc: PatchDoc }[] = [];
   for (const { tier, def } of SNIPPET_NODES) {
     const cpu = tier === "CPU";
+    const texture = def.outputs[0]?.shape === "texture";
     const scope: CodeScope = { tier: cpu ? "cpu" : "gpu", inputs: def.inputs, outputs: def.outputs, reference: null };
     for (const x of snippetTemplates(scope)) {
       const code: CodeDef = { ...def, body: `${PRELUDE}${expandSnippet(x.template)}\n` };
@@ -193,9 +227,17 @@ export function snippetDocs(format: number, into: string): { label: string; doc:
           description: "",
           nodes: [
             { id: "n", kind: "code", name: "n", params: {}, pos: [0, 0], code },
+            ...(texture ? [{ id: "s", kind: "texture_sample", name: "s", params: {}, pos: [0, 0] as [number, number] }] : []),
             { id: "o", kind: "output", name: "o", params: {}, pos: [0, 0] },
           ],
-          edges: cpu ? [] : [{ from: { node: "n", port: "out" }, to: { node: "o", port: into } }],
+          edges: cpu
+            ? []
+            : texture
+              ? [
+                  { from: { node: "n", port: "out" }, to: { node: "s", port: "tex" } },
+                  { from: { node: "s", port: "out" }, to: { node: "o", port: into } },
+                ]
+              : [{ from: { node: "n", port: "out" }, to: { node: "o", port: into } }],
           exposed: [],
         },
       });
