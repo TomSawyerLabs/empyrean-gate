@@ -57,11 +57,31 @@ device(s), ideally a spare. Powered from the box's 48 V rail.
 | **USW-Industrial-DIN-8-PoE** | ~$5,300 | Native 44–57 V DC terminal input (dual, redundant) — wires straight to the 48 V rail. 8× PoE++ (480 W), full L2 incl. IGMP querier, 2× SFP, aluminium, −30 to 70 °C. Ships Nov 2026. The only option that fits power, PoE and heat without caveats. |
 | USW-Lite-8-PoE | ~$1,750 | 4× PoE+ (52 W), full L2. DC barrel input 50–57 V, so the "48 V" rail must be trimmed up to ~53 V. Rated only to 40 °C. |
 | USW-Flex-2.5G-5 + a 48 V DC PoE injector per device | ~$780 + injectors | RSTP + VLANs; 5 V USB-C (buck from 12 V) or PoE in. PoE is unmanaged (no remote power-cycle from UniFi). Rated to 45 °C. |
-| USW-Ultra | ~$2,100 | 7× PoE+, RSTP, but no IGMP snooping and it only takes power through its PoE++ input port or an AC adapter — awkward from a DC rail. |
+| **USW-Ultra** ($129) | ~$2,100 + PSUs | **Leading choice** (see below). 8× GbE, 7× PoE+ out (30 W/port), RSTP + loop protection, no IGMP snooping (fine: unicast). DC input 50–57 V on a 5.5 × 2.1 mm barrel; budget up to 202 W. −20/−30 to 60 °C. |
 
 **Run the 48 V rail at ~53–54 V.** PoE+ (802.3at Type 2) PSEs must output 50–57 V;
-the Lite 8 PoE's input is specified at 50–57 V. Most 48 V DIN supplies trim that
-high.
+the Lite 8 PoE's and the Ultra's inputs are specified at 50–57 V. Most 48 V DIN
+supplies trim that high.
+
+**Leading choice: USW-Ultra, fed from the box's own rail** (user, 2026-10-20 — the
+Industrial DIN is a stretch goal; it roughly doubles the cost).
+
+- Skip the 210 W brick. The official UACC-Adapter-AC-210W is 54 V out on a
+  5.5 × 2.1 mm plug, **rated only 0–40 °C** — the weakest part in a sun-baked box.
+  Instead run a pigtail with a 5.5 × 2.1 mm plug from the box's 54 V DIN supply.
+  **Check the polarity** on a real Ultra/adapter before wiring (expected centre
+  positive; not confirmed by any spec page found).
+- Size the supply for switch (~8 W) + the PoE load, with derating headroom for
+  heat; the switch caps PoE at 202 W.
+- Ports: ring in, ring out, PixLite, WAN, 4 left for PoE (the PoE++ *input* port
+  is the eighth; whether it carries data when the switch is DC-powered is
+  unverified — plan on it as a ring port only after a bench check).
+- Heat: rated to 60 °C on the 210 W/PoE-in ratings (the 60 W adapter rating of
+  45 °C is the adapter's). The boxes stay powered all day in a sealed outer box in
+  the sun, with the lights off — so the load is small but solar gain is not.
+  A sealed box in desert sun can pass 60 °C inside. Shade the box (a lid a few cm
+  above the real lid), light colour, switch on the shaded wall; log one box's
+  inside temperature on the playa before trusting it.
 
 ### WAN anywhere on the ring
 
@@ -108,7 +128,8 @@ high.
 - [x] Node count: one switch per PixLite node box (16)
 - [x] PixLite model confirmed: E4-S Mk3, 10/100 (repo corrected, `8ad289e`)
 - [x] Gateway confirmed: UCG, Network app on-prem
-- [ ] Choose the node-box switch (needs the PoE load and the heat answer)
+- [ ] Choose the node-box switch — leaning USW-Ultra on the 54 V rail; needs the
+      PoE load, and a heat check of a sealed box in the sun
 - [x] Controller addressing: fixed IPs + MAC-keyed discovery (built; awaiting
       a first run on the real boxes)
       (`plans/controller-addressing.md`)
@@ -116,13 +137,11 @@ high.
 
 ## Open questions for the user
 
-1. What does each box's PoE power, and how many watts? (Sizes the 48 V supply, and
-   whether 4× PoE+ / 52 W on the Lite 8 PoE is enough.)
-2. Are the node boxes powered — and in the sun — during the day? (The Lite 8 PoE
-   is rated to 40 °C, the Flex Mini 2.5G to 45 °C, the Industrial DIN to 70 °C.)
-3. Budget: Industrial DIN everywhere (~$5.3k), Lite 8 PoE (~$1.75k), or Flex Mini
-   2.5G + injectors (~$1k)? Recommendation: Industrial DIN, if the budget allows —
-   it is the only one that wires straight to the 48 V rail and survives the heat.
+1. What does each box's PoE power, and how many watts? (Sizes the 54 V supply.)
+2. ~~Powered and in the sun during the day?~~ Answered: powered all day, sealed
+   outer box in the sun, lights off by day.
+3. ~~Budget?~~ Answered: Industrial DIN is a stretch goal (~2× cost); leaning
+   USW-Ultra.
 
 ## Things not to do
 
