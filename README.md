@@ -252,7 +252,14 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   LEDs (defined only at the physical LEDs, like Full random field, drawn as a
   dotted wire); LED data can't go where it would be read between the LEDs
   (Transform's input) until Resample turns it into the plane. Design notes:
-  `plans/field-domains.md`. A saved patch or a preset can
+  `plans/field-domains.md`. **Render to texture** draws a field into a
+  square picture the patch keeps on the GPU (64², 128² or 256²), which
+  **Blur** softens and **Trails** feeds back (last frame faded, zoomed,
+  spun and drifted under the new one); Texture sample shows it on the
+  array, and a Code node can render one cell by cell, reading its own last
+  frame (a Game of Life is a dozen lines). Each runs as a pass of its own
+  before the LEDs are drawn; a patch without one stays a single dispatch.
+  Design notes: `plans/xy-grid.md`. A saved patch or a preset can
   be dropped into another as a **Sub-patch** node whose inputs are its exposed
   knobs and its **Patch in** nodes, and whose outputs are its picture (what
   feeds its Output) and its **Patch out** nodes: a colour or grey field, a
@@ -265,10 +272,11 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   offers the clone or a copy instead. **📁 Patches** browses the built-ins
   and your library as a tree (patches unfold to their Sub-patches), by topic
   (Sound, DJ, Touch…, from the nodes a patch uses) or as one list. A **Code** node is written rather than wired up: declare its inputs
-  and outputs (scalars, events, grey or colour fields or LEDs) and type a WGSL body
+  and outputs (scalars, events, grey or colour fields or LEDs, or a texture) and type a WGSL body
   that sets the outputs by name. With a field output it is pasted into the
   shader (scalar inputs are knobs, field inputs can be resampled with
-  `name_at(ctx)`); with scalar/event ports only it runs on the CPU every
+  `name_at(ctx)`); with a texture output it runs once per texture cell and
+  reads its own last frame (`out_at(uv)`, `out_cell(dx, dy)`); with scalar/event ports only it runs on the CPU every
   frame through a small, bounded WGSL-subset interpreter (`state.x` keeps a
   value across frames), so a submitted patch never runs native code. The
   body is edited in a real code editor (CodeMirror: WGSL highlighting,

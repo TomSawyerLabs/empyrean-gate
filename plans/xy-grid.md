@@ -63,10 +63,11 @@ I, round 4).
 ## Design
 
 - **Grid buffer**: a new read_write storage binding `GRID` (binding 11),
-  `array<vec2u>`, each cell RGBA as four half floats (`pack2x16float`), so
-  trails fade smoothly instead of sticking at 8-bit steps. Fixed size:
-  `MAX_GRID_REGIONS` regions of 256² cells (8 regions = 4 MiB), allocated
-  once by each host.
+  `array<vec4f>`, each cell RGBA as f32, so trails fade smoothly instead of
+  sticking at 8-bit steps (half floats were the first idea; see Findings).
+  At most `MAX_GRID_REGIONS` = 16 regions of up to 256² cells (16 MiB); each
+  host sizes it per program from `Program::grid_bytes` (at least one cell)
+  and clears it on a new program.
 - **Grid nodes** (output Texture, not media sources) each own a region, or two
   (Feedback: this frame and last; Blur: a scratch region for the separable
   pass). Codegen assigns regions in graph order; validate refuses a patch
@@ -81,9 +82,10 @@ I, round 4).
   a position (`theta`, `r01`, `rn` from `pos`; `spoke`/`i` from the nearest
   LED, like `led_cell`). A Render to texture input is a sampled input, so LED
   data must go through Resample (the existing rule).
-- **Feedback ping-pong**: which of the two regions is "this frame" flips each
-  frame by a frame-parity value the host already advances (to confirm:
-  Globals frame counter), so no copy pass.
+- **Trails' last frame**: its second region holds last frame; after the
+  combine pass, a copy pass writes this frame into it. (A parity flip would
+  have needed a frame counter in Globals, an ABI change in both hosts; the
+  copy is one more cheap dispatch.)
 - **Gate**: the patch pipeline gets its own bind group layout and bind group
   (the patch's bindings plus `GRID`), so the layer-stack pipeline keeps its
   8; one pipeline per entry point; `render()` dispatches the grid passes
@@ -95,33 +97,56 @@ I, round 4).
 
 ### The nodes
 
-1. **Render to texture** (`render_texture`): `in` colour field → `out`
-   Texture. Select `resolution` 64 / 128 / 256 (default 128).
-2. **Blur** (`texture_blur`): `in` Texture → `out` Texture. Number `radius`
-   (in the disc's units), Select `resolution`. Separable Gaussian: a
-   horizontal pass into scratch, a vertical pass into its region.
-3. **Trails** (`texture_feedback`, name to settle): `in` Texture → `out`
-   Texture. Each frame: last frame, sampled zoomed / rotated / drifted and
-   faded by `decay`, combined with the new input (Select: Max, Add, Mix).
-   Select `resolution`.
+1. **Render to texture** (`render_texture`): `in` colour field → `tex`
+   Texture. Select `resolution` 128 / 256 / 64 (default 128).
+2. **Blur** (`texture_blur`): `tex` → `tex`. Number `radius` (disc radii,
+   0–1), Select `resolution`. Separable Gaussian, 33 taps: a horizontal pass
+   into scratch, a vertical pass into its region.
+3. **Trails** (`texture_trails`): `tex` → `tex`. Each frame: last frame,
+   warped by `zoom` (×/s), `spin` (turns/s), `drift_x`/`drift_y`, faded by
+   `fade` (s to half), combined with the new input by `mode` (max, add,
+   over); then the copy pass. Select `resolution`.
 4. **Code node Texture output**: a Code node whose output port is a Texture
-   runs its body once per cell (a grid pass) with `pos`/`uv` for the cell,
-   and may read its own last frame (to design: the body idiom, e.g.
-   `prev_at(uv)`), which is what cellular automata need.
+   runs its body once per cell (a grid pass) and may read its own last
+   frame, which is what cellular automata need. The idiom (designed
+   2026-10-20, mirroring how a body already reads a Texture input, where
+   `img` is the picture here and `img_at(uv)` anywhere):
+   - **One output.** A Code node that makes a Texture makes only that
+     (`texture` output shape); its body runs per cell, not per LED, so it
+     can't also make fields or scalars. "Split it into two nodes", as the
+     field/scalar rule already says.
+   - **`c` is the cell's centre** (`plane_ctx`): `c.pos`, `c.rn`, `c.theta`,
+     `c.r01` mean what they mean in a field body. `c.spoke`/`c.i` are
+     refused (a cell is not an LED), as are LED-data inputs (Resample first,
+     the Render to texture rule). `pos_uv(c.pos)` (new lib helper, the
+     inverse of `uv_pos`) gives the cell's uv.
+   - **`out` is assigned as usual** (starts transparent black each frame).
+     **`out_at(uv)`** reads the output's own last frame, bilinear, like a
+     Texture input's `_at`. **`out_cell(dx, dy)`** (i32s) reads last frame's
+     cell `dx` right and `dy` down of this one, exactly, transparent outside:
+     neighbour counts for a CA without texel arithmetic. (`out` stands for
+     whatever the output port is called.)
+   - **Inputs** are read at the cell: fields at `c` (and `name_at(ctx)`),
+     Textures at the cell's uv (and `name_at(uv)`), Scalars, Points and
+     Effects as in a field body.
+   - **Two regions** (this frame, last frame) and the Trails copy pass;
+     resolution fixed at 128² for now (see Open questions).
+   - A port can't be named `<texture output>_at` / `_cell` (they'd shadow
+     the helpers); `_at` is already refused for every port.
 
 ## Plan / steps
 
 1. Core: `GRID` binding in the prelude, `grid_at`, `plane_ctx`, region
    allocation, `Program::grid_passes`, Render to texture codegen, naga tests
-   (main and preview modules). ← current
+   (main and preview modules). Done in `a7b4347`, Blur and Trails too.
 2. Gate engine: patch layout and bind group with `GRID`, pass pipelines,
    dispatch before `main` in all four engines; engine smoke test.
 3. Browser runtime: `GRID` binding, pass pipelines, dispatch; preview reuse.
-4. Blur and Trails.
-5. Code node Texture output (design its idiom in this plan first).
+4. Blur and Trails: checked in the browser 2026-10-20 (pictures below).
+5. Code node Texture output (idiom above). Done in `773e06a`.
 6. Editor: registry groups, icons, thumbnails, mock registry, agent guide,
    behaviour spec; README (gate and site).
-7. Checks, merge, web-dist bump, check on dev in Chrome.
+7. Checks, merge, web-dist bump, check on dev in Chrome. ← current
 
 ## Findings / gotchas
 
@@ -129,15 +154,59 @@ I, round 4).
   sampler or GPU texture at all (survey 2026-10-19).
 - Feedback's same-dispatch read/write of `OUT` is order-dependent between
   invocations; grid ping-pong regions avoid that for the new nodes.
+- Half floats are out: naga refuses `pack2x16float` without
+  `SHADER_FLOAT16_IN_FLOAT32` ("MissingCapabilities"), so cells are `vec4f`.
+- WGSL reserves `new` (and the lib had a `from`): pass code uses `fresh` and
+  `back`.
+- A grid node that reaches no output still costs its passes; kept, so it
+  still gets a thumbnail while it is being wired.
+- **The playground rendered black after opening a file** (2026-10-20), on
+  every patch, with or without this branch: `GateGpu.setProgram` installed
+  its pipelines unconditionally after `await`, so the page's first (empty)
+  program, still compiling, finished last and replaced the opened one. Proved
+  by hooking WebGPU in headless Chrome: the dispatched pipeline was
+  "0 of 5" (the first one built); a pipeline built from the same WGSL on the
+  runtime's own bind group lit 24,192 LEDs. Fixed on its own in `94ef775`
+  (a sequence number; a superseded call drops its pipelines). Before that,
+  thumbnails read mean 0 and the ring was dark.
+- The site checkout's installed `@empyrean-gate/patch-web` currently fails to
+  load (`./djlink` missing from `groove.ts`), so a check without
+  `PATCH_WEB_DIR` is not a baseline right now.
+
+## Checking in the browser
+
+From the site checkout: `PATCH_WEB_DIR=<gate>/packages/patch-web bun run dev
+-- --port 4195 --strictPort`, then `node check.mjs 4195 <name>` in
+`%TEMP%\fd-scripts\grid-check` (installed Chrome, headless, WebGPU flags;
+loads `<name>.json` through "Open file…", screenshots, logs GPU errors,
+dispatch counts and which pipeline runs). 2026-10-20: spiral → Render →
+Trails → Blur → Texture sample shows each stage in its thumbnail, and Blur at
+radius 0 vs 0.3 visibly softens the arms on the ring.
 
 ## Progress log
 
 - [x] Survey and design choices (2026-10-19)
-- [ ] Steps 1–7
+- [x] Step 1, core (`a7b4347`)
+- [x] Playground shader-install race fixed (`94ef775`)
+- [x] Step 2, gate engine (`b47f6b8`; engine-smoke `--patch` passes on
+  Intel UHD Vulkan with a grid chain; src-tauri 362 + 6 tests pass)
+- [x] Step 3, browser runtime (`a49c8fc`; `test:browser` 3/3; renders)
+- [x] Step 4, Blur and Trails checked in the browser
+- [x] Step 5, Code node Texture output (`773e06a`; a Game of Life body runs
+  in the playground; `life` and `trail` snippets compile in Chrome)
+- [x] Step 6, editor: icons and thumbnails (`01ab8d9`), patch browser topic
+  "Trails and blur", agent guide, gate README. The mock backend's registry
+  is a deliberate subset for UI tests and needs none of the new kinds.
+  Site README waits for the web-dist bump (step 7).
+- [ ] Step 7, checks, merge, web-dist bump, dev check
 
 ## Open questions for Cameron
 
-None.
+1. A Code node's Texture output renders at a fixed 128² for now (Render to
+   texture, Blur and Trails have a Resolution select). Worth a per-port
+   resolution choice (64 / 128 / 256) in the port editor? Recommendation:
+   yes, as a follow-up once the node is in use; it touches the patch schema
+   and the port editor, not the shader design.
 
 ## Things not to do
 
