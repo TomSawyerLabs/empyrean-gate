@@ -34,8 +34,10 @@ pub struct PatchPreviewInfo {
     /// Identity of the compiled program (patch id + epoch); the preview
     /// pipeline is reinstalled when it changes.
     pub key: String,
-    /// Companion WGSL module (empty when the patch has no field nodes).
-    pub wgsl: String,
+    /// Companion WGSL module (empty when the patch has no field nodes), with
+    /// the patch's grid passes: this bus renders with its own buffers, so it
+    /// runs them itself.
+    pub shader: super::PatchShader,
     /// Node id per cell slot, in the module's slot order.
     pub node_ids: Vec<String>,
     /// (node id, port) per scalar-meter slot.
@@ -146,10 +148,10 @@ impl MiniBus {
             self.refresh_meta(spokes, pixels, info);
             let slots = info.node_ids.len();
             let mut cells = Vec::new();
-            if slots > 0 && !info.wgsl.is_empty() {
+            if slots > 0 && !info.shader.wgsl.is_empty() {
                 let engine = self.engine.as_mut().expect("checked above");
                 if self.installed_preview != info.key {
-                    match engine.set_patch_shader(Some(&info.wgsl)) {
+                    match engine.set_patch_shader(Some(&info.shader)) {
                         Ok(()) => self.installed_preview = info.key.clone(),
                         Err(error) => {
                             // A program that validated for the main pipeline

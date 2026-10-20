@@ -64,7 +64,7 @@ struct RenderBusSnapshot {
     /// Phase delta per second for each packed layer in `inputs.layers`.
     layer_phase_rates: Vec<f32>,
     patch_runtime: Option<crate::patch::eval::Runtime>,
-    patch_wgsl: Option<String>,
+    patch_shader: Option<std::sync::Arc<PatchShader>>,
     /// The patch's decoded Still images (media cell, RGBA), shared, so the
     /// crossfade bus can upload them into its own buffers.
     patch_images: std::sync::Arc<Vec<(u32, Vec<u8>)>>,
@@ -77,9 +77,16 @@ pub struct Engine {
     pipeline: wgpu::ComputePipeline,
     /// Compiled from a patch's generated WGSL; used instead of `pipeline`
     /// whenever the frame carries `patch_params`.
-    patch_pipeline: Option<wgpu::ComputePipeline>,
+    patch: Option<PatchPipelines>,
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
+    /// The patch pipelines' own layout: the patch's bindings (no layer stack
+    /// or game grid) plus GRID, so the shared layout stays at the 8 storage
+    /// buffers a stage may have.
+    patch_layout: wgpu::BindGroupLayout,
+    patch_bind_group: wgpu::BindGroup,
+    /// The patch's rendered textures (binding 11), sized per patch.
+    grid_buf: wgpu::Buffer,
     globals_buf: wgpu::Buffer,
     audio_buf: wgpu::Buffer,
     layers_buf: wgpu::Buffer,
@@ -98,6 +105,41 @@ pub struct Engine {
     frame: u64,
     pub gpu_name: String,
     readback: Vec<u8>,
+}
+
+/// A compiled patch as an engine runs it: the module, and the grid passes
+/// to dispatch before its `main` (see `codegen::Program::grid_passes`).
+#[derive(Debug, Clone, Default)]
+pub struct PatchShader {
+    pub wgsl: String,
+    pub grid_passes: Vec<crate::patch::codegen::GridPass>,
+    pub grid_bytes: usize,
+}
+
+impl PatchShader {
+    /// The program's main module.
+    pub fn main(prog: &crate::patch::codegen::Program) -> Self {
+        Self {
+            wgsl: prog.wgsl.clone(),
+            grid_passes: prog.grid_passes.clone(),
+            grid_bytes: prog.grid_bytes,
+        }
+    }
+
+    /// Its preview module, which has the same grid passes.
+    pub fn preview(prog: &crate::patch::codegen::Program) -> Self {
+        Self {
+            wgsl: prog.preview_wgsl.clone(),
+            grid_passes: prog.grid_passes.clone(),
+            grid_bytes: prog.grid_bytes,
+        }
+    }
+}
+
+/// An installed patch: its grid passes (pipeline, cells), then `main`.
+struct PatchPipelines {
+    grids: Vec<(wgpu::ComputePipeline, u32)>,
+    main: wgpu::ComputePipeline,
 }
 
 fn shader_source() -> String {
@@ -216,6 +258,7 @@ impl Engine {
         });
 
         let (out_buf, staging) = Self::make_pixel_buffers(&device, npix);
+        let grid_buf = Self::make_grid_buffer(&device, 0);
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("gate"),
@@ -233,6 +276,21 @@ impl Engine {
                 // Touches are a uniform: storage buffers are at the
                 // default per-stage limit of 8 already.
                 uniform_entry(10),
+            ],
+        });
+        let patch_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("patch"),
+            entries: &[
+                uniform_entry(0),
+                uniform_entry(1),
+                storage_entry(3, true),
+                storage_entry(4, false),
+                storage_entry(5, true),
+                storage_entry(6, true),
+                storage_entry(7, true),
+                storage_entry(8, true),
+                uniform_entry(10),
+                storage_entry(11, false),
             ],
         });
 
@@ -253,10 +311,28 @@ impl Engine {
                 &touch_buf,
             ),
             pipeline: Self::make_pipeline(&device, &bind_group_layout)?,
-            patch_pipeline: None,
+            patch: None,
+            patch_bind_group: Self::make_patch_bind_group(
+                &device,
+                &patch_layout,
+                [
+                    &globals_buf,
+                    &audio_buf,
+                    &effects_buf,
+                    &out_buf,
+                    &dabs_buf,
+                    &scope_buf,
+                    &video_buf,
+                    &params_buf,
+                    &touch_buf,
+                    &grid_buf,
+                ],
+            ),
             device,
             queue,
             bind_group_layout,
+            patch_layout,
+            grid_buf,
             globals_buf,
             audio_buf,
             layers_buf,
@@ -292,6 +368,18 @@ impl Engine {
         label: &str,
         source: &str,
     ) -> Result<wgpu::ComputePipeline> {
+        let mut pipelines = Self::build_pipelines(device, bgl, label, source, &["main"])?;
+        Ok(pipelines.remove(0))
+    }
+
+    /// One pipeline per entry point of one module, in `entries` order.
+    fn build_pipelines(
+        device: &wgpu::Device,
+        bgl: &wgpu::BindGroupLayout,
+        label: &str,
+        source: &str,
+        entries: &[&str],
+    ) -> Result<Vec<wgpu::ComputePipeline>> {
         // Error scope instead of wgpu's default panic-on-validation-error: a broken
         // shader (live editing with hot-reload, or a generated patch) must surface
         // as a UI error, not kill the engine thread.
@@ -305,18 +393,23 @@ impl Engine {
             bind_group_layouts: &[Some(bgl)],
             immediate_size: 0,
         });
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some(label),
-            layout: Some(&layout),
-            module: &shader,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        let pipelines = entries
+            .iter()
+            .map(|entry| {
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(&layout),
+                    module: &shader,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            })
+            .collect();
         if let Some(err) = pollster::block_on(scope.pop()) {
             anyhow::bail!("shader/pipeline validation failed: {err}");
         }
-        Ok(pipeline)
+        Ok(pipelines)
     }
 
     /// Rebuild the pipeline from the (possibly edited) shader source. Dev feature.
@@ -326,9 +419,6 @@ impl Engine {
         Ok(())
     }
 
-    /// Install (or clear) the compiled patch pipeline from generated WGSL.
-    /// Failure leaves the previous patch pipeline untouched, so a bad edit
-    /// keeps the last good patch rendering — same contract as hot-reload.
     /// Upload a patch's decoded Still images into their media cells and return
     /// the mask of loaded cells (for `Globals::image_mask`).
     pub fn set_patch_images(&mut self, images: &[(u32, Vec<u8>)]) -> u32 {
@@ -347,19 +437,92 @@ impl Engine {
         mask
     }
 
-    pub fn set_patch_shader(&mut self, source: Option<&str>) -> Result<()> {
-        match source {
-            None => {
-                self.patch_pipeline = None;
-                Ok(())
-            }
-            Some(src) => {
-                let pipeline =
-                    Self::build_pipeline(&self.device, &self.bind_group_layout, "patch", src)?;
-                self.patch_pipeline = Some(pipeline);
-                Ok(())
-            }
-        }
+    /// Install (or clear) the compiled patch pipelines (grid passes and
+    /// `main`) from generated WGSL, with a cleared grid buffer sized for them.
+    /// Failure leaves the previous patch untouched, so a bad edit keeps the
+    /// last good patch rendering — same contract as hot-reload.
+    pub fn set_patch_shader(&mut self, shader: Option<&PatchShader>) -> Result<()> {
+        let Some(shader) = shader else {
+            self.patch = None;
+            return Ok(());
+        };
+        let entries: Vec<&str> = shader
+            .grid_passes
+            .iter()
+            .map(|p| p.entry.as_str())
+            .chain(["main"])
+            .collect();
+        let mut pipelines = Self::build_pipelines(
+            &self.device,
+            &self.patch_layout,
+            "patch",
+            &shader.wgsl,
+            &entries,
+        )?;
+        let main = pipelines.pop().expect("main is the last entry");
+        let grids = pipelines
+            .into_iter()
+            .zip(&shader.grid_passes)
+            .map(|(pipeline, pass)| (pipeline, pass.cells))
+            .collect();
+        self.patch = Some(PatchPipelines { grids, main });
+        // A new program starts from clear textures (Trails' last frame too).
+        self.grid_buf = Self::make_grid_buffer(&self.device, shader.grid_bytes);
+        self.rebuild_patch_bind_group();
+        Ok(())
+    }
+
+    /// A zeroed grid buffer of `bytes`, at least one cell (a binding may not
+    /// be empty).
+    fn make_grid_buffer(device: &wgpu::Device, bytes: usize) -> wgpu::Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("grid"),
+            size: bytes.max(empyrean_patch::abi::GRID_CELL_BYTES) as u64,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        })
+    }
+
+    fn make_patch_bind_group(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        [globals, audio, effects, out, dabs, scope, video, params, touches, grid]: [&wgpu::Buffer; 10],
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("patch"),
+            layout,
+            entries: &[
+                bind(0, globals),
+                bind(1, audio),
+                bind(3, effects),
+                bind(4, out),
+                bind(5, dabs),
+                bind(6, scope),
+                bind(7, video),
+                bind(8, params),
+                bind(10, touches),
+                bind(11, grid),
+            ],
+        })
+    }
+
+    fn rebuild_patch_bind_group(&mut self) {
+        self.patch_bind_group = Self::make_patch_bind_group(
+            &self.device,
+            &self.patch_layout,
+            [
+                &self.globals_buf,
+                &self.audio_buf,
+                &self.effects_buf,
+                &self.out_buf,
+                &self.dabs_buf,
+                &self.scope_buf,
+                &self.video_buf,
+                &self.params_buf,
+                &self.touch_buf,
+                &self.grid_buf,
+            ],
+        );
     }
 
     fn make_pixel_buffers(device: &wgpu::Device, npix: u32) -> (wgpu::Buffer, [wgpu::Buffer; 2]) {
@@ -446,6 +609,7 @@ impl Engine {
             &self.game_buf,
             &self.touch_buf,
         );
+        self.rebuild_patch_bind_group();
     }
 
     /// Submit compute for this frame, then read back the PREVIOUS frame (ping-pong).
@@ -487,13 +651,13 @@ impl Engine {
             self.queue
                 .write_buffer(&self.game_buf, 0, bytemuck::cast_slice(cells));
         }
-        let patch = match (&inputs.patch_params, &self.patch_pipeline) {
-            (Some(params), Some(pipeline)) => {
+        let patch = match (&inputs.patch_params, &self.patch) {
+            (Some(params), Some(patch)) => {
                 if !params.is_empty() {
                     self.queue
                         .write_buffer(&self.params_buf, 0, bytemuck::cast_slice(params));
                 }
-                Some(pipeline)
+                Some(patch)
             }
             _ => None,
         };
@@ -508,8 +672,22 @@ impl Engine {
                 label: Some("gate"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(patch.unwrap_or(&self.pipeline));
-            pass.set_bind_group(0, &self.bind_group, &[]);
+            match patch {
+                Some(patch) => {
+                    pass.set_bind_group(0, &self.patch_bind_group, &[]);
+                    // The rendered textures first, in graph order: each
+                    // dispatch sees the writes of the ones before it.
+                    for (pipeline, cells) in &patch.grids {
+                        pass.set_pipeline(pipeline);
+                        pass.dispatch_workgroups(cells.div_ceil(256), 1, 1);
+                    }
+                    pass.set_pipeline(&patch.main);
+                }
+                None => {
+                    pass.set_bind_group(0, &self.bind_group, &[]);
+                    pass.set_pipeline(&self.pipeline);
+                }
+            }
             pass.dispatch_workgroups(self.npix.div_ceil(256), 1, 1);
         }
         encoder.copy_buffer_to_buffer(
@@ -1658,7 +1836,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     // rebuild. See plans/node-graph.md.
     let mut patch_rt: Option<crate::patch::eval::Runtime> = None;
     let mut patch_key: Option<(String, u32)> = None;
-    let mut patch_wgsl: Option<String> = None;
+    let mut patch_shader: Option<std::sync::Arc<PatchShader>> = None;
     // The active patch's Still images, decoded, and which cells hold one.
     let mut patch_images: std::sync::Arc<Vec<(u32, Vec<u8>)>> = Default::default();
     let mut patch_image_mask: u32 = 0;
@@ -1759,7 +1937,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     (outgoing_render_bus.as_ref(), outgoing_engine.as_mut())
                 {
                     outgoing.ensure_capacity(cfg.geometry.pixel_count() as u32);
-                    if let Err(error) = outgoing.set_patch_shader(bus.patch_wgsl.as_deref()) {
+                    if let Err(error) = outgoing.set_patch_shader(bus.patch_shader.as_deref()) {
                         log::warn!("outgoing patch bus could not compile: {error:#}");
                         setup_failed = true;
                     } else {
@@ -1840,7 +2018,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             match &wanted {
                 None => {
                     patch_rt = None;
-                    patch_wgsl = None;
+                    patch_shader = None;
                     live_patch_id = None;
                     patch_preview = None;
                     let _ = engine.set_patch_shader(None);
@@ -1855,7 +2033,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     match result {
                         // `prog.doc` is the patch with sub-patches inlined:
                         // what every node index below refers to.
-                        Ok(prog) => match engine.set_patch_shader(Some(&prog.wgsl)) {
+                        Ok(prog) => match engine.set_patch_shader(Some(&PatchShader::main(&prog))) {
                             Ok(()) => {
                                 let decoded: Vec<(u32, Vec<u8>)> = prog
                                     .images
@@ -1876,10 +2054,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                                     .collect();
                                 patch_image_mask = engine.set_patch_images(&decoded);
                                 patch_images = std::sync::Arc::new(decoded);
-                                patch_wgsl = Some(prog.wgsl.clone());
+                                patch_shader = Some(std::sync::Arc::new(PatchShader::main(&prog)));
                                 patch_preview = Some(minis::PatchPreviewInfo {
                                     key: format!("{id}:{patch_epoch}"),
-                                    wgsl: prog.preview_wgsl.clone(),
+                                    shader: PatchShader::preview(&prog),
                                     node_ids: prog.preview_keys(),
                                     scalar_refs: prog
                                         .preview_scalars
@@ -1911,7 +2089,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                                 ));
                                 if !retain_last_good {
                                     patch_rt = None;
-                                    patch_wgsl = None;
+                                    patch_shader = None;
                                     live_patch_id = None;
                                     patch_preview = None;
                                     let _ = engine.set_patch_shader(None);
@@ -1922,7 +2100,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                             patch_error = Some(format!("patch compile failed: {e}"));
                             if !retain_last_good {
                                 patch_rt = None;
-                                patch_wgsl = None;
+                                patch_shader = None;
                                 live_patch_id = None;
                                 patch_preview = None;
                                 let _ = engine.set_patch_shader(None);
@@ -3397,7 +3575,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             inputs: inputs.clone(),
             layer_phase_rates: bus_layer_phase_rates,
             patch_runtime: patch_rt.clone(),
-            patch_wgsl: patch_wgsl.clone(),
+            patch_shader: patch_shader.clone(),
             patch_images: patch_images.clone(),
             master_speed: render_master_speed,
         });

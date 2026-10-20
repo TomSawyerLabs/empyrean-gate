@@ -297,6 +297,13 @@ fn patch_demo_doc() -> patch::PatchDoc {
             node("clip", "clip"),
             node("frame", "texture_sample"),
             node("mix7", "blend"),
+            // Round 5: the waves rendered to a texture (grid passes before
+            // main, binding 11), blurred, trailed and sampled back.
+            node("rt", "render_texture"),
+            node("blur", "texture_blur"),
+            node("trails", "texture_trails"),
+            node("grid", "texture_sample"),
+            node("mix8", "blend"),
             node("out", "output"),
         ],
         edges: vec![
@@ -322,7 +329,13 @@ fn patch_demo_doc() -> patch::PatchDoc {
             edge("clip", "tex", "frame", "tex"),
             edge("mix6", "out", "mix7", "base"),
             edge("frame", "out", "mix7", "over"),
-            edge("mix7", "out", "out", "in"),
+            edge("waves", "out", "rt", "in"),
+            edge("rt", "tex", "blur", "tex"),
+            edge("blur", "tex", "trails", "tex"),
+            edge("trails", "tex", "grid", "tex"),
+            edge("mix7", "out", "mix8", "base"),
+            edge("grid", "out", "mix8", "over"),
+            edge("mix8", "out", "out", "in"),
         ],
         ..Default::default()
     }
@@ -349,8 +362,9 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
         }
     }
     let prog = patch::codegen::compile(&doc).map_err(|e| anyhow::anyhow!(e))?;
+    anyhow::ensure!(prog.grid_passes.len() == 5, "render, blur ×2, trails ×2");
     engine
-        .set_patch_shader(Some(&prog.wgsl))
+        .set_patch_shader(Some(&empyrean_gate_lib::engine::PatchShader::main(&prog)))
         .context("patch pipeline build")?;
     let images: Vec<(u32, Vec<u8>)> = prog
         .images
