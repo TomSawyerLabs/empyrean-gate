@@ -146,7 +146,8 @@ I, round 4).
 5. Code node Texture output (idiom above). Done in `773e06a`.
 6. Editor: registry groups, icons, thumbnails, mock registry, agent guide,
    behaviour spec; README (gate and site).
-7. Checks, merge, web-dist bump, check on dev in Chrome. ← current
+7. Checks, merge, web-dist bump, check on dev in Chrome. Done but the
+   look on dev (see Progress log).
 
 ## Findings / gotchas
 
@@ -198,7 +199,14 @@ radius 0 vs 0.3 visibly softens the arms on the ring.
   "Trails and blur", agent guide, gate README. The mock backend's registry
   is a deliberate subset for UI tests and needs none of the new kinds.
   Site README waits for the web-dist bump (step 7).
-- [ ] Step 7, checks, merge, web-dist bump, dev check
+- [x] Step 7: crate 160, src-tauri 362 + 6 (release), engine-smoke `--patch`,
+  hot-reload check, patch-web 173 + `test:browser` 3/3, root typecheck,
+  Playwright patch suites 60 and layout 136, all passing. On gate master as
+  `a7b4347..6d9e6c0` (CI Checks and Web dist green); site dev web-dist bump
+  `46ce1cb` (web-dist `d78266a`) and README `78b4211`, Workers build green.
+- [ ] A look at dev.empyreangate.org in Chrome: not done by the agent (behind
+  Cloudflare Access; no Chrome tools in that session). The same patch-web
+  build was checked locally through `PATCH_WEB_DIR` (pictures above).
 
 ## Open questions for Cameron
 
