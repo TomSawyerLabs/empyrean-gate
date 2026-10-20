@@ -108,6 +108,12 @@ const NODE_ICONS: Record<string, Icon> = {
   image_in: [rect(3, 4, 18, 16, 2), dot(8.5, 9, 1.8), poly(3, 17, 9, 12, 13, 15.5, 16, 13, 21, 17)],
   clip: [rect(3, 3, 18, 18, 2), line(7, 3, 7, 21), line(17, 3, 17, 21), line(3, 8, 7, 8), line(3, 12, 7, 12), line(3, 16, 7, 16), line(17, 8, 21, 8), line(17, 12, 21, 12), line(17, 16, 21, 16)],
   texture_sample: [rect(3, 3, 13, 13, 1.5), line(3, 9.5, 16, 9.5), line(9.5, 3, 9.5, 16), circle(16, 16, 3.2), line(18.3, 18.3, 21.5, 21.5)],
+  // A disc's pattern caught in a square frame.
+  render_texture: [rect(3, 3, 18, 18, 2), circle(12, 12, 5.5), ...spokes(12, 12, 2, 5.5, 6)],
+  // A dot with its soft halo, framed.
+  texture_blur: [rect(3, 3, 18, 18, 2), dot(12, 12, 2.2), circle(12, 12, 4.6), arc(12, 12, 7, 20, 70), arc(12, 12, 7, 110, 160), arc(12, 12, 7, 200, 250), arc(12, 12, 7, 290, 340)],
+  // A dot moving off, leaving fading copies behind it, framed.
+  texture_trails: [rect(3, 3, 18, 18, 2), dot(15.5, 8.5, 2.2), circle(11.5, 12.5, 1.6), circle(8.5, 15.5, 1.1), dot(6.5, 17.5, 0.6)],
 
   // -- Shape a signal
   scalar_math: [line(4, 7, 10, 7), line(7, 4, 7, 10), line(14, 7, 20, 7), line(4.5, 14.5, 9.5, 19.5), line(9.5, 14.5, 4.5, 19.5), line(14, 17, 20, 17), dot(17, 14, 1), dot(17, 20, 1)],

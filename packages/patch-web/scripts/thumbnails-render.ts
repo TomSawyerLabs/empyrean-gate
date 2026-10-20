@@ -152,6 +152,19 @@ const SHOWCASES: Record<string, Showcase> = {
   image_in: { nodes: [["n", "image_in"], ["t", "texture_sample"]], wires: [["n", "tex", "t", "tex"]], at: 1 },
   clip: { nodes: [["n", "clip", { fps: 4 }], ["t", "texture_sample"]], wires: [["n", "tex", "t", "tex"]], at: 1.3 },
   texture_sample: { nodes: [["s", "video_in"], ["n", "texture_sample", { kaleido: 3 }]], wires: [["s", "tex", "n", "tex"]], at: 3 },
+  render_texture: {
+    nodes: [["s", "spiral"], ["n", "render_texture"], ["t", "texture_sample"]],
+    wires: [["s", "out", "n", "in"], ["n", "tex", "t", "tex"]],
+  },
+  texture_blur: {
+    nodes: [["s", "spiral"], ["r", "render_texture"], ["n", "texture_blur", { radius: 0.25 }], ["t", "texture_sample"]],
+    wires: [["s", "out", "r", "in"], ["r", "tex", "n", "tex"], ["n", "tex", "t", "tex"]],
+  },
+  texture_trails: {
+    nodes: [["s", "spiral"], ["r", "render_texture"], ["n", "texture_trails", { fade: 1.5, zoom: 1.4, spin: 0.1 }], ["t", "texture_sample"]],
+    wires: [["s", "out", "r", "in"], ["r", "tex", "n", "tex"], ["n", "tex", "t", "tex"]],
+    at: 4,
+  },
   transform: { nodes: [["s", "wedges"], ["n", "transform", { kaleido: 3, zoom: 1.4, rotate: 0.08 }]], wires: [["s", "out", "n", "in"]] },
   // LED data made smooth, then folded by a kaleidoscope: Transform reads it
   // between the LEDs, which only Resample allows.
