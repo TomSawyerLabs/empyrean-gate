@@ -8,6 +8,11 @@ export class PatchSim {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Run a `prepare`d document; returns what `update` would have. Consumes
+     * `prepared`.
+     */
+    apply(prepared: PreparedPatch): string;
+    /**
      * Binding 1 bytes (every source).
      */
     audio(): Uint8Array;
@@ -63,6 +68,13 @@ export class PatchSim {
      * Throws with the validation/codegen message if it cannot run.
      */
     constructor(doc: string, spokes: number, pixels: number, inner_over_outer: number);
+    /**
+     * Compile an edited document without running it: a host builds the
+     * pipelines for its shader while this patch keeps rendering, then
+     * `apply`s it between two frames. Throws, as `update` does, if the
+     * document cannot run.
+     */
+    prepare(doc: string): PreparedPatch;
     /**
      * Binding 0 bytes for the mini-preview pass (`previewWgsl()`): spokes of
      * `limits().miniPixels` samples.
@@ -136,6 +148,11 @@ export class PatchSim {
      */
     setVideo(width: number, height: number): void;
     /**
+     * Whether `prepared` needs pipelines other than this patch's (its
+     * shader differs from the one running now).
+     */
+    shaderChanged(prepared: PreparedPatch): boolean;
+    /**
      * Floats in the parameter slab (binding 8).
      */
     slabLen(): number;
@@ -188,6 +205,21 @@ export class PatchSim {
      * The main compute shader: one invocation per LED, writes packed RGB to
      * binding 4.
      */
+    wgsl(): string;
+}
+
+/**
+ * A document compiled by `PatchSim.prepare`, not yet running. Its shaders
+ * read like a running patch's (see `PatchSim`).
+ */
+export class PreparedPatch {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    gridPasses(): string;
+    previewNodes(): string[];
+    previewWgsl(): string;
+    relocateError(msg: string): string;
     wgsl(): string;
 }
 
@@ -259,11 +291,13 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_patchsim_free: (a: number, b: number) => void;
+    readonly __wbg_preparedpatch_free: (a: number, b: number) => void;
     readonly codeReference: () => [number, number];
     readonly convertToCode: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly effect_kinds: () => [number, number];
     readonly limits: () => [number, number];
     readonly migrate: (a: number, b: number) => [number, number, number, number];
+    readonly patchsim_apply: (a: number, b: number) => [number, number];
     readonly patchsim_audio: (a: number) => [number, number];
     readonly patchsim_codeLines: (a: number) => [number, number];
     readonly patchsim_dabs: (a: number) => [number, number];
@@ -275,6 +309,7 @@ export interface InitOutput {
     readonly patchsim_gridPasses: (a: number) => [number, number];
     readonly patchsim_images: (a: number) => [number, number];
     readonly patchsim_new: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly patchsim_prepare: (a: number, b: number, c: number) => [number, number, number];
     readonly patchsim_previewGlobals: (a: number) => [number, number];
     readonly patchsim_previewNodes: (a: number) => [number, number];
     readonly patchsim_previewScalars: (a: number) => [number, number];
@@ -290,6 +325,7 @@ export interface InitOutput {
     readonly patchsim_setMotion: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly patchsim_setParam: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly patchsim_setVideo: (a: number, b: number, c: number) => void;
+    readonly patchsim_shaderChanged: (a: number, b: number) => number;
     readonly patchsim_slab: (a: number) => [number, number];
     readonly patchsim_slabLen: (a: number) => number;
     readonly patchsim_step: (a: number, b: number) => void;
@@ -301,6 +337,11 @@ export interface InitOutput {
     readonly patchsim_usesTouch: (a: number) => number;
     readonly patchsim_usesVideo: (a: number) => number;
     readonly patchsim_wgsl: (a: number) => [number, number];
+    readonly preparedpatch_gridPasses: (a: number) => [number, number];
+    readonly preparedpatch_previewNodes: (a: number) => [number, number];
+    readonly preparedpatch_previewWgsl: (a: number) => [number, number];
+    readonly preparedpatch_relocateError: (a: number, b: number, c: number) => [number, number];
+    readonly preparedpatch_wgsl: (a: number) => [number, number];
     readonly presets: () => [number, number];
     readonly registry: () => [number, number];
     readonly schema: () => [number, number];

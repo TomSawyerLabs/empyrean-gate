@@ -5,7 +5,7 @@
 import init, * as wasm from "../../wasm/patch.js";
 import type { CodeReference, PatchDoc, PatchNodeType, PatchShapeDef } from "../types";
 
-export type { PatchSim } from "../../wasm/patch.js";
+export type { PatchSim, PreparedPatch } from "../../wasm/patch.js";
 
 export interface Limits {
   patchFormat: number;

@@ -8618,6 +8618,17 @@ class PatchSim {
     let ptr = this.__destroy_into_raw();
     wasm.__wbg_patchsim_free(ptr, 0);
   }
+  apply(prepared) {
+    let deferred2_0, deferred2_1;
+    try {
+      _assertClass(prepared, PreparedPatch);
+      var ptr0 = prepared.__destroy_into_raw();
+      let ret = wasm.patchsim_apply(this.__wbg_ptr, ptr0);
+      return deferred2_0 = ret[0], deferred2_1 = ret[1], getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+      wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+  }
   audio() {
     let ret = wasm.patchsim_audio(this.__wbg_ptr);
     var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
@@ -8682,6 +8693,12 @@ class PatchSim {
     if (ret[2])
       throw takeFromExternrefTable0(ret[1]);
     return this.__wbg_ptr = ret[0], PatchSimFinalization.register(this, this.__wbg_ptr, this), this;
+  }
+  prepare(doc) {
+    let ptr0 = passStringToWasm0(doc, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc), len0 = WASM_VECTOR_LEN, ret = wasm.patchsim_prepare(this.__wbg_ptr, ptr0, len0);
+    if (ret[2])
+      throw takeFromExternrefTable0(ret[1]);
+    return PreparedPatch.__wrap(ret[0]);
   }
   previewGlobals() {
     let ret = wasm.patchsim_previewGlobals(this.__wbg_ptr);
@@ -8757,6 +8774,9 @@ class PatchSim {
   setVideo(width, height) {
     wasm.patchsim_setVideo(this.__wbg_ptr, width, height);
   }
+  shaderChanged(prepared) {
+    return _assertClass(prepared, PreparedPatch), wasm.patchsim_shaderChanged(this.__wbg_ptr, prepared.__wbg_ptr) !== 0;
+  }
   slabLen() {
     return wasm.patchsim_slabLen(this.__wbg_ptr) >>> 0;
   }
@@ -8816,6 +8836,64 @@ class PatchSim {
 }
 if (Symbol.dispose)
   PatchSim.prototype[Symbol.dispose] = PatchSim.prototype.free;
+
+class PreparedPatch {
+  static __wrap(ptr) {
+    let obj = Object.create(PreparedPatch.prototype);
+    return obj.__wbg_ptr = ptr, PreparedPatchFinalization.register(obj, obj.__wbg_ptr, obj), obj;
+  }
+  __destroy_into_raw() {
+    let ptr = this.__wbg_ptr;
+    return this.__wbg_ptr = 0, PreparedPatchFinalization.unregister(this), ptr;
+  }
+  free() {
+    let ptr = this.__destroy_into_raw();
+    wasm.__wbg_preparedpatch_free(ptr, 0);
+  }
+  gridPasses() {
+    let deferred1_0, deferred1_1;
+    try {
+      let ret = wasm.preparedpatch_gridPasses(this.__wbg_ptr);
+      return deferred1_0 = ret[0], deferred1_1 = ret[1], getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+      wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+  }
+  previewNodes() {
+    let ret = wasm.preparedpatch_previewNodes(this.__wbg_ptr);
+    var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+    return wasm.__wbindgen_free(ret[0], ret[1] * 4, 4), v1;
+  }
+  previewWgsl() {
+    let deferred1_0, deferred1_1;
+    try {
+      let ret = wasm.preparedpatch_previewWgsl(this.__wbg_ptr);
+      return deferred1_0 = ret[0], deferred1_1 = ret[1], getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+      wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+  }
+  relocateError(msg) {
+    let deferred2_0, deferred2_1;
+    try {
+      let ptr0 = passStringToWasm0(msg, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc), len0 = WASM_VECTOR_LEN, ret = wasm.preparedpatch_relocateError(this.__wbg_ptr, ptr0, len0);
+      return deferred2_0 = ret[0], deferred2_1 = ret[1], getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+      wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+  }
+  wgsl() {
+    let deferred1_0, deferred1_1;
+    try {
+      let ret = wasm.preparedpatch_wgsl(this.__wbg_ptr);
+      return deferred1_0 = ret[0], deferred1_1 = ret[1], getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+      wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+  }
+}
+if (Symbol.dispose)
+  PreparedPatch.prototype[Symbol.dispose] = PreparedPatch.prototype.free;
 function codeReference() {
   let deferred1_0, deferred1_1;
   try {
@@ -8933,7 +9011,11 @@ function __wbg_get_imports() {
     }
   };
 }
-var PatchSimFinalization = typeof FinalizationRegistry > "u" ? { register: () => {}, unregister: () => {} } : new FinalizationRegistry((ptr) => wasm.__wbg_patchsim_free(ptr, 1));
+var PatchSimFinalization = typeof FinalizationRegistry > "u" ? { register: () => {}, unregister: () => {} } : new FinalizationRegistry((ptr) => wasm.__wbg_patchsim_free(ptr, 1)), PreparedPatchFinalization = typeof FinalizationRegistry > "u" ? { register: () => {}, unregister: () => {} } : new FinalizationRegistry((ptr) => wasm.__wbg_preparedpatch_free(ptr, 1));
+function _assertClass(instance, klass) {
+  if (!(instance instanceof klass))
+    throw Error(`expected instance of ${klass.name}`);
+}
 function getArrayF32FromWasm0(ptr, len) {
   return ptr = ptr >>> 0, getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
 }
@@ -9807,7 +9889,8 @@ class GateGpu {
   previewBusy = !1;
   layout;
   main = null;
-  programSeq = 0;
+  installed = null;
+  building = /* @__PURE__ */ new Map;
   gridPasses = [];
   mainBind = null;
   preview = null;
@@ -9866,8 +9949,19 @@ class GateGpu {
       primitive: { topology: "triangle-list" }
     });
   }
-  async setProgram(wgsl, previewWgsl, previewCells, grid = { bytes: 0, passes: [] }) {
-    let seq = ++this.programSeq, pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [this.layout] }), build = async (label, code, entries = []) => {
+  build(wgsl, previewWgsl, previewCells, grid = { bytes: 0, passes: [] }) {
+    let key = JSON.stringify([wgsl, previewWgsl, previewCells, grid]);
+    if (this.installed?.key === key)
+      return Promise.resolve(this.installed);
+    let building = this.building.get(key);
+    if (!building)
+      building = this.compile(key, wgsl, previewWgsl, previewCells, grid).finally(() => {
+        this.building.delete(key);
+      }), this.building.set(key, building);
+    return building;
+  }
+  async compile(key, wgsl, previewWgsl, previewCells, grid) {
+    let pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [this.layout] }), pipelines = async (label, code, entries = []) => {
       let module = this.device.createShaderModule({ label, code }), errors = (await module.getCompilationInfo()).messages.filter((m) => m.type === "error");
       if (errors.length)
         throw new ShaderError(`${label} shader failed to compile`, errors.map((m) => `wgsl:${m.lineNum}:${m.linePos} ${m.message}`));
@@ -9880,14 +9974,27 @@ class GateGpu {
       } catch (e) {
         throw new ShaderError(`${label} pipeline failed`, [String(e)]);
       }
-    }, built = await build("patch", wgsl, grid.passes.map((p) => p.entry)), main = built.pop(), preview = previewWgsl ? (await build("patch preview", previewWgsl))[0] : null;
-    if (seq !== this.programSeq)
-      return;
-    if (this.main = main, this.gridPasses = built.map((pipeline, k) => ({ pipeline, cells: grid.passes[k].cells })), this.grid.destroy(), this.grid = this.device.createBuffer({
+    }, [built, preview] = await Promise.all([
+      pipelines("patch", wgsl, grid.passes.map((p) => p.entry)),
+      previewWgsl ? pipelines("patch preview", previewWgsl).then((p) => p[0]) : null
+    ]), main = built.pop();
+    return {
+      key,
+      main,
+      gridPasses: built.map((pipeline, k) => ({ pipeline, cells: grid.passes[k].cells })),
+      gridBytes: grid.bytes,
+      preview,
+      previewCells: preview ? previewCells : 0
+    };
+  }
+  install(program) {
+    this.installed = program, this.main = program.main, this.gridPasses = program.gridPasses, this.grid.destroy(), this.grid = this.device.createBuffer({
       label: "grid",
-      size: Math.max(16, grid.bytes),
+      size: Math.max(16, program.gridBytes),
       usage: GPUBufferUsage.STORAGE
-    }), this.mainBind = this.bindGroup(this.globals, this.out), this.preview = preview, this.previewCells = preview ? previewCells : 0, this.previewOut?.destroy(), this.previewRead?.destroy(), this.previewOut = this.previewRead = this.previewBind = null, preview && previewCells > 0) {
+    }), this.mainBind = this.bindGroup(this.globals, this.out);
+    let { preview, previewCells } = program;
+    if (this.preview = preview, this.previewCells = previewCells, this.previewOut?.destroy(), this.previewRead?.destroy(), this.previewOut = this.previewRead = this.previewBind = null, preview && previewCells > 0) {
       let bytes = previewCells * this.geometry.spokes * this.miniPixels() * 4;
       this.previewOut = this.device.createBuffer({
         size: bytes,
@@ -10413,8 +10520,9 @@ class PatchRuntime {
   sim = null;
   doc = null;
   generation = 0;
-  pendingGen = 0;
+  liveGen = 0;
   pending = !1;
+  held = !1;
   raf = 0;
   last = 0;
   status = { active: !1, touch: !1, error: null };
@@ -10498,47 +10606,59 @@ class PatchRuntime {
   async setPatch(doc) {
     let gen = ++this.generation;
     if (this.doc = doc, !doc) {
-      this.sim?.free(), this.sim = null, this.clearMinis(), this.setStatus({ active: !1, touch: !1, error: null });
+      this.pending = !1, this.sim?.free(), this.sim = null, this.clearMinis(), this.setStatus({ active: !1, touch: !1, error: null });
       return;
     }
-    let shader = !1;
+    let sim = this.sim, prepared = null;
     try {
-      if (this.sim)
-        shader = this.sim.update(JSON.stringify(doc)) === "shader";
+      if (sim)
+        prepared = sim.prepare(JSON.stringify(doc));
       else {
         let g = this.geometry;
-        this.sim = this.core.createSim(doc, g.spokes, g.pixels, g.innerOverOuter), this.uploadedImages.clear(), shader = !0;
+        sim = this.sim = this.core.createSim(doc, g.spokes, g.pixels, g.innerOverOuter), this.liveGen = 0, this.held = !0, this.uploadedImages.clear();
       }
     } catch (e) {
-      this.setStatus({ ...this.status, active: this.sim !== null, error: errorText(e) });
+      this.pending = !1, this.setStatus({ ...this.status, active: this.sim !== null && !this.held, error: errorText(e) });
       return;
     }
-    let sim = this.sim;
-    if (shader) {
-      this.pending = !0, this.pendingGen = gen;
-      try {
-        await this.gpu.setProgram(sim.wgsl(), sim.previewWgsl(), sim.previewNodes().length, JSON.parse(sim.gridPasses()));
-      } catch (e) {
-        if (this.pendingGen === gen)
-          this.pending = !1;
-        if (gen !== this.generation)
-          return;
-        let detail = e instanceof ShaderError ? sim.relocateError(`${e.message}: ${e.details.join("; ")}`) : errorText(e);
-        this.setStatus({ active: !1, touch: !1, error: detail });
-        return;
-      }
-      if (this.pendingGen === gen)
-        this.pending = !1;
-      if (gen !== this.generation)
-        return;
+    if (prepared && !this.held && !sim.shaderChanged(prepared)) {
+      sim.apply(prepared), this.liveGen = gen, this.pending = !1, this.ready(sim, gen, !1);
+      return;
     }
+    let source = prepared ?? sim;
+    this.pending = !0;
+    let program;
+    try {
+      program = await this.gpu.build(source.wgsl(), source.previewWgsl(), source.previewNodes().length, JSON.parse(source.gridPasses()));
+    } catch (e) {
+      if (gen === this.generation) {
+        this.pending = !1;
+        let detail = e instanceof ShaderError ? source.relocateError(`${e.message}: ${e.details.join("; ")}`) : errorText(e);
+        this.setStatus({ ...this.status, active: this.sim !== null && !this.held, error: detail });
+      }
+      prepared?.free();
+      return;
+    }
+    if (gen === this.generation)
+      this.pending = !1;
+    if (this.sim !== sim || gen <= this.liveGen) {
+      prepared?.free();
+      return;
+    }
+    if (prepared)
+      sim.apply(prepared);
+    this.gpu.install(program), this.liveGen = gen, this.held = !1, this.ready(sim, gen, !0);
+  }
+  ready(sim, gen, shader) {
     this.syncImages(sim), this.previewNodes = sim.previewNodes();
     let scalars = JSON.parse(sim.previewScalars());
     if (JSON.stringify(scalars) !== JSON.stringify(this.previewScalars))
       this.previewScalars = scalars, this.meterKeys = scalars.map(([node, port]) => `scalar:${node}:${port}`);
     if (shader)
       this.clearMinis(), this.history?.clear(), this.back = 0;
-    if (this.usesVideo = sim.usesVideo(), this.setStatus({ active: !0, touch: sim.usesTouch(), error: null }), this.paused) {
+    this.usesVideo = sim.usesVideo();
+    let error = gen === this.generation ? null : this.status.error;
+    if (this.setStatus({ active: !0, touch: sim.usesTouch(), error }), this.paused) {
       if (this.back > 0)
         this.show(0);
       this.advance(0, performance.now(), { again: !0 }), this.notifyTransport();
@@ -10649,7 +10769,7 @@ class PatchRuntime {
   }
   advance(dt, now, how = {}) {
     let sim = this.sim;
-    if (!sim || this.pending)
+    if (!sim || this.held)
       return !1;
     if (this.motion) {
       let m = this.motion.read();

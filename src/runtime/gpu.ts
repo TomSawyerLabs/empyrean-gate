@@ -137,6 +137,18 @@ fn fs(v: VOut) -> @location(0) vec4f {
 
 const VIEW_BYTES = 48;
 
+/** A patch's pipelines from [`GateGpu.build`], not running until
+ * [`GateGpu.install`]ed. */
+export interface GpuProgram {
+  /** The sources it was built from. */
+  readonly key: string;
+  readonly main: GPUComputePipeline;
+  readonly gridPasses: readonly { pipeline: GPUComputePipeline; cells: number }[];
+  readonly gridBytes: number;
+  readonly preview: GPUComputePipeline | null;
+  readonly previewCells: number;
+}
+
 interface View {
   canvas: HTMLCanvasElement;
   context: GPUCanvasContext;
@@ -169,11 +181,12 @@ export class GateGpu {
 
   private layout: GPUBindGroupLayout;
   private main: GPUComputePipeline | null = null;
-  /** Bumped per `setProgram`, so a slower earlier call cannot install its
-   * pipelines over a later one's. */
-  private programSeq = 0;
+  /** The program `main` (and the rest below) came from. */
+  private installed: GpuProgram | null = null;
+  /** Builds in flight, by their sources, so an identical request shares one. */
+  private building = new Map<string, Promise<GpuProgram>>();
   /** The patch's grid passes, dispatched before `main` each frame. */
-  private gridPasses: { pipeline: GPUComputePipeline; cells: number }[] = [];
+  private gridPasses: GpuProgram["gridPasses"] = [];
   private mainBind: GPUBindGroup | null = null;
   private preview: GPUComputePipeline | null = null;
   private previewBind: GPUBindGroup | null = null;
@@ -265,19 +278,39 @@ export class GateGpu {
     });
   }
 
-  /** Build the pipelines for a compiled patch. Throws [`ShaderError`] with the
-   * compiler's messages if the WGSL is rejected (which would be a codegen bug:
-   * the same shader is naga-validated in the crate's tests). */
-  async setProgram(
+  /** Build the pipelines for a compiled patch, installing nothing: whatever
+   * is installed keeps rendering until [`install`](#install). Asking again
+   * for the sources being built (or installed) shares that build. Rejects
+   * with [`ShaderError`] and the compiler's messages if the WGSL is refused
+   * (a codegen bug, or a Code node's body). */
+  build(
     wgsl: string,
     previewWgsl: string,
     previewCells: number,
     grid: GridPasses = { bytes: 0, passes: [] },
-  ): Promise<void> {
-    const seq = ++this.programSeq;
+  ): Promise<GpuProgram> {
+    const key = JSON.stringify([wgsl, previewWgsl, previewCells, grid]);
+    if (this.installed?.key === key) return Promise.resolve(this.installed);
+    let building = this.building.get(key);
+    if (!building) {
+      building = this.compile(key, wgsl, previewWgsl, previewCells, grid).finally(() => {
+        this.building.delete(key);
+      });
+      this.building.set(key, building);
+    }
+    return building;
+  }
+
+  private async compile(
+    key: string,
+    wgsl: string,
+    previewWgsl: string,
+    previewCells: number,
+    grid: GridPasses,
+  ): Promise<GpuProgram> {
     const pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [this.layout] });
     // One pipeline per entry point of the module, `main` last.
-    const build = async (label: string, code: string, entries: string[] = []) => {
+    const pipelines = async (label: string, code: string, entries: string[] = []) => {
       const module = this.device.createShaderModule({ label, code });
       const info = await module.getCompilationInfo();
       const errors = info.messages.filter((m) => m.type === "error");
@@ -303,30 +336,44 @@ export class GateGpu {
       }
     };
 
-    const built = await build(
-      "patch",
-      wgsl,
-      grid.passes.map((p) => p.entry),
-    );
+    // Both modules at once: the sooner both exist, the sooner the swap.
+    const [built, preview] = await Promise.all([
+      pipelines(
+        "patch",
+        wgsl,
+        grid.passes.map((p) => p.entry),
+      ),
+      // Previews read the textures the main passes rendered (same patch), so
+      // a thumbnail never advances Trails a second time.
+      previewWgsl ? pipelines("patch preview", previewWgsl).then((p) => p[0]) : null,
+    ]);
     const main = built.pop()!;
-    // Previews read the textures the main passes rendered (same patch), so
-    // a thumbnail never advances Trails a second time.
-    const preview = previewWgsl ? (await build("patch preview", previewWgsl))[0] : null;
+    return {
+      key,
+      main,
+      gridPasses: built.map((pipeline, k) => ({ pipeline, cells: grid.passes[k].cells })),
+      gridBytes: grid.bytes,
+      preview,
+      previewCells: preview ? previewCells : 0,
+    };
+  }
 
-    // Superseded while compiling: the newer program installs itself.
-    if (seq !== this.programSeq) return;
-    this.main = main;
-    this.gridPasses = built.map((pipeline, k) => ({ pipeline, cells: grid.passes[k].cells }));
+  /** Run `program` from the next frame on, in place of the one installed. */
+  install(program: GpuProgram) {
+    this.installed = program;
+    this.main = program.main;
+    this.gridPasses = program.gridPasses;
     // A new program starts from clear textures (Trails' last frame too).
     this.grid.destroy();
     this.grid = this.device.createBuffer({
       label: "grid",
-      size: Math.max(16, grid.bytes),
+      size: Math.max(16, program.gridBytes),
       usage: GPUBufferUsage.STORAGE,
     });
     this.mainBind = this.bindGroup(this.globals, this.out);
+    const { preview, previewCells } = program;
     this.preview = preview;
-    this.previewCells = preview ? previewCells : 0;
+    this.previewCells = previewCells;
     this.previewOut?.destroy();
     this.previewRead?.destroy();
     this.previewOut = this.previewRead = this.previewBind = null;

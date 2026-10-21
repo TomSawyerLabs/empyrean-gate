@@ -15,6 +15,26 @@ export class PatchSim {
         wasm.__wbg_patchsim_free(ptr, 0);
     }
     /**
+     * Run a `prepare`d document; returns what `update` would have. Consumes
+     * `prepared`.
+     * @param {PreparedPatch} prepared
+     * @returns {string}
+     */
+    apply(prepared) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            _assertClass(prepared, PreparedPatch);
+            var ptr0 = prepared.__destroy_into_raw();
+            const ret = wasm.patchsim_apply(this.__wbg_ptr, ptr0);
+            deferred2_0 = ret[0];
+            deferred2_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
      * Binding 1 bytes (every source).
      * @returns {Uint8Array}
      */
@@ -169,6 +189,23 @@ export class PatchSim {
         this.__wbg_ptr = ret[0];
         PatchSimFinalization.register(this, this.__wbg_ptr, this);
         return this;
+    }
+    /**
+     * Compile an edited document without running it: a host builds the
+     * pipelines for its shader while this patch keeps rendering, then
+     * `apply`s it between two frames. Throws, as `update` does, if the
+     * document cannot run.
+     * @param {string} doc
+     * @returns {PreparedPatch}
+     */
+    prepare(doc) {
+        const ptr0 = passStringToWasm0(doc, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.patchsim_prepare(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return PreparedPatch.__wrap(ret[0]);
     }
     /**
      * Binding 0 bytes for the mini-preview pass (`previewWgsl()`): spokes of
@@ -349,6 +386,17 @@ export class PatchSim {
         wasm.patchsim_setVideo(this.__wbg_ptr, width, height);
     }
     /**
+     * Whether `prepared` needs pipelines other than this patch's (its
+     * shader differs from the one running now).
+     * @param {PreparedPatch} prepared
+     * @returns {boolean}
+     */
+    shaderChanged(prepared) {
+        _assertClass(prepared, PreparedPatch);
+        const ret = wasm.patchsim_shaderChanged(this.__wbg_ptr, prepared.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * Floats in the parameter slab (binding 8).
      * @returns {number}
      */
@@ -490,6 +538,102 @@ export class PatchSim {
     }
 }
 if (Symbol.dispose) PatchSim.prototype[Symbol.dispose] = PatchSim.prototype.free;
+
+/**
+ * A document compiled by `PatchSim.prepare`, not yet running. Its shaders
+ * read like a running patch's (see `PatchSim`).
+ */
+export class PreparedPatch {
+    static __wrap(ptr) {
+        const obj = Object.create(PreparedPatch.prototype);
+        obj.__wbg_ptr = ptr;
+        PreparedPatchFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        PreparedPatchFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_preparedpatch_free(ptr, 0);
+    }
+    /**
+     * @returns {string}
+     */
+    gridPasses() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.preparedpatch_gridPasses(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {string[]}
+     */
+    previewNodes() {
+        const ret = wasm.preparedpatch_previewNodes(this.__wbg_ptr);
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * @returns {string}
+     */
+    previewWgsl() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.preparedpatch_previewWgsl(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @param {string} msg
+     * @returns {string}
+     */
+    relocateError(msg) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ptr0 = passStringToWasm0(msg, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.preparedpatch_relocateError(this.__wbg_ptr, ptr0, len0);
+            deferred2_0 = ret[0];
+            deferred2_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * @returns {string}
+     */
+    wgsl() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.preparedpatch_wgsl(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+}
+if (Symbol.dispose) PreparedPatch.prototype[Symbol.dispose] = PreparedPatch.prototype.free;
 
 /**
  * What a Code node body may use (`reference::Reference` as JSON): the
@@ -731,6 +875,15 @@ function __wbg_get_imports() {
 const PatchSimFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_patchsim_free(ptr, 1));
+const PreparedPatchFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_preparedpatch_free(ptr, 1));
+
+function _assertClass(instance, klass) {
+    if (!(instance instanceof klass)) {
+        throw new Error(`expected instance of ${klass.name}`);
+    }
+}
 
 function getArrayF32FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
