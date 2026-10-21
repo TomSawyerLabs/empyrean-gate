@@ -3,7 +3,8 @@
 // amplitude view for scalar outputs. Both read a MiniSource — the gate app's
 // streamed hub, or the playground's local WebGPU runtime — and thumbnails go
 // through one shared WebGL context (browsers cap live GL contexts at ~16; a
-// page with a dozen cards would exhaust that on its own).
+// page with a dozen cards would exhaust that on its own), or through the 2D
+// canvas API where there is no WebGL2.
 
 import { useEffect, useRef, useState } from "react";
 import "./minis.css";
@@ -41,6 +42,11 @@ void main() {
  * px; 192 leaves headroom for 1.5–2× DPR without a per-widget context. */
 const STAGE_SIZE = 192;
 
+/** One LED's dot across, in pixels, on a square `size` px wide. */
+function pointSize(size: number, pixels: number): number {
+  return Math.max(2.0 * (size / STAGE_SIZE), (size / pixels) * 0.82);
+}
+
 class MiniRenderer {
   private stage: HTMLCanvasElement | null = null;
   private gl: WebGL2RenderingContext | null = null;
@@ -49,6 +55,8 @@ class MiniRenderer {
   private pointSizeLoc: WebGLUniformLocation | null = null;
   private geomKey = "";
   private count = 0;
+  private grid: { key: string; positions: Float32Array } | null = null;
+  /** No usable WebGL2: every thumbnail takes the 2D path. */
   private failed = false;
 
   /** Draw one cell onto `target` (a plain 2D canvas) via the shared context. */
@@ -65,17 +73,54 @@ class MiniRenderer {
     out.clearRect(0, 0, target.width, target.height);
     if (!rgb || spokes === 0 || pixels === 0) return;
     const gl = this.ensure();
-    if (!gl) return;
+    if (!gl) {
+      this.draw2d(out, rgb, spokes, pixels);
+      return;
+    }
     this.layout(gl, spokes, pixels);
     const n = Math.min(this.count, spokes * pixels);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuf);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, rgb.subarray(0, n * 3));
-    gl.uniform1f(this.pointSizeLoc, Math.max(2.0, (STAGE_SIZE / pixels) * 0.82));
+    gl.uniform1f(this.pointSizeLoc, pointSize(STAGE_SIZE, pixels));
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.POINTS, 0, n);
     // Blit synchronously in the same task, before anything else can touch the
     // shared stage.
     out.drawImage(this.stage!, 0, 0, target.width, target.height);
+  }
+
+  /** The same dots through the 2D canvas API, for a browser that has no
+   * WebGL2 (a blocklisted GPU, or a privacy setting that turns it off) but
+   * still runs the patch: a halo and a core per LED, added like the
+   * shader's blend. A few thousand arcs per thumbnail is cheap at this size. */
+  private draw2d(out: CanvasRenderingContext2D, rgb: Uint8Array, spokes: number, pixels: number) {
+    const positions = this.positions(spokes, pixels);
+    const half = out.canvas.width / 2;
+    const dot = pointSize(out.canvas.width, pixels);
+    const n = Math.min(spokes * pixels, Math.floor(rgb.length / 3));
+    out.save();
+    out.globalCompositeOperation = "lighter";
+    for (const [radius, alpha] of [
+      [dot * 0.47, 0.3],
+      [dot * 0.32, 1],
+    ] as const) {
+      out.globalAlpha = alpha;
+      for (let p = 0; p < n; p++) {
+        const r = rgb[p * 3];
+        const g = rgb[p * 3 + 1];
+        const b = rgb[p * 3 + 2];
+        // A dark LED still lays down alpha, as the shader's does: the
+        // thumbnail's black face.
+        out.fillStyle = `rgb(${r},${g},${b})`;
+        out.beginPath();
+        // Clip space is y up; the canvas is y down.
+        const x = half + positions[p * 2] * half;
+        const y = half - positions[p * 2 + 1] * half;
+        out.arc(x, y, radius, 0, Math.PI * 2);
+        out.fill();
+      }
+    }
+    out.restore();
   }
 
   private ensure(): WebGL2RenderingContext | null {
@@ -85,6 +130,7 @@ class MiniRenderer {
     stage.height = STAGE_SIZE;
     const gl = stage.getContext("webgl2", { alpha: true, premultipliedAlpha: true });
     if (!gl) {
+      console.info("mini previews: no WebGL2 in this browser, drawing them on a 2D canvas");
       this.failed = true;
       return null;
     }
@@ -120,13 +166,12 @@ class MiniRenderer {
     return gl;
   }
 
-  /** (Re)build the static polar point grid when the mini geometry changes. */
-  private layout(gl: WebGL2RenderingContext, spokes: number, pixels: number) {
+  /** The static polar point grid (clip space, y up), rebuilt when the mini
+   * geometry changes. */
+  private positions(spokes: number, pixels: number): Float32Array {
     const key = `${spokes}x${pixels}`;
-    if (key === this.geomKey) return;
-    this.geomKey = key;
-    this.count = spokes * pixels;
-    const positions = new Float32Array(this.count * 2);
+    if (this.grid?.key === key) return this.grid.positions;
+    const positions = new Float32Array(spokes * pixels * 2);
     // Thumbnails skip the physical inner-hole ratio: at this size the pattern
     // reads better using the full disc, and the hub has no geometry config.
     const inner = 0.2;
@@ -140,6 +185,17 @@ class MiniRenderer {
         positions[o + 1] = r * Math.sin(theta);
       }
     }
+    this.grid = { key, positions };
+    return positions;
+  }
+
+  /** Upload the point grid to the shared context when the geometry changes. */
+  private layout(gl: WebGL2RenderingContext, spokes: number, pixels: number) {
+    const key = `${spokes}x${pixels}`;
+    if (key === this.geomKey) return;
+    this.geomKey = key;
+    this.count = spokes * pixels;
+    const positions = this.positions(spokes, pixels);
     if (this.posBuf) gl.deleteBuffer(this.posBuf);
     if (this.colorBuf) gl.deleteBuffer(this.colorBuf);
     this.posBuf = gl.createBuffer();

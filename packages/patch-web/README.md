@@ -13,8 +13,10 @@ control-rate evaluator, effect and audio analysis. This package only hosts it.
 - `@empyrean-gate/patch-web/editor` — `PatchEditor` (React, React Flow) and
   its pieces. A host provides a `PatchStore` (list/get/save/delete/activate,
   answering with events), the node palette, presets, and optionally a
-  `MiniSource` for live node thumbnails and meters. Also patch file helpers:
-  `savePatchToDisk`, `openPatchFromDisk`, `parsePatchFile`, `exportPatch`.
+  `MiniSource` for live node thumbnails and meters (drawn through one shared
+  WebGL2 context, or the 2D canvas API where WebGL2 is unavailable). Also
+  patch file helpers: `savePatchToDisk`, `openPatchFromDisk`,
+  `parsePatchFile`, `exportPatch`.
   The palette groups kinds by the registry's `group` (labels and order in
   `groups.ts`, `GROUPS` / `grouped` / `groupOf`), with an icon per kind
   (`NodeIcon`, `GroupIcon`) and a thumbnail per kind (`thumbs.gen.ts`, loaded
