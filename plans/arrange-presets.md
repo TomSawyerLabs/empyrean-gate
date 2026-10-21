@@ -74,11 +74,17 @@ Arrange leaves it, and stay that way as presets are added or edited.
   overlapping at the default card size (Beat Pulse: `overlay` and `overlay2`
   both at `[630, 250]`). After: none. A second run of the script changes
   nothing; parsed JSON with `pos` removed is identical to master's.
-- **DJ Stereo Master Flow is broken on master, independently of this**: its
-  `flow` node has kind `stereo_flow`, which was never in the registry
-  (preset from `75da7b1`, 2026-08-25). The card is an "unknown" stub and six
-  wires are not drawn. Logged in `ISSUES.md`; its layout uses the stub's
-  size, so re-run the script once it is fixed.
+- **DJ Stereo Master Flow is not a built-in** (corrected 2026-10-21): the
+  file sits in `presets/` but has never been in `SOURCES` (`presets.rs`), so
+  there are **18** built-ins, not 19; the script arranged it only because it
+  reads every file in the folder. Its `flow` node has kind `stereo_flow`,
+  which never existed anywhere (Allison's `75da7b1`, 2026-08-25, added the
+  file only; no T3 checkpoint has an implementation either). Commit
+  `9cb8fc7`'s message and README said nineteen; `0bcd1af` corrects the
+  README.
+- `codegen::compile` silently drops a node of unknown kind, so
+  `all_presets_compile_and_render` would pass a registered preset like this
+  one. `0bcd1af` makes the test also require `validate()` to pass.
 
 ## Progress log
 
@@ -92,7 +98,11 @@ Arrange leaves it, and stay that way as presets are added or edited.
 
 ## Open questions for the user
 
-(none yet)
+1. Cameron said "fix it" about DJ Stereo Master Flow. Ship it as a built-in
+   (its `flow` node rebuilt as a Code node with the same id, ports and knobs,
+   added to `SOURCES`), or delete the unfinished file? Recommendation: ship
+   it; it was written as a finished preset and only that one node is
+   missing.
 
 ## Things not to do
 
