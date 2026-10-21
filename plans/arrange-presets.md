@@ -1,6 +1,6 @@
 # Arrange the built-in patches
 
-Status: **in progress (2026-10-20)**, worktree
+Status: **done (2026-10-21)**: gate master `9cb8fc7` (ISSUES `640a5ab`), site dev `ee557a2` (bot bump), verified on the Preview., worktree
 `C:\Users\camer\.t3\worktrees\Empyrean\arrange-presets`, branch
 `arrange-presets` → gate `master`.
 
@@ -48,7 +48,7 @@ Arrange leaves it, and stay that way as presets are added or edited.
 
 ## Plan / steps
 
-1. Demo editor exposes its `PatchEditorHandle` (`globalThis.editor`).
+1. Demo editor exposes its `PatchEditorHandle` (`globalThis.editorRef`).
 2. `scripts/arrange-presets.ts`: Vite dev server for the demo, Chromium
    with SwiftShader WebGPU, for each preset file: open a copy, wait for the
    cards to be measured and stable, `editor.arrange()`, read the positions,
@@ -56,7 +56,7 @@ Arrange leaves it, and stay that way as presets are added or edited.
 3. Run it; check every preset in the editor by eye (screenshots).
 4. Unit test `src/editor/presets-arranged.test.ts`.
 5. README (patch-web + gate) mentions the script; commit; push gate
-   master; the site's web-dist bump follows on its own. **← current**
+   master; the site's web-dist bump follows on its own.
 
 ## Findings / gotchas
 
@@ -88,7 +88,7 @@ Arrange leaves it, and stay that way as presets are added or edited.
 - [x] Guard test (39 tests; fails on master's Beat Pulse as intended)
 - [x] Docs: patch-web README (script), gate README (nineteen presets, arranged)
 - [x] Checks: root + patch-web typecheck, patch-web tests 212/212, `cargo test -p empyrean-patch` 160/160
-- [ ] Push gate master; the site's web-dist bump follows
+- [x] Gate master `9cb8fc7`, CI green (Checks, Web dist); site dev `ee557a2`; on the Preview `window.empyrean.preset("Beat Pulse")` has the committed positions
 
 ## Open questions for the user
 
