@@ -18,6 +18,7 @@ const SOURCES: &[&str] = &[
     include_str!("presets/dj-cue-strike.json"),
     include_str!("presets/dj-loop-tunnel.json"),
     include_str!("presets/dj-link-spiral-performance.json"),
+    include_str!("presets/dj-stereo-master-flow.json"),
     include_str!("presets/scope.json"),
     include_str!("presets/finger-paint.json"),
     include_str!("presets/video-kaleido.json"),
@@ -110,6 +111,25 @@ mod tests {
             .validate(&module)
             .unwrap_or_else(|e| panic!("preset \"{}\" fails WGSL validation: {e}", doc.name));
         }
+    }
+
+    /// Every file in presets/ is a built-in. One left out of `SOURCES` is
+    /// never shipped and nothing else notices: dj-stereo-master-flow.json sat
+    /// there unlisted, and broken, for two months.
+    #[test]
+    fn every_preset_file_is_listed() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/presets");
+        let mut files = 0;
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "json") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            assert!(SOURCES.contains(&text.as_str()), "{} is not in SOURCES", path.display());
+            files += 1;
+        }
+        assert_eq!(files, SOURCES.len());
     }
 
     #[test]

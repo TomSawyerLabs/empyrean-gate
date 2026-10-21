@@ -1,6 +1,6 @@
 # Arrange the built-in patches
 
-Status: **done (2026-10-21)**: gate master `9cb8fc7` (ISSUES `640a5ab`), site dev `ee557a2` (bot bump), verified on the Preview., worktree
+Status: **in progress (2026-10-21)**, second part: shipping DJ Stereo Master Flow. Arranging was done: gate master `9cb8fc7` (ISSUES `640a5ab`), site dev `ee557a2` (bot bump), verified on the Preview., worktree
 `C:\Users\camer\.t3\worktrees\Empyrean\arrange-presets`, branch
 `arrange-presets` → gate `master`.
 
@@ -46,6 +46,15 @@ Arrange leaves it, and stay that way as presets are added or edited.
   built-in, every wire runs left to right, and no two nodes overlap at
   `DEFAULT_SIZE`.
 
+- **DJ Stereo Master Flow ships as the 19th built-in** (Cameron, 2026-10-21,
+  "Finish and ship it"): its `flow` node is a Code node with the id, ports
+  and knobs `stereo_flow` was given, so all 60 wires and both exposed knobs
+  stand; no new registry kind for one preset.
+- Its left/right is **`c.pos.y`**, as the gate is drawn: the preview
+  (`runtime/ring.ts`) puts spoke 0 at the bottom, so screen-right is +y
+  (`touch.rs` says the same, and Transform's mirror flips that axis). The
+  first draft used `c.pos.x` and lit top/bottom instead.
+
 ## Plan / steps
 
 1. Demo editor exposes its `PatchEditorHandle` (`globalThis.editorRef`).
@@ -88,6 +97,18 @@ Arrange leaves it, and stay that way as presets are added or edited.
 
 ## Progress log
 
+DJ Stereo Master Flow (second part):
+
+- [x] Validate guard in `all_presets_compile_and_render` (`0bcd1af`)
+- [x] `flow` as a Code node; checked by eye with fixed inputs (moving left,
+  moving right, centred) and in the full preset: 60/60 wires, no error
+- [x] Added to `SOURCES`; `every_preset_file_is_listed` test
+- [x] cargo test 161/161, patch-web tests 212/212, typecheck, `test:browser`
+  (Chrome's compiler, every preset) 3/3, re-arranged
+- [ ] Push; site bump; check on the Preview
+
+Arranging:
+
 - [x] Demo exposes the editor handle (`globalThis.editorRef`)
 - [x] arrange-presets script
 - [x] Presets arranged and eyeballed (screenshots of all 19 in the demo)
@@ -98,11 +119,7 @@ Arrange leaves it, and stay that way as presets are added or edited.
 
 ## Open questions for the user
 
-1. Cameron said "fix it" about DJ Stereo Master Flow. Ship it as a built-in
-   (its `flow` node rebuilt as a Code node with the same id, ports and knobs,
-   added to `SOURCES`), or delete the unfinished file? Recommendation: ship
-   it; it was written as a finished preset and only that one node is
-   missing.
+(none)
 
 ## Things not to do
 

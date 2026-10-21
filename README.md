@@ -330,7 +330,7 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   canvas. The thumbnails are rendered from a showcase patch per kind
   (`bun run thumbnails` in `packages/patch-web`; `plans/palette-overhaul.md`).
   Patches save as JSON files under the config dir and activate live (the layer
-  stack renders when no patch is active); eighteen built-in presets seed the
+  stack renders when no patch is active); nineteen built-in presets seed the
   palette, each laid out as ⇆ Arrange leaves it (`bun run arrange-presets`
   in `packages/patch-web`).
   While a patch is on air a **◆ chip in the top bar names it on every tab** (red
