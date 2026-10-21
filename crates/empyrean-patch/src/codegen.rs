@@ -55,8 +55,8 @@ pub struct Program {
     pub wires: HashMap<(usize, String), (usize, String)>,
     /// Companion module for per-node mini previews: same node functions and
     /// parameter slab, but the entry point renders `preview_cells[slot]`'s
-    /// output into `OUT[slot * spokes * pixels + pix]`. Empty when the patch
-    /// has no field nodes to preview.
+    /// output into `OUT[slot * spokes * pixels + pix]`. Never empty: the
+    /// Output always has a cell.
     pub preview_wgsl: String,
     /// What each preview cell slot renders.
     pub preview_cells: Vec<PreviewCell>,
@@ -239,6 +239,7 @@ impl Program {
 /// consumer would draw them with every knob at 1: the strokes with their own
 /// pens, the effects this chain carries, the texture mapped straight onto the
 /// ring. The cell shows what the node hands on before any downstream knobs.
+/// The Output hands nothing on: its cell is the frame the gate shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PreviewStyle {
     Color,
@@ -246,11 +247,12 @@ enum PreviewStyle {
     Points,
     Effects,
     Texture,
+    Final,
 }
 
 fn preview_style(node: &NodeInst) -> Option<PreviewStyle> {
     match node.kind.as_str() {
-        "output" => return None,
+        "output" => return Some(PreviewStyle::Final),
         "touch_dabs" => return Some(PreviewStyle::Points),
         "effects_in" | "event_effect" => return Some(PreviewStyle::Effects),
         "video_in" | "image_in" | "clip" => return Some(PreviewStyle::Texture),
@@ -460,14 +462,14 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
     g.grid_fns(&mut preview_code, true);
     g.main_fn(&mut code, output)?;
 
-    // Field nodes and the stream/texture sources in graph order, then the
-    // Event effects (CPU nodes whose effects stream previews like Triggered
-    // effects does).
+    // The Output first, so the cap never drops the patch's result; then field
+    // nodes and the stream/texture sources in graph order, then the Event
+    // effects (CPU nodes whose effects stream previews like Triggered effects
+    // does).
     // A Code node previews every field output: its principal one as the
     // node's cell, the others by port name.
-    let preview_cells: Vec<PreviewCell> = gpu_order
-        .iter()
-        .copied()
+    let preview_cells: Vec<PreviewCell> = std::iter::once(output)
+        .chain(gpu_order.iter().copied().filter(|&i| i != output))
         .chain(
             cpu_order
                 .iter()
@@ -1873,7 +1875,9 @@ impl Gen<'_> {
     /// [`preview_style`]). Invocation space is `spokes * pixels * slots`; each
     /// slot renders its node's output alone — no master and nothing it does
     /// not carry itself, so the cell shows exactly what that node hands
-    /// downstream.
+    /// downstream. The Output's cell is the exception: `finish()`'s picture,
+    /// its Master, hue pull and the crew's master brightness included (but,
+    /// as in every cell, Feedback reads black).
     fn preview_main_fn(&self, code: &mut String, cells: &[PreviewCell]) -> Result<(), String> {
         let mut cases = String::new();
         for (slot, cell) in cells.iter().enumerate() {
@@ -1895,6 +1899,11 @@ impl Gen<'_> {
             let expr = match style {
                 Some(PreviewStyle::Color) => format!("{f}(ctx).rgb"),
                 Some(PreviewStyle::Gray) => format!("vec3f(clamp({f}(ctx), 0.0, 1.0))"),
+                Some(PreviewStyle::Final) => format!(
+                    "hue_pull(({root}).rgb * {master}) * G.master",
+                    root = self.color_input(i, "in", "ctx"),
+                    master = self.p(i, "master"),
+                ),
                 Some(style) => {
                     self.preview_stream_fn(code, i, style);
                     format!("n{i}_pv(ctx)")
@@ -1979,7 +1988,9 @@ impl Gen<'_> {
                  \x20   return select(vec3f(0.0), s.rgb, s.a > 0.0);",
                 sample = self.texture_source_expr(i),
             ),
-            PreviewStyle::Color | PreviewStyle::Gray => unreachable!("field nodes use n{i}_f"),
+            PreviewStyle::Color | PreviewStyle::Gray | PreviewStyle::Final => {
+                unreachable!("field nodes and the Output have their own expression")
+            }
         };
         writeln!(code, "\nfn n{i}_pv(c: Ctx) -> vec3f {{").unwrap();
         writeln!(code, "{body}").unwrap();
@@ -2115,15 +2126,14 @@ mod tests {
     fn preview_module_validates_and_lists_field_nodes() {
         let doc = valid_demo();
         let prog = compile(&doc).expect("compiles");
-        // Every previewable node (and only those) gets a cell, in graph order.
-        assert!(!prog.preview_cells.is_empty());
+        // The Output first, then every previewable node (and only those) in
+        // graph order.
+        assert_eq!(doc.nodes[prog.preview_cells[0].node].kind, "output");
+        assert!(prog.preview_cells.len() > 1);
         for cell in &prog.preview_cells {
             let i = cell.node;
             let kind = &doc.nodes[i].kind;
-            assert!(
-                previewable(&doc.nodes[i]) && kind != "output",
-                "cell for non-previewable node {kind}"
-            );
+            assert!(previewable(&doc.nodes[i]), "cell for non-previewable node {kind}");
         }
         // CPU scalar outputs become meters — the audio node's bands among them.
         assert!(
@@ -2175,7 +2185,7 @@ mod tests {
         for id in ["t", "clients", "ev", "v", "img", "clip", "bg"] {
             assert!(cells.contains(&id), "no cell for {id}: {cells:?}");
         }
-        assert!(!cells.contains(&"o"));
+        assert_eq!(cells[0], "o", "the Output's cell comes first");
         let w = &prog.preview_wgsl;
         assert!(w.contains("dab_color(D, c, d)"), "strokes draw their dabs");
         assert!(w.contains("E.source == 0u"), "Triggered effects draws source 0");
@@ -2188,6 +2198,38 @@ mod tests {
         assert!(w.contains("video_at(uv)"), "Video in samples the live frame");
         assert!(w.contains("image_at(1u, uv)"), "Still image samples its own cell");
         assert!(w.contains("clip_at(2u, uv"), "Clip samples its sheet");
+        validates(w);
+    }
+
+    /// The Output's cell is the frame the gate shows (its Master, hue pull,
+    /// the crew's master), and it comes first, so a patch with more field
+    /// nodes than the cap still has it.
+    #[test]
+    fn output_cell_is_the_final_frame_and_survives_the_cap() {
+        let mut nodes: Vec<NodeInst> = (0..MAX_PREVIEW_NODES + 4)
+            .map(|k| node(&format!("s{k}"), "solid"))
+            .collect();
+        nodes.push(node("o", "output"));
+        let doc = PatchDoc {
+            nodes,
+            edges: vec![edge("s0", "out", "o", "in")],
+            ..Default::default()
+        };
+        let prog = compile(&doc).expect("compiles");
+        assert_eq!(prog.preview_cells.len(), MAX_PREVIEW_NODES);
+        assert_eq!(prog.preview_keys()[0], "o");
+        let o = doc.nodes.len() - 1;
+        let master = prog
+            .slots
+            .iter()
+            .find(|s| s.node == o && s.param.as_deref() == Some("master"))
+            .expect("the Output's Master is in the slab")
+            .slot;
+        let w = &prog.preview_wgsl;
+        assert!(
+            w.contains(&format!("case 0u: {{ acc = hue_pull((n0_f(ctx)).rgb * P[{master}u]) * G.master; }}")),
+            "{w}"
+        );
         validates(w);
     }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cloneAlong, crumbs, docAt, flatId, lockAt, sameLocation, validPath } from "./navigation";
+import { cloneAlong, crumbs, docAt, flatId, lockAt, outputMini, sameLocation, validPath } from "./navigation";
 import { sourceRev } from "./links";
 import type { PatchDoc, PatchNode } from "../types";
 
@@ -55,6 +55,11 @@ describe("navigation", () => {
     expect(flatId(root, [], "n")).toBe("n");
     expect(flatId(root, ["s1", "s2"], "x")).toBe("s1/s2");
     expect(flatId(root, ["s1"], "s2")).toBe("s1/s2");
+  });
+
+  test("an Output's mini is its own at the top, the Sub-patch's inside one", () => {
+    expect(outputMini(root, [], "o")).toBe("o");
+    expect(outputMini(root, ["s1", "s2"], "o")).toBe("s1/s2");
   });
 
   test("locations compare by value", () => {

@@ -61,7 +61,7 @@ import { MiniMeter, MiniRing, type MiniSource } from "./minis";
 import { Palette, PALETTE_DRAG_TYPE, PALETTE_PARAMS_TYPE, type SubpatchChoice } from "./Palette";
 import { PanelHead, useSheet } from "./sheet";
 import { isBuiltin, linkedSources, snapshot, sourceRev, summarize, summaryLinks, syncLinks } from "./links";
-import { cloneAlong, crumbs, docAt, flatId, lockAt, sameLocation, unlink, validPath, type EditorLocation } from "./navigation";
+import { cloneAlong, crumbs, docAt, flatId, lockAt, outputMini, sameLocation, unlink, validPath, type EditorLocation } from "./navigation";
 import { PatchBrowser } from "./PatchBrowser";
 import {
   applies,
@@ -487,7 +487,8 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
   // like the hardware, and so do the stream and texture sources (Touch
   // strokes, Triggered effects, Event effect, Video in, Still image, Clip),
   // drawn as their default consumer would draw them; scalar outputs get
-  // amplitude meters and event outputs a fire strip. Only for the patch that
+  // amplitude meters and event outputs a fire strip. The Output hands nothing
+  // on, so its ring is the frame the gate shows. Only for the patch that
   // is actually on air — that is the graph the backend is evaluating. A node
   // with a handful of outputs meters them all; a wide one (Audio, Touch, DJ
   // link) meters `out` and whatever is wired, or it would be taller than the
@@ -501,7 +502,8 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
     .filter((p) => portApplies(def, node, p.name) || data.wiredOut.includes(p.name))
     .map((p) => (data.led ? { ...p, shape: onLeds(p.shape) } : p));
   const primary = outs.find((p) => p.name === "out") ?? (outs.length === 1 ? outs[0] : undefined);
-  const showRing = live && primary !== undefined && RING_SHAPES.includes(primary.shape);
+  const showRing =
+    live && (node.kind === "output" || (primary !== undefined && RING_SHAPES.includes(primary.shape)));
   // A Code node thumbnails every field output, or the texture it renders:
   // the principal one as the node's own cell, the others by port
   // (`node:<id>:<port>`).
@@ -795,7 +797,7 @@ function toFlowNodes(root: PatchDoc, path: string[], registry: Registry): PatchF
       node: n,
       def: registry.get(n.kind),
       docId: root.id,
-      mini: flatId(root, path, n.id),
+      mini: n.kind === "output" ? outputMini(root, path, n.id) : flatId(root, path, n.id),
       wiredOut: doc.edges.filter((e) => e.from.node === n.id).map((e) => e.from.port),
       wiredIn: doc.edges.filter((e) => e.to.node === n.id).map((e) => e.to.port),
       led: leds.has(n.id),

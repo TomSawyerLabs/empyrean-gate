@@ -25,8 +25,9 @@ test("a preset copy shows node thumbnails once it is saved and on air", async ({
   await expect(activate).toBeEnabled({ timeout: 5_000 });
   await activate.click();
 
-  // On air: the generator's thumbnail appears without reopening the patch.
-  await expect(page.locator(".pnode .mini-ring")).toHaveCount(1);
+  // On air: the generator's thumbnail, and the Output's (the frame the gate
+  // shows), appear without reopening the patch.
+  await expect(page.locator(".pnode .mini-ring")).toHaveCount(2);
 });
 
 // Stream and texture sources thumbnail too: the crate previews them as their
@@ -42,7 +43,7 @@ test("stream and texture sources get a thumbnail on air", async ({ page }) => {
   const activate = page.getByRole("button", { name: "▶ Activate" });
   await expect(activate).toBeEnabled({ timeout: 5_000 });
   await activate.click();
-  await expect(page.locator(".pnode .mini-ring")).toHaveCount(1);
+  await expect(page.locator(".pnode .mini-ring")).toHaveCount(2);
 
   for (const label of ["Touch strokes", "Triggered effects", "Still image in", "Clip"]) {
     await page.locator(".palette-item", { hasText: label }).click();
@@ -50,7 +51,7 @@ test("stream and texture sources get a thumbnail on air", async ({ page }) => {
       page.locator(".pnode", { hasText: label }).getByRole("img", { name: `${label} preview` }),
     ).toBeVisible();
   }
-  // The Output has no output of its own, so no ring.
-  await expect(page.locator(".pnode", { hasText: "Output" }).locator(".mini-ring")).toHaveCount(0);
-  await expect(page.locator(".pnode .mini-ring")).toHaveCount(5);
+  // The Output hands nothing on, but its ring is the frame the gate shows.
+  await expect(page.locator(".pnode", { hasText: "Output" }).getByRole("img", { name: "Output preview" })).toBeVisible();
+  await expect(page.locator(".pnode .mini-ring")).toHaveCount(6);
 });
