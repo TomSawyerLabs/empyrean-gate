@@ -12,7 +12,8 @@ use empyrean_patch::abi::{
 };
 use empyrean_patch::effects::{DabPoint, EffectCfg, EffectKind, PenKind};
 use empyrean_patch::eval::{DJ_EVENT_COUNT, DjLinkInputs};
-use empyrean_patch::sim::{Geometry, Sim, Update};
+use empyrean_patch::codegen::Program;
+use empyrean_patch::sim::{Geometry, Prepared, Sim, Update};
 use serde_json::json;
 use wasm_bindgen::prelude::*;
 
@@ -150,6 +151,61 @@ pub fn effect_kinds() -> String {
     serde_json::to_string(&EffectKind::ALL).expect("kinds serialize")
 }
 
+fn update_name(update: Update) -> &'static str {
+    match update {
+        Update::Params => "params",
+        Update::Program {
+            shader_changed: false,
+        } => "program",
+        Update::Program {
+            shader_changed: true,
+        } => "shader",
+    }
+}
+
+fn grid_passes_json(prog: &Program) -> String {
+    let passes: Vec<serde_json::Value> = prog
+        .grid_passes
+        .iter()
+        .map(|p| json!({ "entry": p.entry, "cells": p.cells }))
+        .collect();
+    json!({ "bytes": prog.grid_bytes, "passes": passes }).to_string()
+}
+
+/// A document compiled by `PatchSim.prepare`, not yet running. Its shaders
+/// read like a running patch's (see `PatchSim`).
+#[wasm_bindgen]
+pub struct PreparedPatch {
+    prepared: Prepared,
+}
+
+#[wasm_bindgen]
+impl PreparedPatch {
+    pub fn wgsl(&self) -> String {
+        self.prepared.program().wgsl.clone()
+    }
+
+    #[wasm_bindgen(js_name = previewWgsl)]
+    pub fn preview_wgsl(&self) -> String {
+        self.prepared.program().preview_wgsl.clone()
+    }
+
+    #[wasm_bindgen(js_name = gridPasses)]
+    pub fn grid_passes(&self) -> String {
+        grid_passes_json(self.prepared.program())
+    }
+
+    #[wasm_bindgen(js_name = previewNodes)]
+    pub fn preview_nodes(&self) -> Vec<String> {
+        self.prepared.program().preview_keys()
+    }
+
+    #[wasm_bindgen(js_name = relocateError)]
+    pub fn relocate_error(&self, msg: &str) -> String {
+        self.prepared.program().relocate_error(msg)
+    }
+}
+
 /// One running patch.
 #[wasm_bindgen]
 pub struct PatchSim {
@@ -185,16 +241,29 @@ impl PatchSim {
             .sim
             .update(parse_doc(doc)?)
             .map_err(|e| JsError::new(&e))?;
-        Ok(match update {
-            Update::Params => "params",
-            Update::Program {
-                shader_changed: false,
-            } => "program",
-            Update::Program {
-                shader_changed: true,
-            } => "shader",
-        }
-        .into())
+        Ok(update_name(update).into())
+    }
+
+    /// Compile an edited document without running it: a host builds the
+    /// pipelines for its shader while this patch keeps rendering, then
+    /// `apply`s it between two frames. Throws, as `update` does, if the
+    /// document cannot run.
+    pub fn prepare(&self, doc: &str) -> Result<PreparedPatch, JsError> {
+        let prepared = Sim::prepare(parse_doc(doc)?).map_err(|e| JsError::new(&e))?;
+        Ok(PreparedPatch { prepared })
+    }
+
+    /// Whether `prepared` needs pipelines other than this patch's (its
+    /// shader differs from the one running now).
+    #[wasm_bindgen(js_name = shaderChanged)]
+    pub fn shader_changed(&self, prepared: &PreparedPatch) -> bool {
+        self.sim.shader_changed(&prepared.prepared)
+    }
+
+    /// Run a `prepare`d document; returns what `update` would have. Consumes
+    /// `prepared`.
+    pub fn apply(&mut self, prepared: PreparedPatch) -> String {
+        update_name(self.sim.apply(prepared.prepared)).into()
     }
 
     /// The main compute shader: one invocation per LED, writes packed RGB to
@@ -216,13 +285,7 @@ impl PatchSim {
     /// passes and 0 bytes for a patch that renders no texture.
     #[wasm_bindgen(js_name = gridPasses)]
     pub fn grid_passes(&self) -> String {
-        let prog = self.sim.program();
-        let passes: Vec<serde_json::Value> = prog
-            .grid_passes
-            .iter()
-            .map(|p| json!({ "entry": p.entry, "cells": p.cells }))
-            .collect();
-        json!({ "bytes": prog.grid_bytes, "passes": passes }).to_string()
+        grid_passes_json(self.sim.program())
     }
 
     /// The key of each preview cell, in cell order: a node id, or

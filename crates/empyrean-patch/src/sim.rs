@@ -58,6 +58,19 @@ pub enum Update {
     Program { shader_changed: bool },
 }
 
+/// A document compiled by [`Sim::prepare`], not yet running.
+pub struct Prepared {
+    doc: PatchDoc,
+    prog: Program,
+}
+
+impl Prepared {
+    /// The compiled program: what the host builds its pipelines from.
+    pub fn program(&self) -> &Program {
+        &self.prog
+    }
+}
+
 pub struct Sim {
     geometry: Geometry,
     doc: PatchDoc,
@@ -177,7 +190,28 @@ impl Sim {
     /// pattern; anything structural rebuilds the evaluator. On error the
     /// running patch is left as it was.
     pub fn update(&mut self, doc: PatchDoc) -> Result<Update, String> {
+        Ok(self.apply(Self::prepare(doc)?))
+    }
+
+    /// Compile an edited document without applying it, so a host can build
+    /// its GPU pipelines for the new shader while this sim keeps running the
+    /// old one, then [`Sim::apply`] it between two frames.
+    pub fn prepare(doc: PatchDoc) -> Result<Prepared, String> {
         let prog = codegen::compile(&doc)?;
+        Ok(Prepared { doc, prog })
+    }
+
+    /// Whether running `prepared` needs pipelines this sim's shader does not
+    /// have (its generated WGSL differs).
+    pub fn shader_changed(&self, prepared: &Prepared) -> bool {
+        prepared.prog.wgsl != self.prog.wgsl || prepared.prog.preview_wgsl != self.prog.preview_wgsl
+    }
+
+    /// Run a [`Sim::prepare`]d document, judged against the program running
+    /// now (not the one running when it was prepared), as [`Sim::update`]
+    /// would.
+    pub fn apply(&mut self, prepared: Prepared) -> Update {
+        let Prepared { doc, prog } = prepared;
         let same_graph = prog.wgsl == self.prog.wgsl
             && prog.preview_wgsl == self.prog.preview_wgsl
             && prog.cpu_order == self.prog.cpu_order
@@ -198,7 +232,7 @@ impl Sim {
                 }
             }
             self.doc = doc;
-            return Ok(Update::Params);
+            return Update::Params;
         }
         let shader_changed =
             prog.wgsl != self.prog.wgsl || prog.preview_wgsl != self.prog.preview_wgsl;
@@ -209,7 +243,7 @@ impl Sim {
         self.slab = vec![0.0; prog.slab_len];
         self.prog = prog;
         self.doc = doc;
-        Ok(Update::Program { shader_changed })
+        Update::Program { shader_changed }
     }
 
     /// Live knob change (an exposed param on a play surface).
@@ -560,6 +594,39 @@ mod tests {
         assert!(sim.update(doc).is_err(), "no Output node");
         // Still running the last good program.
         sim.step(1.0 / 60.0);
+    }
+
+    /// A host builds the new shader's pipelines while the old program keeps
+    /// running, so preparing must leave the sim exactly as it was.
+    #[test]
+    fn prepare_leaves_the_running_program_alone_until_applied() {
+        let mut sim = sim(&presets()[0].name);
+        let running = sim.program().wgsl.clone();
+        let other = presets()
+            .iter()
+            .find(|p| {
+                let prog = crate::codegen::compile(p).unwrap();
+                prog.wgsl != running
+            })
+            .expect("a preset with another shader")
+            .clone();
+
+        let prepared = Sim::prepare(other.clone()).unwrap();
+        assert!(sim.shader_changed(&prepared));
+        for _ in 0..10 {
+            sim.step(1.0 / 60.0);
+        }
+        assert_eq!(sim.program().wgsl, running, "still the old program");
+        assert_eq!(sim.slab().len(), sim.program().slab_len);
+
+        assert_eq!(sim.apply(prepared), Update::Program { shader_changed: true });
+        assert_eq!(sim.program().wgsl, crate::codegen::compile(&other).unwrap().wgsl);
+        assert_eq!(sim.doc().name, other.name);
+
+        // The same document again needs no new shader and is only knobs.
+        let again = Sim::prepare(other).unwrap();
+        assert!(!sim.shader_changed(&again));
+        assert_eq!(sim.apply(again), Update::Params);
     }
 
     #[test]
