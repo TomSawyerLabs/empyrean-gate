@@ -108,6 +108,9 @@ pub enum Category {
     Sink,
     /// `code`: nodes whose ports and body are written by the user (see `code`).
     Code,
+    /// `debug`: nodes that only show what they are fed (Debug): never run,
+    /// never reach the Output.
+    Debug,
 }
 
 /// Where the palette shows a kind: grouped by what a person reaches for, not
@@ -139,7 +142,7 @@ pub enum Group {
     Color,
     /// `draw`: renderers for the Points and Effects streams.
     Draw,
-    /// `structure`: Output, Sub-patch, Code and Note.
+    /// `structure`: Output, Sub-patch, Code, Note and Debug.
     Structure,
 }
 
@@ -177,6 +180,13 @@ impl Group {
 
 /// A remark on the canvas: text in `NodeInst::text`, no ports, never run.
 pub const NOTE_KIND: &str = "note";
+
+/// A tap: one input of any shape, no outputs, never run. Its only job is a
+/// mini of what it is fed (`codegen` gives it a preview cell or a meter).
+pub const DEBUG_KIND: &str = "debug";
+
+/// A Debug node's `live` Select: whether the gate's Live tab shows it too.
+pub const DEBUG_LIVE: &str = "live";
 
 /// Node kinds the evaluator runs on the CPU every frame (Scalar/Event
 /// tier). A Code node's tier is per instance: see `NodeInst::is_cpu`.
@@ -416,6 +426,7 @@ pub fn palette_json() -> serde_json::Value {
         Category::Texture => "texture",
         Category::Sink => "sink",
         Category::Code => "code",
+        Category::Debug => "debug",
     };
     let ports = |ports: &[PortDef]| {
         ports
@@ -3332,6 +3343,21 @@ pub const TYPES: &[NodeType] = &[
         params: &[],
     },
     NodeType {
+        id: "debug",
+        label: "Debug",
+        category: Category::Debug,
+        group: Group::Structure,
+        description: "A tap for looking inside a patch: wire any output into it (a field, a Scalar, an Event, a stream or a texture) and it shows that wire live, large: a ring for a picture, a meter for a number, a strip of fires for an event. It has no outputs and changes nothing that reaches the Output, and it costs nothing while nobody is watching. The gate's Live tab shows it too when Show on Live says so.",
+        inputs: &[port("in", Shape::Any, "What to show: a wire of any shape, kept as it is.")],
+        outputs: &[],
+        params: &[sel(
+            "live",
+            "Show on Live",
+            &["Editor only", "Editor and Live"],
+            "Where it shows. Editor only: in the patch editor. Editor and Live: also in a strip on the gate's Live tab while this patch is on air, for watching a signal during a show.",
+        )],
+    },
+    NodeType {
         id: "blend",
         label: "Blend",
         category: Category::Combine,
@@ -3694,6 +3720,14 @@ mod tests {
         );
         assert_eq!(accepts("led_scalar"), serde_json::json!(["scalar", "field_scalar", "led_scalar"]));
         assert_eq!(accepts("event"), serde_json::json!(["event"]));
+        // Any takes every wire shape; nothing carries Any or Pixels.
+        assert_eq!(
+            accepts("any"),
+            serde_json::json!([
+                "scalar", "event", "field_scalar", "field_color", "led_scalar", "led_color", "points", "effects",
+                "texture"
+            ])
+        );
         // Every shape a registry port uses is listed.
         for t in TYPES {
             for p in t.inputs.iter().chain(t.outputs) {

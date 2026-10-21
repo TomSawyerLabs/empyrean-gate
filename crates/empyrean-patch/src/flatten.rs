@@ -329,6 +329,31 @@ mod tests {
         assert_eq!(rt.doc().nodes.iter().find(|n| n.id == "s").unwrap().params["hue"], 0.7);
     }
 
+    /// A Debug node inside a block keeps working once inlined (its key is
+    /// its flattened id), and one outside can watch the block's `out`.
+    #[test]
+    fn debug_nodes_inside_and_outside_a_sub_patch() {
+        let mut inner = tinted_ramp();
+        inner["nodes"].as_array_mut().unwrap().push(serde_json::json!({ "id": "d", "kind": "debug" }));
+        inner["edges"].as_array_mut().unwrap().push(serde_json::json!(
+            { "from": { "node": "ramp", "port": "out" }, "to": { "node": "d", "port": "in" } }
+        ));
+        let outer = doc(serde_json::json!({
+            "nodes": [
+                { "id": "s", "kind": "subpatch", "sub": inner },
+                { "id": "o", "kind": "output" },
+                { "id": "watch", "kind": "debug" }
+            ],
+            "edges": [
+                { "from": { "node": "s", "port": "out" }, "to": { "node": "o", "port": "in" } },
+                { "from": { "node": "s", "port": "out" }, "to": { "node": "watch", "port": "in" } }
+            ]
+        }));
+        let prog = compile(&outer).expect("compiles");
+        let keys = prog.preview_keys();
+        assert_eq!(keys[1..3], ["s/d", "watch"], "after the Output's: {keys:?}");
+    }
+
     #[test]
     fn nesting_works_to_a_limit_and_empties_render_black() {
         let mut inner = tinted_ramp();

@@ -273,9 +273,65 @@ fn preview_style(node: &NodeInst) -> Option<PreviewStyle> {
     }
 }
 
-/// Whether this node gets a mini-preview cell.
+/// Whether this node gets a mini-preview cell. A Debug node gets one when
+/// it is fed something a ring can show (see `debug_feeds`), which takes the
+/// wires to know.
 pub fn previewable(node: &NodeInst) -> bool {
     preview_style(node).is_some()
+}
+
+/// How a wire of `shape` thumbnails in a Debug node's ring; `None` for the
+/// ones it meters instead (Scalar, Event).
+fn tap_style(shape: Shape) -> Option<PreviewStyle> {
+    match shape {
+        s if s.is_color_field() => Some(PreviewStyle::Color),
+        s if s.is_grey_field() => Some(PreviewStyle::Gray),
+        Shape::Points => Some(PreviewStyle::Points),
+        Shape::Effects => Some(PreviewStyle::Effects),
+        Shape::Texture => Some(PreviewStyle::Texture),
+        _ => None,
+    }
+}
+
+/// Every wired Debug node, in document order, with the shape it is fed.
+fn debug_feeds(doc: &PatchDoc, wires: &HashMap<(usize, String), (usize, String)>) -> Vec<(usize, Shape)> {
+    doc.nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.kind == registry::DEBUG_KIND)
+        .filter_map(|(i, _)| {
+            let (from, port) = wires.get(&(i, "in".to_string()))?;
+            Some((i, doc.nodes[*from].output_shape(port)?))
+        })
+        .collect()
+}
+
+/// A Debug node the gate's Live tab shows (its `live` Select is "Editor and
+/// Live"): its id in the flattened document (the key its mini goes by) and
+/// the shape it is fed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveTap {
+    pub id: String,
+    /// The node's name, or "Debug" when it has none.
+    pub label: String,
+    pub shape: Shape,
+}
+
+/// The Debug nodes of a compiled program that ask to be shown on Live, in
+/// document order. Unwired ones show nothing, so they are left out.
+pub fn live_taps(prog: &Program) -> Vec<LiveTap> {
+    debug_feeds(&prog.doc, &prog.wires)
+        .into_iter()
+        .filter(|&(i, _)| prog.doc.nodes[i].param(registry::DEBUG_LIVE).round() >= 1.0)
+        .map(|(i, shape)| {
+            let n = &prog.doc.nodes[i];
+            LiveTap {
+                id: n.id.clone(),
+                label: if n.name.is_empty() { "Debug".to_string() } else { n.name.clone() },
+                shape,
+            }
+        })
+        .collect()
 }
 
 /// Node kinds that read raw touch. A patch containing any of them owns the
@@ -316,8 +372,9 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         .ok_or_else(|| "patch has no Output node".to_string())?;
 
     for n in &doc.nodes {
-        // A Note is text on the canvas: nothing to run.
-        if n.kind == registry::NOTE_KIND {
+        // A Note is text on the canvas and a Debug node only a mini: nothing
+        // to run.
+        if n.kind == registry::NOTE_KIND || n.kind == registry::DEBUG_KIND {
             continue;
         }
         if !n.is_cpu() && !n.is_gpu() {
@@ -462,14 +519,23 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
     g.grid_fns(&mut preview_code, true);
     g.main_fn(&mut code, output)?;
 
-    // The Output first, so the cap never drops the patch's result; then field
+    // The Output first, so the cap never drops the patch's result; then the
+    // Debug nodes, so it never drops a tap someone placed to watch; then field
     // nodes and the stream/texture sources in graph order, then the Event
     // effects (CPU nodes whose effects stream previews like Triggered effects
     // does).
     // A Code node previews every field output: its principal one as the
     // node's cell, the others by port name.
-    let preview_cells: Vec<PreviewCell> = std::iter::once(output)
-        .chain(gpu_order.iter().copied().filter(|&i| i != output))
+    let output_cell = previewable(&doc.nodes[output]).then_some(PreviewCell { node: output, port: None });
+    let taps: Vec<(usize, Shape)> = debug_feeds(doc, &wires);
+    let tap_cells = taps
+        .iter()
+        .filter(|(_, shape)| tap_style(*shape).is_some())
+        .map(|&(i, _)| PreviewCell { node: i, port: None });
+    let node_cells = gpu_order
+        .iter()
+        .copied()
+        .filter(|&i| i != output)
         .chain(
             cpu_order
                 .iter()
@@ -494,26 +560,31 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
                 );
             }
             cells
-        })
-        .take(MAX_PREVIEW_NODES)
-        .collect();
+        });
+    let preview_cells: Vec<PreviewCell> =
+        output_cell.into_iter().chain(tap_cells).chain(node_cells).take(MAX_PREVIEW_NODES).collect();
     let preview_wgsl = if preview_cells.is_empty() {
         String::new()
     } else {
         g.preview_main_fn(&mut preview_code, &preview_cells)?;
         preview_code
     };
-    let preview_scalars: Vec<(usize, String)> = cpu_order
+    // A Debug node fed a Scalar or an Event meters its own `in` (which
+    // `eval::Runtime::scalar_value` reads through the wire), ahead of the
+    // rest for the same reason as its cell.
+    let tap_meters = taps
         .iter()
-        .copied()
-        .flat_map(|i| {
+        .filter(|(_, shape)| matches!(shape, Shape::Scalar | Shape::Event))
+        .map(|&(i, _)| (i, "in".to_string()));
+    let preview_scalars: Vec<(usize, String)> = tap_meters
+        .chain(cpu_order.iter().copied().flat_map(|i| {
             // Events meter too: the runtime reports a fire count for them.
             doc.nodes[i]
                 .outputs()
                 .into_iter()
                 .filter(|(_, shape)| matches!(shape, Shape::Scalar | Shape::Event))
                 .map(move |(name, _)| (i, name))
-        })
+        }))
         // Then a CPU Code node's live values (`script::Script::probe_keys`),
         // after every real meter, so they never crowd one out.
         .chain(cpu_order.iter().copied().flat_map(|i| {
@@ -1880,9 +1951,34 @@ impl Gen<'_> {
     /// as in every cell, Feedback reads black).
     fn preview_main_fn(&self, code: &mut String, cells: &[PreviewCell]) -> Result<(), String> {
         let mut cases = String::new();
+        // Each `n{i}_pv` once, though a source may have its own cell and a
+        // Debug node's too.
+        let mut streams: Vec<usize> = Vec::new();
+        let mut stream = |code: &mut String, i: usize, style: PreviewStyle| {
+            if !streams.contains(&i) {
+                streams.push(i);
+                self.preview_stream_fn(code, i, style);
+            }
+            format!("n{i}_pv(ctx)")
+        };
         for (slot, cell) in cells.iter().enumerate() {
             let i = cell.node;
             let node = &self.doc.nodes[i];
+            // A Debug node shows its source's output as it is.
+            if node.kind == registry::DEBUG_KIND {
+                let Some((from, port)) = self.upstream(i, "in") else {
+                    return Err("an unwired Debug node has no preview".into());
+                };
+                let f = self.field_fn(*from, port);
+                let expr = match self.doc.nodes[*from].output_shape(port).and_then(tap_style) {
+                    Some(PreviewStyle::Color) => format!("{f}(ctx).rgb"),
+                    Some(PreviewStyle::Gray) => format!("vec3f(clamp({f}(ctx), 0.0, 1.0))"),
+                    Some(style) => stream(code, *from, style),
+                    None => return Err("a Debug node fed a Scalar or an Event meters it instead".into()),
+                };
+                let _ = writeln!(cases, "        case {slot}u: {{ acc = {expr}; }}");
+                continue;
+            }
             // A Code node's extra output: its own accessor and shape.
             let style = match &cell.port {
                 Some(port) => match node.output_shape(port) {
@@ -1904,10 +2000,7 @@ impl Gen<'_> {
                     root = self.color_input(i, "in", "ctx"),
                     master = self.p(i, "master"),
                 ),
-                Some(style) => {
-                    self.preview_stream_fn(code, i, style);
-                    format!("n{i}_pv(ctx)")
-                }
+                Some(style) => stream(code, i, style),
                 None => return Err(format!("node kind \"{}\" is not previewable", node.kind)),
             };
             let _ = writeln!(cases, "        case {slot}u: {{ acc = {expr}; }}");
@@ -2231,6 +2324,109 @@ mod tests {
             "{w}"
         );
         validates(w);
+    }
+
+    /// A patch's Debug nodes, last in the document so every other node keeps
+    /// its index: a colour field, a grey field, a Scalar, an Event, an
+    /// Effects stream that also has a cell of its own, a texture, and one
+    /// unwired.
+    fn tapped() -> PatchDoc {
+        PatchDoc {
+            nodes: vec![
+                node("bg", "solid"),
+                node("grey", "perlin_noise"),
+                node("lfo", "lfo"),
+                node("beat", "tap"),
+                node("clients", "effects_in"),
+                node("v", "video_in"),
+                node("o", "output"),
+                node("d_color", "debug"),
+                node("d_grey", "debug"),
+                node("d_lfo", "debug"),
+                node("d_beat", "debug"),
+                node("d_fx", "debug"),
+                node("d_video", "debug"),
+                node("d_idle", "debug"),
+            ],
+            edges: vec![
+                edge("bg", "out", "o", "in"),
+                edge("bg", "out", "d_color", "in"),
+                edge("grey", "out", "d_grey", "in"),
+                edge("lfo", "out", "d_lfo", "in"),
+                edge("beat", "tap", "d_beat", "in"),
+                edge("clients", "effects", "d_fx", "in"),
+                edge("v", "tex", "d_video", "in"),
+            ],
+            ..Default::default()
+        }
+    }
+
+    /// A Debug node shows what it is fed: rings for pictures, streams and
+    /// textures (first, ahead of every node's own), meters on its own `in`
+    /// for a Scalar or an Event (first too). The preview module validates
+    /// with a stream source drawn by two cells.
+    #[test]
+    fn debug_nodes_preview_what_they_are_fed() {
+        let doc = tapped();
+        let prog = compile(&doc).expect("compiles");
+        let id = |i: usize| doc.nodes[i].id.as_str();
+        let cells: Vec<&str> = prog.preview_cells.iter().map(|c| id(c.node)).collect();
+        assert_eq!(cells[..5], ["o", "d_color", "d_grey", "d_fx", "d_video"], "the Output, then the taps: {cells:?}");
+        assert!(cells.contains(&"clients"), "the stream keeps its own cell");
+        assert!(!cells.contains(&"d_lfo") && !cells.contains(&"d_beat") && !cells.contains(&"d_idle"));
+        let meters: Vec<(&str, &str)> =
+            prog.preview_scalars.iter().map(|(i, p)| (id(*i), p.as_str())).collect();
+        assert_eq!(meters[..2], [("d_lfo", "in"), ("d_beat", "in")], "{meters:?}");
+        assert_eq!(prog.preview_keys()[1], "d_color");
+        assert_eq!(prog.preview_wgsl.matches("fn n4_pv(").count(), 1, "one renderer per stream");
+        validates(&prog.preview_wgsl);
+    }
+
+    /// A Debug node costs the show nothing: the patch's own shader is the
+    /// same with or without them.
+    #[test]
+    fn debug_nodes_leave_the_shown_shader_alone() {
+        let with = tapped();
+        let mut without = with.clone();
+        without.nodes.retain(|n| n.kind != registry::DEBUG_KIND);
+        without.edges.retain(|e| !e.to.node.starts_with("d_"));
+        assert_eq!(compile(&with).unwrap().wgsl, compile(&without).unwrap().wgsl);
+    }
+
+    /// The preview cap never drops a Debug node, however many nodes the
+    /// patch has: it follows the Output's cell.
+    #[test]
+    fn debug_cells_come_before_the_cap() {
+        let mut doc = PatchDoc {
+            nodes: (0..MAX_PREVIEW_NODES + 8).map(|k| node(&format!("s{k}"), "solid")).collect(),
+            ..Default::default()
+        };
+        doc.nodes.push(node("o", "output"));
+        doc.nodes.push(node("d", "debug"));
+        doc.edges.push(edge("s0", "out", "o", "in"));
+        doc.edges.push(edge(&format!("s{}", MAX_PREVIEW_NODES + 7), "out", "d", "in"));
+        let prog = compile(&doc).expect("compiles");
+        assert_eq!(prog.preview_cells.len(), MAX_PREVIEW_NODES);
+        assert_eq!(prog.preview_keys()[..2], ["o", "d"], "only the Output comes before it");
+    }
+
+    /// Live shows the wired Debug nodes whose Show on Live says so, by name.
+    #[test]
+    fn live_taps_are_the_flagged_wired_debug_nodes() {
+        let mut doc = tapped();
+        for (id, name) in [("d_grey", "Noise"), ("d_beat", ""), ("d_idle", "Nothing")] {
+            let n = doc.nodes.iter_mut().find(|n| n.id == id).unwrap();
+            n.params.insert(registry::DEBUG_LIVE.into(), 1.0);
+            n.name = name.into();
+        }
+        let taps = live_taps(&compile(&doc).unwrap());
+        assert_eq!(
+            taps,
+            [
+                LiveTap { id: "d_grey".into(), label: "Noise".into(), shape: Shape::FieldScalar },
+                LiveTap { id: "d_beat".into(), label: "Debug".into(), shape: Shape::Event },
+            ]
+        );
     }
 
     /// The round-4 field nodes, chained, make one shader naga accepts, and

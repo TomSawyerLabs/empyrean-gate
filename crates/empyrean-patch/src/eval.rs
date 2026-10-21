@@ -6,7 +6,7 @@
 //! visual discontinuities.
 
 use super::codegen::Program;
-use super::registry::ParamKind;
+use super::registry::{self, ParamKind};
 use super::script;
 use super::{NodeInst, PatchDoc, Shape};
 use crate::abi::{AudioUniform, MAX_AUDIO_SOURCES};
@@ -270,8 +270,14 @@ impl Runtime {
     /// evaluated yet is indistinguishable from one outputting zero, which is
     /// exactly what a meter should show), except a Code node's live value
     /// (`@…`, `script::Script::probe_keys`) that has none yet: NaN, so the
-    /// editor shows nothing rather than a 0 the body never computed.
+    /// editor shows nothing rather than a 0 the body never computed. A
+    /// Debug node's `in` reads as whatever is wired into it.
     pub fn scalar_value(&self, node: usize, port: &str) -> f32 {
+        if self.doc.nodes.get(node).is_some_and(|n| n.kind == registry::DEBUG_KIND)
+            && let Some((from, from_port)) = self.prog.wires.get(&(node, port.to_string()))
+        {
+            return self.scalar_value(*from, from_port);
+        }
         if let Some(v) = self.outputs.get(node).and_then(|o| o.get(port)) {
             return *v;
         }
@@ -1370,6 +1376,32 @@ mod tests {
     fn value(rt: &Runtime, id: &str, port: &str) -> f32 {
         let i = rt.doc.nodes.iter().position(|n| n.id == id).unwrap();
         rt.scalar_value(i, port)
+    }
+
+    /// A Debug node's meter reads its `in` through the wire: the value of a
+    /// Scalar, the fire count of an Event. Unwired, it reads 0.
+    #[test]
+    fn a_debug_node_meters_what_it_is_fed() {
+        let audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
+        let doc = clocked(
+            serde_json::json!([
+                { "id": "d_out", "kind": "debug" },
+                { "id": "d_wrap", "kind": "debug" },
+                { "id": "d_idle", "kind": "debug" },
+            ]),
+            serde_json::json!([
+                { "from": { "node": "clock", "port": "out" }, "to": { "node": "d_out", "port": "in" } },
+                { "from": { "node": "clock", "port": "wrap" }, "to": { "node": "d_wrap", "port": "in" } },
+            ]),
+        );
+        let mut rt = runtime(doc);
+        for _ in 0..9 {
+            step(&mut rt, &audio);
+        }
+        assert_eq!(value(&rt, "d_out", "in"), value(&rt, "clock", "out"));
+        assert_eq!(value(&rt, "d_wrap", "in"), value(&rt, "clock", "wrap"));
+        assert!(value(&rt, "d_wrap", "in") >= 2.0, "the clock wrapped: the test is not hollow");
+        assert_eq!(value(&rt, "d_idle", "in"), 0.0);
     }
 
     #[test]

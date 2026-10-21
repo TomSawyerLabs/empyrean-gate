@@ -87,11 +87,14 @@ pub enum Shape {
     Texture,
     /// The sink: final per-pixel RGB mapped to the fixtures → sACN + preview.
     Pixels,
+    /// A port that takes a wire of any shape (the Debug node's `in`). Never
+    /// carried on a wire: what flows is the source's own shape.
+    Any,
 }
 
 impl Shape {
     /// Every shape, in declaration order.
-    pub const ALL: [Shape; 10] = [
+    pub const ALL: [Shape; 11] = [
         Shape::Scalar,
         Shape::Event,
         Shape::FieldScalar,
@@ -102,6 +105,7 @@ impl Shape {
         Shape::Effects,
         Shape::Texture,
         Shape::Pixels,
+        Shape::Any,
     ];
 
     /// What the editor calls it.
@@ -117,6 +121,7 @@ impl Shape {
             Shape::Effects => "Effects",
             Shape::Texture => "Texture",
             Shape::Pixels => "Pixels",
+            Shape::Any => "Any",
         }
     }
 
@@ -155,16 +160,22 @@ impl Shape {
             Shape::Pixels => {
                 "The final per-pixel RGB sent to the LEDs and the preview. Reserved for the sink: no node port has this shape today (the Output node takes a colour field)."
             }
+            Shape::Any => {
+                "Not a wire's shape but a port's: an input that takes a wire of any shape and keeps it as it is (the Debug node's `in`, which only shows what it is fed)."
+            }
         }
     }
 
     /// Whether a wire carrying `from` may drive an input of this shape.
-    /// Two adapters are blessed because both compile to trivial WGSL:
+    /// An `Any` input takes every wire shape as it is. Two adapters are blessed because both compile to trivial WGSL:
     /// Scalar → grey (uniform field) and grey → colour (grayscale). Nothing
     /// else converts implicitly. Judged by value type alone: the domain
     /// (plane or LEDs) is `validate`'s business, since whether LED data may
     /// flow in depends on whether the node samples that input elsewhere.
     pub fn accepts(self, from: Shape) -> bool {
+        if self == Shape::Any {
+            return !matches!(from, Shape::Any | Shape::Pixels);
+        }
         self == from
             || (self.is_grey_field() && (from == Shape::Scalar || from.is_grey_field()))
             || (self.is_color_field() && from.is_field())
