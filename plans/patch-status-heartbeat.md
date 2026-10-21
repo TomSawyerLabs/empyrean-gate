@@ -1,6 +1,9 @@
 # Patch status — a live heartbeat with details, and "no WebGPU" said out loud
 
-Status: **in progress** (2026-10-21).
+Status: **done** (2026-10-21). Gate master 773039b
+(+ plan f39b631); site dev 405a272 on top of the bot's bump be2ee67
+(web-dist 52b38ef). Checked on the dev Preview in Chrome: "live", the beat
+advancing (5 → 9 in 3.5 s), the "All OK" details on hover.
 
 ## Goal
 
@@ -86,7 +89,7 @@ interface PatchStatus {
 
 ## Plan / steps
 
-1. **(current)** Editor: `PatchStatus.tsx` + CSS, wire into toolbar, compact
+1. Editor: `PatchStatus.tsx` + CSS, wire into toolbar, compact
    chip, menu. Demo host shows it. Bun unit test of the stall logic if it's
    separable; a Playwright spec in `tests/` against the mock backend.
 2. Runtime: frame stats + adapter description, `onStats`. Unit test.
@@ -102,15 +105,37 @@ interface PatchStatus {
 ## Findings / gotchas
 
 - On the gate, `status.active` means *a* patch renders, which may not be
-  the one open in the editor (`activeId`). The popover says which.
+  the one open in the editor (`activeId`). The details say "another one is
+  active" then.
+- The mock backend sent status only at connect and on activation, so a
+  heartbeat test went "stalled" after 3 s. It now sends status every 500 ms
+  while a patch is active (`scripts/mock-backend.ts`, `statusBeats`), as the
+  engine does. The full Chromium suite passed with it (300 passed).
+- `ring.ts` already exports a `FrameStats` type, so the runtime's window
+  counter is `LoopStats` (`runtime/stats.ts`).
+- Captures step frames as fast as they can. Only the loop's own frames
+  (`frame()`) count toward the stats, and `start()` restarts the window, so
+  a capture never reads as 1000 fps.
+- Chrome driven through the extension reported "1 fps". A trivial page
+  (/privacy) in the same tab also got 1.5 animation frames a second: Chrome
+  throttles an occluded window. Not a bug, and the status showed it honestly.
+- The Playwright filter `patch-status` matched every spec, because the
+  worktree directory is named `patch-status`. Use `tests/patch-status.spec.ts`.
+- The site's editor re-renders once a second now (a new `status` object per
+  stats report). The gate app already re-renders its Patch tab at 2 Hz on
+  every status message, so this is within what the editor already does.
 
 ## Progress log
 
-- [ ] Editor component + wiring
-- [ ] Runtime stats
-- [ ] Gate app host
-- [ ] Gate checks, commit, push
-- [ ] Site host + tests, push dev, Preview check
+- [x] Editor component + wiring (`PatchStatus.tsx`, unit test for `liveness`)
+- [x] Runtime stats (`onStats`, `statusDetails`, `LoopStats` + unit test)
+- [x] Gate app host (`src/Patch.tsx`), demo host, mock backend at 2 Hz
+- [x] Gate checks: typecheck, 220 unit tests, 300 Chromium e2e incl.
+      `tests/patch-status.spec.ts`; pushed to master (773039b, f39b631)
+- [x] Site host + tests: typecheck, 321 passed (3 browsers), test:gpu 47
+      passed; pushed to dev 405a272. Tested locally in Chrome (WebGPU) and
+      headless Chromium (no WebGPU).
+- [x] Preview check on dev.empyreangate.org (Chrome, WebGPU)
 
 ## Open questions for the user
 
