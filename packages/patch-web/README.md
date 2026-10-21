@@ -29,6 +29,10 @@ control-rate evaluator, effect and audio analysis. This package only hosts it.
   beat for `STALL_MS` reads "stalled"), the error when the patch can't run,
   `unavailable` where nothing can render (a browser without WebGPU), and
   `details` rows shown on hover or tap.
+  A host's `transport` (`FrameTransport`) gives the patch on air a
+  transport bar (`TransportBar`): pause, step, step back through kept
+  frames, and Keep past frames (`setKeep`, `keepCost`). `PatchRuntime`
+  steps the patch itself (`canStep`); the gate only freezes its views.
 - `@empyrean-gate/patch-web/editor.css` — the editor's styles (imported by the
   editor itself). Colors are `--pe-*` custom properties with the gate's palette
   as defaults.
@@ -37,7 +41,8 @@ control-rate evaluator, effect and audio analysis. This package only hosts it.
   `attach(canvas)` shows it; inputs: `trigger` (effects), `draw` (strokes),
   `startMic`, `startMotion`, `setMedia` (local video/image), `setVideoSource`
   (`MediaTexture.fromCamera()`, or null for the stand-in film), `setDjLink` /
-  `fireDjEvent`, `setMaster`, `setHuePull`. It is also a `MiniSource` for the
+  `fireDjEvent`, `setMaster`, `setHuePull`. It is also a `MiniSource` and a
+  `FrameTransport` (`pause`, `play`, `stepFrames`, `setKeep`) for the
   editor. `onStatus` reports whether the patch runs; `onStats` reports the
   frame rate and CPU cost about once a second while frames render, and
   `statusDetails(stats)` turns them into the editor's status rows. Every

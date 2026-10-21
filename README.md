@@ -329,6 +329,16 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   unless someone is watching minis. **Show on Live** puts it in a strip
   on the Live tab while its patch is on air (status `patch_taps`), for
   watching a signal during a show (`plans/debug-node.md`).
+  **Frame by frame**: a bar under the graph of the patch on air pauses
+  it and steps it a frame at a time (K, and `,` `.`; Shift for ten), so
+  a one-frame event or an every-frame value shows in the minis and Debug
+  views. **Keep past frames** (off by default; 2 to 60 s, each with its
+  memory, and lengths over a quarter of the device's memory not offered)
+  records them to step back through exactly. In the browser the patch
+  really pauses (a paused edit renders the frame again without time
+  moving); on the gate the show keeps running, so the Patch tab only
+  freezes its views and steps through the batches it kept
+  (`plans/frame-step.md`).
   The **palette** groups the node kinds by what they are for (Controls,
   Live input, Media, Shape a signal, Motion, Events, Building blocks,
   Patterns, Color & space, Draw streams, Structure), each fold remembered;
