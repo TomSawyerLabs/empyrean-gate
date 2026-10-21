@@ -387,6 +387,12 @@ function combineAt(d: PatchDoc, registry: Registry, from: PortRef, to: PortRef):
   return combiner && { combiner };
 }
 
+/** How far the canvas zooms out, by hand or to fit a patch when it opens.
+ * React Flow's default (0.5) leaves an arranged built-in cropped in a
+ * narrow canvas: the website's is about 500 px wide at 1280 × 720, and
+ * Rainbow Sparkle needs a third. */
+const MIN_ZOOM = 0.2;
+
 /** About what a minimized node measures (a mini ring, port dots, one line of
  * head), for placing a new combiner before React Flow has measured it. */
 const COLLAPSED_SIZE: NodeSize = { width: 96, height: 112 };
@@ -2578,6 +2584,7 @@ function Editor({
               zoomOnScroll
               zoomOnPinch
               zoomOnDoubleClick={!compact}
+              minZoom={MIN_ZOOM}
               fitView
               proOptions={{ hideAttribution: true }}
               colorMode="dark"
