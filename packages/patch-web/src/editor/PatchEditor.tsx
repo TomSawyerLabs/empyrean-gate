@@ -1628,9 +1628,28 @@ function Editor({
     setNodes(toFlowNodes(r, at, reg));
     setEdges(toFlowEdges(docAt(r, at), reg));
   }, []);
+  // A patch opens fitted to the canvas, but its cards keep growing after the
+  // first fit (measured, then their minis once the preview runs), which left
+  // an arranged patch hanging off the edge. So the view follows the patch
+  // just opened, refitting whenever a card changes size, until the person
+  // moves the view or edits. True at first for the canvas's own `fitView`.
+  const fitFollowRef = useRef(true);
+  const refitFrameRef = useRef(0);
   const fitSoon = useCallback(() => {
+    fitFollowRef.current = true;
     requestAnimationFrame(() => void flow.fitView({ padding: 0.15 }));
   }, [flow]);
+  const refitIfFollowing = useCallback(() => {
+    if (!fitFollowRef.current || refitFrameRef.current) return;
+    refitFrameRef.current = requestAnimationFrame(() => {
+      refitFrameRef.current = 0;
+      if (fitFollowRef.current) void flow.fitView({ padding: 0.15 });
+    });
+  }, [flow]);
+  /** The person moved the view (a programmatic move has no event). */
+  const onMoveStart = useCallback((event: MouseEvent | TouchEvent | null) => {
+    if (event) fitFollowRef.current = false;
+  }, []);
 
   // Stable (ref-based) so the long-lived message subscription never goes stale.
   const openDoc = useCallback(
@@ -1816,6 +1835,7 @@ function Editor({
         return;
       }
       history.current.push(prev, key);
+      fitFollowRef.current = false;
       const next: PatchDoc = structuredClone(prev);
       mutate(docAt(next, at));
       rootRef.current = next;
@@ -2024,8 +2044,9 @@ function Editor({
         else if (next === undefined) next = null;
       }
       if (next !== undefined) setSelectedNode(next);
+      if (changes.some((ch) => ch.type === "dimensions")) refitIfFollowing();
     },
-    [],
+    [refitIfFollowing],
   );
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
@@ -2585,6 +2606,7 @@ function Editor({
               zoomOnPinch
               zoomOnDoubleClick={!compact}
               minZoom={MIN_ZOOM}
+              onMoveStart={onMoveStart}
               fitView
               proOptions={{ hideAttribution: true }}
               colorMode="dark"

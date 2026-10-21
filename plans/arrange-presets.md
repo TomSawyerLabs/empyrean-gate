@@ -123,7 +123,18 @@ Site tests (third part):
 - [x] Both tests pass on all three browsers with the new zoom and with the
   published web-dist; full site suite on local patch-web 309 passed,
   36 skipped; gate `patch-` specs 64 passed; typecheck and unit tests pass
-- [ ] Push gate and site dev; bump; check on the Preview
+- [x] Pushed gate `c348981` and site dev `9dc260c`; bump `da283bc`
+- [x] On the Preview (real Chrome with WebGPU) the zoom floor works (0.47)
+  but Output and a Blend still hung 186 px past the right edge: the opening
+  fit runs before the cards grow (measured, then minis once the preview
+  runs). Pressing fit-view afterwards gave 0.33 and everything in view.
+- [x] Editor: after a patch opens the view refits whenever a card changes
+  size, until the person moves the view (`onMoveStart` with an event) or
+  edits (`mutateDoc`). Spec `tests/patch-fit-follow.spec.ts` (fails without
+  the refit); gate `test:behavior` 177/178 (the one failure the known WebKit
+  `multitouch` flake from ISSUES.md, 6/6 run alone); site suite on this
+  patch-web 309 passed, 36 skipped
+- [ ] Commit, push, bump, check on the Preview
 
 
 DJ Stereo Master Flow (second part):
