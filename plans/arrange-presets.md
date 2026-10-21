@@ -1,6 +1,6 @@
 # Arrange the built-in patches
 
-Status: **done (2026-10-21)**. DJ Stereo Master Flow shipped: gate `74388f8`, site dev `bbc4f35`, checked on the Preview. Arranging: gate master `9cb8fc7` (ISSUES `640a5ab`), site dev `ee557a2` (bot bump), verified on the Preview., worktree
+Status: **in progress (2026-10-21)**, third part: the site tests the arranged layout broke (worktree `C:\Users\camer\.t3\worktrees\empyreangate.org\arrange-tests`, branch `arrange-tests` → site `dev`). DJ Stereo Master Flow shipped: gate `74388f8`, site dev `bbc4f35`, checked on the Preview. Arranging: gate master `9cb8fc7` (ISSUES `640a5ab`), site dev `ee557a2` (bot bump), verified on the Preview., worktree
 `C:\Users\camer\.t3\worktrees\Empyrean\arrange-presets`, branch
 `arrange-presets` → gate `master`.
 
@@ -55,6 +55,11 @@ Arrange leaves it, and stay that way as presets are added or edited.
   (`touch.rs` says the same, and Transform's mirror flips that axis). The
   first draft used `c.pos.x` and lit top/bottom instead.
 
+- **Both** for the cropped opening view (Cameron, 2026-10-21): the editor's
+  `minZoom` is 0.2 (gate `c348981`), and the site's tests pan the canvas to
+  the node they click (`tests/canvas.ts` `bringIntoView`), so they no longer
+  depend on a patch fitting the window.
+
 ## Plan / steps
 
 1. Demo editor exposes its `PatchEditorHandle` (`globalThis.editorRef`).
@@ -95,7 +100,31 @@ Arrange leaves it, and stay that way as presets are added or edited.
   `all_presets_compile_and_render` would pass a registered preset like this
   one. `0bcd1af` makes the test also require `validate()` to pass.
 
+- **The arranged presets are wider, and the playground opens them cropped**
+  (found 2026-10-21 via the site's ISSUES entry "Two playground tests fail
+  every time on Firefox/WebKit at dev `ee557a2`"). At 1280×720 the
+  playground's canvas is 504 px wide; the editor sets no `minZoom`, so React
+  Flow's default 0.5 caps `fitView`, and Rainbow Sparkle (the opening
+  patch) needs ~0.33. Output sits at x = 1290 in a 1280 window in every
+  browser. Chromium's tests pass only because its scroll-into-view scrolls
+  the canvas's overflow-hidden container; Firefox and WebKit refuse
+  ("element is outside of the viewport"). The navigation test's new
+  Sub-patch lands at the canvas centre among the cards and its double-click
+  fails on WebKit.
+
 ## Progress log
+
+Site tests (third part):
+
+- [x] `minZoom` 0.2 alone was not enough: at that zoom Rainbow Sparkle fits,
+  but the open Gate globals card (bottom right) covers Output, and Chromium
+  failed too. `bringIntoView` drags the canvas background until the node
+  sits a third of the way in.
+- [x] Both tests pass on all three browsers with the new zoom and with the
+  published web-dist; full site suite on local patch-web 309 passed,
+  36 skipped; gate `patch-` specs 64 passed; typecheck and unit tests pass
+- [ ] Push gate and site dev; bump; check on the Preview
+
 
 DJ Stereo Master Flow (second part):
 
