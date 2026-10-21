@@ -88,6 +88,17 @@ export function flatId(root: PatchDoc, path: string[], node: string): string {
   return node === fed ? prefix.join("/") : `${prefix.join("/")}/${node}`;
 }
 
+/** The cell an Output node's mini shows. At the top it has its own, the
+ * frame the gate shows. An inner Output is flattened away, so inside a
+ * Sub-patch it shows what the Sub-patch hands on: the cell under the
+ * Sub-patch's own id. */
+export function outputMini(root: PatchDoc, path: string[], node: string): string {
+  if (path.length === 0) return node;
+  return nodesAlong(root, path)
+    .map((n) => n.id)
+    .join("/");
+}
+
 /** A label for each step of the breadcrumb: the patch, then each Sub-patch
  * node by its name (or its document's). */
 export function crumbs(root: PatchDoc, path: string[]): { label: string; path: string[] }[] {
