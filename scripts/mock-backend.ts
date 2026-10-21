@@ -233,6 +233,10 @@ const submissionSummary = (s: (typeof mockSubmissions)[number]) => ({
 });
 const patchLibraries = new WeakMap<object, Map<string, MockPatch>>();
 const activePatch = new WeakMap<object, string | null>();
+/// While a patch is active, status every 500 ms, as the engine publishes it
+/// from its render loop: the editor's status dot beats on each one. Only
+/// then, so the rest of the app sees the single status it always has.
+const statusBeats = new WeakMap<object, ReturnType<typeof setInterval>>();
 let mintedPatches = 0;
 const library = (ws: object) => {
   let lib = patchLibraries.get(ws);
@@ -781,6 +785,17 @@ const server = Bun.serve({
         }
         case "patch_activate": {
           activePatch.set(ws, msg.id ?? null);
+          clearInterval(statusBeats.get(ws));
+          statusBeats.delete(ws);
+          if (msg.id != null) {
+            const patch = () => overrides.get(clients.get(ws) ?? "") ?? {};
+            statusBeats.set(
+              ws,
+              setInterval(() => {
+                ws.send(JSON.stringify({ type: "status", status: { ...status, patch_active: true, ...patch() } }));
+              }, 500),
+            );
+          }
           const configPatch = configOverrides.get(clients.get(ws) ?? "") ?? {};
           ws.send(
             JSON.stringify({
@@ -796,6 +811,8 @@ const server = Bun.serve({
     close(ws) {
       clearInterval(timers.get(ws));
       timers.delete(ws);
+      clearInterval(statusBeats.get(ws));
+      statusBeats.delete(ws);
     },
   },
 });

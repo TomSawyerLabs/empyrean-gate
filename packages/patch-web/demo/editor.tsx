@@ -11,7 +11,7 @@ import { createRef, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { PatchEditor, type PatchEditorHandle, type PatchStore, type PatchStoreEvent } from "../src/editor";
 import "../src/editor/editor.css";
-import { attachGroove, attachVisitors, PatchRuntime } from "../src/runtime";
+import { attachGroove, attachVisitors, PatchRuntime, type RuntimeStats } from "../src/runtime";
 import { loadPatchCore, type PatchCore } from "../src/runtime/core";
 import type { PatchDoc } from "../src/types";
 
@@ -50,11 +50,13 @@ function memoryStore(seed: PatchDoc[]): PatchStore {
 
 const editorRef = createRef<PatchEditorHandle>();
 
-function App({ core, runtime }: { core: PatchCore; runtime: PatchRuntime | null }) {
+function App({ core, runtime, noGpu }: { core: PatchCore; runtime: PatchRuntime | null; noGpu: string | null }) {
   const store = useMemo(() => memoryStore(core.presets.slice(0, 1).map((p) => ({ ...p, id: "start" }))), [core]);
   const [doc, setDoc] = useState<PatchDoc | null>(null);
   const [status, setStatus] = useState(runtime?.getStatus() ?? null);
   useEffect(() => runtime?.onStatus(setStatus), [runtime]);
+  const [stats, setStats] = useState<RuntimeStats | null>(null);
+  useEffect(() => runtime?.onStats(setStats), [runtime]);
   useEffect(() => {
     if (runtime && doc) void runtime.setPatch(doc);
   }, [runtime, doc]);
@@ -70,7 +72,11 @@ function App({ core, runtime }: { core: PatchCore; runtime: PatchRuntime | null 
       convertToCode={async (d, id) => core.convertToCode(d, id)}
       ready
       activeId={doc?.id ?? null}
-      status={status}
+      status={
+        runtime
+          ? status && { ...status, beat: stats?.frames ?? 0, details: runtime.statusDetails(stats) }
+          : { active: false, error: null, unavailable: { label: "no WebGPU", reason: noGpu ?? "" } }
+      }
       canEdit
       minis={runtime}
       showActivate={false}
@@ -83,15 +89,17 @@ function App({ core, runtime }: { core: PatchCore; runtime: PatchRuntime | null 
 const root = createRoot(document.querySelector("#editor")!);
 const wasm = await fetch(new URL("../wasm/patch_bg.wasm", import.meta.url)).then((r) => r.arrayBuffer());
 let runtime: PatchRuntime | null = null;
+let noGpu: string | null = null;
 try {
   runtime = await PatchRuntime.create(undefined, { wasm });
   attachGroove(runtime);
   attachVisitors(runtime);
   runtime.attach(document.querySelector<HTMLCanvasElement>("#gate")!);
   runtime.start();
-} catch {
+} catch (e) {
+  noGpu = `${e instanceof Error ? e.message : String(e)} Editing works; nothing renders here.`;
   document.querySelector("#gate")!.replaceWith("No WebGPU here: editing only.");
 }
 const core = runtime?.core ?? (await loadPatchCore(wasm));
 Object.assign(globalThis, { core, runtime, editorRef });
-root.render(<App core={core} runtime={runtime} />);
+root.render(<App core={core} runtime={runtime} noGpu={noGpu} />);

@@ -12,6 +12,7 @@ import {
   type PatchDoc,
   type CodeReference,
   type PatchNodeType,
+  type PatchStatus,
   type PatchStore,
 } from "@empyrean-gate/patch-web/editor";
 import { getMiniHub } from "./miniPreview";
@@ -84,6 +85,27 @@ export default function Patch() {
     };
   }, [connected, client]);
 
+  // The engine publishes its status from the render loop (~2 Hz): each one
+  // is a beat of the editor's status dot, so the dot stops if the engine does.
+  const [beat, setBeat] = useState(0);
+  useEffect(() => {
+    if (status) setBeat((b) => b + 1);
+  }, [status]);
+  const patchStatus: PatchStatus | null = status
+    ? {
+        active: status.patch_active,
+        error: status.patch_error ?? null,
+        beat,
+        details: [
+          ["Frame rate", `${Math.round(status.engine_fps)} fps`],
+          ["Frame time", `${status.frame_time_ms.toFixed(1)} ms`],
+          ["Render load", `${status.load_history.at(-1) ?? 0}%`],
+          ["GPU", status.gpu_name || "unknown"],
+        ],
+        note: "Measured by the gate's render engine.",
+      }
+    : null;
+
   // The gate's master brightness and speed, as a card in the editor's canvas.
   // They are the Live tab's sliders, so any client may move them (the graph
   // itself stays read-only off the Gate machine). Local state keeps a drag
@@ -150,7 +172,7 @@ export default function Patch() {
       }}
       ready={connected}
       activeId={config?.active_patch ?? null}
-      status={status ? { active: status.patch_active, error: status.patch_error ?? null } : null}
+      status={patchStatus}
       canEdit={canEdit}
       readOnlyHint="read-only — edit on the Gate machine"
       minis={getMiniHub(client)}

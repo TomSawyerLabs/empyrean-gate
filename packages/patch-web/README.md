@@ -22,6 +22,11 @@ control-rate evaluator, effect and audio analysis. This package only hosts it.
   (`NodeIcon`, `GroupIcon`) and a thumbnail per kind (`thumbs.gen.ts`, loaded
   lazily as its own chunk). Ports and params with a `when` belong to some
   modes of their kind only (`applies`).
+  The host's `status` (`PatchStatus`) drives the toolbar's live status: a dot
+  that beats each time `beat` advances (the host's proof of new frames; no
+  beat for `STALL_MS` reads "stalled"), the error when the patch can't run,
+  `unavailable` where nothing can render (a browser without WebGPU), and
+  `details` rows shown on hover or tap.
 - `@empyrean-gate/patch-web/editor.css` — the editor's styles (imported by the
   editor itself). Colors are `--pe-*` custom properties with the gate's palette
   as defaults.
@@ -31,7 +36,10 @@ control-rate evaluator, effect and audio analysis. This package only hosts it.
   `startMic`, `startMotion`, `setMedia` (local video/image), `setVideoSource`
   (`MediaTexture.fromCamera()`, or null for the stand-in film), `setDjLink` /
   `fireDjEvent`, `setMaster`, `setHuePull`. It is also a `MiniSource` for the
-  editor. Every input has a stand-in, so every node kind does something
+  editor. `onStatus` reports whether the patch runs; `onStats` reports the
+  frame rate and CPU cost about once a second while frames render, and
+  `statusDetails(stats)` turns them into the editor's status rows. Every
+  input has a stand-in, so every node kind does something
   anywhere: Video in plays `TestFilm` (dusk over rolling hills) until a file
   or camera is chosen; `attachVisitors(runtime)` brings simulated people who
   tap effects on the beat, draw strokes and, when the patch owns touch, touch
