@@ -1,5 +1,10 @@
 # Gate network redesign
 
+> V2 hardware planning (power, networking, compute, weatherproofing, expansion)
+> now lives in `../Empyrean Upgrades`. This plan stays the detailed record of
+> the network reasoning; that repo's `plans/networking.md` tracks what V2 still
+> needs.
+
 ## Goal
 
 Replace the single central switch with switches daisy-chained around the ring, so
