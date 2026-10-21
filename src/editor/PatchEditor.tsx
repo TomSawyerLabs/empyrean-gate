@@ -17,6 +17,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
+import { PatchStatusIndicator, type PatchStatus } from "./PatchStatus";
 import {
   applyEdgeChanges,
   applyNodeChanges,
@@ -138,8 +139,8 @@ export interface PatchEditorProps {
   ready: boolean;
   /** The patch rendering right now: its nodes get live thumbnails/meters. */
   activeId: string | null;
-  /** The renderer's verdict on the active patch. */
-  status?: { active: boolean; error: string | null } | null;
+  /** The renderer's verdict on the active patch, its heartbeat and stats. */
+  status?: PatchStatus | null;
   canEdit: boolean;
   /** Shown when `canEdit` is false. */
   readOnlyHint?: string;
@@ -934,7 +935,7 @@ function ParamPanel({
   /** Set when the panel is a sheet (compact layout): shows Done. */
   onClose?: () => void;
   /** The renderer's verdict, for a Code node's error marks. */
-  status?: { active: boolean; error: string | null } | null;
+  status?: PatchStatus | null;
   codeReference?: CodeReference | null;
   /** Replace the node with its Code conversion (see `PatchEditorProps`).
    * Rejects with the reason when the node cannot be converted. */
@@ -2399,6 +2400,9 @@ function Editor({
   );
 
   const isActive = root !== null && root.id !== "" && activeId === root.id;
+  // The host renders some other patch than the one open (the gate, with
+  // patches activated by hand).
+  const elsewhere = showActivate && root !== null && !isActive;
   const builtinSummaries = useMemo(() => presets.map(summarize), [presets]);
   const here: EditorLocation | null = root ? { patch: root.id, path } : null;
 
@@ -2477,7 +2481,7 @@ function Editor({
   const statusLine = (
     <>
       {status?.error && <span className="patch-status error">⚠ {status.error}</span>}
-      {status?.active && !status.error && <span className="patch-status ok">patch rendering</span>}
+      <PatchStatusIndicator status={status} variant={compact ? "inline" : "toolbar"} elsewhere={elsewhere} />
       {!canEdit && readOnlyHint && <span className="hint">{readOnlyHint}</span>}
     </>
   );
@@ -2718,17 +2722,7 @@ function Editor({
                 <span aria-hidden="true">☰ </span>
                 {root ? root.name || "Untitled" : "Patches"}
               </button>
-              {status?.error && (
-                <button
-                  type="button"
-                  className="patch-status-chip error"
-                  onClick={() => setSheet("menu")}
-                  title={status.error}
-                  aria-label={`This patch can't run: ${status.error}`}
-                >
-                  ⚠
-                </button>
-              )}
+              <PatchStatusIndicator status={status} variant="chip" elsewhere={elsewhere} />
               {/* Undo and Arrange are on the canvas too: in the menu alone a
                   phone never found them. */}
               {canEdit && doc && (

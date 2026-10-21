@@ -10250,6 +10250,31 @@ function synthScope(features, t, wave, spectrum) {
   return out;
 }
 
+// src/runtime/stats.ts
+class LoopStats {
+  frames = 0;
+  start = 0;
+  windowFrames = 0;
+  windowCpu = 0;
+  restart() {
+    this.start = 0, this.windowFrames = 0, this.windowCpu = 0;
+  }
+  count(now, cpuMs) {
+    if (this.frames += 1, this.start === 0)
+      return this.start = now, null;
+    this.windowFrames += 1, this.windowCpu += cpuMs;
+    let span = now - this.start;
+    if (span < 1000)
+      return null;
+    let stats = {
+      frames: this.frames,
+      fps: this.windowFrames * 1000 / span,
+      cpuMs: this.windowCpu / this.windowFrames
+    };
+    return this.start = now, this.windowFrames = 0, this.windowCpu = 0, stats;
+  }
+}
+
 // src/runtime/index.ts
 var GATE_GEOMETRY = { spokes: 64, pixels: 378, innerOverOuter: 0.32 }, PREVIEW_INTERVAL_MS = 100, SHAKE_TAU = 0.3, STEP_HZ = 60, MAX_CAPTURE_FRAMES = 16;
 
@@ -10268,6 +10293,8 @@ class PatchRuntime {
   statusListeners = /* @__PURE__ */ new Set;
   frameListeners = /* @__PURE__ */ new Set;
   restartListeners = /* @__PURE__ */ new Set;
+  statsListeners = /* @__PURE__ */ new Set;
+  stats = new LoopStats;
   stopMic = null;
   motion = null;
   shake = 0;
@@ -10300,6 +10327,25 @@ class PatchRuntime {
   }
   onStatus(listener) {
     return this.statusListeners.add(listener), () => this.statusListeners.delete(listener);
+  }
+  onStats(listener) {
+    return this.statsListeners.add(listener), () => this.statsListeners.delete(listener);
+  }
+  get adapter() {
+    let info = this.gpu.device.adapterInfo;
+    if (!info)
+      return "";
+    return info.description || [info.vendor, info.architecture, info.device].filter(Boolean).join(" ");
+  }
+  statusDetails(stats) {
+    let g = this.geometry;
+    return [
+      ["Frame rate", stats ? `${Math.round(stats.fps)} fps` : "measuring…"],
+      ["CPU per frame", stats ? `${stats.cpuMs.toFixed(1)} ms` : "measuring…"],
+      ["Frames", stats ? stats.frames.toLocaleString() : "0"],
+      ["GPU", this.adapter || "not reported by this browser"],
+      ["Array", `${g.spokes} spokes × ${g.pixels} LEDs`]
+    ];
   }
   onFrame(listener) {
     return this.frameListeners.add(listener), () => this.frameListeners.delete(listener);
@@ -10380,7 +10426,7 @@ class PatchRuntime {
   start() {
     if (this.raf)
       return;
-    this.last = performance.now();
+    this.last = performance.now(), this.stats.restart();
     let tick = (now) => {
       this.raf = requestAnimationFrame(tick), this.frame(now);
     };
@@ -10396,7 +10442,13 @@ class PatchRuntime {
   }
   frame(now) {
     let dt = Math.min(0.5, Math.max(0, (now - this.last) / 1000));
-    this.last = now, this.advance(dt, now);
+    this.last = now;
+    let started = performance.now();
+    if (!this.advance(dt, now))
+      return;
+    let stats = this.stats.count(now, performance.now() - started);
+    if (stats)
+      this.statsListeners.forEach((l) => l(stats));
   }
   step(dt) {
     this.advance(Math.max(0, dt), performance.now());
@@ -10446,7 +10498,7 @@ class PatchRuntime {
   advance(dt, now) {
     let sim = this.sim;
     if (!sim || this.pending)
-      return;
+      return !1;
     if (this.motion) {
       let m = this.motion.read();
       this.shake = Math.min(3, this.shake + m.shake), sim.setMotion(m.yaw, m.pitch, m.roll, this.shake);
@@ -10475,6 +10527,7 @@ class PatchRuntime {
     }
     if (this.gpu.render(), this.miniRefs > 0 && now - this.lastPreview >= PREVIEW_INTERVAL_MS)
       this.lastPreview = now, this.refreshMinis(sim);
+    return !0;
   }
   trigger(effect) {
     this.sim?.triggerEffect(JSON.stringify(effect));

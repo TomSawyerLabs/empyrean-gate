@@ -84,9 +84,137 @@
   max-width: 44ch;
 }
 
-.patch-status.ok {
-  color: var(--pe-ok, #4ade80);
+/* The live status: a dot that beats once per batch of frames the host
+   confirms (re-keyed, so the one-shot animation replays), amber when the
+   beats stop or nothing can render. Hover or tap: the details. */
+.patch-status-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.patch-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
+}
+
+:where(.patch-tab) :where(.patch-status-wrap:not(.chip) button.patch-live) {
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.patch-live.live { color: var(--pe-ok, #4ade80); }
+.patch-live.stalled,
+.patch-live.unavailable { color: var(--pe-warn, #ffb84d); }
+
+.patch-beat {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.patch-live.live .patch-beat {
+  animation: patch-beat 0.7s ease-out;
+}
+
+.patch-live.unavailable .patch-beat {
+  background: none;
+  border: 1.5px solid currentColor;
+  box-sizing: border-box;
+}
+
+@keyframes patch-beat {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 currentColor; }
+  20% { transform: scale(1.5); }
+  100% { transform: scale(1); box-shadow: 0 0 0 7px transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .patch-live.live .patch-beat {
+    animation: patch-blink 0.7s ease-out;
+  }
+  @keyframes patch-blink {
+    0% { opacity: 0.35; }
+    100% { opacity: 1; }
+  }
+}
+
+.patch-status-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: min(320px, 90vw);
+  padding: 10px 12px;
+  border: 1px solid #2a2445;
+  border-radius: 8px;
+  background: var(--pe-panel, #1a1530);
+  background-image: var(--pe-surface-grad, none);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  color: var(--pe-text, #e8e6f4);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.patch-status-pop p {
+  margin: 0 0 6px;
+}
+
+.patch-status-pop > :last-child {
+  margin-bottom: 0;
+}
+
+.patch-status-head {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.patch-status-head.ok { color: var(--pe-ok, #4ade80); }
+.patch-status-head.warn { color: var(--pe-warn, #ffb84d); }
+.patch-status-head.error { color: var(--pe-danger, #ff5c7a); }
+
+.patch-status-why {
+  color: var(--pe-danger, #ff5c7a);
+  overflow-wrap: anywhere;
+}
+
+.patch-status-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 8px 0 6px;
+}
+
+.patch-status-rows > div {
+  display: contents;
+}
+
+.patch-status-rows dt {
+  color: var(--pe-muted, #8a85a8);
+}
+
+.patch-status-rows dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* In a menu sheet the details open in the flow, not over it. */
+.patch-status-wrap.inline {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.patch-status-wrap.inline .patch-status-pop {
+  position: static;
+  max-width: none;
+  box-shadow: none;
 }
 
 .patch-main {
@@ -901,7 +1029,8 @@
 
 /* Compact: no toolbar row at all. The patch name is a chip on the canvas
    (tap: the patch menu sheet), ↶ and ⇆ undo and arrange, ＋ opens the
-   palette, and a ⚠ chip appears only while the patch cannot run. The canvas
+   palette, and the status chip beats while the patch renders (⚠ while it
+   cannot run; tap: the details). The canvas
    starts right under whatever the host puts above it. */
 
 .patch-canvas-chips {
@@ -940,6 +1069,25 @@
   font-size: 14px;
   line-height: 1;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+/* The chips row is the details' containing block, so they fit the canvas
+   whichever chip they belong to. */
+.patch-canvas-chips .patch-status-wrap {
+  position: static;
+}
+
+.patch-canvas-chips .patch-status-pop {
+  top: calc(100% + 6px);
+  max-width: 100%;
+}
+
+.patch-status-chip.live,
+.patch-status-chip.stalled,
+.patch-status-chip.unavailable {
+  min-height: 38px;
+  padding: 6px 12px;
+  font-size: 12px;
 }
 
 .patch-status-chip.error {

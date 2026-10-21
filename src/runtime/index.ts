@@ -14,6 +14,7 @@ import {
   type MotionSource,
 } from "./inputs";
 import { synthScope, TestFilm, type VideoSource } from "./standins";
+import { LoopStats, type RuntimeStats } from "./stats";
 
 export { loadPatchCore, type Limits, type PatchCore } from "./core";
 export { requestGateDevice, screenToPolar, ShaderError, WebGpuUnavailable, type Geometry } from "./gpu";
@@ -63,6 +64,7 @@ export {
   type RingOptions,
 } from "./ring";
 export { MediaTexture, VIDEO_SIZE, type Motion, type MotionSource } from "./inputs";
+export { LoopStats, STATS_INTERVAL_MS, type RuntimeStats } from "./stats";
 export {
   attachVisitors,
   seeded,
@@ -164,6 +166,8 @@ export class PatchRuntime implements MiniSource {
   private statusListeners = new Set<(s: RuntimeStatus) => void>();
   private frameListeners = new Set<(dt: number) => void>();
   private restartListeners = new Set<() => void>();
+  private statsListeners = new Set<(s: RuntimeStats) => void>();
+  private stats = new LoopStats();
 
   private stopMic: (() => void) | null = null;
   private motion: { read: () => Motion; stop: () => void } | null = null;
@@ -221,6 +225,35 @@ export class PatchRuntime implements MiniSource {
   onStatus(listener: (s: RuntimeStatus) => void): () => void {
     this.statusListeners.add(listener);
     return () => this.statusListeners.delete(listener);
+  }
+
+  /** Run `listener` about once a second while frames render: the frame
+   * rate and cost. Nothing is reported while the loop is stopped or a shader
+   * is installing, which is how a host can tell that rendering stalled. */
+  onStats(listener: (s: RuntimeStats) => void): () => void {
+    this.statsListeners.add(listener);
+    return () => this.statsListeners.delete(listener);
+  }
+
+  /** The GPU rendering, as the browser describes it ("" when it won't say). */
+  get adapter(): string {
+    const info = this.gpu.device.adapterInfo as GPUAdapterInfo | undefined;
+    if (!info) return "";
+    return info.description || [info.vendor, info.architecture, info.device].filter(Boolean).join(" ");
+  }
+
+  /** Rows for the editor's status details (`PatchStatus.details`): the
+   * frame rate and cost from the latest `onStats` report, the GPU and the
+   * array. */
+  statusDetails(stats: RuntimeStats | null): [string, string][] {
+    const g = this.geometry;
+    return [
+      ["Frame rate", stats ? `${Math.round(stats.fps)} fps` : "measuring…"],
+      ["CPU per frame", stats ? `${stats.cpuMs.toFixed(1)} ms` : "measuring…"],
+      ["Frames", stats ? stats.frames.toLocaleString() : "0"],
+      ["GPU", this.adapter || "not reported by this browser"],
+      ["Array", `${g.spokes} spokes × ${g.pixels} LEDs`],
+    ];
   }
 
   /** Run `listener(dt)` every frame, just before the patch is evaluated:
@@ -348,6 +381,7 @@ export class PatchRuntime implements MiniSource {
   start() {
     if (this.raf) return;
     this.last = performance.now();
+    this.stats.restart();
     const tick = (now: number) => {
       this.raf = requestAnimationFrame(tick);
       this.frame(now);
@@ -369,7 +403,12 @@ export class PatchRuntime implements MiniSource {
   private frame(now: number) {
     const dt = Math.min(0.5, Math.max(0, (now - this.last) / 1000));
     this.last = now;
-    this.advance(dt, now);
+    // Only the loop's own frames count toward the stats: a capture steps
+    // as fast as it can, which is no frame rate.
+    const started = performance.now();
+    if (!this.advance(dt, now)) return;
+    const stats = this.stats.count(now, performance.now() - started);
+    if (stats) this.statsListeners.forEach((l) => l(stats));
   }
 
   /** Run exactly one frame of `dt` seconds, whether or not the loop is
@@ -442,9 +481,10 @@ export class PatchRuntime implements MiniSource {
     }
   }
 
-  private advance(dt: number, now: number) {
+  /** One frame; false when there was nothing to render. */
+  private advance(dt: number, now: number): boolean {
     const sim = this.sim;
-    if (!sim || this.pending) return;
+    if (!sim || this.pending) return false;
 
     if (this.motion) {
       const m = this.motion.read();
@@ -488,6 +528,7 @@ export class PatchRuntime implements MiniSource {
       this.lastPreview = now;
       this.refreshMinis(sim);
     }
+    return true;
   }
 
   // --- inputs ---------------------------------------------------------------
