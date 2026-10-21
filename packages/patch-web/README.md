@@ -14,7 +14,9 @@ control-rate evaluator, effect and audio analysis. This package only hosts it.
   its pieces. A host provides a `PatchStore` (list/get/save/delete/activate,
   answering with events), the node palette, presets, and optionally a
   `MiniSource` for live node thumbnails and meters (drawn through one shared
-  WebGL2 context, or the 2D canvas API where WebGL2 is unavailable). Also
+  WebGL2 context, or the 2D canvas API where WebGL2 is unavailable;
+  `MiniTap` is a Debug node's large view, for a host that shows one
+  elsewhere, as the gate's Live tab does). Also
   patch file helpers: `savePatchToDisk`, `openPatchFromDisk`,
   `parsePatchFile`, `exportPatch`.
   The palette groups kinds by the registry's `group` (labels and order in

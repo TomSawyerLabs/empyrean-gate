@@ -319,7 +319,16 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   an input a Blend feeds, or on the Blend itself, becomes another layer of it
   rather than another Blend, and its side panel lists the layers top first to
   raise, lower, remove or add. Any node minimizes (− in its corner) to its
-  mini with bare port dots (`plans/auto-blend.md`).
+  mini with bare port dots (`plans/auto-blend.md`). A **Debug** node
+  (Structure) is a tap: wire any output into it (its `in` takes every
+  shape) and it shows that wire live and large, a ring for a field,
+  stream or texture, a meter for a number, a fire strip for an event, on
+  the node and bigger in its panel; dragging a wire to empty canvas
+  offers it. It has no outputs and is neither compiled into the show's
+  shader nor evaluated: its view is a mini, so it costs the gate nothing
+  unless someone is watching minis. **Show on Live** puts it in a strip
+  on the Live tab while its patch is on air (status `patch_taps`), for
+  watching a signal during a show (`plans/debug-node.md`).
   The **palette** groups the node kinds by what they are for (Controls,
   Live input, Media, Shape a signal, Motion, Events, Building blocks,
   Patterns, Color & space, Draw streams, Structure), each fold remembered;
