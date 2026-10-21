@@ -37,7 +37,9 @@ control-rate evaluator, effect and audio analysis. This package only hosts it.
   editor itself). Colors are `--pe-*` custom properties with the gate's palette
   as defaults.
 - `@empyrean-gate/patch-web/runtime` — `PatchRuntime.create()` loads the wasm
-  core and a WebGPU device; `setPatch(doc)` runs or live-edits a patch;
+  core and a WebGPU device; `setPatch(doc)` runs or live-edits a patch (an
+  edit that changes the shader keeps the running patch rendering while the
+  new pipelines build, then swaps between two frames);
   `attach(canvas)` shows it; inputs: `trigger` (effects), `draw` (strokes),
   `startMic`, `startMotion`, `setMedia` (local video/image), `setVideoSource`
   (`MediaTexture.fromCamera()`, or null for the stand-in film), `setDjLink` /
