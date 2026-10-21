@@ -5,8 +5,16 @@
 import { pushScalar, SCALAR_HISTORY, type MiniScalar, type MiniSource } from "../editor/minis-source";
 import type { FrameTransport, TransportState } from "../editor/transport";
 import type { PatchDoc } from "../types";
-import { loadPatchCore, type PatchCore, type PatchSim } from "./core";
-import { GateGpu, requestGateDevice, ShaderError, WebGpuUnavailable, type Geometry, type GridPasses } from "./gpu";
+import { loadPatchCore, type PatchCore, type PatchSim, type PreparedPatch } from "./core";
+import {
+  GateGpu,
+  requestGateDevice,
+  ShaderError,
+  WebGpuUnavailable,
+  type Geometry,
+  type GpuProgram,
+  type GridPasses,
+} from "./gpu";
 import {
   MediaTexture,
   startMicrophone,
@@ -158,10 +166,15 @@ export class PatchRuntime implements MiniSource, FrameTransport {
   /** The document last given to `setPatch`, for `restart`. */
   private doc: PatchDoc | null = null;
   private generation = 0;
-  /** The generation whose shader is being installed, while one is. */
-  private pendingGen = 0;
-  /** Frames are held (last image stays up) while new pipelines compile. */
+  /** The generation of the document the sim runs (0 before a fresh sim's
+   * first install). A finished build never replaces a newer one. */
+  private liveGen = 0;
+  /** The latest document's pipelines are building. The running patch keeps
+   * rendering meanwhile; `capture` waits for them. */
   private pending = false;
+  /** A fresh sim (first patch, `restart`) waits for its first pipelines:
+   * there is nothing older to show, so frames are held. */
+  private held = false;
   private raf = 0;
   private last = 0;
   private status: RuntimeStatus = { active: false, touch: false, error: null };
@@ -254,8 +267,9 @@ export class PatchRuntime implements MiniSource, FrameTransport {
   }
 
   /** Run `listener` about once a second while frames render: the frame
-   * rate and cost. Nothing is reported while the loop is stopped or a shader
-   * is installing, which is how a host can tell that rendering stalled. */
+   * rate and cost. Nothing is reported while the loop is stopped or a fresh
+   * patch waits for its first pipelines, which is how a host can tell that
+   * rendering stalled. */
   onStats(listener: (s: RuntimeStats) => void): () => void {
     this.statsListeners.add(listener);
     return () => this.statsListeners.delete(listener);
@@ -302,63 +316,93 @@ export class PatchRuntime implements MiniSource, FrameTransport {
   }
 
   /** Run `doc`, or apply edits to the running patch. Knob-only edits never
-   * reset phases. A document that cannot run leaves the previous one
-   * rendering and reports why in the status. */
+   * reset phases. An edit that changes the shader keeps the running patch
+   * rendering while the new pipelines build, then swaps between two frames.
+   * A document that cannot run leaves the previous one rendering and reports
+   * why in the status. */
   async setPatch(doc: PatchDoc | null): Promise<void> {
     const gen = ++this.generation;
     this.doc = doc;
     if (!doc) {
+      this.pending = false;
       this.sim?.free();
       this.sim = null;
       this.clearMinis();
       this.setStatus({ active: false, touch: false, error: null });
       return;
     }
-    let shader = false;
+    let sim = this.sim;
+    let prepared: PreparedPatch | null = null;
     try {
-      if (this.sim) {
-        shader = this.sim.update(JSON.stringify(doc)) === "shader";
+      if (sim) {
+        prepared = sim.prepare(JSON.stringify(doc));
       } else {
         const g = this.geometry;
-        this.sim = this.core.createSim(doc, g.spokes, g.pixels, g.innerOverOuter);
+        sim = this.sim = this.core.createSim(doc, g.spokes, g.pixels, g.innerOverOuter);
+        this.liveGen = 0;
+        // Nothing older to show: frames wait for this sim's pipelines.
+        this.held = true;
         // A fresh sim has no cells marked loaded: upload its images anew.
         this.uploadedImages.clear();
-        shader = true;
       }
     } catch (e) {
-      this.setStatus({ ...this.status, active: this.sim !== null, error: errorText(e) });
+      this.pending = false;
+      this.setStatus({ ...this.status, active: this.sim !== null && !this.held, error: errorText(e) });
       return;
     }
-    const sim = this.sim!;
-    if (shader) {
-      this.pending = true;
-      this.pendingGen = gen;
-      try {
-        await this.gpu.setProgram(
-          sim.wgsl(),
-          sim.previewWgsl(),
-          sim.previewNodes().length,
-          JSON.parse(sim.gridPasses()) as GridPasses,
-        );
-      } catch (e) {
-        if (this.pendingGen === gen) this.pending = false;
-        if (gen !== this.generation) return;
+
+    // Same shader (knobs, CPU-only nodes): runs from the next frame.
+    if (prepared && !this.held && !sim.shaderChanged(prepared)) {
+      sim.apply(prepared);
+      this.liveGen = gen;
+      this.pending = false;
+      this.ready(sim, gen, false);
+      return;
+    }
+
+    const source = prepared ?? sim;
+    this.pending = true;
+    let program: GpuProgram;
+    try {
+      program = await this.gpu.build(
+        source.wgsl(),
+        source.previewWgsl(),
+        source.previewNodes().length,
+        JSON.parse(source.gridPasses()) as GridPasses,
+      );
+    } catch (e) {
+      if (gen === this.generation) {
+        this.pending = false;
         // Locations inside a Code node's body are reported against the
         // user's own lines.
         const detail =
           e instanceof ShaderError
-            ? sim.relocateError(`${e.message}: ${e.details.join("; ")}`)
+            ? source.relocateError(`${e.message}: ${e.details.join("; ")}`)
             : errorText(e);
-        this.setStatus({ active: false, touch: false, error: detail });
-        return;
+        this.setStatus({ ...this.status, active: this.sim !== null && !this.held, error: detail });
       }
-      // An edit may have arrived meanwhile that needed no shader of its own
-      // (a CPU-only node, a knob): it runs on the program just installed, so
-      // the frame loop resumes here even though the rest of this call is
-      // superseded. Only a newer shader install keeps the loop paused.
-      if (this.pendingGen === gen) this.pending = false;
-      if (gen !== this.generation) return;
+      prepared?.free();
+      return;
     }
+    if (gen === this.generation) this.pending = false;
+    // Install unless what runs now is newer: a later edit that needed no new
+    // shader, or another build that finished first. While edits keep coming
+    // (typing in a Code node), each finished build shows; the last one wins.
+    if (this.sim !== sim || gen <= this.liveGen) {
+      prepared?.free();
+      return;
+    }
+    if (prepared) sim.apply(prepared);
+    this.gpu.install(program);
+    this.liveGen = gen;
+    this.held = false;
+    this.ready(sim, gen, true);
+  }
+
+  /** `sim` runs generation `gen`'s document: refresh what depends on its
+   * program. An earlier generation installing on the way to the latest
+   * leaves the status's error (the latest one's) alone. */
+  private ready(sim: PatchSim, gen: number, shader: boolean) {
     this.syncImages(sim);
     this.previewNodes = sim.previewNodes();
     const scalars = JSON.parse(sim.previewScalars()) as [string, string][];
@@ -374,7 +418,8 @@ export class PatchRuntime implements MiniSource, FrameTransport {
       this.back = 0;
     }
     this.usesVideo = sim.usesVideo();
-    this.setStatus({ active: true, touch: sim.usesTouch(), error: null });
+    const error = gen === this.generation ? null : this.status.error;
+    this.setStatus({ active: true, touch: sim.usesTouch(), error });
     // Paused: show the edit on the live frame, without time moving.
     if (this.paused) {
       if (this.back > 0) this.show(0);
@@ -509,7 +554,8 @@ export class PatchRuntime implements MiniSource, FrameTransport {
     if (this.back > 0) this.show(0);
     try {
       if (options.restart) await this.restart();
-      // A shader still installing holds frames; wait for it (bounded).
+      // Wait (bounded) for a shader still building, so the frames show the
+      // latest document.
       for (let waited = 0; this.pending && waited < 15000; waited += 16) {
         await new Promise((r) => setTimeout(r, 16));
       }
@@ -544,7 +590,7 @@ export class PatchRuntime implements MiniSource, FrameTransport {
    * after the frame's own Feedback has read it). */
   private advance(dt: number, now: number, how: { stepping?: boolean; again?: boolean } = {}): boolean {
     const sim = this.sim;
-    if (!sim || this.pending) return false;
+    if (!sim || this.held) return false;
 
     if (this.motion) {
       const m = this.motion.read();
