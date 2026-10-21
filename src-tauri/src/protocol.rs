@@ -434,6 +434,17 @@ fn default_mini_fps() -> f32 {
     10.0
 }
 
+/// A Debug node of the active patch that asks to be shown on Live
+/// (`codegen::live_taps`). Its mini goes by its id: `node:<id>` for a ring,
+/// `scalar:<id>:in` for a meter.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PatchTapInfo {
+    pub id: String,
+    pub label: String,
+    /// The shape of the wire it watches.
+    pub shape: crate::patch::Shape,
+}
+
 /// One scalar meter of the active patch: a CPU node's output port.
 #[derive(Debug, Clone, Serialize)]
 pub struct MiniScalarRef {
@@ -1174,6 +1185,9 @@ pub struct RuntimeStatus {
     /// glow node), so it owns the touch surface: clients send `touch` instead
     /// of applying their own tap or pen tool.
     pub patch_touch: bool,
+    /// The active patch's Debug nodes whose Show on Live is on: the Live tab
+    /// shows a mini of each. Empty without a patch on air.
+    pub patch_taps: Vec<PatchTapInfo>,
     pub show: ScheduledShowStatus,
     pub performance_recording: bool,
     pub performance_recording_name: String,

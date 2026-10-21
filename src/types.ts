@@ -1,6 +1,6 @@
 // Mirrors src-tauri/src/protocol.rs, config.rs, layers.rs (serde snake_case JSON).
 
-import type { PatchDoc, PatchSummary } from "@empyrean-gate/patch-web/types";
+import type { PatchDoc, PatchShape, PatchSummary } from "@empyrean-gate/patch-web/types";
 
 export type LayerKind =
   | "solid"
@@ -678,6 +678,16 @@ export interface ProDjLinkTrackInfo {
   waveform_detail: number[];
 }
 
+/** A Debug node of the patch on air that asks to be shown on Live (mirrors
+ * src-tauri PatchTapInfo). Its mini goes by its id: `node:<id>` for a ring,
+ * `scalar:<id>:in` for a meter. */
+export interface PatchTapInfo {
+  id: string;
+  label: string;
+  /** The shape of the wire it watches. */
+  shape: PatchShape;
+}
+
 export interface RuntimeStatus {
   gpu_error: string | null;
   gpu_name: string;
@@ -761,6 +771,9 @@ export interface RuntimeStatus {
   /** The active patch reads raw touch: canvases send `touch` events instead
    * of applying their tap or pen tool. */
   patch_touch: boolean;
+  /** The active patch's Debug nodes whose Show on Live is on: Live shows a
+   * mini of each. Empty without a patch on air. */
+  patch_taps: PatchTapInfo[];
   /** Phone motion turns: which phone (client id) drives the Phone IMU node,
    * who waits behind it, and how long the holder has while someone waits. */
   imu_turns: { holder: string | null; waiting: string[]; seconds_left: number | null };

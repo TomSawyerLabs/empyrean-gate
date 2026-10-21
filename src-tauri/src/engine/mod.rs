@@ -1835,6 +1835,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     // The active node-graph patch, compiled: (patch id, patch epoch) keys the
     // rebuild. See plans/node-graph.md.
     let mut patch_rt: Option<crate::patch::eval::Runtime> = None;
+    // Its Debug nodes that Live shows (status `patch_taps`), while it runs.
+    let mut patch_taps: Vec<crate::protocol::PatchTapInfo> = Vec::new();
     let mut patch_key: Option<(String, u32)> = None;
     let mut patch_shader: Option<std::sync::Arc<PatchShader>> = None;
     // The active patch's Still images, decoded, and which cells hold one.
@@ -2068,6 +2070,14 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                                         .collect(),
                                     scalar_nodes: prog.preview_scalars.clone(),
                                 });
+                                patch_taps = crate::patch::codegen::live_taps(&prog)
+                                    .into_iter()
+                                    .map(|t| crate::protocol::PatchTapInfo {
+                                        id: t.id,
+                                        label: t.label,
+                                        shape: t.shape,
+                                    })
+                                    .collect();
                                 let mut rt = crate::patch::eval::Runtime::new(prog);
                                 // Re-saving the patch on air (a knob turn, a new
                                 // node) must not restart its timers and phases:
@@ -3896,6 +3906,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 st.patch_touch = patch_rt
                     .as_ref()
                     .is_some_and(|rt| crate::patch::codegen::uses_touch(rt.doc()));
+                if patch_rt.is_some() {
+                    if st.patch_taps != patch_taps {
+                        st.patch_taps.clone_from(&patch_taps);
+                    }
+                } else {
+                    st.patch_taps.clear();
+                }
                 st.show = show_status.clone();
                 let recording = state.performance_recording.lock();
                 st.performance_recording = recording.is_some();

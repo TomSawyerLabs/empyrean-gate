@@ -5,6 +5,8 @@
 import {
   MiniMeter as SharedMeter,
   MiniRing as SharedRing,
+  MiniTap as SharedTap,
+  type PatchShape,
 } from "@empyrean-gate/patch-web/editor";
 import { getMiniHub } from "./miniPreview";
 import { useGate } from "./state";
@@ -19,4 +21,10 @@ export function MiniRing({ mini, label }: { mini: string; label?: string }) {
 export function MiniMeter({ mini, label }: { mini: string; label: string }) {
   const { client } = useGate();
   return <SharedMeter source={getMiniHub(client)} mini={mini} label={label} />;
+}
+
+/** A Debug node's view of what it watches: a ring, or a large meter. */
+export function MiniTap({ id, shape, label }: { id: string; shape: PatchShape; label: string }) {
+  const { client } = useGate();
+  return <SharedTap source={getMiniHub(client)} id={id} shape={shape} label={label} />;
 }

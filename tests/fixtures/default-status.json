@@ -81,6 +81,7 @@
   "patch_active": false,
   "patch_error": null,
   "patch_touch": false,
+  "patch_taps": [],
   "show": {
     "enabled": false,
     "playlist_id": "",

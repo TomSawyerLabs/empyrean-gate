@@ -903,7 +903,36 @@ main {
 .live-side .cluster.master-ctl,
 .live-side .cluster.quick-ctl,
 .live-side .cluster.live-layer-list-wrap,
+.live-side .cluster.live-taps,
 .live-side .cluster.live-status-grid { grid-row: span 2; }
+
+/* Debug taps the patch on air asks Live to show: its rings and meters side by
+   side, each ring captioned. */
+.live-side .cluster.live-taps {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.live-side .cluster.live-taps > .cluster-hint {
+  flex-basis: 100%;
+}
+
+.live-tap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.live-tap .mini-tap-large .mini-ring {
+  width: 96px;
+  height: 96px;
+}
 
 /* A show surface is poked with a finger in the dark. Pad the hit area out to
    ~26px without fattening the track — `background-clip` keeps the painted groove

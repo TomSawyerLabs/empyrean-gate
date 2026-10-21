@@ -33,7 +33,8 @@ import {
 } from "./liveColors";
 import { loadQuickSettings, saveQuickSettings } from "./quickSettings";
 import { contenders } from "./sacnPeers";
-import { MiniRing } from "./MiniViz";
+import { MiniRing, MiniTap } from "./MiniViz";
+import { tapsAsRing } from "@empyrean-gate/patch-web/editor";
 import ClientRoster from "./ClientRoster";
 import ShapeIcon from "./ShapeIcon";
 import Sparkbars from "./Sparkbars";
@@ -700,6 +701,22 @@ export default function Live() {
     </div>
   ) : null;
 
+  // The patch on air's Debug nodes whose Show on Live is on (plans/debug-node.md):
+  // what a patch's author marked as worth watching during a show. None flagged,
+  // no cluster, and nothing subscribes to minis for them.
+  const taps =
+    admin && status && status.patch_taps.length > 0 ? (
+      <div className="cluster live-taps" aria-label="Debug taps">
+        {status.patch_taps.map((tap) => (
+          <div key={tap.id} className="live-tap">
+            <MiniTap id={tap.id} shape={tap.shape} label={tap.label} />
+            {tapsAsRing(tap.shape) && <span>{tap.label}</span>}
+          </div>
+        ))}
+        <p className="cluster-hint">Debug taps the patch on air shows on Live</p>
+      </div>
+    ) : null;
+
   const showStatus = (
     <div className="cluster live-status-grid">
       <div><strong>{bpm > 0 ? bpm.toFixed(0) : "—"}</strong><span>BPM</span></div>
@@ -878,6 +895,7 @@ export default function Live() {
           {master}
           {quick}
           {layers}
+          {taps}
           {showStatus}
         </div>
       </div>
