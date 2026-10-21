@@ -92,6 +92,13 @@ mod tests {
                 "{} should expose play knobs",
                 doc.name
             );
+            // Compiling alone is not enough: it leaves out a node it does not
+            // know, so a preset naming a kind that does not exist still runs,
+            // with that part of the picture missing.
+            if let Err(errors) = crate::validate::validate(doc) {
+                let errors: Vec<String> = errors.iter().map(ToString::to_string).collect();
+                panic!("preset \"{}\" does not validate: {errors:?}", doc.name);
+            }
             let program = codegen::compile(doc)
                 .unwrap_or_else(|e| panic!("preset \"{}\" fails to compile: {e}", doc.name));
             let module = naga::front::wgsl::parse_str(&program.wgsl)
