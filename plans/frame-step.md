@@ -1,7 +1,8 @@
 # Frame by frame: pause, step, and (opt-in) step back
 
-Status: **in progress** (branch `frame-step`, worktree
-`~/.t3/worktrees/Empyrean/debug-node`, from gate master `0490c12`).
+Status: **built and tested; on gate `master` (`4b05eb1`) and the
+empyreangate.org `dev` Preview** (bump `485eb3e`, playground `640230f`), not
+yet in a gate release.
 Follows `plans/debug-node.md`.
 
 ## Goal
@@ -74,9 +75,9 @@ of batches (10 a second) to step through.
 1. **Done** (`26a6477`). Runtime + GPU history + transport interface.
 2. **Done** (`157cb21`). Editor transport bar, keys, status "paused"; demo.
 3. **Done** (`37eb77c`). Gate: MiniHub freeze + kept batches, Patch tab.
-4. **Current.** README (gate, patch-web), push gate master; site: pass
-   `transport` to the editor after the web-dist bump, README, push `dev`,
-   check the Preview.
+4. **Done.** README (gate, patch-web, site); gate master `4b05eb1` (CI
+   green); site bump dispatched, `transport={runtime}` and README on `dev`
+   (`640230f`), checked on the Preview.
 
 ## Findings / gotchas
 
@@ -108,7 +109,10 @@ of batches (10 a second) to step through.
       back, "3 back", per-frame Debug meters, status "paused".
 - [x] Step 3: src/miniPreview.test.ts (3), tests/frame-step.spec.ts; gate
       test:behavior 181 passed, layout 136 passed, test:unit 231.
-- [ ] Step 4
+- [x] Step 4: on dev.empyreangate.org in Chrome: K paused, Keep 10 s,
+      Shift+. twice (frame 7 → 27), `,` three times ("3 back"), status
+      "paused"; Keep set back to off and playing afterwards (it is stored
+      in localStorage). Site playground specs 19 passed on Chromium.
 
 ## Open questions for the user
 
