@@ -13,6 +13,8 @@ export interface TransportState {
   time: number;
   /** How many frames behind the live one the views show (0: the live one). */
   back: number;
+  /** The frame the views show and its patch time (the live one's at 0 back). */
+  shown: { frame: number; time: number };
   /** Past frames there are to step back through now. */
   kept: number;
   /** What Keep past frames is set to, in seconds (0: off). */

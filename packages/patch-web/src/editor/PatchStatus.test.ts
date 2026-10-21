@@ -13,6 +13,11 @@ describe("liveness", () => {
     expect(liveness({ ...ok, beat: 4 }, STALL_MS)).toBe("stalled");
   });
 
+  test("paused frame by frame is not a stall", () => {
+    expect(liveness({ ...ok, beat: 4 }, STALL_MS * 10, true)).toBe("paused");
+    expect(liveness({ active: false, error: null }, 0, true)).toBe("idle");
+  });
+
   test("a host without beats can't stall", () => {
     expect(liveness(ok, STALL_MS * 10)).toBe("live");
   });

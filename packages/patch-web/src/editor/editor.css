@@ -2248,3 +2248,104 @@
   width: 220px;
   height: 220px;
 }
+
+/* Frame by frame (TransportBar): pause, step, step back, under the graph. */
+.patch-canvas .react-flow__panel.patch-transport-panel {
+  margin: 10px;
+  max-width: calc(100% - 20px);
+}
+
+.patch-transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 6px;
+  padding: 4px 10px 4px 4px;
+  border: 1px solid #2a2445;
+  border-radius: 999px;
+  background: var(--pe-panel, #1a1530);
+  background-image: var(--pe-surface-grad, none);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  color: var(--pe-text, #e8e6f4);
+  font-size: 12px;
+}
+
+.patch-transport.paused {
+  border-color: var(--pe-accent, #7c5cff);
+}
+
+.patch-transport button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+}
+
+.patch-transport button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.patch-transport button:disabled {
+  opacity: 0.35;
+}
+
+.patch-transport.paused .patch-transport-play {
+  background: var(--pe-accent, #7c5cff);
+  color: #fff;
+}
+
+.patch-transport-frame {
+  min-width: 70px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.patch-transport-time {
+  color: var(--pe-muted, #8a85a8);
+}
+
+.patch-transport-back {
+  color: var(--pe-warn, #ffb84d);
+}
+
+.patch-transport-keep {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--pe-muted, #8a85a8);
+}
+
+.patch-transport-keep select {
+  font-size: 11px;
+}
+
+.patch-transport-hint {
+  flex-basis: 100%;
+  text-align: center;
+  font-size: 10px;
+  color: var(--pe-muted, #8a85a8);
+}
+
+.patch-transport-problem {
+  flex-basis: 100%;
+  text-align: center;
+  font-size: 11px;
+  color: var(--pe-danger, #ff5c7a);
+}
+
+.patch-transport.compact {
+  gap: 2px 4px;
+}
+
+.patch-transport.compact .patch-transport-frame {
+  min-width: 0;
+}
+
+.patch-live.paused { color: var(--pe-accent, #7c5cff); }

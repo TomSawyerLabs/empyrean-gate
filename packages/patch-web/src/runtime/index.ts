@@ -624,11 +624,13 @@ export class PatchRuntime implements MiniSource, FrameTransport {
 
   state(): TransportState {
     const kept = this.keepSeconds > 0 ? Math.max(0, (this.history?.count ?? 0) - 1) : 0;
+    const past = this.back > 0 ? this.history?.at(this.back) : null;
     return {
       paused: this.paused,
       frame: this.frameNo,
       time: this.patchTime,
       back: this.back,
+      shown: past ? { frame: past.frame, time: past.time } : { frame: this.frameNo, time: this.patchTime },
       kept,
       keepSeconds: this.keepSeconds,
     };

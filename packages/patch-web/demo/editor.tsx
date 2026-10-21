@@ -79,6 +79,7 @@ function App({ core, runtime, noGpu }: { core: PatchCore; runtime: PatchRuntime 
       }
       canEdit
       minis={runtime}
+      transport={runtime}
       showActivate={false}
       onDocChange={setDoc}
       editorRef={editorRef}
