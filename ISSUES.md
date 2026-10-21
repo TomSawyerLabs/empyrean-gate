@@ -61,6 +61,8 @@ on 2026-10-17 (ports now carry their shape in `aria-label`); the rest remain.
 
 ## Built-in "DJ Stereo Master Flow" uses a kind that does not exist
 
+In progress — arrange-presets (shipping it: `flow` as a Code node, added to `SOURCES`).
+
 Its node `flow` (`crates/empyrean-patch/src/presets/dj-stereo-master-flow.json`)
 has kind `stereo_flow`, which is not in the registry and never was on master:
 the preset came in with `75da7b1` (2026-08-25) without it. Opening the built-in
