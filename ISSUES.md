@@ -58,3 +58,16 @@ Sub-patch palette entries, the patch credit, and more in `Live.tsx`,
 show them; the information goes inline (a label, hint line or chip) or a
 tap-to-expand element, or is dropped. The editor's node view was converted
 on 2026-10-17 (ports now carry their shape in `aria-label`); the rest remain.
+
+## Built-in "DJ Stereo Master Flow" uses a kind that does not exist
+
+Its node `flow` (`crates/empyrean-patch/src/presets/dj-stereo-master-flow.json`)
+has kind `stereo_flow`, which is not in the registry and never was on master:
+the preset came in with `75da7b1` (2026-08-25) without it. Opening the built-in
+shows `⚠ node "flow" has unknown kind "stereo_flow"` (plus two exposed params
+"not found"), the card is an "unknown" stub, and six of its 60 wires are not
+drawn. No test catches a built-in with an unknown kind. Seen while arranging
+the presets (`plans/arrange-presets.md`). Whoever fixes it (add the kind, or
+rebuild the patch from existing ones): run `bun run arrange-presets` in
+`packages/patch-web` afterwards, since the stub card measures smaller than the
+real one will.
