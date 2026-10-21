@@ -194,6 +194,8 @@ const NODE_ICONS: Record<string, Icon> = {
   code: [poly(8, 6, 2, 12, 8, 18), poly(16, 6, 22, 12, 16, 18), line(14, 4, 10, 20)],
   note: [p("M4 3h12l4 4v14H4Z"), poly(16, 3, 16, 7, 20, 7), line(7.5, 11, 16.5, 11), line(7.5, 14.5, 16.5, 14.5), line(7.5, 18, 13, 18)],
   output: [circle(12, 12, 9.5), circle(12, 12, 4.5), line(1, 12, 9, 12), poly(6.5, 9.5, 9, 12, 6.5, 14.5)],
+  // A magnifier over a signal.
+  debug: [circle(10, 10, 7.5), line(15.5, 15.5, 21.5, 21.5), plot(5, 15, (t) => 10 - 2.6 * Math.sin(t * Math.PI * 2), 16)],
 };
 
 const GROUP_ICONS: Record<PatchGroup, Icon> = {
@@ -220,6 +222,7 @@ const CATEGORY_ICONS: Record<PatchNodeType["category"], Icon> = {
   texture: GROUP_ICONS.media,
   sink: NODE_ICONS.output!,
   code: NODE_ICONS.code!,
+  debug: NODE_ICONS.debug!,
 };
 
 /** The kinds that have their own drawing. */

@@ -134,6 +134,20 @@ export function shaderCorpus(core: PatchCore): CorpusEntry[] {
       ],
     ),
   });
+  // A Debug node fed each wire shape: its thumbnail cell draws the source as
+  // it is (a field, a stream, a texture), beside the source's own.
+  for (const shape of accepts.get("any") ?? []) {
+    const src = sources.get(shape);
+    if (!src) continue;
+    entries.push({
+      label: `debug fed ${shape}`,
+      doc: doc(
+        `debug ${shape}`,
+        [node("s", src[0]), node("d", "debug"), node("o", "output")],
+        [{ from: { node: "s", port: src[1] }, to: { node: "d", port: "in" } }],
+      ),
+    });
+  }
   for (const p of core.presets) entries.push({ label: `preset "${p.name}"`, doc: p });
   entries.push(...snippetDocs(core.limits.patchFormat, into.name));
   return entries;

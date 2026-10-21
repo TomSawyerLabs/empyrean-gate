@@ -39,6 +39,7 @@ const SHAPE_NAMES: Record<PatchShape, string> = {
   effects: "effects",
   texture: "texture",
   pixels: "pixels",
+  any: "any",
 };
 
 /** A port name not yet used by `def`: `in`, `in2`, `in3`… */

@@ -255,6 +255,7 @@ const SHAPE_WORD: Record<PatchShape, string> = {
   effects: "effects",
   texture: "texture",
   pixels: "pixels",
+  any: "any",
 };
 
 /** WGSL builtins worth offering (the GPU tier), with signatures. */

@@ -12,7 +12,9 @@ export {
 export {
   MiniMeter,
   MiniRing,
+  MiniTap,
   miniRenderer,
+  tapsAsRing,
   pushScalar,
   SCALAR_HISTORY,
   type MiniScalar,

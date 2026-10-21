@@ -9,6 +9,7 @@ import { fitsInput } from "./domains";
 import {
   applies,
   BOUNDARY_SHAPES,
+  DEBUG_KIND,
   PATCH_IN_KIND,
   PATCH_OUT_KIND,
   SUBPATCH_KIND,
@@ -112,6 +113,12 @@ export function suggestConnections(registry: Iterable<PatchNodeType>, from: Drag
       out.push({ type: t, port, exact: true, viaParam: false, params: { shape }, score: 1000 });
       continue;
     }
+    // A Debug node takes any wire from an output, as it is: offered for
+    // every one, just ahead of Patch out for the same reason.
+    if (t.id === DEBUG_KIND) {
+      if (from.dir === "out") out.push({ type: t, port: "in", exact: true, viaParam: false, score: 999 });
+      continue;
+    }
     const candidates =
       from.dir === "out"
         ? inputsOf(t)
@@ -145,4 +152,5 @@ export const SHAPE_LABEL: Record<PatchShape, string> = {
   effects: "effects",
   texture: "texture",
   pixels: "pixels",
+  any: "any",
 };

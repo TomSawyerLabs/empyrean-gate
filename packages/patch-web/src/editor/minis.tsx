@@ -7,6 +7,7 @@
 // canvas API where there is no WebGL2.
 
 import { useEffect, useRef, useState } from "react";
+import type { PatchShape } from "../types";
 import "./minis.css";
 
 export { pushScalar, SCALAR_HISTORY, type MiniScalar, type MiniSource } from "./minis-source";
@@ -39,8 +40,11 @@ void main() {
 }`;
 
 /** Backing resolution of the shared render target. Thumbnails are ≤ ~120 CSS
- * px; 192 leaves headroom for 1.5–2× DPR without a per-widget context. */
+ * px; 192 leaves headroom for 1.5–2× DPR without a per-widget context. A
+ * larger view (a Debug node's) grows the stage, up to `STAGE_MAX`, and draws
+ * into a corner of it at its own size. */
 const STAGE_SIZE = 192;
+const STAGE_MAX = 512;
 
 /** One LED's dot across, in pixels, on a square `size` px wide. */
 function pointSize(size: number, pixels: number): number {
@@ -81,12 +85,22 @@ class MiniRenderer {
     const n = Math.min(this.count, spokes * pixels);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuf);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, rgb.subarray(0, n * 3));
-    gl.uniform1f(this.pointSizeLoc, pointSize(STAGE_SIZE, pixels));
+    // Thumbnails draw at STAGE_SIZE as they always have; a larger view at
+    // its own backing size, in the stage's bottom-left corner (GL's origin),
+    // which is the bottom-left of the image the blit reads.
+    const px = Math.min(STAGE_MAX, Math.max(STAGE_SIZE, backing));
+    const stage = this.stage!;
+    if (stage.width < px) {
+      stage.width = px;
+      stage.height = px;
+    }
+    gl.viewport(0, 0, px, px);
+    gl.uniform1f(this.pointSizeLoc, pointSize(px, pixels));
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.POINTS, 0, n);
     // Blit synchronously in the same task, before anything else can touch the
     // shared stage.
-    out.drawImage(this.stage!, 0, 0, target.width, target.height);
+    out.drawImage(stage, 0, stage.height - px, px, px, 0, 0, target.width, target.height);
   }
 
   /** The same dots through the 2D canvas API, for a browser that has no
@@ -156,7 +170,6 @@ class MiniRenderer {
       return null;
     }
     gl.useProgram(prog);
-    gl.viewport(0, 0, STAGE_SIZE, STAGE_SIZE);
     gl.clearColor(0, 0, 0, 0);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
@@ -255,6 +268,7 @@ export function MiniMeter({
   mini,
   label,
   kind = "scalar",
+  large = false,
 }: {
   source: MiniSource;
   mini: string;
@@ -262,6 +276,9 @@ export function MiniMeter({
   /** "event": the samples are a running fire count; the strip shows a tick
    * at every sample where it grew, and the total. */
   kind?: "scalar" | "event";
+  /** A Debug node's: a wide, tall strip under its label and value, with the
+   * window's range for a number. */
+  large?: boolean;
 }) {
   const [, bump] = useState(0);
   useEffect(() => {
@@ -275,9 +292,10 @@ export function MiniMeter({
   const entry = source.scalars.get(mini);
   const values = entry?.values ?? [];
   const latest = entry?.latest ?? 0;
+  const w = large ? 176 : 72;
+  const h = large ? 56 : 16;
+  const big = large ? " mini-meter-large" : "";
   if (kind === "event") {
-    const w = 72;
-    const h = 16;
     const ticks: number[] = [];
     for (let i = 1; i < values.length; i++) {
       if (values[i] > values[i - 1]) ticks.push((i / (values.length - 1)) * w);
@@ -285,7 +303,7 @@ export function MiniMeter({
     // Lit while the newest samples carry a fire.
     const recent = values.length > 2 && values[values.length - 1] > values[values.length - 3];
     return (
-      <div className={`mini-meter mini-event ${recent ? "lit" : ""}`}>
+      <div className={`mini-meter mini-event${big} ${recent ? "lit" : ""}`}>
         <span className="mini-meter-label">{label}</span>
         <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} aria-hidden="true">
           <line x1="0" y1={h - 1.5} x2={w} y2={h - 1.5} stroke="currentColor" strokeWidth="0.6" opacity="0.4" />
@@ -301,8 +319,6 @@ export function MiniMeter({
   // signal draws as a flat line rather than jittering on float noise.
   const min = values.length ? Math.min(...values, 0) : 0;
   const max = values.length ? Math.max(...values, min + 1e-6) : 1;
-  const w = 72;
-  const h = 16;
   const points = values
     .map((v, i) => {
       const x = values.length > 1 ? (i / (values.length - 1)) * w : 0;
@@ -310,16 +326,60 @@ export function MiniMeter({
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(" ");
-  const shown = Math.abs(latest) >= 100 ? latest.toFixed(0) : latest.toFixed(2);
+  const fmt = (v: number) => (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2));
   return (
-    <div className="mini-meter">
+    <div className={`mini-meter${big}`}>
       <span className="mini-meter-label">{label}</span>
       <svg viewBox={`0 0 ${w} ${h}`} width={w} height={h} aria-hidden="true">
         {points && (
           <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.2" />
         )}
       </svg>
-      <span className="mini-meter-value">{shown}</span>
+      <span className="mini-meter-value">{fmt(latest)}</span>
+      {large && values.length > 0 && (
+        <span className="mini-meter-range">
+          {fmt(min)} … {fmt(max)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Wire shapes a Debug node shows as a ring (the crate's `codegen::tap_style`);
+ * Scalars and Events it meters. */
+export function tapsAsRing(shape: PatchShape): boolean {
+  return ["field_color", "field_scalar", "led_color", "led_scalar", "points", "effects", "texture"].includes(shape);
+}
+
+/** A Debug node's view of what it is fed (`shape`): the ring of its cell
+ * (`node:<id>`), or a large meter on its `in` (`scalar:<id>:in`). `id` is
+ * the node's id in the patch as it renders (inside a Sub-patch,
+ * `"{sub}/{node}"`). `compact`: the size of an ordinary node's mini. */
+export function MiniTap({
+  source,
+  id,
+  shape,
+  label,
+  compact = false,
+}: {
+  source: MiniSource;
+  id: string;
+  shape: PatchShape;
+  label: string;
+  compact?: boolean;
+}) {
+  const size = compact ? "" : " mini-tap-large";
+  if (tapsAsRing(shape)) {
+    return (
+      <div className={`mini-tap${size}`}>
+        <MiniRing source={source} mini={`node:${id}`} label={label} />
+      </div>
+    );
+  }
+  if (shape !== "scalar" && shape !== "event") return null;
+  return (
+    <div className={`mini-tap${size}`}>
+      <MiniMeter source={source} mini={`scalar:${id}:in`} label={label} kind={shape} large={!compact} />
     </div>
   );
 }

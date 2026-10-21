@@ -27,7 +27,7 @@ export const GROUPS: readonly GroupDef[] = [
   { id: "patterns", label: "Patterns", blurb: "Finished looks, each a whole pattern on its own", layout: "grid" },
   { id: "color", label: "Color & space", blurb: "Colour, measure, combine and move fields", layout: "list" },
   { id: "draw", label: "Draw streams", blurb: "Paint strokes and effects onto the array", layout: "list" },
-  { id: "structure", label: "Structure", blurb: "Output, sub-patches, code and notes", layout: "list" },
+  { id: "structure", label: "Structure", blurb: "Output, sub-patches, code, notes and debug taps", layout: "list" },
 ];
 
 const BY_ID = new Map(GROUPS.map((g) => [g.id, g]));
@@ -42,6 +42,7 @@ const FALLBACK: Record<PatchNodeType["category"], PatchGroup> = {
   texture: "media",
   sink: "structure",
   code: "structure",
+  debug: "structure",
 };
 
 /** The group `t` is listed under. */

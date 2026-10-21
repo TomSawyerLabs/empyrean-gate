@@ -85,3 +85,22 @@ describe("suggestConnections", () => {
     expect(a.map((x) => x.type.id)).toEqual(b.map((x) => x.type.id));
   });
 });
+
+describe("a Debug node", () => {
+  const withDebug = [...registry, T("debug", "debug", [["in", "any"]], [])];
+
+  test("is offered for a wire from any output, last, as an exact fit", () => {
+    for (const shape of ["scalar", "event", "field_scalar", "field_color", "points", "effects", "texture"] as const) {
+      const s = suggestConnections(withDebug, { shape, dir: "out" });
+      const last = s[s.length - 1];
+      expect(last.type.id).toBe("debug");
+      expect(last.port).toBe("in");
+      expect(last.exact).toBe(true);
+    }
+  });
+
+  test("is never offered as a producer: it has no outputs", () => {
+    const s = suggestConnections(withDebug, { shape: "scalar", dir: "in" });
+    expect(s.some((x) => x.type.id === "debug")).toBe(false);
+  });
+});

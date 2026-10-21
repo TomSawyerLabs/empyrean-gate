@@ -58,3 +58,42 @@
   gap: 2px;
   padding: 4px 10px 0;
 }
+
+/* A Debug node's view (MiniTap): an ordinary mini's size on a minimized
+   node, a large one otherwise. */
+.mini-tap .mini-ring {
+  width: 72px;
+  height: 72px;
+}
+
+.mini-tap-large .mini-ring {
+  width: 160px;
+  height: 160px;
+}
+
+/* A large meter: label and value over a wide strip, the window's range
+   under it. */
+.mini-meter-large {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  row-gap: 2px;
+  width: 176px;
+}
+
+.mini-meter-large svg {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+}
+
+.mini-meter-large .mini-meter-value {
+  font-size: 14px;
+}
+
+.mini-meter-range {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
