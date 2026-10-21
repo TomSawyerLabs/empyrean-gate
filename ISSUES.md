@@ -59,3 +59,13 @@ show them; the information goes inline (a label, hint line or chip) or a
 tap-to-expand element, or is dropped. The editor's node view was converted
 on 2026-10-17 (ports now carry their shape in `aria-label`); the rest remain.
 
+## A minimized node's meter spills out of the node
+
+- **What:** in the patch editor, minimize any node whose face is a meter
+  (an LFO, say: `collapsed: true`). The face's `.mini-meter` is held to
+  64 px by `.pnode-face .mini-meter` (`packages/patch-web/src/editor/editor.css`),
+  but its label, fixed 72 px strip and value need about 142 px
+  (`scrollWidth`), so the value is drawn past the node's right edge, over
+  its output dots and the wire. Seen 2026-10-21 in the patch-web demo.
+- **Why it matters:** the value reads as floating beside the node, and it
+  covers the output port a wire is dragged from.
