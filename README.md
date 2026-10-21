@@ -310,7 +310,12 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   preset "Code: Ripple Warp" is a starting point for writing one
   (`plans/code-node.md`). Graphs
   compile to a single WGSL dispatch; knob tweaks and scalar
-  wires never recompile, and edits carry every timer and phase over. The
+  wires never recompile, and edits carry every timer and phase over. An
+  edit that does change the shader (or a newly chosen patch) is built on a
+  worker thread for every bus at once while the patch on air keeps playing,
+  then swaps in between two frames, so the rig never skips a beat for a
+  compile; a crossfade asked for meanwhile starts when the new patch is
+  ready (`plans/seamless-patch-swap.md`). The
   editor has undo/redo (Ctrl+Z / Ctrl+Shift+Z) and duplicate (Ctrl+D).
   Dropping a second wire on an input that already has one puts a combiner
   between them (a Blend for colour fields, Field math for grey ones, Merge

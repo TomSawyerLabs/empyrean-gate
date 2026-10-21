@@ -20,6 +20,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 pub mod minis;
+mod patch_build;
 
 // The live video frame lives in media cell 0 (Still images follow it), so it
 // must fit in one cell.
@@ -72,6 +73,8 @@ struct RenderBusSnapshot {
 }
 
 pub struct Engine {
+    /// Unique per engine (see [`PatchCompiler`]).
+    id: u64,
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
@@ -109,7 +112,7 @@ pub struct Engine {
 
 /// A compiled patch as an engine runs it: the module, and the grid passes
 /// to dispatch before its `main` (see `codegen::Program::grid_passes`).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct PatchShader {
     pub wgsl: String,
     pub grid_passes: Vec<crate::patch::codegen::GridPass>,
@@ -137,9 +140,60 @@ impl PatchShader {
 }
 
 /// An installed patch: its grid passes (pipeline, cells), then `main`.
+#[derive(Clone)]
 struct PatchPipelines {
     grids: Vec<(wgpu::ComputePipeline, u32)>,
     main: wgpu::ComputePipeline,
+}
+
+/// Engines are told apart by id: each has its own device, and a pipeline
+/// built on one cannot run on another.
+static NEXT_ENGINE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// What building patch pipelines for one engine takes, on any thread: its
+/// device and patch layout. The engine keeps rendering meanwhile; the result
+/// goes to [`Engine::install_patch`]. Cheap to clone.
+#[derive(Clone)]
+pub struct PatchCompiler {
+    engine: u64,
+    device: wgpu::Device,
+    layout: wgpu::BindGroupLayout,
+}
+
+/// A patch's pipelines, built by a [`PatchCompiler`] for its engine and not
+/// yet running there. Cloning shares the pipelines.
+#[derive(Clone)]
+pub struct BuiltPatch {
+    engine: u64,
+    pipelines: PatchPipelines,
+    grid_bytes: usize,
+}
+
+impl PatchCompiler {
+    /// Compile `shader`'s module and one pipeline per entry point (grid
+    /// passes, then `main`). Slow (the driver compiles); the engine this is
+    /// for is not touched.
+    pub fn build(&self, shader: &PatchShader) -> Result<BuiltPatch> {
+        let entries: Vec<&str> = shader
+            .grid_passes
+            .iter()
+            .map(|p| p.entry.as_str())
+            .chain(["main"])
+            .collect();
+        let mut pipelines =
+            Engine::build_pipelines(&self.device, &self.layout, "patch", &shader.wgsl, &entries)?;
+        let main = pipelines.pop().expect("main is the last entry");
+        let grids = pipelines
+            .into_iter()
+            .zip(&shader.grid_passes)
+            .map(|(pipeline, pass)| (pipeline, pass.cells))
+            .collect();
+        Ok(BuiltPatch {
+            engine: self.engine,
+            pipelines: PatchPipelines { grids, main },
+            grid_bytes: shader.grid_bytes,
+        })
+    }
 }
 
 fn shader_source() -> String {
@@ -295,6 +349,7 @@ impl Engine {
         });
 
         let mut engine = Self {
+            id: NEXT_ENGINE_ID.fetch_add(1, Ordering::Relaxed),
             bind_group: Self::make_bind_group(
                 &device,
                 &bind_group_layout,
@@ -437,37 +492,46 @@ impl Engine {
         mask
     }
 
-    /// Install (or clear) the compiled patch pipelines (grid passes and
-    /// `main`) from generated WGSL, with a cleared grid buffer sized for them.
-    /// Failure leaves the previous patch untouched, so a bad edit keeps the
-    /// last good patch rendering — same contract as hot-reload.
+    /// Build (synchronously) and install (or clear) the patch pipelines for
+    /// generated WGSL. Failure leaves the previous patch untouched, so a bad
+    /// edit keeps the last good patch rendering — same contract as
+    /// hot-reload. The frame loop builds on another thread instead
+    /// ([`Engine::patch_compiler`]) so the show never waits on a compile.
     pub fn set_patch_shader(&mut self, shader: Option<&PatchShader>) -> Result<()> {
         let Some(shader) = shader else {
             self.patch = None;
             return Ok(());
         };
-        let entries: Vec<&str> = shader
-            .grid_passes
-            .iter()
-            .map(|p| p.entry.as_str())
-            .chain(["main"])
-            .collect();
-        let mut pipelines = Self::build_pipelines(
-            &self.device,
-            &self.patch_layout,
-            "patch",
-            &shader.wgsl,
-            &entries,
-        )?;
-        let main = pipelines.pop().expect("main is the last entry");
-        let grids = pipelines
-            .into_iter()
-            .zip(&shader.grid_passes)
-            .map(|(pipeline, pass)| (pipeline, pass.cells))
-            .collect();
-        self.patch = Some(PatchPipelines { grids, main });
+        let built = self.patch_compiler().build(shader)?;
+        self.install_patch(built)
+    }
+
+    /// Unique per engine: tells which one a pipeline was built for.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// A handle for building this engine's patch pipelines on another thread.
+    pub fn patch_compiler(&self) -> PatchCompiler {
+        PatchCompiler {
+            engine: self.id,
+            device: self.device.clone(),
+            layout: self.patch_layout.clone(),
+        }
+    }
+
+    /// Run `built` from the next frame on, with a cleared grid buffer sized
+    /// for it. Refused (nothing changes) if it was built for another engine.
+    pub fn install_patch(&mut self, built: BuiltPatch) -> Result<()> {
+        anyhow::ensure!(
+            built.engine == self.id,
+            "patch pipelines built for engine {}, not this one ({})",
+            built.engine,
+            self.id
+        );
+        self.patch = Some(built.pipelines);
         // A new program starts from clear textures (Trails' last frame too).
-        self.grid_buf = Self::make_grid_buffer(&self.device, shader.grid_bytes);
+        self.grid_buf = Self::make_grid_buffer(&self.device, built.grid_bytes);
         self.rebuild_patch_bind_group();
         Ok(())
     }
@@ -1845,6 +1909,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut live_patch_id: Option<String> = None;
     // Companion preview program for the mini bus (per-node thumbnails).
     let mut patch_preview: Option<minis::PatchPreviewInfo> = None;
+    // Patches build on their own thread (patch_build.rs): what is on air
+    // keeps playing until the new one is ready (plans/seamless-patch-swap.md).
+    let patch_builder = patch_build::PatchBuilder::new();
+    let mut patch_building = false;
+    // The engine `patch_shader` is installed on (a Take swaps engines).
+    let mut patch_engine = 0u64;
+    // The handoff bus's pipelines for `patch_shader`, built along with it, so
+    // a crossfade away from this patch starts without a compile.
+    let mut outgoing_standby: Option<(Arc<PatchShader>, BuiltPatch)> = None;
 
     // Hardware test mode: a CPU-generated frame that replaces the rendered one
     // on its way to sACN and the preview. See `testmode.rs`. Arm/disarm is a
@@ -1920,7 +1993,20 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             // released so an epoch can never be paired with the previous config.
             cfg = state.config.read().clone();
         }
-        if requested_handoff != handoff_epoch {
+        // The active node-graph patch: which one should run, and whether its
+        // build has landed. A crossfade asked for while a patch builds waits
+        // for it, so it starts from what is on air and fades to the new patch
+        // rather than to more of the old one.
+        let patch_epoch = state.patch_epoch.load(Ordering::Relaxed);
+        let wanted = cfg.active_patch.clone().map(|id| (id, patch_epoch));
+        let landed = patch_builder.try_take().filter(|done| {
+            patch_building && patch_key == wanted && wanted.as_ref() == Some(&done.key)
+        });
+        if landed.is_some() {
+            patch_building = false;
+        }
+        let patch_settling = wanted.is_some() && (wanted != patch_key || patch_building);
+        if requested_handoff != handoff_epoch && !patch_settling {
             handoff_epoch = requested_handoff;
             if cfg.render.manual_transition_secs > 0.001 && !last_normal_rgb.is_empty() {
                 handoff_from.clone_from(&last_normal_rgb);
@@ -1939,7 +2025,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     (outgoing_render_bus.as_ref(), outgoing_engine.as_mut())
                 {
                     outgoing.ensure_capacity(cfg.geometry.pixel_count() as u32);
-                    if let Err(error) = outgoing.set_patch_shader(bus.patch_shader.as_deref()) {
+                    // The standby built with the outgoing patch, when it is
+                    // the one; otherwise (it was still building) compile now.
+                    let installed = match (bus.patch_shader.as_deref(), outgoing_standby.as_ref()) {
+                        (Some(shader), Some((built_for, built))) if **built_for == *shader => {
+                            outgoing.install_patch(built.clone())
+                        }
+                        (shader, _) => outgoing.set_patch_shader(shader),
+                    };
+                    if let Err(error) = installed {
                         log::warn!("outgoing patch bus could not compile: {error:#}");
                         setup_failed = true;
                     } else {
@@ -2009,123 +2103,122 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 }
             }
         }
-        // Compile (or drop) the active node-graph patch when it changes — either
-        // a different id, or a patch-file edit (patch_epoch bump). A bad live
-        // edit keeps the last good pipeline for that same patch on screen.
-        let patch_epoch = state.patch_epoch.load(Ordering::Relaxed);
-        let wanted = cfg.active_patch.clone().map(|id| (id, patch_epoch));
+        // Build (or drop) the active node-graph patch when it changes: a
+        // different id, or a patch-file edit (patch_epoch bump). Until the
+        // build lands, what is on air keeps playing. A bad live edit keeps
+        // the last good pipeline for that same patch on screen.
         if wanted != patch_key {
             patch_key = wanted.clone();
-            let mut patch_error = None;
             match &wanted {
                 None => {
+                    patch_building = false;
                     patch_rt = None;
                     patch_shader = None;
                     live_patch_id = None;
                     patch_preview = None;
+                    outgoing_standby = None;
                     let _ = engine.set_patch_shader(None);
+                    state.status.lock().patch_error = None;
                 }
-                Some((id, _)) => {
+                Some(key) => {
                     // A topology rebuild invalidates queued values from the old
                     // Runtime. New values will be delivered on following frames.
                     state.patch_params.lock().clear();
-                    let retain_last_good = live_patch_id.as_deref() == Some(id.as_str());
-                    let result = crate::patch::store::load(&crate::patch::store::patches_dir(), id)
-                        .and_then(|doc| crate::patch::codegen::compile(&doc));
-                    match result {
-                        // `prog.doc` is the patch with sub-patches inlined:
-                        // what every node index below refers to.
-                        Ok(prog) => match engine.set_patch_shader(Some(&PatchShader::main(&prog))) {
-                            Ok(()) => {
-                                let decoded: Vec<(u32, Vec<u8>)> = prog
-                                    .images
-                                    .iter()
-                                    .filter_map(|&(n, slot)| {
-                                        let media = prog.doc.nodes[n].media.as_deref()?;
-                                        match crate::patch::media::decode(media) {
-                                            Ok(rgba) => Some((slot, rgba)),
-                                            Err(e) => {
-                                                log::warn!(
-                                                    "patch image on node {} not loaded: {e}",
-                                                    prog.doc.nodes[n].id
-                                                );
-                                                None
-                                            }
-                                        }
-                                    })
-                                    .collect();
-                                patch_image_mask = engine.set_patch_images(&decoded);
-                                patch_images = std::sync::Arc::new(decoded);
-                                patch_shader = Some(std::sync::Arc::new(PatchShader::main(&prog)));
-                                patch_preview = Some(minis::PatchPreviewInfo {
-                                    key: format!("{id}:{patch_epoch}"),
-                                    shader: PatchShader::preview(&prog),
-                                    node_ids: prog.preview_keys(),
-                                    scalar_refs: prog
-                                        .preview_scalars
-                                        .iter()
-                                        .map(|(n, port)| {
-                                            (prog.doc.nodes[*n].id.clone(), port.to_string())
-                                        })
-                                        .collect(),
-                                    scalar_nodes: prog.preview_scalars.clone(),
-                                });
-                                patch_taps = crate::patch::codegen::live_taps(&prog)
-                                    .into_iter()
-                                    .map(|t| crate::protocol::PatchTapInfo {
-                                        id: t.id,
-                                        label: t.label,
-                                        shape: t.shape,
-                                    })
-                                    .collect();
-                                let mut rt = crate::patch::eval::Runtime::new(prog);
-                                // Re-saving the patch on air (a knob turn, a new
-                                // node) must not restart its timers and phases:
-                                // the rebuilt runtime inherits them.
-                                if retain_last_good
-                                    && let Some(old) = patch_rt.as_ref()
-                                {
-                                    rt.adopt_state(old);
-                                }
-                                patch_rt = Some(rt);
-                                live_patch_id = Some(id.clone());
-                            }
-                            Err(e) => {
-                                // Shader errors inside a Code node's body point at the
-                                // user's own lines.
-                                patch_error = Some(format!(
-                                    "patch pipeline failed: {}",
-                                    prog.relocate_error(&format!("{e:#}"))
-                                ));
-                                if !retain_last_good {
-                                    patch_rt = None;
-                                    patch_shader = None;
-                                    live_patch_id = None;
-                                    patch_preview = None;
-                                    let _ = engine.set_patch_shader(None);
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            patch_error = Some(format!("patch compile failed: {e}"));
-                            if !retain_last_good {
-                                patch_rt = None;
-                                patch_shader = None;
-                                live_patch_id = None;
-                                patch_preview = None;
-                                let _ = engine.set_patch_shader(None);
-                            }
-                        }
-                    }
+                    let running = patch_shader
+                        .clone()
+                        .filter(|_| patch_engine == engine.id())
+                        .zip(patch_preview.as_ref().map(|p| p.shader.clone()));
+                    patch_builder.request(patch_build::Request {
+                        key: key.clone(),
+                        program: engine.patch_compiler(),
+                        minis: mini_bus.patch_compiler(),
+                        outgoing: outgoing_engine.as_ref().map(Engine::patch_compiler),
+                        running,
+                    });
+                    patch_building = true;
                 }
             }
-            if let Some(msg) = &patch_error {
-                log::error!("{msg}");
-                let _ = state.events.send(ServerMsg::Error {
-                    message: msg.clone(),
-                });
+        }
+        if let Some(patch_build::Done {
+            key: (id, built_epoch),
+            result,
+        }) = landed
+        {
+            let retain_last_good = live_patch_id.as_deref() == Some(id.as_str());
+            match result {
+                Ok(ready) => 'install: {
+                    let minis_built;
+                    if let Some(pipelines) = ready.pipelines {
+                        if let Err(error) = engine.install_patch(pipelines.program) {
+                            // A Take swapped the program bus while this built:
+                            // build again, for the bus on air now.
+                            log::info!("patch built for another bus ({error:#}); rebuilding");
+                            patch_key = None;
+                            break 'install;
+                        }
+                        patch_engine = engine.id();
+                        minis_built = pipelines.minis;
+                        outgoing_standby = pipelines
+                            .outgoing
+                            .map(|built| (ready.shader.clone(), built));
+                    } else {
+                        // Same shaders: the thumbnail bus's pipelines carry
+                        // over (it may not have installed them yet).
+                        minis_built = patch_preview.as_ref().and_then(|p| p.prebuilt.clone());
+                    }
+                    patch_image_mask = engine.set_patch_images(&ready.images);
+                    patch_images = Arc::new(ready.images);
+                    // `prog.doc` is the patch with sub-patches inlined: what
+                    // every node index below refers to.
+                    let prog = ready.prog;
+                    patch_preview = Some(minis::PatchPreviewInfo {
+                        key: format!("{id}:{built_epoch}"),
+                        shader: ready.preview,
+                        prebuilt: minis_built,
+                        node_ids: prog.preview_keys(),
+                        scalar_refs: prog
+                            .preview_scalars
+                            .iter()
+                            .map(|(n, port)| (prog.doc.nodes[*n].id.clone(), port.to_string()))
+                            .collect(),
+                        scalar_nodes: prog.preview_scalars.clone(),
+                    });
+                    patch_shader = Some(ready.shader);
+                    patch_taps = crate::patch::codegen::live_taps(&prog)
+                        .into_iter()
+                        .map(|t| crate::protocol::PatchTapInfo {
+                            id: t.id,
+                            label: t.label,
+                            shape: t.shape,
+                        })
+                        .collect();
+                    let mut rt = crate::patch::eval::Runtime::new(prog);
+                    // Re-saving the patch on air (a knob turn, a new node)
+                    // must not restart its timers and phases: the rebuilt
+                    // runtime inherits them.
+                    if retain_last_good && let Some(old) = patch_rt.as_ref() {
+                        rt.adopt_state(old);
+                    }
+                    patch_rt = Some(rt);
+                    live_patch_id = Some(id);
+                    state.status.lock().patch_error = None;
+                }
+                Err(message) => {
+                    log::error!("{message}");
+                    let _ = state.events.send(ServerMsg::Error {
+                        message: message.clone(),
+                    });
+                    if !retain_last_good {
+                        patch_rt = None;
+                        patch_shader = None;
+                        live_patch_id = None;
+                        patch_preview = None;
+                        outgoing_standby = None;
+                        let _ = engine.set_patch_shader(None);
+                    }
+                    state.status.lock().patch_error = Some(message);
+                }
             }
-            state.status.lock().patch_error = patch_error;
         }
 
         if state.phases_transplanted.swap(false, Ordering::SeqCst) {

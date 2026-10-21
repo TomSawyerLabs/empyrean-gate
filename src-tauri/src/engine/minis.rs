@@ -13,7 +13,7 @@
 //! render in a single dispatch of the patch's companion preview module
 //! (`Program::preview_wgsl`), all nodes at once, at the publish cadence.
 
-use super::{Engine, FrameInputs};
+use super::{BuiltPatch, Engine, FrameInputs, PatchCompiler, PatchShader};
 use crate::state::{MiniBatch, MiniKind, SharedState};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -31,13 +31,16 @@ const PUBLISH_INTERVAL: Duration = Duration::from_millis(100);
 /// Built once at patch-compile time so the per-frame path never touches the
 /// document again.
 pub struct PatchPreviewInfo {
-    /// Identity of the compiled program (patch id + epoch); the preview
-    /// pipeline is reinstalled when it changes.
+    /// Identity of the compiled program (patch id + epoch).
     pub key: String,
     /// Companion WGSL module (empty when the patch has no field nodes), with
     /// the patch's grid passes: this bus renders with its own buffers, so it
     /// runs them itself.
-    pub shader: super::PatchShader,
+    pub shader: Arc<PatchShader>,
+    /// Its pipelines for this bus, built with the patch off the frame loop
+    /// (`patch_build`). `None` when the shader is the one installed already,
+    /// or its build failed (the thumbnails go dark for this patch).
+    pub prebuilt: Option<BuiltPatch>,
     /// Node id per cell slot, in the module's slot order.
     pub node_ids: Vec<String>,
     /// (node id, port) per scalar-meter slot.
@@ -68,8 +71,8 @@ pub struct MiniBus {
     /// Bumped whenever geometry or the patch node/scalar lists change.
     meta_epoch: u64,
     meta_key: (u32, u32, String),
-    /// Key of the preview shader currently installed on the engine.
-    installed_preview: String,
+    /// The preview shader the engine has installed, or had refused.
+    installed_preview: Option<Arc<PatchShader>>,
     patch_nodes: Arc<Vec<String>>,
     patch_scalars: Arc<Vec<(String, String)>>,
     /// Kind of the last published batch, to emit one empty batch on mode
@@ -96,11 +99,17 @@ impl MiniBus {
             next_publish: Instant::now(),
             meta_epoch: 0,
             meta_key: (0, 0, String::new()),
-            installed_preview: String::new(),
+            installed_preview: None,
             patch_nodes: Arc::new(Vec::new()),
             patch_scalars: Arc::new(Vec::new()),
             last_published: None,
         }
+    }
+
+    /// A handle for building patch preview pipelines for this bus off the
+    /// frame loop; `None` without a bus.
+    pub fn patch_compiler(&self) -> Option<PatchCompiler> {
+        self.engine.as_ref().map(Engine::patch_compiler)
     }
 
     /// One program-frame tick. `layer_cfg_index[i]` is the config index of
@@ -150,18 +159,19 @@ impl MiniBus {
             let mut cells = Vec::new();
             if slots > 0 && !info.shader.wgsl.is_empty() {
                 let engine = self.engine.as_mut().expect("checked above");
-                if self.installed_preview != info.key {
-                    match engine.set_patch_shader(Some(&info.shader)) {
-                        Ok(()) => self.installed_preview = info.key.clone(),
-                        Err(error) => {
-                            // A program that validated for the main pipeline
-                            // should validate here too; if not, disable cells
-                            // for this patch rather than retrying every tick.
-                            log::warn!("mini preview pipeline failed: {error:#}");
-                            self.installed_preview = info.key.clone();
-                            let _ = engine.set_patch_shader(None);
-                        }
+                if self.installed_preview.as_deref() != Some(&*info.shader) {
+                    // Never compiled here: that would stall the program frame.
+                    // Without pipelines (the build failed), cells stay dark
+                    // for this patch rather than retrying every tick.
+                    let installed = match info.prebuilt.clone() {
+                        Some(built) => engine.install_patch(built),
+                        None => Err(anyhow::anyhow!("no pipelines were built for it")),
+                    };
+                    if let Err(error) = installed {
+                        log::warn!("mini preview pipeline not installed: {error:#}");
+                        let _ = engine.set_patch_shader(None);
                     }
+                    self.installed_preview = Some(info.shader.clone());
                 }
                 engine.ensure_capacity(total * slots as u32);
                 let mut inputs = base.clone();

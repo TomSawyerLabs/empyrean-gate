@@ -363,8 +363,9 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
     }
     let prog = patch::codegen::compile(&doc).map_err(|e| anyhow::anyhow!(e))?;
     anyhow::ensure!(prog.grid_passes.len() == 5, "render, blur ×2, trails ×2");
+    let shader = empyrean_gate_lib::engine::PatchShader::main(&prog);
     engine
-        .set_patch_shader(Some(&empyrean_gate_lib::engine::PatchShader::main(&prog)))
+        .set_patch_shader(Some(&shader))
         .context("patch pipeline build")?;
     let images: Vec<(u32, Vec<u8>)> = prog
         .images
@@ -438,6 +439,35 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
         bail!("patch demo rendered an entirely black final frame");
     }
     println!("patch demo OK: {nonzero} nonzero bytes, checksum {checksum:#018x}");
+
+    // The frame loop's way: build the pipelines on another thread while this
+    // one keeps rendering the installed patch, then swap between frames.
+    let compiler = engine.patch_compiler();
+    let started = Instant::now();
+    let build = std::thread::spawn(move || compiler.build(&shader));
+    let mut frames_meanwhile = 0u32;
+    let mut worst_ms = 0f64;
+    while !build.is_finished() {
+        let frame = Instant::now();
+        engine.render(&inputs).context("frame during a background build")?;
+        worst_ms = worst_ms.max(frame.elapsed().as_secs_f64() * 1000.0);
+        frames_meanwhile += 1;
+    }
+    let build_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let built = build
+        .join()
+        .map_err(|_| anyhow::anyhow!("background build panicked"))?
+        .context("background patch pipeline build")?;
+    engine.install_patch(built).context("install the background build")?;
+    let rgb = engine.render(&inputs)?;
+    anyhow::ensure!(
+        rgb.is_none_or(|rgb| rgb.iter().any(|byte| *byte != 0)),
+        "black frame after the background build was installed"
+    );
+    println!(
+        "background build OK: {build_ms:.1} ms, {frames_meanwhile} frames rendered meanwhile \
+         (worst {worst_ms:.2} ms)"
+    );
     Ok(())
 }
 

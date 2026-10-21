@@ -79,13 +79,15 @@ ureq = { version = "3.4.0", default-features = false, features = ["json", "rustl
 url = "2.5.8"
 # sACN source identity (CID) — a real RFC 4122 v4 UUID, generated once and persisted.
 uuid = { version = "1.24.1", features = ["v4"] }
-wgpu = { version = "29", default-features = false, features = ["wgsl", "vulkan"] }
+# `std` makes wgpu's error scopes per thread, so patch pipelines can build on
+# a worker (engine/patch_build.rs) without catching the frame loop's errors.
+wgpu = { version = "29", default-features = false, features = ["std", "wgsl", "vulkan"] }
 
 # macOS has no native Vulkan; wgpu's plain `vulkan` feature is not implemented there
 # and Instance::new panics. `vulkan-portability` routes Vulkan through MoltenVK —
 # still Vulkan-only by design, no Metal fallback.
 [target.'cfg(target_os = "macos")'.dependencies]
-wgpu = { version = "29", default-features = false, features = ["wgsl", "vulkan-portability"] }
+wgpu = { version = "29", default-features = false, features = ["std", "wgsl", "vulkan-portability"] }
 
 # Detecting whether a WebView2 runtime exists (see `webview2`). Both crates are
 # ALREADY in the graph via tauri/wry — pinned to the versions the lockfile
