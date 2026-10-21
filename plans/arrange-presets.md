@@ -1,6 +1,6 @@
 # Arrange the built-in patches
 
-Status: **in progress (2026-10-21)**, third part: the site tests the arranged layout broke (worktree `C:\Users\camer\.t3\worktrees\empyreangate.org\arrange-tests`, branch `arrange-tests` → site `dev`). DJ Stereo Master Flow shipped: gate `74388f8`, site dev `bbc4f35`, checked on the Preview. Arranging: gate master `9cb8fc7` (ISSUES `640a5ab`), site dev `ee557a2` (bot bump), verified on the Preview., worktree
+Status: **done (2026-10-21)**. Third part, the site tests the arranged layout broke and the cropped opening view: gate `c348981` + `57cc927`, site dev `9dc260c`, bump `2a3ba33`, checked on the Preview (worktree `C:\Users\camer\.t3\worktrees\empyreangate.org\arrange-tests`, branch `arrange-tests` → site `dev`). DJ Stereo Master Flow shipped: gate `74388f8`, site dev `bbc4f35`, checked on the Preview. Arranging: gate master `9cb8fc7` (ISSUES `640a5ab`), site dev `ee557a2` (bot bump), verified on the Preview., worktree
 `C:\Users\camer\.t3\worktrees\Empyrean\arrange-presets`, branch
 `arrange-presets` → gate `master`.
 
@@ -134,7 +134,10 @@ Site tests (third part):
   the refit); gate `test:behavior` 177/178 (the one failure the known WebKit
   `multitouch` flake from ISSUES.md, 6/6 run alone); site suite on this
   patch-web 309 passed, 36 skipped
-- [ ] Commit, push, bump, check on the Preview
+- [x] Gate `57cc927` (CI green), site bump `2a3ba33`. On the Preview in
+  Chrome with WebGPU: Rainbow Sparkle opens at 0.32 and Beat Pulse at 0.31
+  with every card in view; DJ Stereo Master Flow (44 nodes) stops at the 0.2
+  floor and overhangs 184 px of a ~480 px canvas, so it needs a pan there
 
 
 DJ Stereo Master Flow (second part):
