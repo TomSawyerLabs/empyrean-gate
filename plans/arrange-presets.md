@@ -1,6 +1,6 @@
 # Arrange the built-in patches
 
-Status: **in progress (2026-10-21)**, second part: shipping DJ Stereo Master Flow. Arranging was done: gate master `9cb8fc7` (ISSUES `640a5ab`), site dev `ee557a2` (bot bump), verified on the Preview., worktree
+Status: **done (2026-10-21)**. DJ Stereo Master Flow shipped: gate `74388f8`, site dev `bbc4f35`, checked on the Preview. Arranging: gate master `9cb8fc7` (ISSUES `640a5ab`), site dev `ee557a2` (bot bump), verified on the Preview., worktree
 `C:\Users\camer\.t3\worktrees\Empyrean\arrange-presets`, branch
 `arrange-presets` → gate `master`.
 
@@ -105,7 +105,10 @@ DJ Stereo Master Flow (second part):
 - [x] Added to `SOURCES`; `every_preset_file_is_listed` test
 - [x] cargo test 161/161, patch-web tests 212/212, typecheck, `test:browser`
   (Chrome's compiler, every preset) 3/3, re-arranged
-- [ ] Push; site bump; check on the Preview
+- [x] Gate master `74388f8`, CI green; site dev `bbc4f35` (bump dispatched by
+  hand: GitHub ran the 15-minute schedule only every few hours); on the
+  Preview 19 built-ins, `flow` is a Code node at the committed position,
+  `validate` returns no errors
 
 Arranging:
 
