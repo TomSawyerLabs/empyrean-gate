@@ -69,3 +69,19 @@ on 2026-10-17 (ports now carry their shape in `aria-label`); the rest remain.
   its output dots and the wire. Seen 2026-10-21 in the patch-web demo.
 - **Why it matters:** the value reads as floating beside the node, and it
   covers the output port a wire is dragged from.
+
+## Feedback reads the frame two back, not the last one
+
+- **What:** `finish()` (`crates/empyrean-patch/shaders/patch_lib.wgsl`) keeps
+  the previous frame for Feedback by moving `OUT[idx]` into the second half
+  and then writing the new frame. But `feedback_at` reads the second half
+  while the frame is being computed, before that move: so frame N reads
+  what frame N-1's `finish` put there, which is frame N-2. The node's
+  description says "what the array showed last frame".
+- **How seen:** 2026-10-21, frame stepping (`plans/frame-step.md`): rendering
+  a paused frame again only matched the original once both halves of OUT
+  were put back, the frames one and two behind (test "a paused edit renders
+  the live frame again" in `packages/patch-web/browser/frames.spec.ts`).
+- **Why it matters:** trails and echoes lag a frame, and odd and even frames
+  feed two separate chains; the gate and the playground share the shader,
+  so both do it. A fix changes how every Feedback patch looks.
