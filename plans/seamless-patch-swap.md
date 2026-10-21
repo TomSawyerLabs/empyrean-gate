@@ -96,7 +96,7 @@ program adopting phases and timers as it already does.
 
 ### Ship
 
-13. [ ] Gate: commit per logical step, push `master`; README/docs where the
+13. [x] Gate: commit per logical step, push `master`; README/docs where the
     behaviour is described. Wait for `web-dist`, then the site bot's bump on
     `dev`; check the playground on the dev Preview.
 
@@ -152,7 +152,16 @@ program adopting phases and timers as it already does.
   362 + 6 pass. `engine-smoke --patch` on the Intel UHD: background build
   13.3 ms, 9 frames rendered meanwhile, worst frame 1.68 ms.
 - [x] End to end on a sandboxed headless app (see Findings for how).
-- [ ] Push gate master; web-dist; site bump on dev; check the dev Preview.
+- [x] Gate master `9187d1e` (Checks + Web dist green); web-dist `518c8ee`;
+  the site bot bumped `dev` (`0fd78f6`). On the dev Preview (Chrome): the
+  Playground bundle carries the new runtime (`shaderChanged`), four Code
+  node edits through `window.empyrean.setPatch` applied with `ok: true`
+  (each ~220-270 ms to install), no console errors. Frame timing could not
+  be measured there: Chrome ran the page at ~1 rAF/s (window in the
+  background), so the timing evidence is the fake-GPU unit test and the
+  gate A/B above.
+- [ ] Not done, Cameron's call: a gate release tag, to put this on the
+  show machine.
 
 ## Open questions for the user
 
