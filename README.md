@@ -137,6 +137,7 @@ bun run demo            # port 28150: every preset on a bare WebGPU page (/),
                         # the editor over the real core (/editor.html), and
                         # every palette thumbnail (/thumbs.html)
 bun run thumbnails      # regenerate src/editor/thumbs.gen.ts
+bun run arrange-presets # lay out the built-in patches as ⇆ Arrange does
 ```
 
 `thumbnails` renders each node kind in a small showcase patch
@@ -149,6 +150,15 @@ thumbnail nor a place in `ICON_ONLY`. The `crates/` workspace keeps its
 intermediate build files in its own `target/` (`crates/.cargo/config.toml`), so
 two worktrees can build the wasm at once even where a user config shares one
 cargo build directory across projects.
+
+`arrange-presets` opens each built-in patch
+(`crates/empyrean-patch/src/presets/*.json`) in the demo editor, in Chromium
+on SwiftShader's WebGPU so the cards carry their live minis, presses Arrange
+through the editor's handle and writes the positions back, changing only
+each node's `"pos"`. Arrange lays the graph out by the cards' measured sizes,
+which only a browser knows, so it cannot be done offline. Run it after adding
+or changing a preset; `presets-arranged.test.ts` fails when a built-in has a
+wire running right to left or two nodes on top of each other.
 
 `test:browser` (needs the wasm build, and `bunx playwright install chromium`)
 compiles every shader the patch core can generate in Chromium: each node kind
