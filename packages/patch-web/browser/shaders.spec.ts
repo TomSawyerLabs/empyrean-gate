@@ -50,6 +50,7 @@ test.beforeAll(async ({ browser }) => {
     for (const [code, which] of [
       [sim.wgsl(), "main"],
       [sim.previewWgsl(), "thumbnails"],
+      [sim.fullWgsl(), "every-LED taps"],
     ] as const) {
       if (!code) continue;
       const shader = shaders.get(code) ?? { code, labels: [], entries };

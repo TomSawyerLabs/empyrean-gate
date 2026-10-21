@@ -143,8 +143,12 @@ export function shaderCorpus(core: PatchCore): CorpusEntry[] {
       label: `debug fed ${shape}`,
       doc: doc(
         `debug ${shape}`,
-        [node("s", src[0]), node("d", "debug"), node("o", "output")],
-        [{ from: { node: "s", port: src[1] }, to: { node: "d", port: "in" } }],
+        // Shown at every LED too, which is its own module.
+        [node("s", src[0]), node("d", "debug"), node("e", "debug", { detail: 1 }), node("o", "output")],
+        [
+          { from: { node: "s", port: src[1] }, to: { node: "d", port: "in" } },
+          { from: { node: "s", port: src[1] }, to: { node: "e", port: "in" } },
+        ],
       ),
     });
   }

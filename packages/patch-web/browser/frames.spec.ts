@@ -216,3 +216,35 @@ test("stepped frames reach the thumbnails and meters, one sample per frame", asy
   // Two frames back, the meter ends where it was then.
   expect(r.pastMeter[0]).toBe(r.meter[0]);
 });
+
+test("a Debug node at every LED gets a whole frame's cell, kept with the others", async () => {
+  const doc: PatchDoc = {
+    ...TURNING,
+    id: "every-led",
+    nodes: [...TURNING.nodes, node("tap", "debug", { detail: 1 })],
+    edges: [...TURNING.edges, { from: { node: "bow", port: "out" }, to: { node: "tap", port: "in" } }],
+  };
+  const r = await inPage(async (rt, d) => {
+    await rt.setPatch(d);
+    await rt.setKeep(2);
+    rt.retain();
+    rt.pause();
+    const settle = () => new Promise((res) => setTimeout(res, 300));
+    rt.stepFrames(1);
+    await settle();
+    const first = Array.from(rt.cells.get("node:tap") ?? []);
+    rt.stepFrames(1);
+    await settle();
+    const second = Array.from(rt.cells.get("node:tap") ?? []);
+    rt.stepFrames(-1);
+    await settle();
+    const back = Array.from(rt.cells.get("node:tap") ?? []);
+    const mini = rt.cells.get("node:bow")?.length ?? 0;
+    rt.release();
+    return { first: first.length, differs: first.join() !== second.join(), same: back.join() === first.join(), mini };
+  }, doc);
+  expect(r.first).toBe(64 * 378 * 3);
+  expect(r.mini).toBe(64 * 16 * 3);
+  expect(r.differs).toBe(true);
+  expect(r.same).toBe(true);
+});

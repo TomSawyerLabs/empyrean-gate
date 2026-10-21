@@ -205,6 +205,8 @@ export class PatchRuntime implements MiniSource, FrameTransport {
   private miniListeners = new Set<() => void>();
   private lastPreview = 0;
   private previewNodes: string[] = [];
+  /** The Debug nodes shown at every LED, in their cells' order. */
+  private fullNodes: string[] = [];
   /** The picture currently uploaded to each media cell (by data URL). */
   private uploadedImages = new Map<number, string>();
   private previewScalars: [string, string][] = [];
@@ -369,6 +371,7 @@ export class PatchRuntime implements MiniSource, FrameTransport {
         source.previewWgsl(),
         source.previewNodes().length,
         JSON.parse(source.gridPasses()) as GridPasses,
+        { wgsl: source.fullWgsl(), cells: source.fullNodes().length },
       );
     } catch (e) {
       if (gen === this.generation) {
@@ -405,6 +408,13 @@ export class PatchRuntime implements MiniSource, FrameTransport {
   private ready(sim: PatchSim, gen: number, shader: boolean) {
     this.syncImages(sim);
     this.previewNodes = sim.previewNodes();
+    this.fullNodes = sim.fullNodes();
+    // Keeping past frames: the every-LED cells kept with them change size
+    // with the patch.
+    const fullBytes = this.fullNodes.length * this.gpu.frameBytes;
+    if (this.keepSeconds > 0 && this.history && this.history.fullBytes !== fullBytes) {
+      void this.setKeep(this.keepSeconds);
+    }
     const scalars = JSON.parse(sim.previewScalars()) as [string, string][];
     if (JSON.stringify(scalars) !== JSON.stringify(this.previewScalars)) {
       this.previewScalars = scalars;
@@ -652,7 +662,10 @@ export class PatchRuntime implements MiniSource, FrameTransport {
               history!.restore(enc, 2, this.gpu.out, null, this.gpu.frameBytes);
             }
           : undefined,
-        record: history ? (enc) => history.record(enc, this.gpu.out, this.gpu.previewBuffer, meta, how.again) : undefined,
+        record: history
+          ? (enc) =>
+              history.record(enc, this.gpu.out, this.gpu.previewBuffer, meta, how.again, this.gpu.fullBuffer)
+          : undefined,
       },
       thumbs,
     );
@@ -733,6 +746,7 @@ export class PatchRuntime implements MiniSource, FrameTransport {
         keepSlots(s),
         this.gpu.frameBytes,
         s > 0 ? this.gpu.maxPreviewBytes : 0,
+        this.fullNodes.length * this.gpu.frameBytes,
       );
     } catch (e) {
       return errorText(e);
@@ -747,7 +761,8 @@ export class PatchRuntime implements MiniSource, FrameTransport {
   }
 
   keepCost(seconds: number): number {
-    return keepSlots(seconds) * (this.gpu.frameBytes + (seconds > 0 ? this.gpu.maxPreviewBytes : 0));
+    const thumbs = seconds > 0 ? this.gpu.maxPreviewBytes + this.fullNodes.length * this.gpu.frameBytes : 0;
+    return keepSlots(seconds) * (this.gpu.frameBytes + thumbs);
   }
 
   /** Show the frame `back` frames behind the live one (0: the live one):
@@ -756,7 +771,8 @@ export class PatchRuntime implements MiniSource, FrameTransport {
     const history = this.history;
     if (!history || back >= Math.max(1, history.count)) return;
     const preview = history.previewed ? this.gpu.previewBuffer : null;
-    this.gpu.redraw((enc) => history.restore(enc, back, this.gpu.out, preview));
+    const full = history.previewed ? this.gpu.fullBuffer : null;
+    this.gpu.redraw((enc) => history.restore(enc, back, this.gpu.out, preview, 0, full));
     this.back = back;
     if (!history.previewed) return;
     if (this.miniRefs > 0) this.readMinis(false);
@@ -937,6 +953,7 @@ export class PatchRuntime implements MiniSource, FrameTransport {
     }
     this.reading = true;
     const nodes = this.previewNodes;
+    const full = this.fullNodes;
     const gen = this.generation;
     void this.gpu
       .readPreview(dispatch)
@@ -947,6 +964,12 @@ export class PatchRuntime implements MiniSource, FrameTransport {
           this.cells.clear();
           res.cells.forEach((rgb, i) => {
             const id = nodes[i];
+            if (id) this.cells.set(`node:${id}`, rgb);
+          });
+          // An every-LED Debug cell stands in for its mini (a ring draws a
+          // cell at whatever size it is).
+          res.full.forEach((rgb, i) => {
+            const id = full[i];
             if (id) this.cells.set(`node:${id}`, rgb);
           });
         }

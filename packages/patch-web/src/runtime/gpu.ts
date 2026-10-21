@@ -147,6 +147,17 @@ export interface GpuProgram {
   readonly gridBytes: number;
   readonly preview: GPUComputePipeline | null;
   readonly previewCells: number;
+  /** The Debug nodes shown at every LED (`fullWgsl`): the same entry point
+   * as the preview's, run with the main globals into its own buffer. */
+  readonly full: GPUComputePipeline | null;
+  readonly fullCells: number;
+}
+
+/** The every-LED Debug module for `build` (`PatchSim.fullWgsl`); none by
+ * default. */
+export interface FullTaps {
+  wgsl: string;
+  cells: number;
 }
 
 interface View {
@@ -177,6 +188,11 @@ export class GateGpu {
   private grid: GPUBuffer;
   private previewOut: GPUBuffer | null = null;
   private previewRead: GPUBuffer | null = null;
+  private fullOut: GPUBuffer | null = null;
+  private fullRead: GPUBuffer | null = null;
+  private fullBind: GPUBindGroup | null = null;
+  private full: GPUComputePipeline | null = null;
+  private fullCells = 0;
   private previewBusy = false;
 
   private layout: GPUBindGroupLayout;
@@ -288,12 +304,13 @@ export class GateGpu {
     previewWgsl: string,
     previewCells: number,
     grid: GridPasses = { bytes: 0, passes: [] },
+    full: FullTaps = { wgsl: "", cells: 0 },
   ): Promise<GpuProgram> {
-    const key = JSON.stringify([wgsl, previewWgsl, previewCells, grid]);
+    const key = JSON.stringify([wgsl, previewWgsl, previewCells, grid, full]);
     if (this.installed?.key === key) return Promise.resolve(this.installed);
     let building = this.building.get(key);
     if (!building) {
-      building = this.compile(key, wgsl, previewWgsl, previewCells, grid).finally(() => {
+      building = this.compile(key, wgsl, previewWgsl, previewCells, grid, full).finally(() => {
         this.building.delete(key);
       });
       this.building.set(key, building);
@@ -307,6 +324,7 @@ export class GateGpu {
     previewWgsl: string,
     previewCells: number,
     grid: GridPasses,
+    full: FullTaps,
   ): Promise<GpuProgram> {
     const pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [this.layout] });
     // One pipeline per entry point of the module, `main` last.
@@ -336,8 +354,8 @@ export class GateGpu {
       }
     };
 
-    // Both modules at once: the sooner both exist, the sooner the swap.
-    const [built, preview] = await Promise.all([
+    // Every module at once: the sooner all exist, the sooner the swap.
+    const [built, preview, fullTaps] = await Promise.all([
       pipelines(
         "patch",
         wgsl,
@@ -346,6 +364,7 @@ export class GateGpu {
       // Previews read the textures the main passes rendered (same patch), so
       // a thumbnail never advances Trails a second time.
       previewWgsl ? pipelines("patch preview", previewWgsl).then((p) => p[0]) : null,
+      full.wgsl ? pipelines("patch debug taps", full.wgsl).then((p) => p[0]) : null,
     ]);
     const main = built.pop()!;
     return {
@@ -355,6 +374,8 @@ export class GateGpu {
       gridBytes: grid.bytes,
       preview,
       previewCells: preview ? previewCells : 0,
+      full: fullTaps,
+      fullCells: fullTaps ? full.cells : 0,
     };
   }
 
@@ -388,6 +409,25 @@ export class GateGpu {
         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
       });
       this.previewBind = this.bindGroup(this.previewGlobals, this.previewOut);
+    }
+    this.full = program.full;
+    this.fullCells = program.fullCells;
+    this.fullOut?.destroy();
+    this.fullRead?.destroy();
+    this.fullOut = this.fullRead = this.fullBind = null;
+    if (this.full && this.fullCells > 0) {
+      const bytes = this.fullCells * this.frameBytes;
+      this.fullOut = this.device.createBuffer({
+        label: "debug taps",
+        size: bytes,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      });
+      this.fullRead = this.device.createBuffer({
+        size: bytes,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      });
+      // The main pass's globals: every LED, not a mini's spoke.
+      this.fullBind = this.bindGroup(this.globals, this.fullOut);
     }
   }
 
@@ -444,6 +484,7 @@ export class GateGpu {
       });
       if (this.main) this.mainBind = this.bindGroup(this.globals, this.out);
       if (this.previewOut) this.previewBind = this.bindGroup(this.previewGlobals, this.previewOut);
+      if (this.fullOut) this.fullBind = this.bindGroup(this.globals, this.fullOut);
     }
     this.device.queue.writeBuffer(this.video, 0, rgba as GPUAllowSharedBufferSource, 0, width * height * 4);
   }
@@ -520,28 +561,43 @@ export class GateGpu {
     return this.previewOut;
   }
 
+  /** The every-LED Debug cells as last rendered; null without any. */
+  get fullBuffer(): GPUBuffer | null {
+    return this.fullOut;
+  }
+
   private dispatchPreview(pass: GPUComputePassEncoder) {
-    if (!this.preview || !this.previewBind) return;
-    const perCell = this.geometry.spokes * this.miniPixels();
-    pass.setPipeline(this.preview);
-    pass.setBindGroup(0, this.previewBind);
-    pass.dispatchWorkgroups(Math.ceil((perCell * this.previewCells) / 256));
+    if (this.preview && this.previewBind) {
+      const perCell = this.geometry.spokes * this.miniPixels();
+      pass.setPipeline(this.preview);
+      pass.setBindGroup(0, this.previewBind);
+      pass.dispatchWorkgroups(Math.ceil((perCell * this.previewCells) / 256));
+    }
+    if (this.full && this.fullBind) {
+      const perCell = this.geometry.spokes * this.geometry.pixels;
+      pass.setPipeline(this.full);
+      pass.setBindGroup(0, this.fullBind);
+      pass.dispatchWorkgroups(Math.ceil((perCell * this.fullCells) / 256));
+    }
   }
 
   /** Render the per-node thumbnails and read them back as 3-byte RGB cells
-   * (`spokes × miniPixels` each), in `previewNodes` order. Resolves null when
-   * there is nothing to preview or a readback is already in flight. Without
-   * `dispatch`, reads what the preview buffer already holds (rendered with
+   * (`spokes × miniPixels` each), in `previewNodes` order, and the every-LED
+   * Debug cells (`spokes × pixels` each) in `fullNodes` order. Resolves null
+   * when there is nothing to preview or a readback is already in flight.
+   * Without `dispatch`, reads what the buffers already hold (rendered with
    * the frame, or a past frame put back). */
-  async readPreview(dispatch = true): Promise<{ spokes: number; pixels: number; cells: Uint8Array[] } | null> {
+  async readPreview(
+    dispatch = true,
+  ): Promise<{ spokes: number; pixels: number; cells: Uint8Array[]; full: Uint8Array[] } | null> {
     if (!this.preview || !this.previewBind || !this.previewOut || !this.previewRead) return null;
     if (this.previewBusy) return null;
     this.previewBusy = true;
     const read = this.previewRead;
-    const cells = this.previewCells;
+    const fullOut = this.fullOut;
+    const fullRead = this.fullRead;
     const spokes = this.geometry.spokes;
     const pixels = this.miniPixels();
-    const perCell = spokes * pixels;
     try {
       const enc = this.device.createCommandEncoder({ label: "patch preview" });
       if (dispatch) {
@@ -550,22 +606,30 @@ export class GateGpu {
         pass.end();
       }
       enc.copyBufferToBuffer(this.previewOut, 0, read, 0, read.size);
+      if (fullOut && fullRead) enc.copyBufferToBuffer(fullOut, 0, fullRead, 0, fullRead.size);
       this.device.queue.submit([enc.finish()]);
-      await read.mapAsync(GPUMapMode.READ);
-      const packed = new Uint32Array(read.getMappedRange().slice(0));
-      read.unmap();
-      const out: Uint8Array[] = [];
-      for (let c = 0; c < cells; c++) {
-        const rgb = new Uint8Array(perCell * 3);
-        for (let p = 0; p < perCell; p++) {
-          const v = packed[c * perCell + p];
-          rgb[p * 3] = v & 0xff;
-          rgb[p * 3 + 1] = (v >> 8) & 0xff;
-          rgb[p * 3 + 2] = (v >> 16) & 0xff;
+      const unpack = async (buf: GPUBuffer, cells: number, perCell: number) => {
+        await buf.mapAsync(GPUMapMode.READ);
+        const packed = new Uint32Array(buf.getMappedRange().slice(0));
+        buf.unmap();
+        const out: Uint8Array[] = [];
+        for (let c = 0; c < cells; c++) {
+          const rgb = new Uint8Array(perCell * 3);
+          for (let p = 0; p < perCell; p++) {
+            const v = packed[c * perCell + p]!;
+            rgb[p * 3] = v & 0xff;
+            rgb[p * 3 + 1] = (v >> 8) & 0xff;
+            rgb[p * 3 + 2] = (v >> 16) & 0xff;
+          }
+          out.push(rgb);
         }
-        out.push(rgb);
-      }
-      return { spokes, pixels, cells: out };
+        return out;
+      };
+      const [cells, full] = await Promise.all([
+        unpack(read, this.previewCells, spokes * pixels),
+        fullRead ? unpack(fullRead, this.fullCells, spokes * this.geometry.pixels) : Promise.resolve([]),
+      ]);
+      return { spokes, pixels, cells, full };
     } catch {
       // The buffer was replaced by a new program mid-flight; skip this round.
       return null;
@@ -695,6 +759,8 @@ export class GateGpu {
       this.grid,
       this.previewOut,
       this.previewRead,
+      this.fullOut,
+      this.fullRead,
       this.frameRead,
     ]) {
       b?.destroy();

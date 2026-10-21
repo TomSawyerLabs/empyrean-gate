@@ -1,5 +1,6 @@
 // Past frames, for stepping back (plans/frame-step.md): a ring of the LED
-// frame and the preview cells as the GPU rendered them, copied GPU to GPU
+// frame, the preview cells and the every-LED Debug cells as the GPU rendered
+// them, copied GPU to GPU
 // every frame (nothing is read back until one is shown), and on the CPU the
 // meter values, frame number and patch time of each. A recording, not a
 // simulation: showing a past frame never changes the patch's state.
@@ -25,8 +26,11 @@ export class FrameHistory {
   readonly capacity: number;
   private readonly frameBytes: number;
   private readonly previewBytes: number;
+  /** Bytes of the every-LED Debug cells kept per frame (0: none). */
+  readonly fullBytes: number;
   private frames: GPUBuffer[] = [];
   private previews: GPUBuffer[] = [];
+  private fulls: GPUBuffer[] = [];
   private meta: (FrameMeta | null)[];
   /** The slot holding the newest frame (-1: none yet). */
   private head = -1;
@@ -34,17 +38,18 @@ export class FrameHistory {
 
   /**
    * `frameBytes`: the LED frame (the first half of OUT); `previewBytes`: the
-   * largest preview there can be (0: frames only). Throws when the GPU
-   * refuses the memory.
+   * largest preview there can be (0: frames only); `fullBytes`: the patch's
+   * every-LED Debug cells (0: none). Throws when the GPU refuses the memory.
    */
   static async create(
     device: GPUDevice,
     capacity: number,
     frameBytes: number,
     previewBytes: number,
+    fullBytes = 0,
   ): Promise<FrameHistory> {
     device.pushErrorScope("out-of-memory");
-    const h = new FrameHistory(device, capacity, frameBytes, previewBytes);
+    const h = new FrameHistory(device, capacity, frameBytes, previewBytes, fullBytes);
     const error = await device.popErrorScope();
     if (error) {
       h.destroy();
@@ -53,10 +58,17 @@ export class FrameHistory {
     return h;
   }
 
-  private constructor(device: GPUDevice, capacity: number, frameBytes: number, previewBytes: number) {
+  private constructor(
+    device: GPUDevice,
+    capacity: number,
+    frameBytes: number,
+    previewBytes: number,
+    fullBytes: number,
+  ) {
     this.capacity = Math.max(3, capacity);
     this.frameBytes = frameBytes;
     this.previewBytes = previewBytes;
+    this.fullBytes = previewBytes > 0 ? fullBytes : 0;
     this.meta = new Array<FrameMeta | null>(this.capacity).fill(null);
     const usage = GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
     for (let first = 0; first < this.capacity; first += CHUNK_SLOTS) {
@@ -64,6 +76,9 @@ export class FrameHistory {
       this.frames.push(device.createBuffer({ label: "past frames", size: slots * frameBytes, usage }));
       if (previewBytes > 0) {
         this.previews.push(device.createBuffer({ label: "past previews", size: slots * previewBytes, usage }));
+      }
+      if (this.fullBytes > 0) {
+        this.fulls.push(device.createBuffer({ label: "past debug taps", size: slots * this.fullBytes, usage }));
       }
     }
   }
@@ -79,9 +94,17 @@ export class FrameHistory {
   }
 
   /** Record the frame just rendered into `out` (and the preview cells into
-   * `preview`, when it keeps them): a new newest frame, or, with `replace`,
-   * a new version of the newest one (a paused frame rendered again). */
-  record(enc: GPUCommandEncoder, out: GPUBuffer, preview: GPUBuffer | null, meta: FrameMeta, replace = false) {
+   * `preview` and the every-LED ones into `full`, when it keeps them): a new
+   * newest frame, or, with `replace`, a new version of the newest one (a
+   * paused frame rendered again). */
+  record(
+    enc: GPUCommandEncoder,
+    out: GPUBuffer,
+    preview: GPUBuffer | null,
+    meta: FrameMeta,
+    replace = false,
+    full: GPUBuffer | null = null,
+  ) {
     if (!replace || this.head < 0) {
       this.head = (this.head + 1) % this.capacity;
       this.filled = Math.min(this.filled + 1, this.capacity);
@@ -93,6 +116,10 @@ export class FrameHistory {
       const bytes = Math.min(this.previewBytes, preview.size);
       enc.copyBufferToBuffer(preview, 0, this.previews[chunk]!, at * this.previewBytes, bytes);
     }
+    if (this.fullBytes > 0 && full) {
+      const bytes = Math.min(this.fullBytes, full.size);
+      enc.copyBufferToBuffer(full, 0, this.fulls[chunk]!, at * this.fullBytes, bytes);
+    }
     this.meta[slot] = meta;
   }
 
@@ -103,14 +130,25 @@ export class FrameHistory {
   }
 
   /** Copy the frame `back` frames before the newest into `out` at `offset`
-   * (and its preview cells into `preview`). */
-  restore(enc: GPUCommandEncoder, back: number, out: GPUBuffer, preview: GPUBuffer | null, offset = 0) {
+   * (and its preview cells into `preview`, its every-LED cells into `full`). */
+  restore(
+    enc: GPUCommandEncoder,
+    back: number,
+    out: GPUBuffer,
+    preview: GPUBuffer | null,
+    offset = 0,
+    full: GPUBuffer | null = null,
+  ) {
     if (back < 0 || back >= this.filled) return;
     const [chunk, at] = this.locate(this.slotAt(back));
     enc.copyBufferToBuffer(this.frames[chunk]!, at * this.frameBytes, out, offset, this.frameBytes);
     if (this.previewBytes > 0 && preview) {
       const bytes = Math.min(this.previewBytes, preview.size);
       enc.copyBufferToBuffer(this.previews[chunk]!, at * this.previewBytes, preview, 0, bytes);
+    }
+    if (this.fullBytes > 0 && full) {
+      const bytes = Math.min(this.fullBytes, full.size);
+      enc.copyBufferToBuffer(this.fulls[chunk]!, at * this.fullBytes, full, 0, bytes);
     }
   }
 
@@ -138,9 +176,10 @@ export class FrameHistory {
   }
 
   destroy() {
-    for (const b of [...this.frames, ...this.previews]) b.destroy();
+    for (const b of [...this.frames, ...this.previews, ...this.fulls]) b.destroy();
     this.frames = [];
     this.previews = [];
+    this.fulls = [];
     this.clear();
   }
 
