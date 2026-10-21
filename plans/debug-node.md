@@ -1,7 +1,8 @@
 # Debug node: a tap that shows any wire
 
-Status: **in progress** (branch `debug-node`, worktree
-`~/.t3/worktrees/Empyrean/debug-node`).
+Status: **built and tested; on gate `master` (`7c2344f`) and the
+empyreangate.org `dev` Preview** (bump `b348e80`, README `3982361`), not
+yet in a gate release.
 
 ## Goal
 
@@ -65,10 +66,10 @@ tapped shape); Live renders a strip of minis for them.
 1. **Done** (`7b36ca2`). Crate: shape, registry, codegen, eval, tests.
 2. **Done** (`bea531d`). patch-web: types, editor view, panel, `MiniTap`,
    icons/thumbs, connect suggestions, corpus, guide.
-3. **Current.** Gate app: status `patch_taps`, Live strip, spec
+3. **Done** (`03fded4`). Gate app: status `patch_taps`, Live strip, spec
    `tests/live-taps.spec.ts`.
-4. README (gate, patch-web), web-dist publish (gate master push), site bump
-   on `dev` (the "Web dist bump" workflow does it, or by hand).
+4. **Done.** README (gate, patch-web, site), web-dist published from gate
+   master, site bump on `dev` (dispatched by hand: the schedule lagged).
 
 ## Findings / gotchas
 
@@ -90,8 +91,15 @@ tapped shape); Live renders a strip of minis for them.
 - [x] Step 1: crate 167 tests pass.
 - [x] Step 2: patch-web typecheck, 215 unit tests, browser shader corpus
       (Chrome compiles every shader incl. "debug fed <shape>").
-- [ ] Step 3
-- [ ] Step 4
+- [x] Step 3: gate typecheck, cargo test --lib 362, test:behavior 179/180
+      (the one failure the known WebKit multitouch flake in ISSUES.md;
+      passes alone), layout gate, live-taps on Chromium.
+- [x] Step 4: gate CI green on `7c2344f` (Checks, Web dist); site Preview
+      built; checked on dev.empyreangate.org in Chrome: rings, meter,
+      fire strip, Live badge all live. A test patch "Debug node check
+      (Claude, safe to delete)" was left in Cameron's playground library.
+- Rebased once onto the Output's mini (`43b1d82`, another thread): the
+  Output's cell is slot 0, Debug cells follow it.
 
 ## Open questions for the user
 
