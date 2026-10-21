@@ -198,6 +198,10 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
     "",
     "A patch has one `output` node (at most one; without it nothing shows), and the picture is what reaches its `in`.",
     "",
+    "A `debug` node is for people looking inside a patch: wire any output into its `in` and the editor shows that " +
+      "wire live, large. It changes nothing on the gate and costs nothing there, so a patch may keep them; its " +
+      "`live` select (1) also shows it on the gate's Live tab during a show.",
+    "",
     "**Blocks.** A patch used as a Sub-patch can take and hand on more than a picture: each `patch_in` node inside " +
       "it is an input port of the Sub-patch, and each `patch_out` an output port, named by that node's `id` (its " +
       "`name` is only the label). Their `shape` select (0 colour field, 1 grey field, 2 number, 3 event, 4 colour " +
@@ -213,7 +217,7 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
   add(
     "",
     "A wire connects ports of the same shape, plus two automatic adapters: `scalar` → `field_scalar` (a constant " +
-      "field) and `field_scalar` → `field_color` (grayscale).",
+      "field) and `field_scalar` → `field_color` (grayscale). An `any` port (a `debug` node's `in`) takes every wire.",
     "",
     "**Two domains.** Fields live on the *plane* (`field_*`: defined at every position, so Transform can move them) " +
       "or on the *LEDs* (`led_*`: defined only at the gate's physical LEDs, such as `random_field`, or a Code node " +

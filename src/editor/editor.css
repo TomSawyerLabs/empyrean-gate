@@ -2196,3 +2196,55 @@
   align-items: center;
   gap: 7px;
 }
+
+/* Debug: a tap that only shows what it is fed. Dashed, as it is not part of
+   what the gate shows; its `in` takes any wire, so its dot is every colour
+   until one arrives. */
+.patch-palette .cat-debug { --cat: #5ce1ff; }
+.pnode.cat-debug .pnode-head { border-left: 3px solid #5ce1ff; }
+.palette-item.cat-debug { border-left: 3px solid #5ce1ff; }
+.pnode.cat-debug { border-style: dashed; border-color: #3d6f80; }
+.pnode.cat-debug.selected { border-color: var(--pe-accent, #7c5cff); }
+
+.shape-any {
+  background: conic-gradient(#7cc0ff, #ffe066, #ff9f5c, #ff5c7a, #ff8fd0, #c0a8ff, #7cc0ff) !important;
+}
+
+.pnode-debug {
+  display: flex;
+  justify-content: center;
+  padding: 8px 10px 2px;
+  min-width: 180px;
+}
+
+.pnode-debug .hint {
+  max-width: 170px;
+  padding: 18px 0;
+  text-align: center;
+  font-size: 11px;
+}
+
+.pnode-badge {
+  margin-left: auto;
+  padding: 0 5px;
+  border: 1px solid #3d6f80;
+  border-radius: 999px;
+  font-size: 9px;
+  line-height: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #5ce1ff;
+}
+
+.patch-debug {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 10px;
+}
+
+.patch-debug .mini-tap-large .mini-ring {
+  width: 220px;
+  height: 220px;
+}

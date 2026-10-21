@@ -16,7 +16,10 @@ export type PatchShape =
   | "points"
   | "effects"
   | "texture"
-  | "pixels";
+  | "pixels"
+  /** A port's shape, never a wire's: an input that takes any wire as it is
+   * (the Debug node's `in`). */
+  | "any";
 
 /** One wire shape as the patch core's `shapes()` describes it: what flows on
  * such a wire, and which shapes may drive an input of it (`accepts`, the
@@ -90,7 +93,7 @@ export interface PatchNodeType {
    * drawn (crate `registry::sampled_inputs`; Transform's `in`): LED data
    * can't go into them without Resample. Absent when there are none. */
   sampled?: string[];
-  category: "input" | "scalar" | "generator" | "field" | "combine" | "texture" | "sink" | "code";
+  category: "input" | "scalar" | "generator" | "field" | "combine" | "texture" | "sink" | "code" | "debug";
   /** The palette group it is listed under (crate `registry::Group`; labels
    * and order in `groups.ts`). Optional: older gates send none, and
    * `groupOf` falls back on the category. */
@@ -314,6 +317,10 @@ export const RESAMPLE_KIND = "resample";
 /** The node kind that is a remark on the canvas (crate `registry::NOTE_KIND`). */
 export const NOTE_KIND = "note";
 
+/** The node kind that only shows what it is fed (crate `registry::DEBUG_KIND`):
+ * one `any` input, no outputs, a large mini. */
+export const DEBUG_KIND = "debug";
+
 /** Shapes a Code node's inputs may have. Points, Effects and Texture reach
  * a GPU body as `name_count` / `name_at(k)` / `name_on(k)` / `name_at(uv)`. */
 export const CODE_INPUT_SHAPES: readonly PatchShape[] = [
@@ -425,10 +432,11 @@ export function defaultCode(): CodeDef {
 }
 
 /** Wire-compat rule — mirrors Shape::accepts in Rust: exact match plus the
- * two blessed adapters (Scalar→grey, grey→colour). Value types only: whether
- * LED data may go in is the domain rule's business (`fitsInput` in
- * editor/domains.ts). */
+ * two blessed adapters (Scalar→grey, grey→colour), and an `any` input takes
+ * every wire. Value types only: whether LED data may go in is the domain
+ * rule's business (`fitsInput` in editor/domains.ts). */
 export function shapeAccepts(into: PatchShape, from: PatchShape): boolean {
+  if (into === "any") return from !== "any" && from !== "pixels";
   return (
     into === from ||
     (isGreyField(into) && (from === "scalar" || isGreyField(from))) ||

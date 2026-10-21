@@ -58,7 +58,7 @@ import { imageFileToMedia } from "./files";
 import { History } from "./history";
 import { addLayer, layerFor, layerInput, moveLayer, removeLayer } from "./layers";
 import { NodeIcon } from "./icons";
-import { MiniMeter, MiniRing, type MiniSource } from "./minis";
+import { MiniMeter, MiniRing, MiniTap, tapsAsRing, type MiniSource } from "./minis";
 import { Palette, PALETTE_DRAG_TYPE, PALETTE_PARAMS_TYPE, type SubpatchChoice } from "./Palette";
 import { PanelHead, useSheet } from "./sheet";
 import { isBuiltin, linkedSources, snapshot, sourceRev, summarize, summaryLinks, syncLinks } from "./links";
@@ -68,6 +68,7 @@ import {
   applies,
   boundaryShape,
   CODE_KIND,
+  DEBUG_KIND,
   PATCH_IN_KIND,
   PATCH_OUT_KIND,
   NOTE_KIND,
@@ -446,6 +447,9 @@ type PatchFlowNode = FlowNode<
     wiredIn: string[];
     /** Its field outputs carry LED data, not the plane (see domains.ts). */
     led: boolean;
+    /** A Debug node's: the shape of what is wired into it (see `fedShape`);
+     * null when nothing is, and on every other node. */
+    fed: PatchShape | null;
   },
   "patch"
 >;
@@ -536,7 +540,24 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
     if (!data.wiredIn.includes(name)) return " port-fit";
     return combines(node.id, name) ? " port-fit port-combine" : " port-nofit";
   };
-  const portLabel = (p: Port, dir: "in" | "out") => `${p.label ?? p.name} · ${SHAPE_LABEL[p.shape]} ${dir}`;
+  const portLabel = (p: Port, dir: "in" | "out") =>
+    `${p.label ?? p.name} · ${SHAPE_LABEL[dir === "in" && data.fed ? data.fed : p.shape]} ${dir}`;
+  // A Debug node's `in` takes any wire; its dot wears the colour of the one
+  // it has.
+  const dotShape = (p: Port) => (p.shape === "any" && data.fed ? data.fed : p.shape);
+  const tapFace = (compact: boolean) =>
+    live && data.fed ? (
+      <MiniTap source={minis!} id={data.mini} shape={data.fed} label={SHAPE_LABEL[data.fed]} compact={compact} />
+    ) : compact ? null : (
+      <span className="hint">
+        {data.fed ? "Shows here while this patch runs." : "Wire anything into it to watch it here."}
+      </span>
+    );
+  const onLive = node.kind === DEBUG_KIND && (node.params.live ?? 0) >= 1 && (
+    <span className="pnode-badge" title="Also shown on the gate's Live tab while this patch is on air">
+      Live
+    </span>
+  );
   const collapseButton = setCollapsed && (
     <button
       type="button"
@@ -564,7 +585,9 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
     const choice = def.params.find((p) => p.kind !== "number");
     const layers = layerCount(def, node);
     const choiceLabel =
-      layers > 1
+      node.kind === DEBUG_KIND
+        ? undefined
+        : layers > 1
         ? `${layers} layers`
         : choice && choice.kind !== "number"
           ? choice.kind.select[Math.round(node.params[choice.name] ?? choice.default)]
@@ -579,6 +602,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
             <NodeIcon kind={node.kind} category={def.category} size={13} />
             {node.name || def.label}
           </span>
+          {onLive}
           {collapseButton}
         </div>
         <div className="pnode-body">
@@ -589,12 +613,13 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
                 className={`pnode-port in${fitClass(p.shape, "in", p.name)}`}
                 aria-label={portLabel(p, "in")}
               >
-                <Handle type="target" position={Position.Left} id={p.name} className={`port-dot shape-${p.shape}`} />
+                <Handle type="target" position={Position.Left} id={p.name} className={`port-dot shape-${dotShape(p)}`} />
                 {named && <span>{p.label ?? p.name}</span>}
               </div>
             ))}
           </div>
           <div className="pnode-face">
+            {node.kind === DEBUG_KIND && tapFace(true)}
             {rings.length > 0 ? (
               <div className="pnode-mini">
                 <MiniRing source={minis!} mini={rings[0].mini} label={rings[0].label} />
@@ -635,8 +660,10 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
           {def.label}
           {node.name && <span className="pnode-name"> · {node.name}</span>}
         </span>
+        {onLive}
         {collapseButton}
       </div>
+      {node.kind === DEBUG_KIND && <div className="pnode-debug">{tapFace(false)}</div>}
       {rings.length === 1 && (
         <div className="pnode-mini">
           <MiniRing source={minis!} mini={rings[0].mini} label={rings[0].label} />
@@ -703,7 +730,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
                 type="target"
                 position={Position.Left}
                 id={p.name}
-                className={`port-dot shape-${p.shape}`}
+                className={`port-dot shape-${dotShape(p)}`}
               />
               <span>{p.label ?? p.name}</span>
             </div>
@@ -787,6 +814,16 @@ const EDGE_TYPES = { wire: WireEdge };
 // --- doc <-> flow mapping --------------------------------------------------
 
 /** The flow nodes for what is shown: the document at `path` inside `root`. */
+/** The shape the wire into `node.port` carries, its LED twin when its
+ * source hands on LED data (`leds`, from `ledNodes`); null when unwired. */
+function fedShape(doc: PatchDoc, registry: Registry, leds: Set<string>, node: string, port: string): PatchShape | null {
+  const e = doc.edges.find((x) => x.to.node === node && x.to.port === port);
+  const from = e && doc.nodes.find((n) => n.id === e.from.node);
+  if (!e || !from) return null;
+  const declared = portShape(registry.get(from.kind), e.from.port, "out", from);
+  return declared && (leds.has(from.id) ? onLeds(declared) : declared);
+}
+
 function toFlowNodes(root: PatchDoc, path: string[], registry: Registry): PatchFlowNode[] {
   const doc = docAt(root, path);
   const leds = ledNodes(doc, registry);
@@ -802,6 +839,7 @@ function toFlowNodes(root: PatchDoc, path: string[], registry: Registry): PatchF
       wiredOut: doc.edges.filter((e) => e.from.node === n.id).map((e) => e.from.port),
       wiredIn: doc.edges.filter((e) => e.to.node === n.id).map((e) => e.to.port),
       led: leds.has(n.id),
+      fed: n.kind === DEBUG_KIND ? fedShape(doc, registry, leds, n.id, "in") : null,
     },
   }));
 }
@@ -923,6 +961,7 @@ function ParamPanel({
   codeReference,
   onConvertToCode,
   subpatch,
+  tap,
 }: {
   doc: PatchDoc;
   nodeId: string;
@@ -942,6 +981,9 @@ function ParamPanel({
   onConvertToCode?: () => Promise<void>;
   /** For a Sub-patch node: its source and what can be done with it. */
   subpatch?: SubpatchActions;
+  /** For a Debug node: its id as the patch renders (what its mini keys on),
+   * what it is fed, and the mini source while this patch is on air. */
+  tap?: { mini: string; fed: PatchShape | null; minis: MiniSource | null };
 }) {
   const sheet = useSheet(onClose);
   // Why Convert to Code was refused, for the node (and layer count) it was
@@ -1077,6 +1119,18 @@ function ParamPanel({
         />
       </label>
       {node.kind === SUBPATCH_KIND && <SubpatchInfo node={node} canEdit={canEdit} actions={subpatch} />}
+      {node.kind === DEBUG_KIND && (
+        <div className="patch-debug" aria-label="What it is fed">
+          {tap?.minis && tap.fed ? (
+            <MiniTap source={tap.minis} id={tap.mini} shape={tap.fed} label={SHAPE_LABEL[tap.fed]} />
+          ) : (
+            <p className="hint">
+              {tap?.fed ? "Its view shows here while this patch runs." : "Wire any output into its in to watch it here."}
+            </p>
+          )}
+          {tap?.minis && tap.fed && tapsAsRing(tap.fed) && <span className="hint">{SHAPE_LABEL[tap.fed]}</span>}
+        </div>
+      )}
       {node.kind === NOTE_KIND && (
         <label className="patch-field">
           <span>Text</span>
@@ -2403,6 +2457,16 @@ function Editor({
   // The host renders some other patch than the one open (the gate, with
   // patches activated by hand).
   const elsewhere = showActivate && root !== null && !isActive;
+  // The selected node's view, when it is a Debug node.
+  const selectedTap = useMemo(() => {
+    const n = selectedNode && doc ? doc.nodes.find((x) => x.id === selectedNode) : undefined;
+    if (!root || !doc || !registry || n?.kind !== DEBUG_KIND) return undefined;
+    return {
+      mini: flatId(root, path, n.id),
+      fed: fedShape(doc, registry, ledNodes(doc, registry), n.id, "in"),
+      minis: isActive ? minis : null,
+    };
+  }, [root, doc, path, registry, selectedNode, isActive, minis]);
   const builtinSummaries = useMemo(() => presets.map(summarize), [presets]);
   const here: EditorLocation | null = root ? { patch: root.id, path } : null;
 
@@ -2797,6 +2861,7 @@ function Editor({
             status={status}
             codeReference={codeReference}
             subpatch={subpatchActions}
+            tap={selectedTap}
             onConvertToCode={
               convertToCode
                 ? async () => {
