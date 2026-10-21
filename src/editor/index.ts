@@ -34,4 +34,13 @@ export {
 export { BUILTIN_PREFIX, isBuiltin, linksTo, snapshot, sourceRev, summarize, syncLinks } from "./links";
 export { sameLocation, type EditorLocation } from "./navigation";
 export { PatchBrowser, type BrowserView } from "./PatchBrowser";
+export { TransportBar, useTransport } from "./TransportBar";
+export {
+  deviceAllows,
+  formatBytes,
+  KEEP_CHOICES,
+  KEEP_KEY,
+  type FrameTransport,
+  type TransportState,
+} from "./transport";
 export { liveness, PatchStatusIndicator, STALL_MS, type Liveness, type PatchStatus } from "./PatchStatus";

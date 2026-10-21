@@ -28,12 +28,14 @@ export const STALL_MS = 3000;
 /** Hover leaves the details up this long, so the pointer can reach them. */
 const HOVER_CLOSE_MS = 250;
 
-export type Liveness = "unavailable" | "live" | "stalled" | "idle";
+export type Liveness = "unavailable" | "live" | "paused" | "stalled" | "idle";
 
-/** What the status dot shows. */
-export function liveness(status: PatchStatus, quietMs: number): Liveness {
+/** What the status dot shows. `paused`: the person paused it (frame by
+ * frame), so no new frames is not a stall. */
+export function liveness(status: PatchStatus, quietMs: number, paused = false): Liveness {
   if (status.unavailable) return "unavailable";
   if (!status.active) return "idle";
+  if (paused) return "paused";
   return status.beat !== undefined && quietMs >= STALL_MS ? "stalled" : "live";
 }
 
@@ -81,10 +83,13 @@ export function PatchStatusIndicator({
   status,
   variant = "toolbar",
   elsewhere = false,
+  paused = false,
 }: {
   status: PatchStatus | null | undefined;
   variant?: "toolbar" | "chip" | "inline";
   elsewhere?: boolean;
+  /** Paused frame by frame (the editor's transport bar). */
+  paused?: boolean;
 }) {
   const quietMs = useQuietMs(status);
   const [open, setOpen] = useState<"hover" | "pinned" | null>(null);
@@ -114,7 +119,7 @@ export function PatchStatusIndicator({
   useEffect(() => () => clearTimeout(closeTimer.current), []);
 
   if (!status) return null;
-  const state = liveness(status, quietMs);
+  const state = liveness(status, quietMs, paused);
   if (state === "idle" && !(variant === "chip" && status.error)) return null;
 
   const hover = (enter: boolean) => (e: ReactPointerEvent) => {
@@ -133,9 +138,11 @@ export function PatchStatusIndicator({
       ? `Preview: ${label}.`
       : state === "live"
         ? "Rendering: live."
-        : state === "stalled"
-          ? "Rendering: stalled."
-          : "") +
+        : state === "paused"
+          ? "Rendering: paused, frame by frame."
+          : state === "stalled"
+            ? "Rendering: stalled."
+            : "") +
     " Show the details";
 
   return (
@@ -201,6 +208,14 @@ function StatusDetails({
     );
     line = (
       <p>{status.active ? "The last version that ran keeps rendering." : "Nothing from it is rendering."}</p>
+    );
+  } else if (state === "paused") {
+    head = <p className="patch-status-head ok">⏸ Paused</p>;
+    line = (
+      <p>
+        Frame by frame: nothing moves until you step (<kbd>.</kbd>) or play (<kbd>K</kbd>). The patch compiles
+        and edits still show.
+      </p>
     );
   } else if (state === "stalled") {
     head = <p className="patch-status-head warn">Stalled</p>;

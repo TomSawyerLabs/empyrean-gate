@@ -2,7 +2,8 @@
 // renders it, and any number of canvases show it. Also a MiniSource, so the
 // editor's node thumbnails and meters work exactly as they do against a gate.
 
-import { pushScalar, type MiniScalar, type MiniSource } from "../editor/minis-source";
+import { pushScalar, SCALAR_HISTORY, type MiniScalar, type MiniSource } from "../editor/minis-source";
+import type { FrameTransport, TransportState } from "../editor/transport";
 import type { PatchDoc } from "../types";
 import { loadPatchCore, type PatchCore, type PatchSim } from "./core";
 import { GateGpu, requestGateDevice, ShaderError, WebGpuUnavailable, type Geometry, type GridPasses } from "./gpu";
@@ -13,6 +14,7 @@ import {
   type Motion,
   type MotionSource,
 } from "./inputs";
+import { FrameHistory } from "./history";
 import { synthScope, TestFilm, type VideoSource } from "./standins";
 import { LoopStats, type RuntimeStats } from "./stats";
 
@@ -147,7 +149,7 @@ export interface CapturedFrame {
   rgb: Uint8Array;
 }
 
-export class PatchRuntime implements MiniSource {
+export class PatchRuntime implements MiniSource, FrameTransport {
   readonly core: PatchCore;
   readonly gpu: GateGpu;
   readonly geometry: Geometry;
@@ -193,6 +195,28 @@ export class PatchRuntime implements MiniSource {
   /** The picture currently uploaded to each media cell (by data URL). */
   private uploadedImages = new Map<number, string>();
   private previewScalars: [string, string][] = [];
+  /** `previewScalars` as meter keys; a new array whenever they change, so a
+   * kept frame knows which meters its values belong to. */
+  private meterKeys: readonly string[] = [];
+  /** A preview cell read back is in flight; another was asked for meanwhile
+   * (and whether it should render the thumbnails first). */
+  private reading = false;
+  private readAgain: boolean | null = null;
+
+  // Frame by frame (FrameTransport, plans/frame-step.md).
+  readonly canStep = true;
+  private paused = false;
+  /** Frames rendered and patch time since the patch started. */
+  private frameNo = 0;
+  private patchTime = 0;
+  /** How many frames behind the live one the views show. */
+  private back = 0;
+  private keepSeconds = 0;
+  /** Past frames: always the live one and the two before it (for a paused
+   * frame rendered again); with Keep past frames, the last seconds of them
+   * and their thumbnails. */
+  private history: FrameHistory | null = null;
+  private transportListeners = new Set<() => void>();
 
   private readonly decode: (dataUrl: string, size: number) => Promise<Uint8Array>;
 
@@ -215,7 +239,9 @@ export class PatchRuntime implements MiniSource {
    * [`WebGpuUnavailable`] where WebGPU is missing. */
   static async create(geometry: Geometry = GATE_GEOMETRY, options: RuntimeOptions = {}): Promise<PatchRuntime> {
     const [core, device] = await Promise.all([loadPatchCore(options.wasm), requestGateDevice(options.gpu)]);
-    return new PatchRuntime(core, new GateGpu(device, core.limits, geometry), options.decodeImage);
+    const rt = new PatchRuntime(core, new GateGpu(device, core.limits, geometry), options.decodeImage);
+    rt.history = await FrameHistory.create(device, keepSlots(0), rt.gpu.frameBytes, 0);
+    return rt;
   }
 
   getStatus(): RuntimeStatus {
@@ -335,10 +361,26 @@ export class PatchRuntime implements MiniSource {
     }
     this.syncImages(sim);
     this.previewNodes = sim.previewNodes();
-    this.previewScalars = JSON.parse(sim.previewScalars()) as [string, string][];
-    if (shader) this.clearMinis();
+    const scalars = JSON.parse(sim.previewScalars()) as [string, string][];
+    if (JSON.stringify(scalars) !== JSON.stringify(this.previewScalars)) {
+      this.previewScalars = scalars;
+      this.meterKeys = scalars.map(([node, port]) => `scalar:${node}:${port}`);
+    }
+    if (shader) {
+      this.clearMinis();
+      // Kept thumbnails no longer match the cells; the frames belong to a
+      // patch that is gone.
+      this.history?.clear();
+      this.back = 0;
+    }
     this.usesVideo = sim.usesVideo();
     this.setStatus({ active: true, touch: sim.usesTouch(), error: null });
+    // Paused: show the edit on the live frame, without time moving.
+    if (this.paused) {
+      if (this.back > 0) this.show(0);
+      this.advance(0, performance.now(), { again: true });
+      this.notifyTransport();
+    }
   }
 
   /** Upload each Still image node's picture to its media cell (only what
@@ -403,6 +445,11 @@ export class PatchRuntime implements MiniSource {
   private frame(now: number) {
     const dt = Math.min(0.5, Math.max(0, (now - this.last) / 1000));
     this.last = now;
+    // Paused: nothing advances, but a view that changed size draws again.
+    if (this.paused) {
+      if (this.gpu.viewsResized()) this.gpu.redraw();
+      return;
+    }
     // Only the loop's own frames count toward the stats: a capture steps
     // as fast as it can, which is no frame rate.
     const started = performance.now();
@@ -427,8 +474,13 @@ export class PatchRuntime implements MiniSource {
     this.sim = null;
     this.shake = 0;
     this.video.reset?.();
+    this.history?.clear();
+    this.frameNo = 0;
+    this.patchTime = 0;
+    this.back = 0;
     this.restartListeners.forEach((l) => l());
     await this.setPatch(doc);
+    this.notifyTransport();
   }
 
   /** The LED colors of the frame last rendered (see `GateGpu.readFrame`). */
@@ -453,6 +505,8 @@ export class PatchRuntime implements MiniSource {
     const warmup = Math.max(0, options.warmup ?? (options.restart ? 1 : 0));
     const wasRunning = this.running;
     this.stop();
+    // From the live frame, whatever past one the views were showing.
+    if (this.back > 0) this.show(0);
     try {
       if (options.restart) await this.restart();
       // A shader still installing holds frames; wait for it (bounded).
@@ -481,8 +535,14 @@ export class PatchRuntime implements MiniSource {
     }
   }
 
-  /** One frame; false when there was nothing to render. */
-  private advance(dt: number, now: number): boolean {
+  /** One frame; false when there was nothing to render. `stepping`: a frame
+   * stepped by hand, whose thumbnails and meters show at once; `again`: the
+   * live frame rendered again (a paused edit), replacing it among the kept
+   * frames. For that, OUT is put back as it was before the live frame: the
+   * frame before it in the first half and the one before that in the second,
+   * which is what Feedback reads (`finish` moves the first half there only
+   * after the frame's own Feedback has read it). */
+  private advance(dt: number, now: number, how: { stepping?: boolean; again?: boolean } = {}): boolean {
     const sim = this.sim;
     if (!sim || this.pending) return false;
 
@@ -522,13 +582,143 @@ export class PatchRuntime implements MiniSource {
       scope.set(synthScope(this.audioFeatures, this.scopeT, scopeWave, scopeSpectrum));
       this.gpu.writeScope(scope);
     }
-    this.gpu.render();
+    // With Keep past frames on, the thumbnails render with every frame so
+    // each kept frame has its own.
+    const history = this.history;
+    const thumbs = history?.previewed ?? false;
+    const again = how.again === true && (history?.count ?? 0) > 2;
+    if (!how.again) {
+      this.frameNo += 1;
+      this.patchTime += dt;
+    }
+    const meta = {
+      frame: this.frameNo,
+      time: this.patchTime,
+      values: thumbs ? sim.scalarValues() : EMPTY_VALUES,
+      keys: this.meterKeys,
+      cells: this.previewNodes,
+    };
+    this.gpu.render(
+      {
+        before: again
+          ? (enc) => {
+              history!.restore(enc, 1, this.gpu.out, null);
+              history!.restore(enc, 2, this.gpu.out, null, this.gpu.frameBytes);
+            }
+          : undefined,
+        record: history ? (enc) => history.record(enc, this.gpu.out, this.gpu.previewBuffer, meta, how.again) : undefined,
+      },
+      thumbs,
+    );
 
-    if (this.miniRefs > 0 && now - this.lastPreview >= PREVIEW_INTERVAL_MS) {
+    const stepping = how.stepping === true || how.again === true;
+    if (this.miniRefs > 0 && (stepping || now - this.lastPreview >= PREVIEW_INTERVAL_MS)) {
       this.lastPreview = now;
-      this.refreshMinis(sim);
+      this.pushMeters(sim);
+      this.readMinis(!thumbs);
     }
     return true;
+  }
+
+  // --- frame by frame (FrameTransport) ---------------------------------------
+
+  state(): TransportState {
+    const kept = this.keepSeconds > 0 ? Math.max(0, (this.history?.count ?? 0) - 1) : 0;
+    const past = this.back > 0 ? this.history?.at(this.back) : null;
+    return {
+      paused: this.paused,
+      frame: this.frameNo,
+      time: this.patchTime,
+      back: this.back,
+      shown: past ? { frame: past.frame, time: past.time } : { frame: this.frameNo, time: this.patchTime },
+      kept,
+      keepSeconds: this.keepSeconds,
+    };
+  }
+
+  onTransport(listener: () => void): () => void {
+    this.transportListeners.add(listener);
+    return () => this.transportListeners.delete(listener);
+  }
+
+  private notifyTransport() {
+    this.transportListeners.forEach((l) => l());
+  }
+
+  pause() {
+    if (this.paused) return;
+    this.paused = true;
+    this.notifyTransport();
+  }
+
+  play() {
+    if (this.back > 0) this.show(0);
+    this.paused = false;
+    // No catch-up for the time spent paused.
+    this.last = performance.now();
+    this.notifyTransport();
+  }
+
+  stepFrames(frames: number) {
+    this.paused = true;
+    const n = Math.trunc(frames);
+    if (n < 0) {
+      const back = Math.min(this.back - n, this.state().kept);
+      if (back !== this.back) this.show(back);
+    } else if (n > 0) {
+      let left = n;
+      // Forward through the kept frames first, then new ones.
+      if (this.back > 0) {
+        const back = Math.max(0, this.back - left);
+        left -= this.back - back;
+        this.show(back);
+      }
+      for (let i = 0; i < left; i++) this.advance(1 / STEP_HZ, performance.now(), { stepping: true });
+    }
+    this.notifyTransport();
+  }
+
+  async setKeep(seconds: number): Promise<string | null> {
+    const s = Math.max(0, seconds);
+    let next: FrameHistory;
+    try {
+      next = await FrameHistory.create(
+        this.gpu.device,
+        keepSlots(s),
+        this.gpu.frameBytes,
+        s > 0 ? this.gpu.maxPreviewBytes : 0,
+      );
+    } catch (e) {
+      return errorText(e);
+    }
+    // The live frame back in place before the frames it was kept among go.
+    if (this.back > 0) this.show(0);
+    this.history?.destroy();
+    this.history = next;
+    this.keepSeconds = s;
+    this.notifyTransport();
+    return null;
+  }
+
+  keepCost(seconds: number): number {
+    return keepSlots(seconds) * (this.gpu.frameBytes + (seconds > 0 ? this.gpu.maxPreviewBytes : 0));
+  }
+
+  /** Show the frame `back` frames behind the live one (0: the live one):
+   * its LEDs in every view, its thumbnails and its meters' last values. */
+  private show(back: number) {
+    const history = this.history;
+    if (!history || back >= Math.max(1, history.count)) return;
+    const preview = history.previewed ? this.gpu.previewBuffer : null;
+    this.gpu.redraw((enc) => history.restore(enc, back, this.gpu.out, preview));
+    this.back = back;
+    if (!history.previewed) return;
+    if (this.miniRefs > 0) this.readMinis(false);
+    this.scalars.clear();
+    for (const [key, values] of history.series(back, SCALAR_HISTORY)) {
+      this.scalars.set(key, { values, latest: values.at(-1) ?? 0 });
+    }
+    this.miniListeners.forEach((l) => l());
   }
 
   // --- inputs ---------------------------------------------------------------
@@ -685,29 +875,49 @@ export class PatchRuntime implements MiniSource {
     this.miniListeners.forEach((l) => l());
   }
 
-  private refreshMinis(sim: PatchSim) {
+  /** One meter sample per scalar, as the patch has them now. */
+  private pushMeters(sim: PatchSim) {
     const values = sim.scalarValues();
-    this.previewScalars.forEach(([node, port], i) =>
-      pushScalar(this.scalars, `scalar:${node}:${port}`, values[i] ?? 0),
-    );
+    this.meterKeys.forEach((key, i) => pushScalar(this.scalars, key, values[i] ?? 0));
+  }
+
+  /** Read the thumbnails back (rendering them first with `dispatch`). One
+   * read at a time; a frame stepped meanwhile is read when it is done, so
+   * the last one stepped is always the one shown. */
+  private readMinis(dispatch: boolean) {
+    if (this.reading) {
+      this.readAgain = dispatch || (this.readAgain ?? false);
+      return;
+    }
+    this.reading = true;
     const nodes = this.previewNodes;
     const gen = this.generation;
-    void this.gpu.readPreview().then((res) => {
-      if (res && gen === this.generation) {
-        this.spokes = res.spokes;
-        this.pixels = res.pixels;
-        this.cells.clear();
-        res.cells.forEach((rgb, i) => {
-          const id = nodes[i];
-          if (id) this.cells.set(`node:${id}`, rgb);
-        });
-      }
-      this.miniListeners.forEach((l) => l());
-    });
+    void this.gpu
+      .readPreview(dispatch)
+      .then((res) => {
+        if (res && gen === this.generation) {
+          this.spokes = res.spokes;
+          this.pixels = res.pixels;
+          this.cells.clear();
+          res.cells.forEach((rgb, i) => {
+            const id = nodes[i];
+            if (id) this.cells.set(`node:${id}`, rgb);
+          });
+        }
+        this.miniListeners.forEach((l) => l());
+      })
+      .finally(() => {
+        this.reading = false;
+        const again = this.readAgain;
+        this.readAgain = null;
+        if (again !== null) this.readMinis(again);
+      });
   }
 
   dispose() {
     this.stop();
+    this.history?.destroy();
+    this.history = null;
     this.stopMicrophone();
     this.stopMotion();
     this.video.dispose();
@@ -730,6 +940,14 @@ async function decodeImage(dataUrl: string, size: number): Promise<Uint8Array> {
   bitmap.close();
   const data = ctx.getImageData(0, 0, size, size).data;
   return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+}
+
+const EMPTY_VALUES = new Float32Array(0);
+
+/** History slots for `seconds` of frames at 60 fps, plus the live frame and
+ * the two before it (always kept). */
+function keepSlots(seconds: number): number {
+  return Math.ceil(Math.max(0, seconds) * STEP_HZ) + 3;
 }
 
 function errorText(e: unknown): string {

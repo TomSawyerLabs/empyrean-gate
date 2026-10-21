@@ -9697,6 +9697,7 @@ function attachGroove(runtime, initial = {}) {
 }
 
 // src/editor/minis-source.ts
+var SCALAR_HISTORY = 40;
 function pushScalar(scalars, key, value) {
   let entry = scalars.get(key);
   if (!entry)
@@ -9819,7 +9820,7 @@ class GateGpu {
   constructor(device, limits, geometry) {
     this.device = device, this.limits = limits, this.geometry = geometry;
     let leds = geometry.spokes * geometry.pixels, U = GPUBufferUsage, buf = (size, usage) => device.createBuffer({ size: Math.max(16, Math.ceil(size / 4) * 4), usage });
-    this.globals = buf(limits.globalsBytes, U.UNIFORM | U.COPY_DST), this.previewGlobals = buf(limits.globalsBytes, U.UNIFORM | U.COPY_DST), this.audio = buf(limits.audioBytes, U.UNIFORM | U.COPY_DST), this.fx = buf(limits.effectBytes * limits.maxEffects, U.STORAGE | U.COPY_DST), this.out = buf(leds * 8, U.STORAGE | U.COPY_SRC), this.dabs = buf(limits.dabBytes * limits.maxDabs, U.STORAGE | U.COPY_DST), this.scope = buf(limits.scopeFloats * limits.audioSources * 4, U.STORAGE | U.COPY_DST), this.video = buf(limits.mediaBufferBytes, U.STORAGE | U.COPY_DST), this.slab = buf(limits.maxSlabFloats * 4, U.STORAGE | U.COPY_DST), this.touches = buf(limits.touchBytes * limits.maxTouches, U.UNIFORM | U.COPY_DST), this.grid = buf(0, U.STORAGE);
+    this.globals = buf(limits.globalsBytes, U.UNIFORM | U.COPY_DST), this.previewGlobals = buf(limits.globalsBytes, U.UNIFORM | U.COPY_DST), this.audio = buf(limits.audioBytes, U.UNIFORM | U.COPY_DST), this.fx = buf(limits.effectBytes * limits.maxEffects, U.STORAGE | U.COPY_DST), this.out = buf(leds * 8, U.STORAGE | U.COPY_SRC | U.COPY_DST), this.dabs = buf(limits.dabBytes * limits.maxDabs, U.STORAGE | U.COPY_DST), this.scope = buf(limits.scopeFloats * limits.audioSources * 4, U.STORAGE | U.COPY_DST), this.video = buf(limits.mediaBufferBytes, U.STORAGE | U.COPY_DST), this.slab = buf(limits.maxSlabFloats * 4, U.STORAGE | U.COPY_DST), this.touches = buf(limits.touchBytes * limits.maxTouches, U.UNIFORM | U.COPY_DST), this.grid = buf(0, U.STORAGE);
     let C = GPUShaderStage.COMPUTE, ro = { type: "read-only-storage" };
     this.layout = device.createBindGroupLayout({
       label: "patch",
@@ -9890,7 +9891,7 @@ class GateGpu {
       let bytes = previewCells * this.geometry.spokes * this.miniPixels() * 4;
       this.previewOut = this.device.createBuffer({
         size: bytes,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
       }), this.previewRead = this.device.createBuffer({
         size: bytes,
         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
@@ -9950,19 +9951,56 @@ class GateGpu {
       return;
     this.device.queue.writeBuffer(this.video, slot * cell, rgba);
   }
-  render() {
+  render(hooks = {}, preview = !1) {
     if (!this.main || !this.mainBind)
       return;
-    let enc = this.device.createCommandEncoder({ label: "patch frame" }), pass = enc.beginComputePass();
+    let enc = this.device.createCommandEncoder({ label: "patch frame" });
+    hooks.before?.(enc);
+    let pass = enc.beginComputePass();
     pass.setBindGroup(0, this.mainBind);
     for (let { pipeline, cells } of this.gridPasses)
       pass.setPipeline(pipeline), pass.dispatchWorkgroups(Math.ceil(cells / 256));
-    pass.setPipeline(this.main), pass.dispatchWorkgroups(Math.ceil(this.geometry.spokes * this.geometry.pixels / 256)), pass.end();
+    if (pass.setPipeline(this.main), pass.dispatchWorkgroups(Math.ceil(this.geometry.spokes * this.geometry.pixels / 256)), preview)
+      this.dispatchPreview(pass);
+    pass.end(), hooks.record?.(enc);
     for (let view of this.views.values())
       this.drawView(enc, view);
     this.device.queue.submit([enc.finish()]);
   }
-  async readPreview() {
+  redraw(before) {
+    if (!before && this.views.size === 0)
+      return;
+    let enc = this.device.createCommandEncoder({ label: "patch redraw" });
+    before?.(enc);
+    for (let view of this.views.values())
+      this.drawView(enc, view);
+    this.device.queue.submit([enc.finish()]);
+  }
+  viewsResized() {
+    let dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+    for (let { canvas } of this.views.values()) {
+      let w = Math.max(1, Math.round(canvas.clientWidth * dpr)), h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+      if (canvas.width !== w || canvas.height !== h)
+        return !0;
+    }
+    return !1;
+  }
+  get frameBytes() {
+    return this.geometry.spokes * this.geometry.pixels * 4;
+  }
+  get maxPreviewBytes() {
+    return this.limits.maxPreviewNodes * this.geometry.spokes * this.miniPixels() * 4;
+  }
+  get previewBuffer() {
+    return this.previewOut;
+  }
+  dispatchPreview(pass) {
+    if (!this.preview || !this.previewBind)
+      return;
+    let perCell = this.geometry.spokes * this.miniPixels();
+    pass.setPipeline(this.preview), pass.setBindGroup(0, this.previewBind), pass.dispatchWorkgroups(Math.ceil(perCell * this.previewCells / 256));
+  }
+  async readPreview(dispatch = !0) {
     if (!this.preview || !this.previewBind || !this.previewOut || !this.previewRead)
       return null;
     if (this.previewBusy)
@@ -9970,8 +10008,12 @@ class GateGpu {
     this.previewBusy = !0;
     let read = this.previewRead, cells = this.previewCells, spokes = this.geometry.spokes, pixels = this.miniPixels(), perCell = spokes * pixels;
     try {
-      let enc = this.device.createCommandEncoder({ label: "patch preview" }), pass = enc.beginComputePass();
-      pass.setPipeline(this.preview), pass.setBindGroup(0, this.previewBind), pass.dispatchWorkgroups(Math.ceil(perCell * cells / 256)), pass.end(), enc.copyBufferToBuffer(this.previewOut, 0, read, 0, read.size), this.device.queue.submit([enc.finish()]), await read.mapAsync(GPUMapMode.READ);
+      let enc = this.device.createCommandEncoder({ label: "patch preview" });
+      if (dispatch) {
+        let pass = enc.beginComputePass();
+        this.dispatchPreview(pass), pass.end();
+      }
+      enc.copyBufferToBuffer(this.previewOut, 0, read, 0, read.size), this.device.queue.submit([enc.finish()]), await read.mapAsync(GPUMapMode.READ);
       let packed = new Uint32Array(read.getMappedRange().slice(0));
       read.unmap();
       let out = [];
@@ -10186,6 +10228,91 @@ class MediaTexture {
   }
 }
 
+// src/runtime/history.ts
+class FrameHistory {
+  capacity;
+  frameBytes;
+  previewBytes;
+  frames = [];
+  previews = [];
+  meta;
+  head = -1;
+  filled = 0;
+  static async create(device, capacity, frameBytes, previewBytes) {
+    device.pushErrorScope("out-of-memory");
+    let h = new FrameHistory(device, capacity, frameBytes, previewBytes), error = await device.popErrorScope();
+    if (error)
+      throw h.destroy(), Error(`the GPU could not hold ${capacity} frames: ${error.message}`);
+    return h;
+  }
+  constructor(device, capacity, frameBytes, previewBytes) {
+    this.capacity = Math.max(3, capacity), this.frameBytes = frameBytes, this.previewBytes = previewBytes, this.meta = Array(this.capacity).fill(null);
+    let usage = GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+    for (let first = 0;first < this.capacity; first += 256) {
+      let slots = Math.min(256, this.capacity - first);
+      if (this.frames.push(device.createBuffer({ label: "past frames", size: slots * frameBytes, usage })), previewBytes > 0)
+        this.previews.push(device.createBuffer({ label: "past previews", size: slots * previewBytes, usage }));
+    }
+  }
+  get count() {
+    return this.filled;
+  }
+  get previewed() {
+    return this.previewBytes > 0;
+  }
+  record(enc, out, preview, meta, replace = !1) {
+    if (!replace || this.head < 0)
+      this.head = (this.head + 1) % this.capacity, this.filled = Math.min(this.filled + 1, this.capacity);
+    let slot = this.head, [chunk, at] = this.locate(slot);
+    if (enc.copyBufferToBuffer(out, 0, this.frames[chunk], at * this.frameBytes, this.frameBytes), this.previewBytes > 0 && preview) {
+      let bytes = Math.min(this.previewBytes, preview.size);
+      enc.copyBufferToBuffer(preview, 0, this.previews[chunk], at * this.previewBytes, bytes);
+    }
+    this.meta[slot] = meta;
+  }
+  at(back) {
+    if (back < 0 || back >= this.filled)
+      return null;
+    return this.meta[this.slotAt(back)] ?? null;
+  }
+  restore(enc, back, out, preview, offset = 0) {
+    if (back < 0 || back >= this.filled)
+      return;
+    let [chunk, at] = this.locate(this.slotAt(back));
+    if (enc.copyBufferToBuffer(this.frames[chunk], at * this.frameBytes, out, offset, this.frameBytes), this.previewBytes > 0 && preview) {
+      let bytes = Math.min(this.previewBytes, preview.size);
+      enc.copyBufferToBuffer(this.previews[chunk], at * this.previewBytes, preview, 0, bytes);
+    }
+  }
+  series(back, length) {
+    let out = /* @__PURE__ */ new Map, shown = this.at(back);
+    if (!shown)
+      return out;
+    shown.keys.forEach((key) => out.set(key, []));
+    for (let b = Math.min(this.filled - 1, back + length - 1);b >= back; b--) {
+      let m = this.at(b);
+      if (!m || m.keys !== shown.keys)
+        continue;
+      m.keys.forEach((key, i) => out.get(key).push(m.values[i] ?? 0));
+    }
+    return out;
+  }
+  clear() {
+    this.head = -1, this.filled = 0, this.meta.fill(null);
+  }
+  destroy() {
+    for (let b of [...this.frames, ...this.previews])
+      b.destroy();
+    this.frames = [], this.previews = [], this.clear();
+  }
+  slotAt(back) {
+    return (this.head - back + this.capacity) % this.capacity;
+  }
+  locate(slot) {
+    return [Math.floor(slot / 256), slot % 256];
+  }
+}
+
 // src/runtime/standins.ts
 function hsv(h, s, v) {
   let f = (n) => {
@@ -10313,6 +10440,17 @@ class PatchRuntime {
   previewNodes = [];
   uploadedImages = /* @__PURE__ */ new Map;
   previewScalars = [];
+  meterKeys = [];
+  reading = !1;
+  readAgain = null;
+  canStep = !0;
+  paused = !1;
+  frameNo = 0;
+  patchTime = 0;
+  back = 0;
+  keepSeconds = 0;
+  history = null;
+  transportListeners = /* @__PURE__ */ new Set;
   decode;
   constructor(core, gpu, decode = decodeImage) {
     this.core = core, this.gpu = gpu, this.decode = decode, this.geometry = gpu.geometry, gpu.device.lost.then((info) => {
@@ -10320,8 +10458,8 @@ class PatchRuntime {
     });
   }
   static async create(geometry = GATE_GEOMETRY, options = {}) {
-    let [core, device] = await Promise.all([loadPatchCore(options.wasm), requestGateDevice(options.gpu)]);
-    return new PatchRuntime(core, new GateGpu(device, core.limits, geometry), options.decodeImage);
+    let [core, device] = await Promise.all([loadPatchCore(options.wasm), requestGateDevice(options.gpu)]), rt = new PatchRuntime(core, new GateGpu(device, core.limits, geometry), options.decodeImage);
+    return rt.history = await FrameHistory.create(device, keepSlots(0), rt.gpu.frameBytes, 0), rt;
   }
   getStatus() {
     return this.status;
@@ -10394,9 +10532,17 @@ class PatchRuntime {
       if (gen !== this.generation)
         return;
     }
-    if (this.syncImages(sim), this.previewNodes = sim.previewNodes(), this.previewScalars = JSON.parse(sim.previewScalars()), shader)
-      this.clearMinis();
-    this.usesVideo = sim.usesVideo(), this.setStatus({ active: !0, touch: sim.usesTouch(), error: null });
+    this.syncImages(sim), this.previewNodes = sim.previewNodes();
+    let scalars = JSON.parse(sim.previewScalars());
+    if (JSON.stringify(scalars) !== JSON.stringify(this.previewScalars))
+      this.previewScalars = scalars, this.meterKeys = scalars.map(([node, port]) => `scalar:${node}:${port}`);
+    if (shader)
+      this.clearMinis(), this.history?.clear(), this.back = 0;
+    if (this.usesVideo = sim.usesVideo(), this.setStatus({ active: !0, touch: sim.usesTouch(), error: null }), this.paused) {
+      if (this.back > 0)
+        this.show(0);
+      this.advance(0, performance.now(), { again: !0 }), this.notifyTransport();
+    }
   }
   syncImages(sim) {
     let wanted = JSON.parse(sim.images()), size = this.core.limits.imageSize;
@@ -10443,7 +10589,11 @@ class PatchRuntime {
   }
   frame(now) {
     let dt = Math.min(0.5, Math.max(0, (now - this.last) / 1000));
-    this.last = now;
+    if (this.last = now, this.paused) {
+      if (this.gpu.viewsResized())
+        this.gpu.redraw();
+      return;
+    }
     let started = performance.now();
     if (!this.advance(dt, now))
       return;
@@ -10458,7 +10608,7 @@ class PatchRuntime {
     let doc = this.doc;
     if (!doc)
       return;
-    this.sim?.free(), this.sim = null, this.shake = 0, this.video.reset?.(), this.restartListeners.forEach((l) => l()), await this.setPatch(doc);
+    this.sim?.free(), this.sim = null, this.shake = 0, this.video.reset?.(), this.history?.clear(), this.frameNo = 0, this.patchTime = 0, this.back = 0, this.restartListeners.forEach((l) => l()), await this.setPatch(doc), this.notifyTransport();
   }
   async readFrame() {
     for (;; ) {
@@ -10470,7 +10620,8 @@ class PatchRuntime {
   }
   async capture(options = {}) {
     let frames = Math.max(1, Math.min(MAX_CAPTURE_FRAMES, Math.round(options.frames ?? 1))), interval = Math.max(0, options.interval ?? 0.5), warmup = Math.max(0, options.warmup ?? (options.restart ? 1 : 0)), wasRunning = this.running;
-    this.stop();
+    if (this.stop(), this.back > 0)
+      this.show(0);
     try {
       if (options.restart)
         await this.restart();
@@ -10496,7 +10647,7 @@ class PatchRuntime {
         this.start();
     }
   }
-  advance(dt, now) {
+  advance(dt, now, how = {}) {
     let sim = this.sim;
     if (!sim || this.pending)
       return !1;
@@ -10526,9 +10677,100 @@ class PatchRuntime {
       let scope = new Float32Array(scopeFloats * audioSources);
       scope.set(synthScope(this.audioFeatures, this.scopeT, scopeWave, scopeSpectrum)), this.gpu.writeScope(scope);
     }
-    if (this.gpu.render(), this.miniRefs > 0 && now - this.lastPreview >= PREVIEW_INTERVAL_MS)
-      this.lastPreview = now, this.refreshMinis(sim);
+    let history = this.history, thumbs = history?.previewed ?? !1, again = how.again === !0 && (history?.count ?? 0) > 2;
+    if (!how.again)
+      this.frameNo += 1, this.patchTime += dt;
+    let meta = {
+      frame: this.frameNo,
+      time: this.patchTime,
+      values: thumbs ? sim.scalarValues() : EMPTY_VALUES,
+      keys: this.meterKeys,
+      cells: this.previewNodes
+    };
+    this.gpu.render({
+      before: again ? (enc) => {
+        history.restore(enc, 1, this.gpu.out, null), history.restore(enc, 2, this.gpu.out, null, this.gpu.frameBytes);
+      } : void 0,
+      record: history ? (enc) => history.record(enc, this.gpu.out, this.gpu.previewBuffer, meta, how.again) : void 0
+    }, thumbs);
+    let stepping = how.stepping === !0 || how.again === !0;
+    if (this.miniRefs > 0 && (stepping || now - this.lastPreview >= PREVIEW_INTERVAL_MS))
+      this.lastPreview = now, this.pushMeters(sim), this.readMinis(!thumbs);
     return !0;
+  }
+  state() {
+    let kept = this.keepSeconds > 0 ? Math.max(0, (this.history?.count ?? 0) - 1) : 0, past = this.back > 0 ? this.history?.at(this.back) : null;
+    return {
+      paused: this.paused,
+      frame: this.frameNo,
+      time: this.patchTime,
+      back: this.back,
+      shown: past ? { frame: past.frame, time: past.time } : { frame: this.frameNo, time: this.patchTime },
+      kept,
+      keepSeconds: this.keepSeconds
+    };
+  }
+  onTransport(listener) {
+    return this.transportListeners.add(listener), () => this.transportListeners.delete(listener);
+  }
+  notifyTransport() {
+    this.transportListeners.forEach((l) => l());
+  }
+  pause() {
+    if (this.paused)
+      return;
+    this.paused = !0, this.notifyTransport();
+  }
+  play() {
+    if (this.back > 0)
+      this.show(0);
+    this.paused = !1, this.last = performance.now(), this.notifyTransport();
+  }
+  stepFrames(frames) {
+    this.paused = !0;
+    let n = Math.trunc(frames);
+    if (n < 0) {
+      let back = Math.min(this.back - n, this.state().kept);
+      if (back !== this.back)
+        this.show(back);
+    } else if (n > 0) {
+      let left = n;
+      if (this.back > 0) {
+        let back = Math.max(0, this.back - left);
+        left -= this.back - back, this.show(back);
+      }
+      for (let i = 0;i < left; i++)
+        this.advance(1 / STEP_HZ, performance.now(), { stepping: !0 });
+    }
+    this.notifyTransport();
+  }
+  async setKeep(seconds) {
+    let s = Math.max(0, seconds), next;
+    try {
+      next = await FrameHistory.create(this.gpu.device, keepSlots(s), this.gpu.frameBytes, s > 0 ? this.gpu.maxPreviewBytes : 0);
+    } catch (e) {
+      return errorText(e);
+    }
+    if (this.back > 0)
+      this.show(0);
+    return this.history?.destroy(), this.history = next, this.keepSeconds = s, this.notifyTransport(), null;
+  }
+  keepCost(seconds) {
+    return keepSlots(seconds) * (this.gpu.frameBytes + (seconds > 0 ? this.gpu.maxPreviewBytes : 0));
+  }
+  show(back) {
+    let history = this.history;
+    if (!history || back >= Math.max(1, history.count))
+      return;
+    let preview = history.previewed ? this.gpu.previewBuffer : null;
+    if (this.gpu.redraw((enc) => history.restore(enc, back, this.gpu.out, preview)), this.back = back, !history.previewed)
+      return;
+    if (this.miniRefs > 0)
+      this.readMinis(!1);
+    this.scalars.clear();
+    for (let [key, values] of history.series(back, SCALAR_HISTORY))
+      this.scalars.set(key, { values, latest: values.at(-1) ?? 0 });
+    this.miniListeners.forEach((l) => l());
   }
   trigger(effect) {
     this.sim?.triggerEffect(JSON.stringify(effect));
@@ -10602,11 +10844,18 @@ class PatchRuntime {
   clearMinis() {
     this.cells.clear(), this.scalars.clear(), this.miniListeners.forEach((l) => l());
   }
-  refreshMinis(sim) {
+  pushMeters(sim) {
     let values = sim.scalarValues();
-    this.previewScalars.forEach(([node, port], i) => pushScalar(this.scalars, `scalar:${node}:${port}`, values[i] ?? 0));
+    this.meterKeys.forEach((key, i) => pushScalar(this.scalars, key, values[i] ?? 0));
+  }
+  readMinis(dispatch) {
+    if (this.reading) {
+      this.readAgain = dispatch || (this.readAgain ?? !1);
+      return;
+    }
+    this.reading = !0;
     let nodes = this.previewNodes, gen = this.generation;
-    this.gpu.readPreview().then((res) => {
+    this.gpu.readPreview(dispatch).then((res) => {
       if (res && gen === this.generation)
         this.spokes = res.spokes, this.pixels = res.pixels, this.cells.clear(), res.cells.forEach((rgb, i) => {
           let id = nodes[i];
@@ -10614,10 +10863,15 @@ class PatchRuntime {
             this.cells.set(`node:${id}`, rgb);
         });
       this.miniListeners.forEach((l) => l());
+    }).finally(() => {
+      this.reading = !1;
+      let again = this.readAgain;
+      if (this.readAgain = null, again !== null)
+        this.readMinis(again);
     });
   }
   dispose() {
-    this.stop(), this.stopMicrophone(), this.stopMotion(), this.video.dispose(), this.sim?.free(), this.sim = null, this.gpu.destroy(), this.gpu.device.destroy();
+    this.stop(), this.history?.destroy(), this.history = null, this.stopMicrophone(), this.stopMotion(), this.video.dispose(), this.sim?.free(), this.sim = null, this.gpu.destroy(), this.gpu.device.destroy();
   }
 }
 async function decodeImage(dataUrl, size) {
@@ -10627,6 +10881,10 @@ async function decodeImage(dataUrl, size) {
   ctx.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, size, size), bitmap.close();
   let data = ctx.getImageData(0, 0, size, size).data;
   return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+}
+var EMPTY_VALUES = new Float32Array(0);
+function keepSlots(seconds) {
+  return Math.ceil(Math.max(0, seconds) * STEP_HZ) + 3;
 }
 function errorText(e) {
   if (e instanceof WebGpuUnavailable)

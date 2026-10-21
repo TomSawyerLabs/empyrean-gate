@@ -199,10 +199,11 @@ export class GateGpu {
     this.previewGlobals = buf(limits.globalsBytes, U.UNIFORM | U.COPY_DST);
     this.audio = buf(limits.audioBytes, U.UNIFORM | U.COPY_DST);
     this.fx = buf(limits.effectBytes * limits.maxEffects, U.STORAGE | U.COPY_DST);
-    // COPY_SRC so tests and `readFrame` (an agent's snapshot) can read it back.
+    // COPY_SRC so tests and `readFrame` (an agent's snapshot) can read it back,
+    // and past frames be kept; COPY_DST so a kept one can be shown again.
     // Two frames: the patch's `finish` keeps frame N-1 in the second half
     // for its Feedback node (patch_lib.wgsl); the view draws the first.
-    this.out = buf(leds * 8, U.STORAGE | U.COPY_SRC);
+    this.out = buf(leds * 8, U.STORAGE | U.COPY_SRC | U.COPY_DST);
     this.dabs = buf(limits.dabBytes * limits.maxDabs, U.STORAGE | U.COPY_DST);
     this.scope = buf(limits.scopeFloats * limits.audioSources * 4, U.STORAGE | U.COPY_DST);
     // Cell 0: the live video frame; cells 1..: the patch's Still images.
@@ -333,7 +334,7 @@ export class GateGpu {
       const bytes = previewCells * this.geometry.spokes * this.miniPixels() * 4;
       this.previewOut = this.device.createBuffer({
         size: bytes,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
       });
       this.previewRead = this.device.createBuffer({
         size: bytes,
@@ -407,10 +408,17 @@ export class GateGpu {
     this.device.queue.writeBuffer(this.video, slot * cell, rgba as GPUAllowSharedBufferSource);
   }
 
-  /** Render the frame: dispatch the patch, then draw every attached view. */
-  render() {
+  /** Render the frame: run `before` (a frame put back into OUT for Feedback
+   * to read), dispatch the patch (and, with `preview`, the thumbnails into
+   * the preview buffer, as `readPreview` would), run `record` (a copy of
+   * what was rendered: `FrameHistory`), then draw every attached view. */
+  render(
+    hooks: { before?: (enc: GPUCommandEncoder) => void; record?: (enc: GPUCommandEncoder) => void } = {},
+    preview = false,
+  ) {
     if (!this.main || !this.mainBind) return;
     const enc = this.device.createCommandEncoder({ label: "patch frame" });
+    hooks.before?.(enc);
     const pass = enc.beginComputePass();
     pass.setBindGroup(0, this.mainBind);
     // The rendered textures first, in graph order: each dispatch sees the
@@ -421,15 +429,64 @@ export class GateGpu {
     }
     pass.setPipeline(this.main);
     pass.dispatchWorkgroups(Math.ceil((this.geometry.spokes * this.geometry.pixels) / 256));
+    if (preview) this.dispatchPreview(pass);
     pass.end();
+    hooks.record?.(enc);
     for (const view of this.views.values()) this.drawView(enc, view);
     this.device.queue.submit([enc.finish()]);
   }
 
+  /** Draw every attached view from the frame OUT holds, without rendering
+   * one (a paused patch; a past frame put back into OUT). `before` runs
+   * first in the same submission (that putting back). */
+  redraw(before?: (enc: GPUCommandEncoder) => void) {
+    if (!before && this.views.size === 0) return;
+    const enc = this.device.createCommandEncoder({ label: "patch redraw" });
+    before?.(enc);
+    for (const view of this.views.values()) this.drawView(enc, view);
+    this.device.queue.submit([enc.finish()]);
+  }
+
+  /** Some attached view's canvas changed size since it was last drawn. */
+  viewsResized(): boolean {
+    const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+    for (const { canvas } of this.views.values()) {
+      const w = Math.max(1, Math.round(canvas.clientWidth * dpr));
+      const h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+      if (canvas.width !== w || canvas.height !== h) return true;
+    }
+    return false;
+  }
+
+  /** Bytes of one LED frame (the first half of OUT, what a view draws). */
+  get frameBytes(): number {
+    return this.geometry.spokes * this.geometry.pixels * 4;
+  }
+
+  /** Bytes of the largest preview a patch can have (`maxPreviewNodes` cells). */
+  get maxPreviewBytes(): number {
+    return this.limits.maxPreviewNodes * this.geometry.spokes * this.miniPixels() * 4;
+  }
+
+  /** The thumbnails as last rendered (packed RGB per cell); null without any. */
+  get previewBuffer(): GPUBuffer | null {
+    return this.previewOut;
+  }
+
+  private dispatchPreview(pass: GPUComputePassEncoder) {
+    if (!this.preview || !this.previewBind) return;
+    const perCell = this.geometry.spokes * this.miniPixels();
+    pass.setPipeline(this.preview);
+    pass.setBindGroup(0, this.previewBind);
+    pass.dispatchWorkgroups(Math.ceil((perCell * this.previewCells) / 256));
+  }
+
   /** Render the per-node thumbnails and read them back as 3-byte RGB cells
    * (`spokes × miniPixels` each), in `previewNodes` order. Resolves null when
-   * there is nothing to preview or a readback is already in flight. */
-  async readPreview(): Promise<{ spokes: number; pixels: number; cells: Uint8Array[] } | null> {
+   * there is nothing to preview or a readback is already in flight. Without
+   * `dispatch`, reads what the preview buffer already holds (rendered with
+   * the frame, or a past frame put back). */
+  async readPreview(dispatch = true): Promise<{ spokes: number; pixels: number; cells: Uint8Array[] } | null> {
     if (!this.preview || !this.previewBind || !this.previewOut || !this.previewRead) return null;
     if (this.previewBusy) return null;
     this.previewBusy = true;
@@ -440,11 +497,11 @@ export class GateGpu {
     const perCell = spokes * pixels;
     try {
       const enc = this.device.createCommandEncoder({ label: "patch preview" });
-      const pass = enc.beginComputePass();
-      pass.setPipeline(this.preview);
-      pass.setBindGroup(0, this.previewBind);
-      pass.dispatchWorkgroups(Math.ceil((perCell * cells) / 256));
-      pass.end();
+      if (dispatch) {
+        const pass = enc.beginComputePass();
+        this.dispatchPreview(pass);
+        pass.end();
+      }
       enc.copyBufferToBuffer(this.previewOut, 0, read, 0, read.size);
       this.device.queue.submit([enc.finish()]);
       await read.mapAsync(GPUMapMode.READ);

@@ -18,6 +18,8 @@ import {
   type Ref,
 } from "react";
 import { PatchStatusIndicator, type PatchStatus } from "./PatchStatus";
+import { TransportBar, useTransport } from "./TransportBar";
+import type { FrameTransport } from "./transport";
 import {
   applyEdgeChanges,
   applyNodeChanges,
@@ -147,6 +149,10 @@ export interface PatchEditorProps {
   readOnlyHint?: string;
   /** Live per-node thumbnails and meters for the active patch. */
   minis?: MiniSource | null;
+  /** Frame by frame for the active patch (plans/frame-step.md): pause, step
+   * and step back (the browser runtime), or freeze the views and step
+   * through what was kept (the gate). A bar under the graph. */
+  transport?: FrameTransport | null;
   /** Show Activate/Deactivate (hosts that always render the open patch don't). */
   showActivate?: boolean;
   /** Called with every edit as it happens (saves are debounced). */
@@ -554,7 +560,7 @@ const PatchNodeView = memo(function PatchNodeView({ data, selected }: NodeProps<
       </span>
     );
   const onLive = node.kind === DEBUG_KIND && (node.params.live ?? 0) >= 1 && (
-    <span className="pnode-badge" title="Also shown on the gate's Live tab while this patch is on air">
+    <span className="pnode-badge" aria-label="Also shown on the gate's Live tab">
       Live
     </span>
   );
@@ -1509,6 +1515,7 @@ function Editor({
   canEdit,
   readOnlyHint,
   minis = null,
+  transport = null,
   showActivate = true,
   onDocChange,
   toolbarExtra,
@@ -2454,6 +2461,11 @@ function Editor({
   );
 
   const isActive = root !== null && root.id !== "" && activeId === root.id;
+  // Frame by frame acts on the patch rendering, so only that one has it.
+  const transportState = useTransport(isActive ? transport : null);
+  // Only a host that pauses the patch itself has it say "paused"; the gate
+  // freezes the views while the show runs on.
+  const paused = (transport?.canStep ?? false) && (transportState?.paused ?? false);
   // The host renders some other patch than the one open (the gate, with
   // patches activated by hand).
   const elsewhere = showActivate && root !== null && !isActive;
@@ -2545,7 +2557,7 @@ function Editor({
   const statusLine = (
     <>
       {status?.error && <span className="patch-status error">⚠ {status.error}</span>}
-      <PatchStatusIndicator status={status} variant={compact ? "inline" : "toolbar"} elsewhere={elsewhere} />
+      <PatchStatusIndicator status={status} variant={compact ? "inline" : "toolbar"} elsewhere={elsewhere} paused={paused} />
       {!canEdit && readOnlyHint && <span className="hint">{readOnlyHint}</span>}
     </>
   );
@@ -2683,6 +2695,11 @@ function Editor({
             >
               <Background gap={24} />
               <Controls showInteractive={false} />
+              {transport && transportState && (
+                <Panel position="bottom-center" className="patch-transport-panel nodrag nopan nowheel">
+                  <TransportBar transport={transport} compact={compact} />
+                </Panel>
+              )}
               {globals && globals.length > 0 && (
                 <GlobalsCard
                   controls={globals}
@@ -2786,7 +2803,7 @@ function Editor({
                 <span aria-hidden="true">☰ </span>
                 {root ? root.name || "Untitled" : "Patches"}
               </button>
-              <PatchStatusIndicator status={status} variant="chip" elsewhere={elsewhere} />
+              <PatchStatusIndicator status={status} variant="chip" elsewhere={elsewhere} paused={paused} />
               {/* Undo and Arrange are on the canvas too: in the menu alone a
                   phone never found them. */}
               {canEdit && doc && (
