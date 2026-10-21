@@ -124,7 +124,7 @@ export function TransportBar({ transport, compact = false }: { transport: FrameT
       <button
         type="button"
         className="patch-transport-play"
-        aria-label={state.paused ? "Play" : "Pause"}
+        aria-label={transport.canStep ? (state.paused ? "Play" : "Pause") : state.paused ? "Resume the views" : "Freeze the views"}
         aria-keyshortcuts="K"
         onClick={() => (state.paused ? transport.play() : transport.pause())}
       >
@@ -177,7 +177,11 @@ export function TransportBar({ transport, compact = false }: { transport: FrameT
       </label>
       {!compact && state.paused && (
         <span className="patch-transport-hint">
-          {state.keepSeconds > 0 ? "K play · , . step (Shift: 10)" : "K play · . step (Shift: 10) · keep past frames to step back"}
+          {transport.canStep
+            ? state.keepSeconds > 0
+              ? "K play · , . step (Shift: 10)"
+              : "K play · . step (Shift: 10) · keep past frames to step back"
+            : `Views frozen; the gate keeps running · K resumes${state.keepSeconds > 0 ? " · , . step through what was kept" : " · keep past frames to step back"}`}
         </span>
       )}
       {problem && (

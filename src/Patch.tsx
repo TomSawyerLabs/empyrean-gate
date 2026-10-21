@@ -123,6 +123,10 @@ export default function Patch() {
   const sendMaster = useThrottled((v: { brightness?: number; speed?: number }) =>
     client.setMaster(v),
   );
+  // Frozen views are this tab's: leaving it lets them run again (the Live
+  // tab's layer thumbnails share the hub).
+  useEffect(() => () => getMiniHub(client).play(), [client]);
+
   const globals: GlobalControl[] = [
     {
       name: "brightness",
@@ -176,6 +180,7 @@ export default function Patch() {
       canEdit={canEdit}
       readOnlyHint="read-only — edit on the Gate machine"
       minis={getMiniHub(client)}
+      transport={getMiniHub(client)}
       globals={globals}
       globalsNote="The Live tab's master brightness and speed, outside the patch: speed scales every Time node and phase, brightness scales the Output. To react to them, add a Gate globals node."
       nodeExtras={(node) =>

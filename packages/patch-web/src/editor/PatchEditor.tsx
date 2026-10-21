@@ -2463,7 +2463,9 @@ function Editor({
   const isActive = root !== null && root.id !== "" && activeId === root.id;
   // Frame by frame acts on the patch rendering, so only that one has it.
   const transportState = useTransport(isActive ? transport : null);
-  const paused = transportState?.paused ?? false;
+  // Only a host that pauses the patch itself has it say "paused"; the gate
+  // freezes the views while the show runs on.
+  const paused = (transport?.canStep ?? false) && (transportState?.paused ?? false);
   // The host renders some other patch than the one open (the gate, with
   // patches activated by hand).
   const elsewhere = showActivate && root !== null && !isActive;
