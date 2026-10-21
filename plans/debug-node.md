@@ -103,10 +103,14 @@ tapped shape); Live renders a strip of minis for them.
 
 ## Open questions for the user
 
-1. Resolution: minis render 16 samples per spoke (`MINI_PIXELS`). A Debug
-   view is larger, so a full-resolution cell would look closer to the real
-   gate, at the cost of a per-cell pixel count in both hosts' preview
-   pipelines and the gate's mini protocol. Left at 16 for now.
+1. ~~Resolution~~ Answered (Cameron, 2026-10-21: "make it a toggle"):
+   Debug's Resolution Select, Mini or Every LED (`e3da1de`, `6246d7b`).
+   Every LED is a third module run with the main globals, in the browser
+   only. **Open:** the gate's own views show it as a Mini; doing it there
+   needs a second GPU engine in the mini bus (its own Vulkan device) or a
+   second patch pipeline slot in `Engine`, on the show machine, plus a
+   batch kind for cells of another size (a 64 × 378 cell is ~73 KB, ×10/s
+   per client).
 
 ## Things not to do
 

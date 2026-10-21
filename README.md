@@ -333,7 +333,10 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   shader nor evaluated: its view is a mini, so it costs the gate nothing
   unless someone is watching minis. **Show on Live** puts it in a strip
   on the Live tab while its patch is on air (status `patch_taps`), for
-  watching a signal during a show (`plans/debug-node.md`).
+  watching a signal during a show (`plans/debug-node.md`). Its
+  **Resolution** is Mini or **Every LED**: the latter renders the tap at
+  the array's own resolution in a pass of its own (at most four a
+  patch), in the browser playground; the gate's views show it as a Mini.
   **Frame by frame**: a bar under the graph of the patch on air pauses
   it and steps it a frame at a time (K, and `,` `.`; Shift for ten), so
   a one-frame event or an every-frame value shows in the minis and Debug
