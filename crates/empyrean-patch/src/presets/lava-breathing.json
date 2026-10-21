@@ -4,16 +4,16 @@
   "name": "Lava Breathing",
   "description": "Fire climbing the spokes, reach swelling on a slow LFO, whole field slowly rotating.",
   "nodes": [
-    { "id": "lfo", "kind": "lfo", "name": "breath", "params": { "max": 0.85, "min": 0.35, "rate": 0.08 }, "pos": [40, 220] },
-    { "id": "fire", "kind": "fire", "name": "", "params": { "brightness": 1, "hue": 0.02, "saturation": 1, "speed": 0.8, "stretch": 0.5 }, "pos": [280, 100] },
-    { "id": "spin", "kind": "transform", "name": "", "params": { "spin": 0.02 }, "pos": [520, 100] },
-    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [760, 100] },
-    { "id": "effects", "kind": "effects_in", "name": "", "params": {}, "pos": [500, 320] },
-    { "id": "effects_render", "kind": "render_effects", "name": "", "params": {}, "pos": [240, 320] },
-    { "id": "strokes", "kind": "touch_dabs", "name": "", "params": {}, "pos": [-20, 540] },
-    { "id": "strokes_render", "kind": "render_points", "name": "", "params": {}, "pos": [-280, 540] },
-    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [630, 220] },
-    { "id": "overlay2", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [630, 220] }
+    { "id": "lfo", "kind": "lfo", "name": "breath", "params": { "max": 0.85, "min": 0.35, "rate": 0.08 }, "pos": [40, 110] },
+    { "id": "fire", "kind": "fire", "name": "", "params": { "brightness": 1, "hue": 0.02, "saturation": 1, "speed": 0.8, "stretch": 0.5 }, "pos": [304, 40] },
+    { "id": "spin", "kind": "transform", "name": "", "params": { "spin": 0.02 }, "pos": [540, 60] },
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [1214, 357] },
+    { "id": "effects", "kind": "effects_in", "name": "", "params": {}, "pos": [294, 337] },
+    { "id": "effects_render", "kind": "render_effects", "name": "", "params": {}, "pos": [536, 317] },
+    { "id": "strokes", "kind": "touch_dabs", "name": "", "params": {}, "pos": [538, 544] },
+    { "id": "strokes_render", "kind": "render_points", "name": "", "params": {}, "pos": [765, 524] },
+    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [768, 199] },
+    { "id": "overlay2", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [992, 307] }
   ],
   "edges": [
     { "from": { "node": "lfo", "port": "out" }, "to": { "node": "fire", "port": "reach" } },

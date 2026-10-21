@@ -4,14 +4,14 @@
   "name": "Touch Ripples",
   "description": "A patch that owns touch, with nothing hidden: every finger glows in its toucher's color and grows while held, and each touchdown fires a burst where it landed, over a dim plasma. The burst shows because its effects are wired through Render effects into the blend; rewire the Touch node to make touch do anything else.",
   "nodes": [
-    { "id": "touch", "kind": "touch", "name": "", "params": { "follow": 0 }, "pos": [40, 320] },
-    { "id": "burst", "kind": "event_effect", "name": "tap burst", "params": { "effect": 1, "intensity": 1.2, "size": 1 }, "pos": [320, 320] },
-    { "id": "bursts", "kind": "render_effects", "name": "", "params": {}, "pos": [600, 360] },
-    { "id": "bg", "kind": "plasma", "name": "", "params": { "brightness": 0.22, "hue": 0.62, "hue_range": 0.25, "scale": 1.4, "speed": 0.25 }, "pos": [600, 20] },
-    { "id": "glow", "kind": "touch_glow", "name": "", "params": { "fade": 0.9, "grow": 0.6, "intensity": 1.2, "radius": 0.1, "soft": 0.7, "trail": 0.6 }, "pos": [600, 620] },
-    { "id": "mix", "kind": "blend", "name": "", "params": { "mode": 0 }, "pos": [860, 120] },
-    { "id": "mix2", "kind": "blend", "name": "", "params": { "mode": 0 }, "pos": [1100, 260] },
-    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [1340, 260] }
+    { "id": "touch", "kind": "touch", "name": "", "params": { "follow": 0 }, "pos": [40, 107] },
+    { "id": "burst", "kind": "event_effect", "name": "tap burst", "params": { "effect": 1, "intensity": 1.2, "size": 1 }, "pos": [299, 84] },
+    { "id": "bursts", "kind": "render_effects", "name": "", "params": {}, "pos": [571, 194] },
+    { "id": "bg", "kind": "plasma", "name": "", "params": { "brightness": 0.22, "hue": 0.62, "hue_range": 0.25, "scale": 1.4, "speed": 0.25 }, "pos": [574, 411] },
+    { "id": "glow", "kind": "touch_glow", "name": "", "params": { "fade": 0.9, "grow": 0.6, "intensity": 1.2, "radius": 0.1, "soft": 0.7, "trail": 0.6 }, "pos": [800, 40] },
+    { "id": "mix", "kind": "blend", "name": "", "params": { "mode": 0 }, "pos": [800, 317] },
+    { "id": "mix2", "kind": "blend", "name": "", "params": { "mode": 0 }, "pos": [1022, 194] },
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [1244, 244] }
   ],
   "edges": [
     { "from": { "node": "touch", "port": "down" }, "to": { "node": "burst", "port": "trigger" } },

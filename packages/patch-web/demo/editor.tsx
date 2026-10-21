@@ -4,10 +4,12 @@
 // one (live node thumbnails and the array beside the canvas), driven by the
 // stand-ins: the synthetic groove, the test film and simulated visitors.
 // Without WebGPU the editor still works on the registry alone.
+// `globalThis.editorRef.current` is the editor's handle (open, arrange …),
+// which scripts/arrange-presets.ts drives.
 
-import { useEffect, useMemo, useState } from "react";
+import { createRef, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { PatchEditor, type PatchStore, type PatchStoreEvent } from "../src/editor";
+import { PatchEditor, type PatchEditorHandle, type PatchStore, type PatchStoreEvent } from "../src/editor";
 import "../src/editor/editor.css";
 import { attachGroove, attachVisitors, PatchRuntime } from "../src/runtime";
 import { loadPatchCore, type PatchCore } from "../src/runtime/core";
@@ -46,6 +48,8 @@ function memoryStore(seed: PatchDoc[]): PatchStore {
   };
 }
 
+const editorRef = createRef<PatchEditorHandle>();
+
 function App({ core, runtime }: { core: PatchCore; runtime: PatchRuntime | null }) {
   const store = useMemo(() => memoryStore(core.presets.slice(0, 1).map((p) => ({ ...p, id: "start" }))), [core]);
   const [doc, setDoc] = useState<PatchDoc | null>(null);
@@ -71,6 +75,7 @@ function App({ core, runtime }: { core: PatchCore; runtime: PatchRuntime | null 
       minis={runtime}
       showActivate={false}
       onDocChange={setDoc}
+      editorRef={editorRef}
     />
   );
 }
@@ -88,5 +93,5 @@ try {
   document.querySelector("#gate")!.replaceWith("No WebGPU here: editing only.");
 }
 const core = runtime?.core ?? (await loadPatchCore(wasm));
-Object.assign(globalThis, { core, runtime });
+Object.assign(globalThis, { core, runtime, editorRef });
 root.render(<App core={core} runtime={runtime} />);

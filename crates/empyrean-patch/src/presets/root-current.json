@@ -4,16 +4,16 @@
   "name": "Root Current",
   "description": "Layered forest greens form a shifting canopy, with broad leaf clusters bending slowly in dappled wind.",
   "nodes": [
-    { "id": "breath", "kind": "lfo", "name": "dappled sunlight", "params": { "max": 0.34, "min": 0.08, "rate": 0.035 }, "pos": [40, 360] },
-    { "id": "earth", "kind": "earth_current", "name": "leaves in the wind", "params": { "brightness": 1.42, "leaf_hue": 0.31, "pulse": 0, "root_hue": 0.39, "saturation": 0.82, "scale": 1.08, "speed": 0.16, "warp": 0.58, "width": 0.64 }, "pos": [300, 160] },
-    { "id": "drift", "kind": "transform", "name": "canopy drift", "params": { "spin": 0, "zoom": 1 }, "pos": [570, 160] },
-    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.92 }, "pos": [820, 160] },
-    { "id": "effects", "kind": "effects_in", "name": "", "params": {}, "pos": [560, 380] },
-    { "id": "effects_render", "kind": "render_effects", "name": "", "params": {}, "pos": [300, 380] },
-    { "id": "strokes", "kind": "touch_dabs", "name": "", "params": {}, "pos": [40, 600] },
-    { "id": "strokes_render", "kind": "render_points", "name": "", "params": {}, "pos": [-220, 600] },
-    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [690, 280] },
-    { "id": "overlay2", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [690, 280] }
+    { "id": "breath", "kind": "lfo", "name": "dappled sunlight", "params": { "max": 0.34, "min": 0.08, "rate": 0.035 }, "pos": [40, 130] },
+    { "id": "earth", "kind": "earth_current", "name": "leaves in the wind", "params": { "brightness": 1.42, "leaf_hue": 0.31, "pulse": 0, "root_hue": 0.39, "saturation": 0.82, "scale": 1.08, "speed": 0.16, "warp": 0.58, "width": 0.64 }, "pos": [310, 40] },
+    { "id": "drift", "kind": "transform", "name": "canopy drift", "params": { "spin": 0, "zoom": 1 }, "pos": [641, 80] },
+    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.92 }, "pos": [1369, 387] },
+    { "id": "effects", "kind": "effects_in", "name": "", "params": {}, "pos": [355, 377] },
+    { "id": "effects_render", "kind": "render_effects", "name": "", "params": {}, "pos": [666, 357] },
+    { "id": "strokes", "kind": "touch_dabs", "name": "", "params": {}, "pos": [668, 584] },
+    { "id": "strokes_render", "kind": "render_points", "name": "", "params": {}, "pos": [920, 564] },
+    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [923, 229] },
+    { "id": "overlay2", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [1147, 337] }
   ],
   "edges": [
     { "from": { "node": "breath", "port": "out" }, "to": { "node": "earth", "port": "pulse" } },

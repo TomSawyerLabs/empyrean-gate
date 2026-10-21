@@ -4,17 +4,17 @@
   "name": "Beat Pulse",
   "description": "Rings ride the beat over a slow noise bed; bass fades them in.",
   "nodes": [
-    { "id": "aud", "kind": "audio", "name": "", "params": {}, "pos": [40, 60] },
-    { "id": "noise", "kind": "noise_field", "name": "", "params": { "brightness": 0.5, "hue": 0.62, "hue_range": 0.25, "scale": 1.2, "speed": 0.3, "threshold": 0.45 }, "pos": [260, 40] },
-    { "id": "rings", "kind": "beat_rings", "name": "", "params": { "brightness": 1.2, "hue": 0.95, "hue_range": 0.15, "width": 0.12 }, "pos": [260, 240] },
-    { "id": "mix", "kind": "blend", "name": "", "params": {}, "pos": [520, 130] },
-    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [760, 130] },
-    { "id": "effects", "kind": "effects_in", "name": "", "params": {}, "pos": [500, 350] },
-    { "id": "effects_render", "kind": "render_effects", "name": "", "params": {}, "pos": [240, 350] },
-    { "id": "strokes", "kind": "touch_dabs", "name": "", "params": {}, "pos": [-20, 570] },
-    { "id": "strokes_render", "kind": "render_points", "name": "", "params": {}, "pos": [-280, 570] },
-    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [630, 250] },
-    { "id": "overlay2", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [630, 250] }
+    { "id": "aud", "kind": "audio", "name": "", "params": {}, "pos": [40, 589] },
+    { "id": "noise", "kind": "noise_field", "name": "", "params": { "brightness": 0.5, "hue": 0.62, "hue_range": 0.25, "scale": 1.2, "speed": 0.3, "threshold": 0.45 }, "pos": [335, 464] },
+    { "id": "rings", "kind": "beat_rings", "name": "", "params": { "brightness": 1.2, "hue": 0.95, "hue_range": 0.15, "width": 0.12 }, "pos": [335, 761] },
+    { "id": "mix", "kind": "blend", "name": "", "params": {}, "pos": [571, 504] },
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [1245, 317] },
+    { "id": "effects", "kind": "effects_in", "name": "", "params": {}, "pos": [325, 267] },
+    { "id": "effects_render", "kind": "render_effects", "name": "", "params": {}, "pos": [567, 247] },
+    { "id": "strokes", "kind": "touch_dabs", "name": "", "params": {}, "pos": [569, 60] },
+    { "id": "strokes_render", "kind": "render_points", "name": "", "params": {}, "pos": [796, 40] },
+    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [799, 376] },
+    { "id": "overlay2", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [1023, 267] }
   ],
   "edges": [
     { "from": { "node": "aud", "port": "beat_phase" }, "to": { "node": "rings", "port": "front" } },

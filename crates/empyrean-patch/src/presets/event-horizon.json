@@ -4,15 +4,15 @@
   "name": "Event Horizon",
   "description": "A restrained indigo star flight with triggered effects explicitly routed through a rotating, intensity-controlled effect layer.",
   "nodes": [
-    { "id": "space", "kind": "warp", "name": "deep star field", "params": { "brightness": 0.62, "density": 0.32, "hue": 0.64, "hue_range": 0.12, "saturation": 0.82, "speed": 0.28 }, "pos": [40, 80] },
-    { "id": "fx", "kind": "effects_in", "name": "live effects", "params": {}, "pos": [40, 330] },
-    { "id": "render", "kind": "render_effects", "name": "effect layer", "params": { "intensity": 0.72, "size": 0.82 }, "pos": [280, 330] },
-    { "id": "drift", "kind": "transform", "name": "slow orbit", "params": { "kaleido": 0, "rotate": 0, "spin": -0.018, "zoom": 1 }, "pos": [520, 330] },
-    { "id": "mix", "kind": "blend", "name": "effects over space", "params": { "mode": 3, "opacity": 0.86 }, "pos": [760, 170] },
-    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.94 }, "pos": [1000, 170] },
-    { "id": "strokes", "kind": "touch_dabs", "name": "", "params": {}, "pos": [740, 610] },
-    { "id": "strokes_render", "kind": "render_points", "name": "", "params": {}, "pos": [480, 610] },
-    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [870, 290] }
+    { "id": "space", "kind": "warp", "name": "deep star field", "params": { "brightness": 0.62, "density": 0.32, "hue": 0.64, "hue_range": 0.12, "saturation": 0.82, "speed": 0.28 }, "pos": [645, 40] },
+    { "id": "fx", "kind": "effects_in", "name": "live effects", "params": {}, "pos": [40, 357] },
+    { "id": "render", "kind": "render_effects", "name": "effect layer", "params": { "intensity": 0.72, "size": 0.82 }, "pos": [348, 337] },
+    { "id": "drift", "kind": "transform", "name": "slow orbit", "params": { "kaleido": 0, "rotate": 0, "spin": -0.018, "zoom": 1 }, "pos": [644, 317] },
+    { "id": "mix", "kind": "blend", "name": "effects over space", "params": { "mode": 3, "opacity": 0.86 }, "pos": [911, 204] },
+    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.94 }, "pos": [1419, 362] },
+    { "id": "strokes", "kind": "touch_dabs", "name": "", "params": {}, "pos": [665, 574] },
+    { "id": "strokes_render", "kind": "render_points", "name": "", "params": {}, "pos": [941, 554] },
+    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [1197, 312] }
   ],
   "edges": [
     { "from": { "node": "render", "port": "out" }, "to": { "node": "drift", "port": "in" } },

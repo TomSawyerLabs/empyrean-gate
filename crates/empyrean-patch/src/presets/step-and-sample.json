@@ -4,17 +4,17 @@
   "name": "Step and Sample",
   "description": "A clock steps a sequencer through hues; every bar a random scale and a toggled spiral. Shows the event tools.",
   "nodes": [
-    { "id": "clock", "kind": "time", "name": "2 steps / s", "params": { "mode": 1, "rate": 2 }, "pos": [-320, 60] },
-    { "id": "seq", "kind": "sequence", "name": "hues", "params": { "steps": 4, "v1": 0, "v2": 0.3, "v3": 0.6, "v4": 0.85 }, "pos": [-60, 20] },
-    { "id": "env", "kind": "envelope", "name": "", "params": { "attack": 0.01, "decay": 0.4, "peak": 1 }, "pos": [-60, 300] },
-    { "id": "map", "kind": "map_range", "name": "pulse → brightness", "params": { "out_max": 1.4, "out_min": 0.5 }, "pos": [200, 300] },
-    { "id": "rand", "kind": "random", "name": "every bar", "params": { "glide": 1.5, "max": 2, "min": 0.6 }, "pos": [200, 20] },
-    { "id": "tog", "kind": "toggle", "name": "spiral on/off", "params": {}, "pos": [200, 520] },
-    { "id": "sm", "kind": "smooth", "name": "", "params": { "seconds": 0.5 }, "pos": [460, 520] },
-    { "id": "waves", "kind": "radial_waves", "name": "", "params": { "hue_range": 0.1, "saturation": 0.95, "sharpness": 0.6, "waves": 4 }, "pos": [460, 120] },
-    { "id": "spiral", "kind": "spiral", "name": "", "params": { "arms": 5, "brightness": 0.9, "hue": 0.12, "speed": 0.6 }, "pos": [460, 340] },
-    { "id": "mix", "kind": "blend", "name": "", "params": { "mode": 0 }, "pos": [720, 230] },
-    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [960, 230] }
+    { "id": "clock", "kind": "time", "name": "2 steps / s", "params": { "mode": 1, "rate": 2 }, "pos": [40, 288] },
+    { "id": "seq", "kind": "sequence", "name": "hues", "params": { "steps": 4, "v1": 0, "v2": 0.3, "v3": 0.6, "v4": 0.85 }, "pos": [299, 391] },
+    { "id": "env", "kind": "envelope", "name": "", "params": { "attack": 0.01, "decay": 0.4, "peak": 1 }, "pos": [306, 50] },
+    { "id": "map", "kind": "map_range", "name": "pulse → brightness", "params": { "out_max": 1.4, "out_min": 0.5 }, "pos": [567, 40] },
+    { "id": "rand", "kind": "random", "name": "every bar", "params": { "glide": 1.5, "max": 2, "min": 0.6 }, "pos": [591, 488] },
+    { "id": "tog", "kind": "toggle", "name": "spiral on/off", "params": {}, "pos": [597, 272] },
+    { "id": "sm", "kind": "smooth", "name": "", "params": { "seconds": 0.5 }, "pos": [887, 225] },
+    { "id": "waves", "kind": "radial_waves", "name": "", "params": { "hue_range": 0.1, "saturation": 0.95, "sharpness": 0.6, "waves": 4 }, "pos": [903, 409] },
+    { "id": "spiral", "kind": "spiral", "name": "", "params": { "arms": 5, "brightness": 0.9, "hue": 0.12, "speed": 0.6 }, "pos": [903, 726] },
+    { "id": "mix", "kind": "blend", "name": "", "params": { "mode": 0 }, "pos": [1141, 487] },
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [1363, 537] }
   ],
   "edges": [
     { "from": { "node": "clock", "port": "wrap" }, "to": { "node": "seq", "port": "step" } },

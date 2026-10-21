@@ -4,17 +4,17 @@
   "name": "Deep Space Pulse",
   "description": "A slow flight through deep indigo cloudbanks, with six broad travellers crossing the gate and a restrained bass swell.",
   "nodes": [
-    { "id": "aud", "kind": "audio", "name": "music", "params": {}, "pos": [40, 420] },
-    { "id": "bass_smooth", "kind": "smooth", "name": "restrained bass swell", "params": { "seconds": 0.85 }, "pos": [260, 420] },
-    { "id": "space", "kind": "cosmic_drift", "name": "slow deep-space flight", "params": { "brightness": 1.24, "depth": 0.64, "hue": 0.64, "hue_range": 0.16, "pulse": 0, "saturation": 0.88, "speed": 0.32, "trail": 0.58 }, "pos": [500, 180] },
-    { "id": "drift", "kind": "transform", "name": "almost imperceptible roll", "params": { "spin": 0.0025, "zoom": 1 }, "pos": [760, 180] },
-    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.96 }, "pos": [1000, 180] },
-    { "id": "effects", "kind": "effects_in", "name": "", "params": {}, "pos": [740, 400] },
-    { "id": "effects_render", "kind": "render_effects", "name": "", "params": {}, "pos": [480, 400] },
-    { "id": "strokes", "kind": "touch_dabs", "name": "", "params": {}, "pos": [220, 620] },
-    { "id": "strokes_render", "kind": "render_points", "name": "", "params": {}, "pos": [-40, 620] },
-    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [870, 300] },
-    { "id": "overlay2", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [870, 300] }
+    { "id": "aud", "kind": "audio", "name": "music", "params": {}, "pos": [40, 60] },
+    { "id": "bass_smooth", "kind": "smooth", "name": "restrained bass swell", "params": { "seconds": 0.85 }, "pos": [294, 130] },
+    { "id": "space", "kind": "cosmic_drift", "name": "slow deep-space flight", "params": { "brightness": 1.24, "depth": 0.64, "hue": 0.64, "hue_range": 0.16, "pulse": 0, "saturation": 0.88, "speed": 0.32, "trail": 0.58 }, "pos": [606, 40] },
+    { "id": "drift", "kind": "transform", "name": "almost imperceptible roll", "params": { "spin": 0.0025, "zoom": 1 }, "pos": [952, 70] },
+    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.96 }, "pos": [1748, 372] },
+    { "id": "effects", "kind": "effects_in", "name": "", "params": {}, "pos": [658, 357] },
+    { "id": "effects_render", "kind": "render_effects", "name": "", "params": {}, "pos": [1011, 337] },
+    { "id": "strokes", "kind": "touch_dabs", "name": "", "params": {}, "pos": [1013, 564] },
+    { "id": "strokes_render", "kind": "render_points", "name": "", "params": {}, "pos": [1299, 544] },
+    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [1302, 214] },
+    { "id": "overlay2", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [1526, 322] }
   ],
   "edges": [
     { "from": { "node": "aud", "port": "bass" }, "to": { "node": "bass_smooth", "port": "in" } },

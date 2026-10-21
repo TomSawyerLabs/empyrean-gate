@@ -4,15 +4,15 @@
   "name": "Ember Canvas",
   "description": "Slow breathing fire beneath live finger painting and show effects, each routed as an independent layer with its own scale and gain.",
   "nodes": [
-    { "id": "breath", "kind": "lfo", "name": "slow breath", "params": { "max": 0.76, "min": 0.34, "rate": 0.055 }, "pos": [20, 30] },
-    { "id": "fire", "kind": "fire", "name": "ember bed", "params": { "brightness": 0.72, "hue": 0.025, "reach": 0.5, "saturation": 0.96, "scale": 0.72, "speed": 0.34, "stretch": 0.66 }, "pos": [270, 30] },
-    { "id": "touch", "kind": "touch_dabs", "name": "live drawing", "params": {}, "pos": [20, 280] },
-    { "id": "paint", "kind": "render_points", "name": "paint layer", "params": { "intensity": 0.9, "pen": 0, "size": 1.18 }, "pos": [270, 280] },
-    { "id": "mixpaint", "kind": "blend", "name": "paint over embers", "params": { "mode": 3, "opacity": 0.92 }, "pos": [530, 150] },
-    { "id": "fx", "kind": "effects_in", "name": "live effects", "params": {}, "pos": [270, 500] },
-    { "id": "renderfx", "kind": "render_effects", "name": "effect layer", "params": { "intensity": 0.8, "size": 1 }, "pos": [530, 500] },
-    { "id": "mixfx", "kind": "blend", "name": "effects over canvas", "params": { "mode": 0, "opacity": 0.72 }, "pos": [790, 250] },
-    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.94 }, "pos": [1030, 250] }
+    { "id": "breath", "kind": "lfo", "name": "slow breath", "params": { "max": 0.76, "min": 0.34, "rate": 0.055 }, "pos": [62, 327] },
+    { "id": "fire", "kind": "fire", "name": "ember bed", "params": { "brightness": 0.72, "hue": 0.025, "reach": 0.5, "saturation": 0.96, "scale": 0.72, "speed": 0.34, "stretch": 0.66 }, "pos": [373, 257] },
+    { "id": "touch", "kind": "touch_dabs", "name": "live drawing", "params": {}, "pos": [40, 60] },
+    { "id": "paint", "kind": "render_points", "name": "paint layer", "params": { "intensity": 0.9, "pen": 0, "size": 1.18 }, "pos": [346, 40] },
+    { "id": "mixpaint", "kind": "blend", "name": "paint over embers", "params": { "mode": 3, "opacity": 0.92 }, "pos": [651, 169] },
+    { "id": "fx", "kind": "effects_in", "name": "live effects", "params": {}, "pos": [338, 554] },
+    { "id": "renderfx", "kind": "render_effects", "name": "effect layer", "params": { "intensity": 0.8, "size": 1 }, "pos": [646, 534] },
+    { "id": "mixfx", "kind": "blend", "name": "effects over canvas", "params": { "mode": 0, "opacity": 0.72 }, "pos": [942, 287] },
+    { "id": "out", "kind": "output", "name": "", "params": { "master": 0.94 }, "pos": [1233, 337] }
   ],
   "edges": [
     { "from": { "node": "breath", "port": "out" }, "to": { "node": "fire", "port": "reach" } },

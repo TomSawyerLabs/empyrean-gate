@@ -4,17 +4,17 @@
   "name": "Rainbow Sparkle",
   "description": "A turning hue wheel with treble-driven glitter on top.",
   "nodes": [
-    { "id": "aud", "kind": "audio", "name": "", "params": {}, "pos": [40, 240] },
-    { "id": "bow", "kind": "rainbow", "name": "", "params": { "brightness": 0.8, "hue_range": 0.2, "saturation": 0.9, "speed": 0.5, "turns": 2 }, "pos": [260, 40] },
-    { "id": "spark", "kind": "sparkle", "name": "", "params": { "brightness": 1, "hue": 0, "hue_range": 1, "saturation": 0.3, "speed": 1, "twinkle": 0.6 }, "pos": [260, 240] },
-    { "id": "mix", "kind": "blend", "name": "", "params": { "opacity": 0.8 }, "pos": [520, 130] },
-    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [760, 130] },
-    { "id": "effects", "kind": "effects_in", "name": "", "params": {}, "pos": [500, 350] },
-    { "id": "effects_render", "kind": "render_effects", "name": "", "params": {}, "pos": [240, 350] },
-    { "id": "strokes", "kind": "touch_dabs", "name": "", "params": {}, "pos": [-20, 570] },
-    { "id": "strokes_render", "kind": "render_points", "name": "", "params": {}, "pos": [-280, 570] },
-    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [630, 250] },
-    { "id": "overlay2", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [630, 250] }
+    { "id": "aud", "kind": "audio", "name": "", "params": {}, "pos": [40, 327] },
+    { "id": "bow", "kind": "rainbow", "name": "", "params": { "brightness": 0.8, "hue_range": 0.2, "saturation": 0.9, "speed": 0.5, "turns": 2 }, "pos": [308, 40] },
+    { "id": "spark", "kind": "sparkle", "name": "", "params": { "brightness": 1, "hue": 0, "hue_range": 1, "saturation": 0.3, "speed": 1, "twinkle": 0.6 }, "pos": [308, 317] },
+    { "id": "mix", "kind": "blend", "name": "", "params": { "opacity": 0.8 }, "pos": [544, 214] },
+    { "id": "out", "kind": "output", "name": "", "params": {}, "pos": [1218, 491] },
+    { "id": "effects", "kind": "effects_in", "name": "", "params": {}, "pos": [298, 614] },
+    { "id": "effects_render", "kind": "render_effects", "name": "", "params": {}, "pos": [540, 594] },
+    { "id": "strokes", "kind": "touch_dabs", "name": "", "params": {}, "pos": [542, 821] },
+    { "id": "strokes_render", "kind": "render_points", "name": "", "params": {}, "pos": [769, 801] },
+    { "id": "overlay", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [772, 332] },
+    { "id": "overlay2", "kind": "blend", "name": "", "params": { "mode": 0, "opacity": 1 }, "pos": [996, 441] }
   ],
   "edges": [
     { "from": { "node": "aud", "port": "treble" }, "to": { "node": "spark", "port": "density" } },

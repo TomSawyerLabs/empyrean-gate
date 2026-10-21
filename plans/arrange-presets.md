@@ -1,0 +1,100 @@
+# Arrange the built-in patches
+
+Status: **in progress (2026-10-20)**, worktree
+`C:\Users\camer\.t3\worktrees\Empyrean\arrange-presets`, branch
+`arrange-presets` → gate `master`.
+
+## Goal
+
+Cameron (2026-10-20): "We need to 'arrange' all of the built-in patches."
+The editor's ⇆ Arrange (`packages/patch-web/src/editor/arrange.ts`, dagre,
+left to right by the wires) exists, but the built-in presets were laid out
+by hand and by agents: some have nodes on top of each other (Beat Pulse's
+`overlay` and `overlay2` share `[630, 250]`), wires running right to left,
+nodes at negative coordinates. Every built-in should open looking the way
+Arrange leaves it, and stay that way as presets are added or edited.
+
+## Environment / context
+
+- The built-ins: `crates/empyrean-patch/src/presets/*.json` (19 files,
+  `include_str!` in `presets.rs`, so they reach the gate, the wasm core and
+  the website through web-dist). Format 7, one node per line, edited as text.
+  No preset has Sub-patches (no nested `nodes`).
+- Arrange in the editor (`PatchEditor.tsx` `arrangeNodes`) feeds dagre the
+  nodes' **measured** sizes from React Flow; `arrangeDoc` falls back to
+  `DEFAULT_SIZE` (180 × 110) for unmeasured nodes. The agent's `arranged()`
+  (`agent/edit.ts`) always uses `DEFAULT_SIZE`.
+- Measured sizes depend on what the card shows: a live mini needs the
+  WebGPU runtime. The demo editor (`packages/patch-web/demo/editor.tsx`, `bun
+  run demo`) runs the real core and runtime; the shader check's Chromium
+  setup (`channel: "chromium"` + SwiftShader) gives it a WebGPU adapter.
+- `mutateDoc` always pushes an undo step, so the site's spec ("Arrange …
+  then Undo enables Redo", `tests/playground.spec.ts` in empyreangate.org)
+  still holds when the preset is already arranged.
+
+## Decisions already made (don't re-ask)
+
+- **Arrange exactly as the editor does**, with sizes measured in the real
+  editor (desktop viewport, WebGPU on so minis show), not `DEFAULT_SIZE`
+  offline: that is what a person pressing ⇆ Arrange on a built-in gets.
+- **A re-runnable script**, not a one-off edit: `bun run arrange-presets`
+  in `packages/patch-web` (after `build:wasm`). It rewrites only the `pos`
+  of each node line, keeping the files' text layout.
+- **A size-independent guard** in the unit tests rather than "Arrange is a
+  no-op": measured sizes change whenever a node card changes, and an exact
+  check would fail all presets for a cosmetic change. The guard: in every
+  built-in, every wire runs left to right, and no two nodes overlap at
+  `DEFAULT_SIZE`.
+
+## Plan / steps
+
+1. Demo editor exposes its `PatchEditorHandle` (`globalThis.editor`).
+2. `scripts/arrange-presets.ts`: Vite dev server for the demo, Chromium
+   with SwiftShader WebGPU, for each preset file: open a copy, wait for the
+   cards to be measured and stable, `editor.arrange()`, read the positions,
+   rewrite the `pos` fields.
+3. Run it; check every preset in the editor by eye (screenshots).
+4. Unit test `src/editor/presets-arranged.test.ts`.
+5. README (patch-web + gate) mentions the script; commit; push gate
+   master; the site's web-dist bump follows on its own. **← current**
+
+## Findings / gotchas
+
+- Playwright and Vite's `createServer` both run fine under Bun on Windows,
+  so the script is plain `bun scripts/arrange-presets.ts` (unlike
+  `thumbnails`, which needs Node for Dawn).
+- Minis only show on the **active** patch (`live` in `PatchNode`:
+  `activeId === data.docId`), and `open(doc, true)` blanks the id. The
+  script opens each preset under `arrange-<id>` instead, so it is editable
+  (not `builtin-`) and active.
+- Code Ripple Warp's Code node spans several lines (its `code` object), so
+  the rewrite walks `"id"` / `"pos"` pairs inside `"nodes"` rather than
+  assuming one node per line.
+- Before: 15 of 19 built-ins had wires running right to left and/or nodes
+  overlapping at the default card size (Beat Pulse: `overlay` and `overlay2`
+  both at `[630, 250]`). After: none. A second run of the script changes
+  nothing; parsed JSON with `pos` removed is identical to master's.
+- **DJ Stereo Master Flow is broken on master, independently of this**: its
+  `flow` node has kind `stereo_flow`, which was never in the registry
+  (preset from `75da7b1`, 2026-08-25). The card is an "unknown" stub and six
+  wires are not drawn. Logged in `ISSUES.md`; its layout uses the stub's
+  size, so re-run the script once it is fixed.
+
+## Progress log
+
+- [x] Demo exposes the editor handle (`globalThis.editorRef`)
+- [x] arrange-presets script
+- [x] Presets arranged and eyeballed (screenshots of all 19 in the demo)
+- [x] Guard test (39 tests; fails on master's Beat Pulse as intended)
+- [x] Docs: patch-web README (script), gate README (nineteen presets, arranged)
+- [x] Checks: root + patch-web typecheck, patch-web tests 212/212, `cargo test -p empyrean-patch` 160/160
+- [ ] Push gate master; the site's web-dist bump follows
+
+## Open questions for the user
+
+(none yet)
+
+## Things not to do
+
+- Don't arrange with `DEFAULT_SIZE` offline: cards are taller than 110 px
+  with params and minis, so the result is not what Arrange gives.
