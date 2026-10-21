@@ -200,6 +200,16 @@ impl PreparedPatch {
         self.prepared.program().preview_keys()
     }
 
+    #[wasm_bindgen(js_name = fullWgsl)]
+    pub fn full_wgsl(&self) -> String {
+        self.prepared.program().full_wgsl.clone()
+    }
+
+    #[wasm_bindgen(js_name = fullNodes)]
+    pub fn full_nodes(&self) -> Vec<String> {
+        self.prepared.program().full_keys()
+    }
+
     #[wasm_bindgen(js_name = relocateError)]
     pub fn relocate_error(&self, msg: &str) -> String {
         self.prepared.program().relocate_error(msg)
@@ -294,6 +304,21 @@ impl PatchSim {
     #[wasm_bindgen(js_name = previewNodes)]
     pub fn preview_nodes(&self) -> Vec<String> {
         self.sim.program().preview_keys()
+    }
+
+    /// The Debug nodes shown at every LED: the preview's entry point over
+    /// `fullNodes().length` cells of `spokes × pixels` (the whole array), run
+    /// with the main pass's globals (binding 0 of `globals()`), into its own
+    /// buffer. Empty when there are none.
+    #[wasm_bindgen(js_name = fullWgsl)]
+    pub fn full_wgsl(&self) -> String {
+        self.sim.program().full_wgsl.clone()
+    }
+
+    /// The node id of each `fullWgsl()` cell (the mini is `node:<id>`).
+    #[wasm_bindgen(js_name = fullNodes)]
+    pub fn full_nodes(&self) -> Vec<String> {
+        self.sim.program().full_keys()
     }
 
     /// `[[nodeId, port], ...]` for each value in `scalarValues()`.

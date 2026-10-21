@@ -204,7 +204,9 @@ impl Sim {
     /// Whether running `prepared` needs pipelines this sim's shader does not
     /// have (its generated WGSL differs).
     pub fn shader_changed(&self, prepared: &Prepared) -> bool {
-        prepared.prog.wgsl != self.prog.wgsl || prepared.prog.preview_wgsl != self.prog.preview_wgsl
+        prepared.prog.wgsl != self.prog.wgsl
+            || prepared.prog.preview_wgsl != self.prog.preview_wgsl
+            || prepared.prog.full_wgsl != self.prog.full_wgsl
     }
 
     /// Run a [`Sim::prepare`]d document, judged against the program running
@@ -214,6 +216,7 @@ impl Sim {
         let Prepared { doc, prog } = prepared;
         let same_graph = prog.wgsl == self.prog.wgsl
             && prog.preview_wgsl == self.prog.preview_wgsl
+            && prog.full_wgsl == self.prog.full_wgsl
             && prog.cpu_order == self.prog.cpu_order
             && prog.wires == self.prog.wires
             && self.doc.nodes.len() == doc.nodes.len()
@@ -234,8 +237,9 @@ impl Sim {
             self.doc = doc;
             return Update::Params;
         }
-        let shader_changed =
-            prog.wgsl != self.prog.wgsl || prog.preview_wgsl != self.prog.preview_wgsl;
+        let shader_changed = prog.wgsl != self.prog.wgsl
+            || prog.preview_wgsl != self.prog.preview_wgsl
+            || prog.full_wgsl != self.prog.full_wgsl;
         let mut rt = Runtime::new(prog.clone());
         // Phases, timers and smoothing carry over: an edit never jumps.
         rt.adopt_state(&self.rt);

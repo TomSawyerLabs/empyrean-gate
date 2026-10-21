@@ -188,6 +188,9 @@ pub const DEBUG_KIND: &str = "debug";
 /// A Debug node's `live` Select: whether the gate's Live tab shows it too.
 pub const DEBUG_LIVE: &str = "live";
 
+/// A Debug node's `detail` Select: 0 a mini's resolution, 1 every LED.
+pub const DEBUG_DETAIL: &str = "detail";
+
 /// Node kinds the evaluator runs on the CPU every frame (Scalar/Event
 /// tier). A Code node's tier is per instance: see `NodeInst::is_cpu`.
 pub fn is_cpu_kind(kind: &str) -> bool {
@@ -3350,12 +3353,20 @@ pub const TYPES: &[NodeType] = &[
         description: "A tap for looking inside a patch: wire any output into it (a field, a Scalar, an Event, a stream or a texture) and it shows that wire live, large: a ring for a picture, a meter for a number, a strip of fires for an event. It has no outputs and changes nothing that reaches the Output, and it costs nothing while nobody is watching. The gate's Live tab shows it too when Show on Live says so.",
         inputs: &[port("in", Shape::Any, "What to show: a wire of any shape, kept as it is.")],
         outputs: &[],
-        params: &[sel(
-            "live",
-            "Show on Live",
-            &["Editor only", "Editor and Live"],
-            "Where it shows. Editor only: in the patch editor. Editor and Live: also in a strip on the gate's Live tab while this patch is on air, for watching a signal during a show.",
-        )],
+        params: &[
+            sel(
+                "live",
+                "Show on Live",
+                &["Editor only", "Editor and Live"],
+                "Where it shows. Editor only: in the patch editor. Editor and Live: also in a strip on the gate's Live tab while this patch is on air, for watching a signal during a show.",
+            ),
+            sel(
+                "detail",
+                "Resolution",
+                &["Mini", "Every LED"],
+                "How finely a picture, stream or texture is shown. Mini: 16 samples along each spoke, as every node's thumbnail. Every LED: the array's own resolution (378 along each spoke on the gate), for detail a mini blurs. Every LED renders in the browser playground; the gate's own views show it as a Mini. Numbers and events are the same either way.",
+            ),
+        ],
     },
     NodeType {
         id: "blend",

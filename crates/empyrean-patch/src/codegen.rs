@@ -38,6 +38,9 @@ pub const MINI_PIXELS: u32 = 16;
 /// Scalar-meter cap for the same reason (each is only 8 bytes per batch, but
 /// the meta list and the UI both want a bound).
 pub const MAX_PREVIEW_SCALARS: usize = 64;
+/// Debug nodes shown at every LED (`Program::full_cells`): each is a whole
+/// frame's work, so a patch gets this many; the rest show as minis.
+pub const MAX_FULL_TAPS: usize = 4;
 
 /// The runtime library every generated shader starts with: bindings, the
 /// per-pixel `Ctx`, noise/colour helpers, and the effect/dab renderers.
@@ -62,6 +65,13 @@ pub struct Program {
     pub preview_cells: Vec<PreviewCell>,
     /// CPU node scalar outputs (doc node index, port) for amplitude meters.
     pub preview_scalars: Vec<(usize, String)>,
+    /// A third module for the Debug nodes whose Resolution is Every LED: the
+    /// preview's entry point over `full_cells`, run with the main pass's
+    /// globals (every LED) instead of the preview's, into its own buffer.
+    /// Those taps keep their mini cell too, for a host without this pass.
+    /// Empty when there are none.
+    pub full_wgsl: String,
+    pub full_cells: Vec<PreviewCell>,
     /// Where each GPU Code node's body sits in `wgsl` (and `preview_wgsl`,
     /// which shares the node functions), so a shader error can point at the
     /// user's own lines (see [`Program::relocate_error`]).
@@ -149,6 +159,12 @@ pub struct PreviewCell {
 }
 
 impl Program {
+    /// The node id of each `full_cells` slot (the mini is `node:<id>`, as
+    /// its mini cell's).
+    pub fn full_keys(&self) -> Vec<String> {
+        self.full_cells.iter().map(|c| self.doc.nodes[c.node].id.clone()).collect()
+    }
+
     /// The key of each preview cell, in slot order: the node id, or
     /// `"<id>:<port>"` for a Code node's extra outputs. Hosts prefix it with
     /// `node:` to name the mini.
@@ -515,8 +531,10 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
     // functions (and therefore the same parameter-slab layout) with a per-node
     // thumbnail main instead of the composited one.
     let mut preview_code = code.clone();
+    let mut full_code = code.clone();
     let grid_passes = g.grid_fns(&mut code, false);
     g.grid_fns(&mut preview_code, true);
+    g.grid_fns(&mut full_code, true);
     g.main_fn(&mut code, output)?;
 
     // The Output first, so the cap never drops the patch's result; then the
@@ -569,6 +587,20 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         g.preview_main_fn(&mut preview_code, &preview_cells)?;
         preview_code
     };
+    let full_cells: Vec<PreviewCell> = taps
+        .iter()
+        .filter(|&&(i, shape)| {
+            tap_style(shape).is_some() && doc.nodes[i].param(registry::DEBUG_DETAIL).round() >= 1.0
+        })
+        .map(|&(i, _)| PreviewCell { node: i, port: None })
+        .take(MAX_FULL_TAPS)
+        .collect();
+    let full_wgsl = if full_cells.is_empty() {
+        String::new()
+    } else {
+        g.preview_main_fn(&mut full_code, &full_cells)?;
+        full_code
+    };
     // A Debug node fed a Scalar or an Event meters its own `in` (which
     // `eval::Runtime::scalar_value` reads through the wire), ahead of the
     // rest for the same reason as its cell.
@@ -607,6 +639,8 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         preview_wgsl,
         preview_cells,
         preview_scalars,
+        full_wgsl,
+        full_cells,
         code_lines,
         images,
         grid_passes,
@@ -2391,6 +2425,34 @@ mod tests {
         without.nodes.retain(|n| n.kind != registry::DEBUG_KIND);
         without.edges.retain(|e| !e.to.node.starts_with("d_"));
         assert_eq!(compile(&with).unwrap().wgsl, compile(&without).unwrap().wgsl);
+    }
+
+    /// Resolution "Every LED": a third module over just those taps (pictures,
+    /// streams and textures; a number or an event meters as before), which
+    /// still have their mini cell for a host without it; at most
+    /// MAX_FULL_TAPS. The shown shader stays the same.
+    #[test]
+    fn every_led_taps_get_a_module_of_their_own() {
+        let mut doc = tapped();
+        for id in ["d_grey", "d_fx", "d_lfo"] {
+            doc.nodes.iter_mut().find(|n| n.id == id).unwrap().params.insert(registry::DEBUG_DETAIL.into(), 1.0);
+        }
+        let prog = compile(&doc).expect("compiles");
+        assert_eq!(prog.full_keys(), ["d_grey", "d_fx"]);
+        let minis = prog.preview_keys();
+        assert!(minis.contains(&"d_grey".to_string()) && minis.contains(&"d_fx".to_string()));
+        validates(&prog.full_wgsl);
+        assert_eq!(prog.wgsl, compile(&tapped()).unwrap().wgsl);
+
+        let mut many = tapped();
+        for k in 0..MAX_FULL_TAPS + 2 {
+            let mut d = node(&format!("full{k}"), "debug");
+            d.params.insert(registry::DEBUG_DETAIL.into(), 1.0);
+            many.nodes.push(d);
+            many.edges.push(edge("bg", "out", &format!("full{k}"), "in"));
+        }
+        assert_eq!(compile(&many).unwrap().full_cells.len(), MAX_FULL_TAPS);
+        assert!(compile(&tapped()).unwrap().full_wgsl.is_empty());
     }
 
     /// The preview cap never drops a Debug node, however many nodes the
