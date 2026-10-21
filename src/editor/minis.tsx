@@ -51,15 +51,53 @@ function pointSize(size: number, pixels: number): number {
   return Math.max(2.0 * (size / STAGE_SIZE), (size / pixels) * 0.82);
 }
 
+/** A mini's samples along a spoke: cells this size or smaller draw as minis
+ * always have. */
+const MINI_SAMPLES = 16;
+/** How much of a square's width a spoke spans (`positions`: 0.95 × (1 − 0.2)
+ * of the radius). */
+const SPOKE_SPAN = 0.38;
+/** Finest dot spacing a larger cell is drawn at, in pixels: past this, LEDs
+ * are averaged together, as the eye would see them from further away. */
+const MIN_SPACING = 0.75;
+
+/** A finer cell (a Debug node at every LED) brought down to what a view
+ * `size` px wide can show: each spoke's LEDs averaged in even runs. Returns
+ * the cell as it is when it already fits. */
+function fitCell(rgb: Uint8Array, spokes: number, pixels: number, size: number): [Uint8Array, number] {
+  const fit = Math.max(MINI_SAMPLES, Math.floor((SPOKE_SPAN * size) / MIN_SPACING));
+  if (pixels <= fit) return [rgb, pixels];
+  const out = new Uint8Array(spokes * fit * 3);
+  for (let s = 0; s < spokes; s++) {
+    for (let j = 0; j < fit; j++) {
+      const a = Math.floor((j * pixels) / fit);
+      const b = Math.max(a + 1, Math.floor(((j + 1) * pixels) / fit));
+      for (let ch = 0; ch < 3; ch++) {
+        let sum = 0;
+        for (let i = a; i < b; i++) sum += rgb[(s * pixels + i) * 3 + ch]!;
+        out[(s * fit + j) * 3 + ch] = Math.round(sum / (b - a));
+      }
+    }
+  }
+  return [out, fit];
+}
+
+/** The dot for a cell of `samples` per spoke on a square `size` px wide:
+ * a mini's, or for a finer cell the same overlap of neighbours a mini has
+ * (about twice their spacing), so it reads alike, only finer. */
+function dotSize(size: number, samples: number): number {
+  if (samples <= MINI_SAMPLES) return pointSize(size, samples);
+  return Math.max(2, (2.16 * SPOKE_SPAN * size) / Math.max(1, samples - 1));
+}
+
 class MiniRenderer {
   private stage: HTMLCanvasElement | null = null;
   private gl: WebGL2RenderingContext | null = null;
-  private posBuf: WebGLBuffer | null = null;
-  private colorBuf: WebGLBuffer | null = null;
   private pointSizeLoc: WebGLUniformLocation | null = null;
-  private geomKey = "";
-  private count = 0;
-  private grid: { key: string; positions: Float32Array } | null = null;
+  /** One point grid per cell size (`spokes×pixels`): the minis' and a Debug
+   * node's every-LED one draw side by side without rebuilding each other's. */
+  private layouts = new Map<string, { vao: WebGLVertexArrayObject; color: WebGLBuffer; count: number }>();
+  private grids = new Map<string, Float32Array>();
   /** No usable WebGL2: every thumbnail takes the 2D path. */
   private failed = false;
 
@@ -78,24 +116,27 @@ class MiniRenderer {
     if (!rgb || spokes === 0 || pixels === 0) return;
     const gl = this.ensure();
     if (!gl) {
+      [rgb, pixels] = fitCell(rgb, spokes, pixels, out.canvas.width);
       this.draw2d(out, rgb, spokes, pixels);
       return;
     }
-    this.layout(gl, spokes, pixels);
-    const n = Math.min(this.count, spokes * pixels);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuf);
+    const px = Math.min(STAGE_MAX, Math.max(STAGE_SIZE, backing));
+    [rgb, pixels] = fitCell(rgb, spokes, pixels, px);
+    const layout = this.layout(gl, spokes, pixels);
+    const n = Math.min(layout.count, Math.floor(rgb.length / 3));
+    gl.bindVertexArray(layout.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, layout.color);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, rgb.subarray(0, n * 3));
     // Thumbnails draw at STAGE_SIZE as they always have; a larger view at
     // its own backing size, in the stage's bottom-left corner (GL's origin),
     // which is the bottom-left of the image the blit reads.
-    const px = Math.min(STAGE_MAX, Math.max(STAGE_SIZE, backing));
     const stage = this.stage!;
     if (stage.width < px) {
       stage.width = px;
       stage.height = px;
     }
     gl.viewport(0, 0, px, px);
-    gl.uniform1f(this.pointSizeLoc, pointSize(px, pixels));
+    gl.uniform1f(this.pointSizeLoc, dotSize(px, pixels));
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.POINTS, 0, n);
     // Blit synchronously in the same task, before anything else can touch the
@@ -110,7 +151,7 @@ class MiniRenderer {
   private draw2d(out: CanvasRenderingContext2D, rgb: Uint8Array, spokes: number, pixels: number) {
     const positions = this.positions(spokes, pixels);
     const half = out.canvas.width / 2;
-    const dot = pointSize(out.canvas.width, pixels);
+    const dot = dotSize(out.canvas.width, pixels);
     const n = Math.min(spokes * pixels, Math.floor(rgb.length / 3));
     out.save();
     out.globalCompositeOperation = "lighter";
@@ -179,11 +220,11 @@ class MiniRenderer {
     return gl;
   }
 
-  /** The static polar point grid (clip space, y up), rebuilt when the mini
-   * geometry changes. */
+  /** The static polar point grid (clip space, y up) for a cell size. */
   private positions(spokes: number, pixels: number): Float32Array {
     const key = `${spokes}x${pixels}`;
-    if (this.grid?.key === key) return this.grid.positions;
+    const known = this.grids.get(key);
+    if (known) return known;
     const positions = new Float32Array(spokes * pixels * 2);
     // Thumbnails skip the physical inner-hole ratio: at this size the pattern
     // reads better using the full disc, and the hub has no geometry config.
@@ -198,33 +239,44 @@ class MiniRenderer {
         positions[o + 1] = r * Math.sin(theta);
       }
     }
-    this.grid = { key, positions };
+    this.grids.set(key, positions);
     return positions;
   }
 
-  /** Upload the point grid to the shared context when the geometry changes. */
+  /** The point grid of a cell size in the shared context, uploaded the
+   * first time it is drawn. */
   private layout(gl: WebGL2RenderingContext, spokes: number, pixels: number) {
     const key = `${spokes}x${pixels}`;
-    if (key === this.geomKey) return;
-    this.geomKey = key;
-    this.count = spokes * pixels;
-    const positions = this.positions(spokes, pixels);
-    if (this.posBuf) gl.deleteBuffer(this.posBuf);
-    if (this.colorBuf) gl.deleteBuffer(this.colorBuf);
-    this.posBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+    const known = this.layouts.get(key);
+    if (known) return known;
+    const count = spokes * pixels;
+    const vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
+    const pos = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, pos);
+    gl.bufferData(gl.ARRAY_BUFFER, this.positions(spokes, pixels), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    this.colorBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, this.count * 3, gl.DYNAMIC_DRAW);
+    const color = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, color);
+    gl.bufferData(gl.ARRAY_BUFFER, count * 3, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(1);
     gl.vertexAttribPointer(1, 3, gl.UNSIGNED_BYTE, true, 0, 0);
+    const layout = { vao, color, count };
+    this.layouts.set(key, layout);
+    return layout;
   }
 }
 
 export const miniRenderer = new MiniRenderer();
+
+/** Samples along each spoke in `rgb`: the source's mini size, or a larger
+ * cell's own (a Debug node at every LED). */
+export function cellPixels(rgb: Uint8Array | null, spokes: number, pixels: number): number {
+  if (!rgb || spokes <= 0) return pixels;
+  const own = rgb.length / 3 / spokes;
+  return Number.isInteger(own) && own > 0 ? own : pixels;
+}
 
 /** Ring thumbnail for `layer:<config index>` or `node:<patch node id>`. */
 export function MiniRing({
@@ -243,7 +295,8 @@ export function MiniRing({
     const draw = () => {
       const canvas = canvasRef.current;
       if (!canvas) return;
-      miniRenderer.draw(canvas, hub.cells.get(mini) ?? null, hub.spokes, hub.pixels);
+      const rgb = hub.cells.get(mini) ?? null;
+      miniRenderer.draw(canvas, rgb, hub.spokes, cellPixels(rgb, hub.spokes, hub.pixels));
     };
     draw();
     const off = hub.onChange(draw);

@@ -124,6 +124,35 @@ export class PatchSim {
         wasm.patchsim_fireDjEvent(this.__wbg_ptr, index);
     }
     /**
+     * The node id of each `fullWgsl()` cell (the mini is `node:<id>`).
+     * @returns {string[]}
+     */
+    fullNodes() {
+        const ret = wasm.patchsim_fullNodes(this.__wbg_ptr);
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * The Debug nodes shown at every LED: the preview's entry point over
+     * `fullNodes().length` cells of `spokes × pixels` (the whole array), run
+     * with the main pass's globals (binding 0 of `globals()`), into its own
+     * buffer. Empty when there are none.
+     * @returns {string}
+     */
+    fullWgsl() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.patchsim_fullWgsl(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * Binding 0 bytes.
      * @returns {Uint8Array}
      */
@@ -559,6 +588,30 @@ export class PreparedPatch {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_preparedpatch_free(ptr, 0);
+    }
+    /**
+     * @returns {string[]}
+     */
+    fullNodes() {
+        const ret = wasm.preparedpatch_fullNodes(this.__wbg_ptr);
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * @returns {string}
+     */
+    fullWgsl() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.preparedpatch_fullWgsl(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
     }
     /**
      * @returns {string}

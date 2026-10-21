@@ -16,6 +16,8 @@ export const patchsim_draw: (a: number, b: number, c: number, d: number, e: numb
 export const patchsim_effects: (a: number) => [number, number];
 export const patchsim_feedAudio: (a: number, b: number, c: number, d: number, e: number) => void;
 export const patchsim_fireDjEvent: (a: number, b: number) => void;
+export const patchsim_fullNodes: (a: number) => [number, number];
+export const patchsim_fullWgsl: (a: number) => [number, number];
 export const patchsim_globals: (a: number) => [number, number];
 export const patchsim_gridPasses: (a: number) => [number, number];
 export const patchsim_images: (a: number) => [number, number];
@@ -48,6 +50,8 @@ export const patchsim_update: (a: number, b: number, c: number) => [number, numb
 export const patchsim_usesTouch: (a: number) => number;
 export const patchsim_usesVideo: (a: number) => number;
 export const patchsim_wgsl: (a: number) => [number, number];
+export const preparedpatch_fullNodes: (a: number) => [number, number];
+export const preparedpatch_fullWgsl: (a: number) => [number, number];
 export const preparedpatch_gridPasses: (a: number) => [number, number];
 export const preparedpatch_previewNodes: (a: number) => [number, number];
 export const preparedpatch_previewWgsl: (a: number) => [number, number];

@@ -8665,6 +8665,20 @@ class PatchSim {
   fireDjEvent(index) {
     wasm.patchsim_fireDjEvent(this.__wbg_ptr, index);
   }
+  fullNodes() {
+    let ret = wasm.patchsim_fullNodes(this.__wbg_ptr);
+    var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+    return wasm.__wbindgen_free(ret[0], ret[1] * 4, 4), v1;
+  }
+  fullWgsl() {
+    let deferred1_0, deferred1_1;
+    try {
+      let ret = wasm.patchsim_fullWgsl(this.__wbg_ptr);
+      return deferred1_0 = ret[0], deferred1_1 = ret[1], getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+      wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+  }
   globals() {
     let ret = wasm.patchsim_globals(this.__wbg_ptr);
     var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
@@ -8849,6 +8863,20 @@ class PreparedPatch {
   free() {
     let ptr = this.__destroy_into_raw();
     wasm.__wbg_preparedpatch_free(ptr, 0);
+  }
+  fullNodes() {
+    let ret = wasm.preparedpatch_fullNodes(this.__wbg_ptr);
+    var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+    return wasm.__wbindgen_free(ret[0], ret[1] * 4, 4), v1;
+  }
+  fullWgsl() {
+    let deferred1_0, deferred1_1;
+    try {
+      let ret = wasm.preparedpatch_fullWgsl(this.__wbg_ptr);
+      return deferred1_0 = ret[0], deferred1_1 = ret[1], getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+      wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
   }
   gridPasses() {
     let deferred1_0, deferred1_1;
@@ -9886,6 +9914,11 @@ class GateGpu {
   grid;
   previewOut = null;
   previewRead = null;
+  fullOut = null;
+  fullRead = null;
+  fullBind = null;
+  full = null;
+  fullCells = 0;
   previewBusy = !1;
   layout;
   main = null;
@@ -9949,18 +9982,18 @@ class GateGpu {
       primitive: { topology: "triangle-list" }
     });
   }
-  build(wgsl, previewWgsl, previewCells, grid = { bytes: 0, passes: [] }) {
-    let key = JSON.stringify([wgsl, previewWgsl, previewCells, grid]);
+  build(wgsl, previewWgsl, previewCells, grid = { bytes: 0, passes: [] }, full = { wgsl: "", cells: 0 }) {
+    let key = JSON.stringify([wgsl, previewWgsl, previewCells, grid, full]);
     if (this.installed?.key === key)
       return Promise.resolve(this.installed);
     let building = this.building.get(key);
     if (!building)
-      building = this.compile(key, wgsl, previewWgsl, previewCells, grid).finally(() => {
+      building = this.compile(key, wgsl, previewWgsl, previewCells, grid, full).finally(() => {
         this.building.delete(key);
       }), this.building.set(key, building);
     return building;
   }
-  async compile(key, wgsl, previewWgsl, previewCells, grid) {
+  async compile(key, wgsl, previewWgsl, previewCells, grid, full) {
     let pipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [this.layout] }), pipelines = async (label, code, entries = []) => {
       let module = this.device.createShaderModule({ label, code }), errors = (await module.getCompilationInfo()).messages.filter((m) => m.type === "error");
       if (errors.length)
@@ -9974,9 +10007,10 @@ class GateGpu {
       } catch (e) {
         throw new ShaderError(`${label} pipeline failed`, [String(e)]);
       }
-    }, [built, preview] = await Promise.all([
+    }, [built, preview, fullTaps] = await Promise.all([
       pipelines("patch", wgsl, grid.passes.map((p) => p.entry)),
-      previewWgsl ? pipelines("patch preview", previewWgsl).then((p) => p[0]) : null
+      previewWgsl ? pipelines("patch preview", previewWgsl).then((p) => p[0]) : null,
+      full.wgsl ? pipelines("patch debug taps", full.wgsl).then((p) => p[0]) : null
     ]), main = built.pop();
     return {
       key,
@@ -9984,7 +10018,9 @@ class GateGpu {
       gridPasses: built.map((pipeline, k) => ({ pipeline, cells: grid.passes[k].cells })),
       gridBytes: grid.bytes,
       preview,
-      previewCells: preview ? previewCells : 0
+      previewCells: preview ? previewCells : 0,
+      full: fullTaps,
+      fullCells: fullTaps ? full.cells : 0
     };
   }
   install(program) {
@@ -10003,6 +10039,17 @@ class GateGpu {
         size: bytes,
         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
       }), this.previewBind = this.bindGroup(this.previewGlobals, this.previewOut);
+    }
+    if (this.full = program.full, this.fullCells = program.fullCells, this.fullOut?.destroy(), this.fullRead?.destroy(), this.fullOut = this.fullRead = this.fullBind = null, this.full && this.fullCells > 0) {
+      let bytes = this.fullCells * this.frameBytes;
+      this.fullOut = this.device.createBuffer({
+        label: "debug taps",
+        size: bytes,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+      }), this.fullRead = this.device.createBuffer({
+        size: bytes,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+      }), this.fullBind = this.bindGroup(this.globals, this.fullOut);
     }
   }
   miniPixels() {
@@ -10049,6 +10096,8 @@ class GateGpu {
         this.mainBind = this.bindGroup(this.globals, this.out);
       if (this.previewOut)
         this.previewBind = this.bindGroup(this.previewGlobals, this.previewOut);
+      if (this.fullOut)
+        this.fullBind = this.bindGroup(this.globals, this.fullOut);
     }
     this.device.queue.writeBuffer(this.video, 0, rgba, 0, width * height * 4);
   }
@@ -10101,11 +10150,18 @@ class GateGpu {
   get previewBuffer() {
     return this.previewOut;
   }
+  get fullBuffer() {
+    return this.fullOut;
+  }
   dispatchPreview(pass) {
-    if (!this.preview || !this.previewBind)
-      return;
-    let perCell = this.geometry.spokes * this.miniPixels();
-    pass.setPipeline(this.preview), pass.setBindGroup(0, this.previewBind), pass.dispatchWorkgroups(Math.ceil(perCell * this.previewCells / 256));
+    if (this.preview && this.previewBind) {
+      let perCell = this.geometry.spokes * this.miniPixels();
+      pass.setPipeline(this.preview), pass.setBindGroup(0, this.previewBind), pass.dispatchWorkgroups(Math.ceil(perCell * this.previewCells / 256));
+    }
+    if (this.full && this.fullBind) {
+      let perCell = this.geometry.spokes * this.geometry.pixels;
+      pass.setPipeline(this.full), pass.setBindGroup(0, this.fullBind), pass.dispatchWorkgroups(Math.ceil(perCell * this.fullCells / 256));
+    }
   }
   async readPreview(dispatch = !0) {
     if (!this.preview || !this.previewBind || !this.previewOut || !this.previewRead)
@@ -10113,26 +10169,35 @@ class GateGpu {
     if (this.previewBusy)
       return null;
     this.previewBusy = !0;
-    let read = this.previewRead, cells = this.previewCells, spokes = this.geometry.spokes, pixels = this.miniPixels(), perCell = spokes * pixels;
+    let read = this.previewRead, fullOut = this.fullOut, fullRead = this.fullRead, spokes = this.geometry.spokes, pixels = this.miniPixels();
     try {
       let enc = this.device.createCommandEncoder({ label: "patch preview" });
       if (dispatch) {
         let pass = enc.beginComputePass();
         this.dispatchPreview(pass), pass.end();
       }
-      enc.copyBufferToBuffer(this.previewOut, 0, read, 0, read.size), this.device.queue.submit([enc.finish()]), await read.mapAsync(GPUMapMode.READ);
-      let packed = new Uint32Array(read.getMappedRange().slice(0));
-      read.unmap();
-      let out = [];
-      for (let c = 0;c < cells; c++) {
-        let rgb = new Uint8Array(perCell * 3);
-        for (let p = 0;p < perCell; p++) {
-          let v = packed[c * perCell + p];
-          rgb[p * 3] = v & 255, rgb[p * 3 + 1] = v >> 8 & 255, rgb[p * 3 + 2] = v >> 16 & 255;
+      if (enc.copyBufferToBuffer(this.previewOut, 0, read, 0, read.size), fullOut && fullRead)
+        enc.copyBufferToBuffer(fullOut, 0, fullRead, 0, fullRead.size);
+      this.device.queue.submit([enc.finish()]);
+      let unpack = async (buf, cells, perCell) => {
+        await buf.mapAsync(GPUMapMode.READ);
+        let packed = new Uint32Array(buf.getMappedRange().slice(0));
+        buf.unmap();
+        let out = [];
+        for (let c = 0;c < cells; c++) {
+          let rgb = new Uint8Array(perCell * 3);
+          for (let p = 0;p < perCell; p++) {
+            let v = packed[c * perCell + p];
+            rgb[p * 3] = v & 255, rgb[p * 3 + 1] = v >> 8 & 255, rgb[p * 3 + 2] = v >> 16 & 255;
+          }
+          out.push(rgb);
         }
-        out.push(rgb);
-      }
-      return { spokes, pixels, cells: out };
+        return out;
+      }, [cells, full] = await Promise.all([
+        unpack(read, this.previewCells, spokes * pixels),
+        fullRead ? unpack(fullRead, this.fullCells, spokes * this.geometry.pixels) : Promise.resolve([])
+      ]);
+      return { spokes, pixels, cells, full };
     } catch {
       return null;
     } finally {
@@ -10220,6 +10285,8 @@ class GateGpu {
       this.grid,
       this.previewOut,
       this.previewRead,
+      this.fullOut,
+      this.fullRead,
       this.frameRead
     ])
       b?.destroy();
@@ -10340,25 +10407,29 @@ class FrameHistory {
   capacity;
   frameBytes;
   previewBytes;
+  fullBytes;
   frames = [];
   previews = [];
+  fulls = [];
   meta;
   head = -1;
   filled = 0;
-  static async create(device, capacity, frameBytes, previewBytes) {
+  static async create(device, capacity, frameBytes, previewBytes, fullBytes = 0) {
     device.pushErrorScope("out-of-memory");
-    let h = new FrameHistory(device, capacity, frameBytes, previewBytes), error = await device.popErrorScope();
+    let h = new FrameHistory(device, capacity, frameBytes, previewBytes, fullBytes), error = await device.popErrorScope();
     if (error)
       throw h.destroy(), Error(`the GPU could not hold ${capacity} frames: ${error.message}`);
     return h;
   }
-  constructor(device, capacity, frameBytes, previewBytes) {
-    this.capacity = Math.max(3, capacity), this.frameBytes = frameBytes, this.previewBytes = previewBytes, this.meta = Array(this.capacity).fill(null);
+  constructor(device, capacity, frameBytes, previewBytes, fullBytes) {
+    this.capacity = Math.max(3, capacity), this.frameBytes = frameBytes, this.previewBytes = previewBytes, this.fullBytes = previewBytes > 0 ? fullBytes : 0, this.meta = Array(this.capacity).fill(null);
     let usage = GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
     for (let first = 0;first < this.capacity; first += 256) {
       let slots = Math.min(256, this.capacity - first);
       if (this.frames.push(device.createBuffer({ label: "past frames", size: slots * frameBytes, usage })), previewBytes > 0)
         this.previews.push(device.createBuffer({ label: "past previews", size: slots * previewBytes, usage }));
+      if (this.fullBytes > 0)
+        this.fulls.push(device.createBuffer({ label: "past debug taps", size: slots * this.fullBytes, usage }));
     }
   }
   get count() {
@@ -10367,13 +10438,17 @@ class FrameHistory {
   get previewed() {
     return this.previewBytes > 0;
   }
-  record(enc, out, preview, meta, replace = !1) {
+  record(enc, out, preview, meta, replace = !1, full = null) {
     if (!replace || this.head < 0)
       this.head = (this.head + 1) % this.capacity, this.filled = Math.min(this.filled + 1, this.capacity);
     let slot = this.head, [chunk, at] = this.locate(slot);
     if (enc.copyBufferToBuffer(out, 0, this.frames[chunk], at * this.frameBytes, this.frameBytes), this.previewBytes > 0 && preview) {
       let bytes = Math.min(this.previewBytes, preview.size);
       enc.copyBufferToBuffer(preview, 0, this.previews[chunk], at * this.previewBytes, bytes);
+    }
+    if (this.fullBytes > 0 && full) {
+      let bytes = Math.min(this.fullBytes, full.size);
+      enc.copyBufferToBuffer(full, 0, this.fulls[chunk], at * this.fullBytes, bytes);
     }
     this.meta[slot] = meta;
   }
@@ -10382,13 +10457,17 @@ class FrameHistory {
       return null;
     return this.meta[this.slotAt(back)] ?? null;
   }
-  restore(enc, back, out, preview, offset = 0) {
+  restore(enc, back, out, preview, offset = 0, full = null) {
     if (back < 0 || back >= this.filled)
       return;
     let [chunk, at] = this.locate(this.slotAt(back));
     if (enc.copyBufferToBuffer(this.frames[chunk], at * this.frameBytes, out, offset, this.frameBytes), this.previewBytes > 0 && preview) {
       let bytes = Math.min(this.previewBytes, preview.size);
       enc.copyBufferToBuffer(this.previews[chunk], at * this.previewBytes, preview, 0, bytes);
+    }
+    if (this.fullBytes > 0 && full) {
+      let bytes = Math.min(this.fullBytes, full.size);
+      enc.copyBufferToBuffer(this.fulls[chunk], at * this.fullBytes, full, 0, bytes);
     }
   }
   series(back, length) {
@@ -10408,9 +10487,9 @@ class FrameHistory {
     this.head = -1, this.filled = 0, this.meta.fill(null);
   }
   destroy() {
-    for (let b of [...this.frames, ...this.previews])
+    for (let b of [...this.frames, ...this.previews, ...this.fulls])
       b.destroy();
-    this.frames = [], this.previews = [], this.clear();
+    this.frames = [], this.previews = [], this.fulls = [], this.clear();
   }
   slotAt(back) {
     return (this.head - back + this.capacity) % this.capacity;
@@ -10546,6 +10625,7 @@ class PatchRuntime {
   miniListeners = /* @__PURE__ */ new Set;
   lastPreview = 0;
   previewNodes = [];
+  fullNodes = [];
   uploadedImages = /* @__PURE__ */ new Map;
   previewScalars = [];
   meterKeys = [];
@@ -10629,7 +10709,7 @@ class PatchRuntime {
     this.pending = !0;
     let program;
     try {
-      program = await this.gpu.build(source.wgsl(), source.previewWgsl(), source.previewNodes().length, JSON.parse(source.gridPasses()));
+      program = await this.gpu.build(source.wgsl(), source.previewWgsl(), source.previewNodes().length, JSON.parse(source.gridPasses()), { wgsl: source.fullWgsl(), cells: source.fullNodes().length });
     } catch (e) {
       if (gen === this.generation) {
         this.pending = !1;
@@ -10650,7 +10730,10 @@ class PatchRuntime {
     this.gpu.install(program), this.liveGen = gen, this.held = !1, this.ready(sim, gen, !0);
   }
   ready(sim, gen, shader) {
-    this.syncImages(sim), this.previewNodes = sim.previewNodes();
+    this.syncImages(sim), this.previewNodes = sim.previewNodes(), this.fullNodes = sim.fullNodes();
+    let fullBytes = this.fullNodes.length * this.gpu.frameBytes;
+    if (this.keepSeconds > 0 && this.history && this.history.fullBytes !== fullBytes)
+      this.setKeep(this.keepSeconds);
     let scalars = JSON.parse(sim.previewScalars());
     if (JSON.stringify(scalars) !== JSON.stringify(this.previewScalars))
       this.previewScalars = scalars, this.meterKeys = scalars.map(([node, port]) => `scalar:${node}:${port}`);
@@ -10811,7 +10894,7 @@ class PatchRuntime {
       before: again ? (enc) => {
         history.restore(enc, 1, this.gpu.out, null), history.restore(enc, 2, this.gpu.out, null, this.gpu.frameBytes);
       } : void 0,
-      record: history ? (enc) => history.record(enc, this.gpu.out, this.gpu.previewBuffer, meta, how.again) : void 0
+      record: history ? (enc) => history.record(enc, this.gpu.out, this.gpu.previewBuffer, meta, how.again, this.gpu.fullBuffer) : void 0
     }, thumbs);
     let stepping = how.stepping === !0 || how.again === !0;
     if (this.miniRefs > 0 && (stepping || now - this.lastPreview >= PREVIEW_INTERVAL_MS))
@@ -10867,7 +10950,7 @@ class PatchRuntime {
   async setKeep(seconds) {
     let s = Math.max(0, seconds), next;
     try {
-      next = await FrameHistory.create(this.gpu.device, keepSlots(s), this.gpu.frameBytes, s > 0 ? this.gpu.maxPreviewBytes : 0);
+      next = await FrameHistory.create(this.gpu.device, keepSlots(s), this.gpu.frameBytes, s > 0 ? this.gpu.maxPreviewBytes : 0, this.fullNodes.length * this.gpu.frameBytes);
     } catch (e) {
       return errorText(e);
     }
@@ -10876,14 +10959,15 @@ class PatchRuntime {
     return this.history?.destroy(), this.history = next, this.keepSeconds = s, this.notifyTransport(), null;
   }
   keepCost(seconds) {
-    return keepSlots(seconds) * (this.gpu.frameBytes + (seconds > 0 ? this.gpu.maxPreviewBytes : 0));
+    let thumbs = seconds > 0 ? this.gpu.maxPreviewBytes + this.fullNodes.length * this.gpu.frameBytes : 0;
+    return keepSlots(seconds) * (this.gpu.frameBytes + thumbs);
   }
   show(back) {
     let history = this.history;
     if (!history || back >= Math.max(1, history.count))
       return;
-    let preview = history.previewed ? this.gpu.previewBuffer : null;
-    if (this.gpu.redraw((enc) => history.restore(enc, back, this.gpu.out, preview)), this.back = back, !history.previewed)
+    let preview = history.previewed ? this.gpu.previewBuffer : null, full = history.previewed ? this.gpu.fullBuffer : null;
+    if (this.gpu.redraw((enc) => history.restore(enc, back, this.gpu.out, preview, 0, full)), this.back = back, !history.previewed)
       return;
     if (this.miniRefs > 0)
       this.readMinis(!1);
@@ -10974,11 +11058,15 @@ class PatchRuntime {
       return;
     }
     this.reading = !0;
-    let nodes = this.previewNodes, gen = this.generation;
+    let nodes = this.previewNodes, full = this.fullNodes, gen = this.generation;
     this.gpu.readPreview(dispatch).then((res) => {
       if (res && gen === this.generation)
         this.spokes = res.spokes, this.pixels = res.pixels, this.cells.clear(), res.cells.forEach((rgb, i) => {
           let id = nodes[i];
+          if (id)
+            this.cells.set(`node:${id}`, rgb);
+        }), res.full.forEach((rgb, i) => {
+          let id = full[i];
           if (id)
             this.cells.set(`node:${id}`, rgb);
         });

@@ -46,6 +46,17 @@ export class PatchSim {
      */
     fireDjEvent(index: number): void;
     /**
+     * The node id of each `fullWgsl()` cell (the mini is `node:<id>`).
+     */
+    fullNodes(): string[];
+    /**
+     * The Debug nodes shown at every LED: the preview's entry point over
+     * `fullNodes().length` cells of `spokes × pixels` (the whole array), run
+     * with the main pass's globals (binding 0 of `globals()`), into its own
+     * buffer. Empty when there are none.
+     */
+    fullWgsl(): string;
+    /**
      * Binding 0 bytes.
      */
     globals(): Uint8Array;
@@ -216,6 +227,8 @@ export class PreparedPatch {
     private constructor();
     free(): void;
     [Symbol.dispose](): void;
+    fullNodes(): string[];
+    fullWgsl(): string;
     gridPasses(): string;
     previewNodes(): string[];
     previewWgsl(): string;
@@ -305,6 +318,8 @@ export interface InitOutput {
     readonly patchsim_effects: (a: number) => [number, number];
     readonly patchsim_feedAudio: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly patchsim_fireDjEvent: (a: number, b: number) => void;
+    readonly patchsim_fullNodes: (a: number) => [number, number];
+    readonly patchsim_fullWgsl: (a: number) => [number, number];
     readonly patchsim_globals: (a: number) => [number, number];
     readonly patchsim_gridPasses: (a: number) => [number, number];
     readonly patchsim_images: (a: number) => [number, number];
@@ -337,6 +352,8 @@ export interface InitOutput {
     readonly patchsim_usesTouch: (a: number) => number;
     readonly patchsim_usesVideo: (a: number) => number;
     readonly patchsim_wgsl: (a: number) => [number, number];
+    readonly preparedpatch_fullNodes: (a: number) => [number, number];
+    readonly preparedpatch_fullWgsl: (a: number) => [number, number];
     readonly preparedpatch_gridPasses: (a: number) => [number, number];
     readonly preparedpatch_previewNodes: (a: number) => [number, number];
     readonly preparedpatch_previewWgsl: (a: number) => [number, number];
