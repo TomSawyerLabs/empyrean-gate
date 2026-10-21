@@ -1,6 +1,6 @@
 # The Output node gets a mini
 
-Status: **built and tested (2026-10-21), gate `43b1d82`**. Worktree
+Status: **done (2026-10-21)**: gate `43b1d82` (plan `30a5bb9`), CI green; site bump `735bd87`, README `54549d9`; seen on the dev Preview. Worktree
 `C:\Users\camer\.t3\worktrees\Empyrean\output-mini`, branch `output-mini` →
 gate `master`; the site picks it up through the web-dist bump.
 
@@ -43,7 +43,11 @@ the preview scrolled away still shows the result next to the graph.
       inner Output on its Sub-patch's id; README sentence.
 - [x] 3 checks: patch-web typecheck + 213 unit tests green; gate patch specs
       14/14, full behaviour suite 144/144 (Chromium), browser shader check 3/3.
-- [ ] 4 landed and seen on the Preview
+- [x] 4 gate master `30a5bb9` (Checks, Web dist green); site bump `735bd87`
+      (dispatched by hand, the 15-minute schedule had stalled); site dev
+      `54549d9` (README, after the queued diagram commit `f6f02be` as `c7fd1a5`).
+      On the Preview, Rainbow Sparkle's Output ring shows the same rainbow as
+      the Blend feeding it.
 
 ## Findings / gotchas
 
