@@ -87,7 +87,7 @@ export {
 } from "./standins";
 
 /** The gate as built (`src-tauri/src/config.rs` defaults). */
-export const GATE_GEOMETRY: Geometry = { spokes: 64, pixels: 378, innerOverOuter: 8 / 25 };
+export const GATE_GEOMETRY: Geometry = { spokes: 64, pixels: 378, innerOverOuter: 8.38 / 28.99 };
 
 /** How often the node thumbnails refresh, as on the gate (`minis.rs`). */
 const PREVIEW_INTERVAL_MS = 100;
