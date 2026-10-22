@@ -116,8 +116,8 @@ function png(width: number, height: number, rgb: Uint8Array): Uint8Array {
 
 // --- Array -> image ---------------------------------------------------------
 
-/** Inner radius over outer, matching the default geometry (8 ft of 25 ft). */
-const INNER = 0.32;
+/** Inner radius over outer, matching the default geometry (8.38 ft of 28.99 ft). */
+const INNER = 8.38 / 28.99;
 
 function render(before: Frame, after: Frame): Uint8Array {
   const img = new Uint8Array(IMG * IMG * 3);

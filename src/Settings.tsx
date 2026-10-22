@@ -2133,7 +2133,7 @@ function GeometryPanel({ config }: { config: AppConfig }) {
         <NumberField
           label="Outer radius (ft)"
           value={g.outer_radius_ft}
-          step={0.5}
+          step={0.01}
           min={1}
           max={60}
           onCommit={(v) => commit({ outer_radius_ft: v })}
@@ -2141,7 +2141,7 @@ function GeometryPanel({ config }: { config: AppConfig }) {
         <NumberField
           label="Inner radius (ft)"
           value={g.inner_radius_ft}
-          step={0.5}
+          step={0.01}
           min={0}
           max={60}
           onCommit={(v) => commit({ inner_radius_ft: v })}

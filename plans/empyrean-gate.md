@@ -16,12 +16,30 @@ keyboard/mouse/touch. CI builds a standalone binary (no installer/updater).
   half is deliberate: the rig is intended to double to 128 spokes later.
 - **378 px per spoke** (confirmed 2026-08-23 against the existing controller patch;
   matches the 64×378 Uprising recordings the Archive tab replays).
-- Major (outer) diameter 50 ft → outer radius 25 ft. Minor radius ~15–20 ft diameter →
-  default inner radius 8 ft (configurable; user unsure).
+- **Ring size, corrected 2026-10-22.** This plan used to say a 50 ft ring (outer radius
+  25 ft, inner 8 ft). The Gate is a **60 ft** ring. From the Entheos design drawings
+  A-06 and A-07 ("Empyrean Gate: Details", 2022-04-28), which the user says are pretty
+  accurate:
+  - Truss circle: Tomcat Global TC 1212-60D16B, 12" light-duty, **60'-0" outside
+    diameter**, about 58'-0" inside; 16 arcs of about 11'-8", lettered A–P.
+  - Inner ring: a custom **13'-0"** Tomcat ring.
+  - Each LED sail runs from **57'-11¾"** across (radius 28.99 ft) in to **13'-0⅛"**
+    (radius 6.50 ft): 22'-5⅞" (22.49 ft) of sail per spoke.
+  - 8 legs, 20 ft tall; the ring at about 20'-11".
+- **Default geometry** (`GeometryConfig::default`): outer radius **28.99 ft**, inner
+  **8.38 ft** (inner/outer 0.289). These are pixel positions, not structure: pixel 0
+  sits at the sail's outer edge (strips fed from outside, off the truss), and the strip
+  is shorter than the sail — 378 px at 60/m is 6.3 m (20.67 ft), so the last pixel is
+  377/60 m = 20.61 ft further in. 60/m is the only standard density that fits (30/m
+  would be 41 ft of strip); where along the sail the strip actually starts is not
+  measured, so the inner end could be off by a foot or so. A saved config keeps the
+  geometry it already has (the default only fills a missing field), so a machine set
+  up before this keeps 25 / 8 until someone enters the new values in Settings →
+  Geometry.
 - LED density 30 or 60 LED/m (default 60, configurable; only affects physical-space mapping).
-- **Strings are fed from the outside**: pixel 0 = outer radius (50 ft dia), last pixel =
-  innermost radius. **Confirmed 100% by the user 2026-08-23** — treat as fixed, not an
-  assumption. Spoke direction matters for chases.
+- **Strings are fed from the outside**: pixel 0 = outer radius (sail outer edge, 57'-11¾"
+  across), last pixel = innermost radius. **Confirmed 100% by the user 2026-08-23** —
+  treat as fixed, not an assumption. Spoke direction matters for chases.
 - **Indexing conventions** (they differ on purpose; this is a classic off-by-one trap):
   spokes and pixels are **0-based** everywhere — config, engine, Test tab, Settings hint.
   Universes and channels are **1-based**, because that is the wire format and what
@@ -1047,7 +1065,8 @@ The patch is confirmed independently of the screenshot it was derived from.
 
 1. Pixel count and universe map are now confirmed against the installed patch (378
    px/spoke, 6-universe stride) and shipped in `default-config`. Still estimates:
-   LED density (60/m) and the minor radius (8 ft) — editable in Settings → Geometry.
+   LED density (60/m) and so the inner radius (8.38 ft, from the strip's length; the
+   outer radius, 28.99 ft, is the drawings') — editable in Settings → Geometry.
 2. Show machine OS? CI builds Windows + Linux; add macOS on request.
 3. Which public video providers matter in practice? Direct files and standards-based
    metadata work now; changing provider sites remain optional `yt-dlp` territory.

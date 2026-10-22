@@ -36,7 +36,7 @@ impl Default for Geometry {
         Self {
             spokes: 64,
             pixels: 378,
-            inner_over_outer: 8.0 / 25.0,
+            inner_over_outer: 8.38 / 28.99,
         }
     }
 }

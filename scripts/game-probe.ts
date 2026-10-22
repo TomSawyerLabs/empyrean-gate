@@ -48,7 +48,8 @@ if (kinds.length !== 1) {
 const kind = kinds[0];
 const OUT_DIR = "test-results/games";
 const IMG = 480;
-const INNER = 0.32;
+/** Inner radius over outer, matching the default geometry (8.38 ft of 28.99 ft). */
+const INNER = 8.38 / 28.99;
 
 interface Frame {
   spokes: number;
