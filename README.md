@@ -335,9 +335,15 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   unless someone is watching minis. **Show on Live** puts it in a strip
   on the Live tab while its patch is on air (status `patch_taps`), for
   watching a signal during a show (`plans/debug-node.md`). Its
-  **Resolution** is Mini or **Every LED**: the latter renders the tap at
-  the array's own resolution in a pass of its own (at most four a
-  patch), in the browser playground; the gate's views show it as a Mini.
+  **Resolution** is Mini or **Full detail**. A Mini is worked out at 16
+  points along each spoke, so it can miss a thin ring or make up a
+  pattern. Full detail works the tap out at every LED in a pass of its own
+  (at most four per patch), and each view averages that down to what it can
+  show. The gate's thumbnail bus renders it only while someone watches, and
+  each client asks for as many samples per spoke as its largest view
+  draws (`SubscribeMiniPreviews.detail`; half that on a phone). So a
+  desktop gets about 260 of the 378 at 10 a second, about 4 Mbit/s per
+  tap.
   **Frame by frame**: a bar under the graph of the patch on air pauses
   it and steps it a frame at a time (K, and `,` `.`; Shift for ten), so
   a one-frame event or an every-frame value shows in the minis and Debug

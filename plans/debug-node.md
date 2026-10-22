@@ -2,7 +2,8 @@
 
 Status: **built and tested; on gate `master` (`7c2344f`) and the
 empyreangate.org `dev` Preview** (bump `b348e80`, README `3982361`), not
-yet in a gate release.
+yet in a gate release. Full detail on the gate (2026-10-22) is built and
+tested; see its section.
 
 ## Goal
 
@@ -101,9 +102,77 @@ tapped shape); Live renders a strip of minis for them.
 - Rebased once onto the Output's mini (`43b1d82`, another thread): the
   Output's cell is slot 0, Debug cells follow it.
 
+## Full detail on the gate (built 2026-10-22)
+
+Cameron (2026-10-21): "Having it everywhere would be nice", then "sounds
+good" to the plan below. It covers building it on the gate and renaming the
+option.
+
+**Decisions:**
+- The Select's second choice is labelled **"Full detail"**, not "Every
+  LED": the views average the real LEDs down to what the screen can hold.
+  It keeps value 1, so saved patches are unchanged.
+- **No checkbox.** The node's Resolution is the only switch. Each client
+  asks for as many samples per spoke as it can draw; the gate box-averages
+  the full cell down to that for each client.
+
+**Design:**
+1. **Engine** (`src-tauri/src/engine/mod.rs`):
+   - `PatchShader` gains `taps`, the Full detail module
+     (`Program::full_wgsl`), set only on the preview shader.
+     `PatchCompiler::build` builds its `main` pipeline into
+     `PatchPipelines::taps`.
+   - `Engine::render_taps(globals, cells)` runs that pipeline after
+     `render`, on the same queue, so it reads this frame's textures. It
+     uses its own globals, output and ping-pong staging, with the readback
+     one call behind, as `render` does.
+2. **Mini bus** (`minis.rs`): after the preview dispatch, render the taps
+   with the show's own globals (real pixel count). The batch carries
+   `detail` cells, keyed by slot in `patch_nodes` (a Full detail tap keeps
+   its mini cell), plus `detail_pixels`. It renders only while someone
+   watches (`mini_watchers`).
+3. **Wire:** a patch batch (kind 1) gains a tail after its scalars: u16
+   detail pixels, u16 count, then cells (u16 slot, pad, spokes × pixels
+   RGB). `SubscribeMiniPreviews { detail }` is the samples per spoke the
+   client can draw (0: no tail). `encode_minis` box-averages to
+   `min(detail, pixels)`.
+4. **Client:**
+   - `ws.ts` parses the tail.
+   - `MiniHub` lets a detail cell stand in for its mini in `apply` and
+     `keep`, counts it in `keepCost`, and subscribes with `detail` from
+     patch-web's `ringSamples` (the `fitCell` formula at the largest
+     stage; half that on phones).
+5. Tests, README (gate, patch-web, site), registry description.
+
+**Verified (2026-10-22):**
+- `cargo test --lib` 364, crate 172, gate unit 240, patch-web unit 231,
+  typechecks.
+- `engine-smoke --patch` on the real GPU: the taps cell is the whole frame
+  (72,576 bytes), with 84 different LEDs along a spoke.
+- `scripts/mini-preview-test.ts` against a real headless backend: Full
+  detail cells at the 100 samples asked for, lit.
+- Playwright: patch-minis, live-taps, frame-step, public-floor.
+- In Chrome against an isolated backend: radial waves at a high count. The
+  Mini tap shows a few broad aliased rings, the Full detail tap the real
+  fine ones. Seen on the node, in the panel, and in the Live strip.
+
+**Findings:**
+- The first run of `scripts/mini-preview-test.ts` after a fresh build timed
+  out waiting for the first meta (8 s), and the next four passed. It looks
+  like a cold start (a new exe copy, Vulkan init); the script is not in CI.
+- Each kept frame-step batch now holds its detail cells too (`keepCost`
+  counts them).
+
+**Not doing (yet):** per-key interest. A client watching only the Live
+strip still receives detail cells for taps that are not on Live. It's a
+small cost (about 3 Mbit/s per tap per desktop client at 192 samples); add
+it if it shows up.
+
 ## Open questions for the user
 
-1. ~~Resolution~~ Answered (Cameron, 2026-10-21: "make it a toggle"):
+1. ~~Resolution~~ Answered (Cameron, 2026-10-21: "make it a toggle";
+   2026-10-22: "sounds good" to Full detail on the gate, built above).
+   Was:
    Debug's Resolution Select, Mini or Every LED (`e3da1de`, `6246d7b`).
    Every LED is a third module run with the main globals, in the browser
    only. **Open:** the gate's own views show it as a Mini; doing it there
