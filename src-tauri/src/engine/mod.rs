@@ -108,6 +108,8 @@ pub struct Engine {
     frame: u64,
     pub gpu_name: String,
     readback: Vec<u8>,
+    /// Made on the first [`Engine::render_taps`], resized as it needs.
+    taps: Option<TapBuffers>,
 }
 
 /// A compiled patch as an engine runs it: the module, and the grid passes
@@ -117,6 +119,10 @@ pub struct PatchShader {
     pub wgsl: String,
     pub grid_passes: Vec<crate::patch::codegen::GridPass>,
     pub grid_bytes: usize,
+    /// The Debug nodes at Full detail (`Program::full_wgsl`), run after
+    /// `main` by [`Engine::render_taps`]; empty without any, and always for
+    /// the main module.
+    pub taps: String,
 }
 
 impl PatchShader {
@@ -126,24 +132,44 @@ impl PatchShader {
             wgsl: prog.wgsl.clone(),
             grid_passes: prog.grid_passes.clone(),
             grid_bytes: prog.grid_bytes,
+            taps: String::new(),
         }
     }
 
-    /// Its preview module, which has the same grid passes.
+    /// Its preview module, which has the same grid passes, with its Full
+    /// detail Debug taps.
     pub fn preview(prog: &crate::patch::codegen::Program) -> Self {
         Self {
             wgsl: prog.preview_wgsl.clone(),
             grid_passes: prog.grid_passes.clone(),
             grid_bytes: prog.grid_bytes,
+            taps: prog.full_wgsl.clone(),
         }
     }
 }
 
-/// An installed patch: its grid passes (pipeline, cells), then `main`.
+/// An installed patch: its grid passes (pipeline, cells), then `main`, and
+/// the Full detail taps' pipeline when it has one.
 #[derive(Clone)]
 struct PatchPipelines {
     grids: Vec<(wgpu::ComputePipeline, u32)>,
     main: wgpu::ComputePipeline,
+    taps: Option<wgpu::ComputePipeline>,
+}
+
+/// What [`Engine::render_taps`] renders into: its own globals (the show's
+/// pixel count, not a mini's) and output, read back one call behind like
+/// the frame's.
+struct TapBuffers {
+    globals: wgpu::Buffer,
+    out: wgpu::Buffer,
+    staging: [wgpu::Buffer; 2],
+    staging_submission: [Option<wgpu::SubmissionIndex>; 2],
+    bind_group: wgpu::BindGroup,
+    /// Pixels across every cell.
+    npix: u32,
+    calls: u64,
+    readback: Vec<u8>,
 }
 
 /// Engines are told apart by id: each has its own device, and a pipeline
@@ -188,9 +214,21 @@ impl PatchCompiler {
             .zip(&shader.grid_passes)
             .map(|(pipeline, pass)| (pipeline, pass.cells))
             .collect();
+        // Only its `main`: the textures are the ones `main`'s grid passes
+        // just rendered, not rendered again.
+        let taps = if shader.taps.is_empty() {
+            None
+        } else {
+            Some(Engine::build_pipeline(
+                &self.device,
+                &self.layout,
+                "patch debug taps",
+                &shader.taps,
+            )?)
+        };
         Ok(BuiltPatch {
             engine: self.engine,
-            pipelines: PatchPipelines { grids, main },
+            pipelines: PatchPipelines { grids, main, taps },
             grid_bytes: shader.grid_bytes,
         })
     }
@@ -405,6 +443,7 @@ impl Engine {
             frame: 0,
             gpu_name,
             readback: Vec::new(),
+            taps: None,
         };
         engine.readback = vec![0u8; (npix * 3) as usize];
         Ok(engine)
@@ -587,6 +626,11 @@ impl Engine {
                 &self.grid_buf,
             ],
         );
+        // The taps read the same textures.
+        if let Some(taps) = &self.taps {
+            let bind_group = self.tap_bind_group(&taps.globals, &taps.out);
+            self.taps.as_mut().expect("checked above").bind_group = bind_group;
+        }
     }
 
     fn make_pixel_buffers(device: &wgpu::Device, npix: u32) -> (wgpu::Buffer, [wgpu::Buffer; 2]) {
@@ -770,34 +814,160 @@ impl Engine {
         let Some(prev_submission) = self.staging_submission[read_slot].take() else {
             return Ok(None);
         };
-        let buf = &self.staging[read_slot];
-        let slice = buf.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        self.device
-            .poll(wgpu::PollType::Wait {
-                submission_index: Some(prev_submission),
-                timeout: None,
-            })
-            .context("device poll failed")?;
-        rx.recv()
-            .context("map_async callback dropped")?
-            .context("staging buffer map failed")?;
-        {
-            let data = slice.get_mapped_range();
-            let words: &[u32] = bytemuck::cast_slice(&data);
-            for (px, w) in words.iter().enumerate() {
-                let o = px * 3;
-                self.readback[o] = (*w & 0xff) as u8;
-                self.readback[o + 1] = ((*w >> 8) & 0xff) as u8;
-                self.readback[o + 2] = ((*w >> 16) & 0xff) as u8;
-            }
-        }
-        buf.unmap();
+        read_back(
+            &self.device,
+            &self.staging[read_slot],
+            prev_submission,
+            &mut self.readback,
+        )?;
         Ok(Some(&self.readback))
     }
+
+    /// Run the installed patch's Full detail Debug taps (`PatchShader::taps`,
+    /// `cells` of them) with `globals`, the show's own pixel count rather
+    /// than a mini's. Call it after [`Engine::render`]: queued behind that
+    /// frame, the taps read the textures its grid passes just rendered.
+    /// Like `render`, it returns the previous call's cells (RGB, `spokes ×
+    /// pixels` each, in slot order), or `None` on the first call, after the
+    /// size changes, or without taps.
+    pub fn render_taps(&mut self, globals: &Globals, cells: u32) -> Result<Option<&[u8]>> {
+        let Some(pipeline) = self.patch.as_ref().and_then(|p| p.taps.clone()) else {
+            self.taps = None;
+            return Ok(None);
+        };
+        let npix = globals.spokes * globals.pixels * cells;
+        if npix == 0 {
+            return Ok(None);
+        }
+        if self.taps.as_ref().is_none_or(|t| t.npix != npix) {
+            self.taps = Some(self.make_tap_buffers(npix));
+        }
+        let taps = self.taps.as_mut().expect("made above");
+        let write_slot = (taps.calls % 2) as usize;
+        let read_slot = 1 - write_slot;
+        self.queue
+            .write_buffer(&taps.globals, 0, bytemuck::bytes_of(globals));
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("debug taps"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("debug taps"),
+                timestamp_writes: None,
+            });
+            pass.set_bind_group(0, &taps.bind_group, &[]);
+            pass.set_pipeline(&pipeline);
+            pass.dispatch_workgroups(npix.div_ceil(256), 1, 1);
+        }
+        encoder.copy_buffer_to_buffer(&taps.out, 0, &taps.staging[write_slot], 0, (npix as u64) * 4);
+        taps.staging_submission[write_slot] = Some(self.queue.submit([encoder.finish()]));
+        taps.calls += 1;
+        let Some(prev_submission) = taps.staging_submission[read_slot].take() else {
+            return Ok(None);
+        };
+        read_back(
+            &self.device,
+            &taps.staging[read_slot],
+            prev_submission,
+            &mut taps.readback,
+        )?;
+        Ok(Some(&taps.readback))
+    }
+
+    /// Buffers for `npix` pixels of Full detail taps, bound with this
+    /// engine's patch inputs.
+    fn make_tap_buffers(&self, npix: u32) -> TapBuffers {
+        let size = (npix as u64) * 4;
+        let globals = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tap globals"),
+            size: std::mem::size_of::<Globals>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let out = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tap out"),
+            size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let staging = std::array::from_fn(|i| {
+            self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(if i == 0 { "tap staging-0" } else { "tap staging-1" }),
+                size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+        let bind_group = self.tap_bind_group(&globals, &out);
+        TapBuffers {
+            globals,
+            out,
+            staging,
+            staging_submission: [None, None],
+            bind_group,
+            npix,
+            calls: 0,
+            readback: vec![0u8; (npix * 3) as usize],
+        }
+    }
+
+    /// The patch bindings with the taps' own globals and output.
+    fn tap_bind_group(&self, globals: &wgpu::Buffer, out: &wgpu::Buffer) -> wgpu::BindGroup {
+        Self::make_patch_bind_group(
+            &self.device,
+            &self.patch_layout,
+            [
+                globals,
+                &self.audio_buf,
+                &self.effects_buf,
+                out,
+                &self.dabs_buf,
+                &self.scope_buf,
+                &self.video_buf,
+                &self.params_buf,
+                &self.touch_buf,
+                &self.grid_buf,
+            ],
+        )
+    }
+}
+
+/// Wait for `submission` (the copy into `buf`), then unpack `buf`'s packed
+/// pixels into `rgb`, 3 bytes each.
+fn read_back(
+    device: &wgpu::Device,
+    buf: &wgpu::Buffer,
+    submission: wgpu::SubmissionIndex,
+    rgb: &mut [u8],
+) -> Result<()> {
+    let slice = buf.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
+    device
+        .poll(wgpu::PollType::Wait {
+            submission_index: Some(submission),
+            timeout: None,
+        })
+        .context("device poll failed")?;
+    rx.recv()
+        .context("map_async callback dropped")?
+        .context("staging buffer map failed")?;
+    {
+        let data = slice.get_mapped_range();
+        let words: &[u32] = bytemuck::cast_slice(&data);
+        for (px, w) in words.iter().enumerate() {
+            let o = px * 3;
+            rgb[o] = (*w & 0xff) as u8;
+            rgb[o + 1] = ((*w >> 8) & 0xff) as u8;
+            rgb[o + 2] = ((*w >> 16) & 0xff) as u8;
+        }
+    }
+    buf.unmap();
+    Ok(())
 }
 
 fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
@@ -2171,11 +2341,17 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     // `prog.doc` is the patch with sub-patches inlined: what
                     // every node index below refers to.
                     let prog = ready.prog;
+                    let node_ids = prog.preview_keys();
                     patch_preview = Some(minis::PatchPreviewInfo {
                         key: format!("{id}:{built_epoch}"),
                         shader: ready.preview,
                         prebuilt: minis_built,
-                        node_ids: prog.preview_keys(),
+                        detail_slots: prog
+                            .full_keys()
+                            .iter()
+                            .map(|key| node_ids.iter().position(|n| n == key).map(|i| i as u16))
+                            .collect(),
+                        node_ids,
                         scalar_refs: prog
                             .preview_scalars
                             .iter()

@@ -1034,6 +1034,8 @@ pub(crate) const PREVIEW_ACK_STALL: Duration = Duration::from_secs(3);
 /// and always describe the newest state, so a lagging client just skips.
 struct MiniSub {
     min_interval: Duration,
+    /// Samples along a spoke for Full detail cells (0: none).
+    detail: u32,
     last_sent: Instant,
     /// Last `meta_epoch` announced to this client (None = never).
     announced: Option<u64>,
@@ -1367,7 +1369,7 @@ async fn client_task(ctx: Ctx, socket: WebSocket, addr: SocketAddr) {
                 let empty = batch.cells.is_empty() && batch.scalars.is_empty();
                 if !empty && sub.last_sent.elapsed() < sub.min_interval { continue; }
                 sub.last_sent = Instant::now();
-                let bytes = encode_minis(&batch);
+                let bytes = encode_minis(&batch, sub.detail);
                 if tx.send(Message::Binary(bytes.into())).await.is_err() { break; }
             }
         }
@@ -1692,9 +1694,10 @@ fn encode_preview_rgb(frame: &PreviewFrame, rgb: &[u8], decimate: u32, magic: u3
     bytes
 }
 
-/// One MINI_PREVIEW_MAGIC message: header, ring cells, scalar meters. Layout
-/// documented at the magic's definition in `protocol.rs`.
-fn encode_minis(batch: &MiniBatch) -> Vec<u8> {
+/// One MINI_PREVIEW_MAGIC message: header, ring cells, scalar meters, and
+/// the Full detail cells averaged to `detail` samples a spoke (none for 0).
+/// Layout documented at the magic's definition in `protocol.rs`.
+fn encode_minis(batch: &MiniBatch, detail: u32) -> Vec<u8> {
     let cell_len = (batch.spokes * batch.pixels * 3) as usize;
     let mut bytes =
         Vec::with_capacity(20 + batch.cells.len() * (4 + cell_len) + batch.scalars.len() * 8);
@@ -1724,7 +1727,36 @@ fn encode_minis(batch: &MiniBatch) -> Vec<u8> {
         bytes.extend_from_slice(&0u16.to_le_bytes());
         bytes.extend_from_slice(&value.to_le_bytes());
     }
+    if detail > 0 && !batch.detail.is_empty() {
+        let from = batch.detail_pixels.max(1);
+        let to = detail.min(from);
+        bytes.extend_from_slice(&(to as u16).to_le_bytes());
+        bytes.extend_from_slice(&(batch.detail.len() as u16).to_le_bytes());
+        for (id, rgb) in &batch.detail {
+            bytes.extend_from_slice(&id.to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            fit_spokes(&mut bytes, rgb, batch.spokes as usize, from as usize, to as usize);
+        }
+    }
     bytes
+}
+
+/// Append `rgb` (`spokes` × `from` pixels) with each spoke averaged down to
+/// `to` pixels in even runs, as the clients' own `fitCell` does. A short
+/// cell (geometry changed mid-render) reads as black past its end.
+fn fit_spokes(bytes: &mut Vec<u8>, rgb: &[u8], spokes: usize, from: usize, to: usize) {
+    let at = |i: usize| rgb.get(i).copied().unwrap_or(0) as u32;
+    for s in 0..spokes {
+        for j in 0..to {
+            let a = j * from / to;
+            let b = ((j + 1) * from / to).max(a + 1);
+            for ch in 0..3 {
+                let sum: u32 = (a..b).map(|i| at((s * from + i) * 3 + ch)).sum();
+                let n = (b - a) as u32;
+                bytes.push(((sum + n / 2) / n) as u8);
+            }
+        }
+    }
 }
 
 /// What a connection's state snapshots may carry. Every `State`/`Status` a
@@ -3015,12 +3047,13 @@ async fn handle_msg(
                 sub.note_ack(Instant::now());
             }
         }
-        ClientMsg::SubscribeMiniPreviews { fps } => {
+        ClientMsg::SubscribeMiniPreviews { fps, detail } => {
             if minis.is_none() {
                 state.mini_watchers.fetch_add(1, Ordering::Relaxed);
             }
             *minis = Some(MiniSub {
                 min_interval: Duration::from_secs_f32(1.0 / fps.clamp(1.0, 30.0)),
+                detail,
                 last_sent: Instant::now() - Duration::from_secs(1),
                 announced: None,
             });
@@ -3338,6 +3371,50 @@ mod diagnostics_tests {
         );
         assert_eq!(u16::from_le_bytes(program[10..12].try_into().unwrap()), 2);
         assert_ne!(&program[12..], &ready[12..]);
+    }
+
+    /// A patch batch of 2 spokes: one 2-pixel mini cell (slot 0) and a
+    /// Full detail cell for slot 1 at 6 pixels, its LEDs counting up.
+    fn detail_batch() -> MiniBatch {
+        MiniBatch {
+            batch: 3,
+            kind: MiniKind::Patch,
+            spokes: 2,
+            pixels: 2,
+            cells: vec![(0, vec![9; 12])],
+            scalars: vec![(0, 0.5)],
+            detail_pixels: 6,
+            detail: vec![(1, (0..36).map(|i| (i / 3 * 10) as u8).collect())],
+            meta_epoch: 1,
+            patch_nodes: Arc::new(vec!["out".into(), "tap".into()]),
+            patch_scalars: Arc::new(vec![("lfo".into(), "out".into())]),
+        }
+    }
+
+    #[test]
+    fn full_detail_cells_come_averaged_to_what_the_client_asked_for() {
+        let batch = detail_batch();
+        // Header 20, one cell 4 + 12, one scalar 8: the tail starts at 44.
+        let tail = 20 + 16 + 8;
+        let bytes = encode_minis(&batch, 3);
+        assert_eq!(u16::from_le_bytes(bytes[tail..tail + 2].try_into().unwrap()), 3);
+        assert_eq!(u16::from_le_bytes(bytes[tail + 2..tail + 4].try_into().unwrap()), 1);
+        assert_eq!(u16::from_le_bytes(bytes[tail + 4..tail + 6].try_into().unwrap()), 1);
+        // Each spoke's 6 LEDs (0, 10, …, 50 and 60, …, 110) in pairs.
+        let cell = &bytes[tail + 8..];
+        assert_eq!(cell.len(), 2 * 3 * 3);
+        let reds: Vec<u8> = cell.iter().step_by(3).copied().collect();
+        assert_eq!(reds, [5, 25, 45, 65, 85, 105]);
+    }
+
+    #[test]
+    fn full_detail_is_never_finer_than_the_show_nor_sent_unasked() {
+        let batch = detail_batch();
+        let tail = 20 + 16 + 8;
+        let full = encode_minis(&batch, 1000);
+        assert_eq!(u16::from_le_bytes(full[tail..tail + 2].try_into().unwrap()), 6);
+        assert_eq!(&full[tail + 8..], &batch.detail[0].1[..]);
+        assert_eq!(encode_minis(&batch, 0).len(), tail, "no tail for a client that asked for none");
     }
 
     #[test]

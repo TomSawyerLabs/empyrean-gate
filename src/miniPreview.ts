@@ -10,6 +10,7 @@
 
 import {
   pushScalar,
+  ringSamples,
   SCALAR_HISTORY,
   type FrameTransport,
   type MiniScalar,
@@ -47,6 +48,8 @@ export class MiniHub implements MiniSource, FrameTransport {
   /** Node id per patch cell slot, from the latest meta. */
   private patchNodes: string[] = [];
   private patchScalars: { node: string; port: string }[] = [];
+  /** Bytes of the latest patch batch's Full detail cells. */
+  private detailBytes = 0;
 
   // FrameTransport: freeze the patch's views, step through kept batches.
   readonly canStep = false;
@@ -68,7 +71,9 @@ export class MiniHub implements MiniSource, FrameTransport {
     this.refs += 1;
     if (this.refs > 1) return;
     const phone = window.innerWidth < 700;
-    const sub = () => this.client.subscribeMiniPreviews(phone ? 5 : 10);
+    // Debug nodes at Full detail come averaged to what the largest view
+    // draws (half that on a phone's smaller views).
+    const sub = () => this.client.subscribeMiniPreviews(phone ? 5 : 10, ringSamples(phone ? 256 : undefined));
     sub();
     this.offStatus = this.client.onStatus((up) => up && sub());
     this.offMsg = this.client.onMessage((m) => {
@@ -102,6 +107,9 @@ export class MiniHub implements MiniSource, FrameTransport {
   }
 
   private apply(batch: MiniBatch) {
+    if (batch.kind === 1) {
+      this.detailBytes = (batch.detail?.cells ?? []).reduce((n, c) => n + c.rgb.byteLength, 0);
+    }
     // Frozen, a patch batch is only kept (a layer batch still shows: the
     // freeze is the patch editor's).
     if (batch.kind === 1) {
@@ -120,6 +128,11 @@ export class MiniHub implements MiniSource, FrameTransport {
       const key =
         batch.kind === 0 ? `layer:${cell.id}` : `node:${this.patchNodes[cell.id] ?? cell.id}`;
       this.cells.set(key, cell.rgb);
+    }
+    // A Debug node at Full detail: its finer cell stands in for its mini (a
+    // ring draws a cell at whatever size it is).
+    for (const cell of batch.detail?.cells ?? []) {
+      this.cells.set(`node:${this.patchNodes[cell.id] ?? cell.id}`, cell.rgb);
     }
     if (batch.kind === 1) {
       for (const s of batch.scalars) {
@@ -144,7 +157,9 @@ export class MiniHub implements MiniSource, FrameTransport {
     this.batches += 1;
     if (this.paused) return;
     const cells = new Map<string, Uint8Array>();
-    for (const cell of batch.cells) cells.set(`node:${this.patchNodes[cell.id] ?? cell.id}`, cell.rgb);
+    for (const cell of [...batch.cells, ...(batch.detail?.cells ?? [])]) {
+      cells.set(`node:${this.patchNodes[cell.id] ?? cell.id}`, cell.rgb);
+    }
     const meters = new Map<string, number>();
     for (const s of batch.scalars) {
       const ref = this.patchScalars[s.id];
@@ -223,9 +238,11 @@ export class MiniHub implements MiniSource, FrameTransport {
   }
 
   keepCost(seconds: number): number {
-    // A batch is about its cells' RGB (the gate's at most 32 cells).
+    // A batch is about its cells' RGB (the gate's at most 32 cells), and the
+    // Full detail ones last seen.
+    const spokes = Math.max(1, this.spokes || 64);
     const cells = Math.max(1, this.patchNodes.length || 32);
-    const perBatch = cells * Math.max(1, this.spokes || 64) * Math.max(1, this.pixels || 16) * 3;
+    const perBatch = cells * spokes * Math.max(1, this.pixels || 16) * 3 + this.detailBytes;
     return (Math.ceil(Math.max(0, seconds) * BATCHES_PER_SECOND) + 1) * perBatch;
   }
 }

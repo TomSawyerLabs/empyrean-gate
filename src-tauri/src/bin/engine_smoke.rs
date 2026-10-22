@@ -305,6 +305,12 @@ fn patch_demo_doc() -> patch::PatchDoc {
             node("grid", "texture_sample"),
             node("mix8", "blend"),
             node("out", "output"),
+            // Last, so the shown shader's node indices hold: a Debug tap
+            // at Full detail on what reaches the Output.
+            NodeInst {
+                params: [("detail".to_string(), 1.0)].into(),
+                ..node("tap", "debug")
+            },
         ],
         edges: vec![
             edge("lfo", "out", "noise", "threshold"),
@@ -336,6 +342,7 @@ fn patch_demo_doc() -> patch::PatchDoc {
             edge("mix7", "out", "mix8", "base"),
             edge("grid", "out", "mix8", "over"),
             edge("mix8", "out", "out", "in"),
+            edge("mix8", "out", "tap", "in"),
         ],
         ..Default::default()
     }
@@ -378,6 +385,8 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
         .collect::<Result<_>>()?;
     let image_mask = engine.set_patch_images(&images);
     anyhow::ensure!(image_mask == 0b110, "demo image and clip load into cells 1 and 2");
+    let preview = empyrean_gate_lib::engine::PatchShader::preview(&prog);
+    anyhow::ensure!(prog.full_keys() == ["tap"], "the Debug tap is at Full detail");
     let mut rt = patch::eval::Runtime::new(prog);
 
     let pixels = 24_192;
@@ -439,6 +448,7 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
         bail!("patch demo rendered an entirely black final frame");
     }
     println!("patch demo OK: {nonzero} nonzero bytes, checksum {checksum:#018x}");
+    debug_taps_demo(&preview, &images, &inputs, spokes, pixels_per_spoke)?;
 
     // The frame loop's way: build the pipelines on another thread while this
     // one keeps rendering the installed patch, then swap between frames.
@@ -467,6 +477,56 @@ fn run_patch_demo(engine: &mut Engine, options: &Options) -> Result<()> {
     println!(
         "background build OK: {build_ms:.1} ms, {frames_meanwhile} frames rendered meanwhile \
          (worst {worst_ms:.2} ms)"
+    );
+    Ok(())
+}
+
+/// The thumbnail bus's way with a Debug tap at Full detail: its own engine
+/// renders the preview module at a mini's pixel count, then the taps at the
+/// show's, reading the textures that frame rendered.
+fn debug_taps_demo(
+    preview: &empyrean_gate_lib::engine::PatchShader,
+    images: &[(u32, Vec<u8>)],
+    inputs: &FrameInputs,
+    spokes: u32,
+    pixels: u32,
+) -> Result<()> {
+    let mini = patch::codegen::MINI_PIXELS;
+    let mut bus = Engine::new(spokes * mini).context("thumbnail engine")?;
+    bus.set_patch_shader(Some(preview))
+        .context("preview pipelines with the taps")?;
+    bus.set_patch_images(images);
+    let mut minis = inputs.clone();
+    minis.globals.pixels = mini;
+    let mut cell = None;
+    for frame in 0..3 {
+        bus.render(&minis)
+            .with_context(|| format!("thumbnail frame {frame}"))?;
+        if let Some(rgb) = bus
+            .render_taps(&inputs.globals, 1)
+            .with_context(|| format!("debug taps frame {frame}"))?
+        {
+            cell = Some(rgb.to_vec());
+        }
+    }
+    let cell = cell.context("the taps never read back")?;
+    anyhow::ensure!(
+        cell.len() == (spokes * pixels * 3) as usize,
+        "a Full detail cell is the whole frame"
+    );
+    // Finer than a mini: more different LEDs along a spoke than a mini has
+    // samples.
+    let mut along: Vec<&[u8]> = cell[..(pixels * 3) as usize].chunks(3).collect();
+    along.dedup();
+    anyhow::ensure!(
+        along.len() > mini as usize,
+        "only {} different LEDs along spoke 0",
+        along.len()
+    );
+    println!(
+        "debug taps OK: {} bytes, {} different LEDs along spoke 0",
+        cell.len(),
+        along.len()
     );
     Ok(())
 }

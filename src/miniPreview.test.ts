@@ -104,3 +104,55 @@ describe("the gate's frame by frame", () => {
     expect(hub.keepCost(2)).toBeGreaterThan(0);
   });
 });
+
+describe("a Debug node at Full detail on the gate", () => {
+  /** A patch batch: the mini says `v`; with `fine`, a 4-pixel Full detail
+   * cell for the same node says `fine`. */
+  const batch = (n: number, v: number, fine?: number): MiniBatch => ({
+    batch: n,
+    kind: 1,
+    spokes: 2,
+    pixels: 1,
+    cells: [{ id: 0, rgb: new Uint8Array(6).fill(v) }],
+    scalars: [],
+    detail: fine === undefined ? undefined : { pixels: 4, cells: [{ id: 0, rgb: new Uint8Array(24).fill(fine) }] },
+  });
+
+  test("its finer cell stands in for its mini, and is kept with the batch", async () => {
+    let onBatch: ((b: MiniBatch) => void) | null = null;
+    const asked: number[] = [];
+    const client = {
+      subscribeMiniPreviews(_fps: number, detail: number) {
+        asked.push(detail);
+      },
+      unsubscribeMiniPreviews() {},
+      onStatus: () => () => {},
+      onMessage: () => () => {},
+      onMiniBatch(l: (b: MiniBatch) => void) {
+        onBatch = l;
+        return () => (onBatch = null);
+      },
+    } as unknown as GateClient;
+    const hub = new MiniHub(client);
+    hub.retain();
+    // As many samples as the largest view draws, no more than that.
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toBeGreaterThan(16);
+    expect(asked[0]).toBeLessThan(378);
+    expect(await hub.setKeep(2)).toBeNull();
+    onBatch!(batch(0, 0));
+    const cheap = hub.keepCost(2);
+    onBatch!(batch(1, 1, 101));
+    onBatch!(batch(2, 2, 102));
+    expect(hub.cells.get("node:0")).toHaveLength(24);
+    expect(hub.cells.get("node:0")?.[0]).toBe(102);
+    expect(hub.keepCost(2)).toBeGreaterThan(cheap);
+    hub.stepFrames(-1);
+    expect(hub.cells.get("node:0")?.[0]).toBe(101);
+    hub.play();
+    // Set back to Mini: the mini again.
+    onBatch!(batch(3, 3));
+    expect(hub.cells.get("node:0")).toHaveLength(6);
+    expect(hub.cells.get("node:0")?.[0]).toBe(3);
+  });
+});

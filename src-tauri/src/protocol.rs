@@ -22,6 +22,11 @@ pub const READY_PREVIEW_MAGIC: u32 = 0x4547_5256; // "VRGE"
 /// `cell_count` × (`u16 id, u16 pad`, `spokes * pixels` RGB triplets), then
 /// `scalar_count` × (`u16 id, u16 pad, f32 value`). Ids are config layer
 /// indices (layers) or indices into the `mini_preview_meta` lists (patch).
+/// A patch batch to a client that asked for `detail` then has the Debug
+/// nodes at Full detail: `u16 detail_pixels, u16 detail_count`, then
+/// `detail_count` × (`u16 id, u16 pad`, `spokes * detail_pixels` RGB), each
+/// standing in for the cell of the same id (`patch_nodes` index). Without
+/// any, the batch ends after its scalars.
 pub const MINI_PREVIEW_MAGIC: u32 = 0x4547_4D56; // "VMGE"
 
 /// Binary video input frame (client -> backend), little endian:
@@ -191,6 +196,11 @@ pub enum ClientMsg {
         /// Max batches per second this client wants.
         #[serde(default = "default_mini_fps")]
         fps: f32,
+        /// Samples along a spoke this client can draw a Debug node at Full
+        /// detail with: its cells come averaged down to that (0: none sent,
+        /// those nodes show as minis).
+        #[serde(default)]
+        detail: u32,
     },
     UnsubscribeMiniPreviews,
     /// Receipt for one program preview frame. The server keeps only a few

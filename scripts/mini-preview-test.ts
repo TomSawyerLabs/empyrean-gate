@@ -1,8 +1,9 @@
 // Mini-preview end-to-end test: spawns an ISOLATED headless backend (scratch
 // config, its own port), subscribes to the mini stream, and verifies both
 // flavors — per-layer solo thumbnails while the layer stack renders, and
-// per-node cells + scalar meters once a patch goes on air — plus the
-// mode-flip clear batch and the id/meta bookkeeping between them.
+// per-node cells + scalar meters once a patch goes on air, with a Debug node
+// at Full detail averaged to the samples asked for — plus the mode-flip clear
+// batch and the id/meta bookkeeping between them.
 //
 // Usage: bun scripts/mini-preview-test.ts [path-to-exe]
 // (builds nothing itself — run `cargo build` in src-tauri first)
@@ -96,7 +97,10 @@ interface Batch {
   pixels: number;
   cells: { id: number; rgb: Uint8Array }[];
   scalars: { id: number; value: number }[];
+  detail?: { pixels: number; cells: { id: number; rgb: Uint8Array }[] };
 }
+/** Samples along a spoke this client asks Full detail cells to come at. */
+const DETAIL = 100;
 const inbox: Msg[] = [];
 // Metas land here too: they can arrive BEFORE the 2 Hz status tick a phase is
 // waiting on, and the sequential cursor would consume them unseen.
@@ -140,6 +144,18 @@ ws.onmessage = (ev) => {
     b.scalars.push({ id: view.getUint16(o, true), value: view.getFloat32(o + 4, true) });
     o += 8;
   }
+  if (o < buf.byteLength) {
+    const pixels = view.getUint16(o, true);
+    const count = view.getUint16(o + 2, true);
+    o += 4;
+    b.detail = { pixels, cells: [] };
+    for (let c = 0; c < count; c++) {
+      const id = view.getUint16(o, true);
+      o += 4;
+      b.detail.cells.push({ id, rgb: new Uint8Array(buf, o, b.spokes * pixels * 3) });
+      o += b.spokes * pixels * 3;
+    }
+  }
   if (o !== buf.byteLength) fail(`batch framing off: consumed ${o} of ${buf.byteLength}`);
   batches.push(b);
 };
@@ -179,7 +195,7 @@ async function waitMeta(pred: (m: Msg) => boolean, what: string, ms = 8000): Pro
   fail(`timed out waiting for ${what}`);
 }
 
-send({ type: "subscribe_mini_previews", fps: 10 });
+send({ type: "subscribe_mini_previews", fps: 10, detail: DETAIL });
 const meta = await waitMeta((m) => true, "mini meta");
 if (meta.pixels > 16 || meta.pixels < 1) fail(`unreasonable mini pixels ${meta.pixels}`);
 if (meta.spokes !== state.config.geometry.spokes) {
@@ -214,9 +230,11 @@ const doc = {
     { id: "gen", kind: "noise_field", name: "", params: { brightness: 1.5 }, pos: [0, 0] },
     { id: "lfo", kind: "lfo", name: "", params: { rate: 2 }, pos: [0, 120] },
     { id: "out", kind: "output", name: "", params: {}, pos: [300, 0] },
+    { id: "tap", kind: "debug", name: "", params: { detail: 1 }, pos: [300, 120] },
   ],
   edges: [
     { from: { node: "gen", port: "out" }, to: { node: "out", port: "in" } },
+    { from: { node: "gen", port: "out" }, to: { node: "tap", port: "in" } },
     { from: { node: "lfo", port: "out" }, to: { node: "gen", port: "threshold" } },
   ],
   exposed: [],
@@ -262,6 +280,20 @@ if (new Set(lfoValues.map((v) => v.toFixed(4))).size < 2) {
 console.log(
   `patch minis OK: ${patchBatches.length} batches, node cell lit, lfo meter moving (${lfoValues.length} samples)`,
 );
+// The Debug node at Full detail: its mini cell, and a finer one for it.
+const tapSlot = patchMeta.patch_nodes.indexOf("tap");
+if (tapSlot < 0) fail(`no cell slot for the Debug node: ${patchMeta.patch_nodes}`);
+const withDetail = patchBatches.filter((b) => b.detail?.cells.length);
+if (withDetail.length === 0) fail("no patch batch carries Full detail cells");
+const dLast = withDetail[withDetail.length - 1];
+const pixelsOnAir = state.config.geometry.pixels_per_spoke;
+if (dLast.detail!.pixels !== Math.min(DETAIL, pixelsOnAir)) {
+  fail(`Full detail at ${dLast.detail!.pixels} pixels, asked for ${DETAIL} (${pixelsOnAir} on the gate)`);
+}
+const fine = dLast.detail!.cells.find((c) => c.id === tapSlot);
+if (!fine) fail("no Full detail cell for the Debug node");
+if (!fine.rgb.some((v) => v > 8)) fail("the Debug node's Full detail cell is black");
+console.log(`full detail OK: ${withDetail.length} batches, ${dLast.detail!.pixels} samples a spoke`);
 
 // --- 3. back to layers + unsubscribe ---------------------------------------
 

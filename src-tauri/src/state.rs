@@ -506,6 +506,12 @@ pub struct MiniBatch {
     pub cells: Vec<(u16, Vec<u8>)>,
     /// (index into `patch_scalars`, value). Empty for `Layers` batches.
     pub scalars: Vec<(u16, f32)>,
+    /// Pixels along a spoke in `detail`'s cells: the show's own.
+    pub detail_pixels: u32,
+    /// The Debug nodes at Full detail: (index into `patch_nodes`, rgb of
+    /// spokes × `detail_pixels`). Each stands in for its own mini cell. Each
+    /// client gets them averaged down to what it can draw (`encode_minis`).
+    pub detail: Vec<(u16, Vec<u8>)>,
     /// Bumped whenever the meta below changes; client tasks re-announce on change.
     pub meta_epoch: u64,
     /// Patch node ids in cell-slot order (empty when no patch is active).

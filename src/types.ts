@@ -1146,6 +1146,10 @@ export interface MiniBatch {
   pixels: number;
   cells: { id: number; rgb: Uint8Array }[];
   scalars: { id: number; value: number }[];
+  /** Patch batches: the Debug nodes at Full detail, `spokes × pixels` each,
+   * each standing in for the cell of the same id. Absent when there are
+   * none (or the subscription asked for none). */
+  detail?: { pixels: number; cells: { id: number; rgb: Uint8Array }[] };
 }
 
 export const LAYER_KINDS: LayerKind[] = [

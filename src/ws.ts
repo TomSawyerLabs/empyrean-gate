@@ -496,8 +496,10 @@ export class GateClient {
   subscribePreview(fps: number, decimate: number, includeReady = false) {
     this.send({ type: "subscribe_preview", fps, decimate, include_ready: includeReady });
   }
-  subscribeMiniPreviews(fps: number) {
-    this.send({ type: "subscribe_mini_previews", fps });
+  /** `detail`: samples along a spoke this client draws a Debug node at
+   * Full detail with (0: send those as minis). */
+  subscribeMiniPreviews(fps: number, detail = 0) {
+    this.send({ type: "subscribe_mini_previews", fps, detail });
   }
   unsubscribeMiniPreviews() {
     this.send({ type: "unsubscribe_mini_previews" });
@@ -546,7 +548,7 @@ export class GateClient {
   }
 }
 
-function parseMiniBatch(buf: ArrayBuffer): MiniBatch | null {
+export function parseMiniBatch(buf: ArrayBuffer): MiniBatch | null {
   if (buf.byteLength < 20) return null;
   const view = new DataView(buf);
   if (view.getUint32(0, true) !== MINI_PREVIEW_MAGIC) return null;
@@ -573,7 +575,21 @@ function parseMiniBatch(buf: ArrayBuffer): MiniBatch | null {
     offset += 8;
     scalars.push({ id, value });
   }
-  return { batch, kind, spokes, pixels, cells, scalars };
+  // The Full detail tail, when the batch has one.
+  if (buf.byteLength < offset + 4) return { batch, kind, spokes, pixels, cells, scalars };
+  const detailPixels = view.getUint16(offset, true);
+  const detailCount = view.getUint16(offset + 2, true);
+  offset += 4;
+  const detailLen = spokes * detailPixels * 3;
+  if (buf.byteLength < offset + detailCount * (4 + detailLen)) return null;
+  const detail: NonNullable<MiniBatch["detail"]> = { pixels: detailPixels, cells: [] };
+  for (let c = 0; c < detailCount; c++) {
+    const id = view.getUint16(offset, true);
+    offset += 4;
+    detail.cells.push({ id, rgb: new Uint8Array(buf, offset, detailLen) });
+    offset += detailLen;
+  }
+  return { batch, kind, spokes, pixels, cells, scalars, detail };
 }
 
 export function parsePreview(buf: ArrayBuffer): { bus: "program" | "ready"; frame: PreviewFrame } | null {

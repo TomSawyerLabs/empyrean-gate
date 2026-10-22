@@ -11,7 +11,10 @@
 //! sweep on alternate passes only, so the lit layers keep twice the refresh
 //! and the program frame never pays more than that one dispatch. Patch cells
 //! render in a single dispatch of the patch's companion preview module
-//! (`Program::preview_wgsl`), all nodes at once, at the publish cadence.
+//! (`Program::preview_wgsl`), all nodes at once, at the publish cadence. The
+//! Debug nodes at Full detail follow in one more dispatch of their own module
+//! (`Program::full_wgsl`) at the show's own pixel count, sent with the batch
+//! for each client to average down to what it can draw.
 
 use super::{BuiltPatch, Engine, FrameInputs, PatchCompiler, PatchShader};
 use crate::state::{MiniBatch, MiniKind, SharedState};
@@ -26,6 +29,9 @@ pub use crate::patch::codegen::MINI_PIXELS;
 /// Publish cadence cap. Layer sweeps naturally refresh slower than this on
 /// real stacks; single-layer stacks and patch renders are held to it.
 const PUBLISH_INTERVAL: Duration = Duration::from_millis(100);
+
+/// A batch without Full detail cells.
+const NO_DETAIL: (u32, Vec<(u16, Vec<u8>)>) = (0, Vec::new());
 
 /// Everything the mini bus needs from the active patch's compiled program.
 /// Built once at patch-compile time so the per-frame path never touches the
@@ -47,6 +53,9 @@ pub struct PatchPreviewInfo {
     pub scalar_refs: Vec<(String, String)>,
     /// (doc node index, port) matching `scalar_refs`, for value lookup.
     pub scalar_nodes: Vec<(usize, String)>,
+    /// The cell slot (in `node_ids`) of each Debug node at Full detail, in
+    /// the taps module's order (`PatchShader::taps`).
+    pub detail_slots: Vec<Option<u16>>,
 }
 
 /// What the previous mini dispatch rendered — the ping-pong readback is one
@@ -64,6 +73,9 @@ pub struct MiniBus {
     /// Whether the current sweep pass includes the off-air (disabled) layers.
     offair_pass: bool,
     pending: Option<Pending>,
+    /// What the previous Full detail taps render was for (patch key, pixels
+    /// in all), labelling the readback the same way.
+    pending_taps: Option<(String, u32)>,
     /// Latest completed solo frame per config layer index.
     layer_cells: HashMap<u16, Vec<u8>>,
     batch: u64,
@@ -94,6 +106,7 @@ impl MiniBus {
             cursor: 0,
             offair_pass: false,
             pending: None,
+            pending_taps: None,
             layer_cells: HashMap::new(),
             batch: 0,
             next_publish: Instant::now(),
@@ -133,6 +146,7 @@ impl MiniBus {
             // frame after a resubscribe never publishes an old look.
             self.cursor = 0;
             self.pending = None;
+            self.pending_taps = None;
             self.layer_cells.clear();
             self.last_published = None;
             return;
@@ -157,6 +171,8 @@ impl MiniBus {
             self.refresh_meta(spokes, pixels, info);
             let slots = info.node_ids.len();
             let mut cells = Vec::new();
+            let mut detail = Vec::new();
+            let detail_pixels = base.globals.pixels.max(1);
             if slots > 0 && !info.shader.wgsl.is_empty() {
                 let engine = self.engine.as_mut().expect("checked above");
                 if self.installed_preview.as_deref() != Some(&*info.shader) {
@@ -196,8 +212,34 @@ impl MiniBus {
                     }
                 }
                 self.pending = Some(Pending::Patch { slots });
+                // The Full detail taps: the show's own pixel count, read
+                // back one publish behind like the cells.
+                let taps = info.detail_slots.len() as u32;
+                let mut globals = inputs.globals;
+                globals.pixels = detail_pixels;
+                let size = spokes * detail_pixels * taps;
+                match engine.render_taps(&globals, taps) {
+                    Ok(Some(rgb)) => {
+                        if self.pending_taps.as_ref() == Some(&(info.key.clone(), size)) {
+                            let cell = (spokes * detail_pixels * 3) as usize;
+                            for (tap, slot) in info.detail_slots.iter().enumerate() {
+                                if let Some(slot) = slot {
+                                    detail.push((*slot, rgb[tap * cell..(tap + 1) * cell].to_vec()));
+                                }
+                            }
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        log::warn!("debug taps render failed: {error:#}");
+                        self.engine = None;
+                        return;
+                    }
+                }
+                self.pending_taps = (taps > 0).then(|| (info.key.clone(), size));
             } else {
                 self.pending = None;
+                self.pending_taps = None;
             }
             let scalars = info
                 .scalar_nodes
@@ -205,7 +247,15 @@ impl MiniBus {
                 .enumerate()
                 .map(|(slot, (node, port))| (slot as u16, rt.scalar_value(*node, port)))
                 .collect();
-            self.publish(state, MiniKind::Patch, spokes, pixels, cells, scalars);
+            self.publish(
+                state,
+                MiniKind::Patch,
+                spokes,
+                pixels,
+                cells,
+                scalars,
+                (detail_pixels, detail),
+            );
             return;
         }
 
@@ -230,7 +280,15 @@ impl MiniBus {
             self.offair_pass = !self.offair_pass;
             if now >= self.next_publish {
                 self.next_publish = now + PUBLISH_INTERVAL;
-                self.publish(state, MiniKind::Layers, spokes, pixels, Vec::new(), Vec::new());
+                self.publish(
+                    state,
+                    MiniKind::Layers,
+                    spokes,
+                    pixels,
+                    Vec::new(),
+                    Vec::new(),
+                    NO_DETAIL,
+                );
             }
             return;
         }
@@ -296,7 +354,15 @@ impl MiniBus {
                 .map(|(id, rgb)| (*id, rgb.clone()))
                 .collect();
             cells.sort_by_key(|(id, _)| *id);
-            self.publish(state, MiniKind::Layers, spokes, pixels, cells, Vec::new());
+            self.publish(
+                state,
+                MiniKind::Layers,
+                spokes,
+                pixels,
+                cells,
+                Vec::new(),
+                NO_DETAIL,
+            );
         }
     }
 
@@ -320,6 +386,7 @@ impl MiniBus {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn publish(
         &mut self,
         state: &Arc<SharedState>,
@@ -328,6 +395,7 @@ impl MiniBus {
         pixels: u32,
         cells: Vec<(u16, Vec<u8>)>,
         scalars: Vec<(u16, f32)>,
+        (detail_pixels, detail): (u32, Vec<(u16, Vec<u8>)>),
     ) {
         // On a mode flip, lead with one empty batch of the departing kind so
         // clients drop its stale cells.
@@ -342,6 +410,8 @@ impl MiniBus {
                 pixels,
                 cells: Vec::new(),
                 scalars: Vec::new(),
+                detail_pixels: 0,
+                detail: Vec::new(),
                 meta_epoch: self.meta_epoch,
                 patch_nodes: self.patch_nodes.clone(),
                 patch_scalars: self.patch_scalars.clone(),
@@ -356,6 +426,8 @@ impl MiniBus {
             pixels,
             cells,
             scalars,
+            detail_pixels,
+            detail,
             meta_epoch: self.meta_epoch,
             patch_nodes: self.patch_nodes.clone(),
             patch_scalars: self.patch_scalars.clone(),

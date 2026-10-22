@@ -897,7 +897,7 @@ mod tests {
             Gate::HiddenGame(Some(GameKind::Perimeter))
         );
         assert_eq!(gate(&ClientMsg::SetGameMode { game: None, species: None, claim: false }), Gate::HiddenGame(None));
-        assert_eq!(gate(&ClientMsg::SubscribeMiniPreviews { fps: 1.0 }), Gate::Refuse);
+        assert_eq!(gate(&ClientMsg::SubscribeMiniPreviews { fps: 1.0, detail: 0 }), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::PatchList), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::RotateJoinToken), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::PeerFollow { backup: true, version: String::new() }), Gate::Refuse);
