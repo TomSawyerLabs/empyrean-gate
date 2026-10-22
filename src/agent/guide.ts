@@ -284,10 +284,12 @@ export function agentGuide(core: PatchCore, options: GuideOptions = {}): string 
         "`AUDIO[0]` (the music: `level`, `bass`, `mid`, `treble`, `onset`, `beat_phase`, `bpm`) are readable; " +
         "`return` is not allowed.",
       "",
-      "**Texture output** (one `texture` output, nothing beside it): the body renders a 128 × 128 picture, run once " +
-        "per cell. `c` is the cell's centre (`c.pos`, `c.rn`, `c.theta`, `c.r01`; `c.spoke` and `c.i` are refused), " +
-        "the output is the cell's RGBA, and `out_at(uv)` (bilinear) and `out_cell(dx, dy)` (a neighbouring cell, " +
-        "exactly) read the texture as it was last frame, transparent at first and outside: cellular automata, " +
+      "**Texture output** (one `texture` output, nothing beside it): the body renders a square picture, run once " +
+        "per cell, 128 × 128 unless the port says `resolution: 64` or `256` (cells a side: a cellular automaton's " +
+        "cells are these, and 256 costs four times the runs of 128). `c` is the cell's centre (`c.pos`, `c.rn`, " +
+        "`c.theta`, `c.r01`; `c.spoke` and `c.i` are refused), the output is the cell's RGBA, and `out_at(uv)` " +
+        "(bilinear) and `out_cell(dx, dy)` (a neighbouring cell, exactly) read the texture as it was last frame, " +
+        "transparent at first and outside: cellular automata, " +
         "reaction-diffusion, feedback (`out` stands for the output's name). Field inputs are read at the cells, so " +
         "LED data needs a `resample` first; a `texture` input `x` is its colour at the cell, `x_at(uv)` anywhere. " +
         "`pos_uv(c.pos)` is the cell's uv. Show it through `texture_sample` (or `texture_blur`, `texture_trails`).",

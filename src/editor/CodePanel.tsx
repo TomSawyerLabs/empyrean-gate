@@ -14,8 +14,10 @@ import { MiniMeter, MiniRing } from "./minis";
 import {
   CODE_INPUT_SHAPES,
   CODE_OUTPUT_SHAPES,
+  CODE_TEXTURE_RESOLUTIONS,
   codeTextureOutput,
   codeTier,
+  DEFAULT_TEXTURE_RESOLUTION,
   isFieldShape,
   isPortName,
   MAX_CODE_PORTS,
@@ -149,6 +151,8 @@ export function CodePanel({
       const port = code[dir][index];
       if (!port || port.shape === shape) return;
       port.shape = shape;
+      // A size means something only on a texture.
+      if (shape !== "texture") delete port.resolution;
       // Wires that no longer fit go; a knob that stops being one loses its
       // value and its exposure.
       d.edges = d.edges.filter((e) => {
@@ -181,6 +185,14 @@ export function CodePanel({
       if (!port) return;
       if (on) port.integrate = true;
       else delete port.integrate;
+    });
+
+  const setResolution = (index: number, resolution: number) =>
+    edit((code) => {
+      const port = code.outputs[index];
+      if (!port) return;
+      if (resolution === DEFAULT_TEXTURE_RESOLUTION) delete port.resolution;
+      else port.resolution = resolution;
     });
 
   const remove = (dir: "inputs" | "outputs", index: number) =>
@@ -219,9 +231,13 @@ export function CodePanel({
 
   const setBody = (body: string) => edit((code) => void (code.body = body), `${id}.code.body`);
 
+  const texture = codeTextureOutput(def);
+  const textureSize = texture?.resolution ?? DEFAULT_TEXTURE_RESOLUTION;
   const tierText =
     tier === "gpu"
-      ? "Runs on the GPU, once per pixel: it makes a field."
+      ? texture
+        ? `Runs on the GPU, once per cell of a ${textureSize} × ${textureSize} texture.`
+        : "Runs on the GPU, once per pixel: it makes a field."
       : tier === "cpu"
         ? "Runs on the CPU, once per frame: scalars and events."
         : "These ports do not fit one tier: a node either makes fields (GPU; scalar and field inputs) or scalars and events (CPU).";
@@ -413,6 +429,25 @@ export function CodePanel({
             )}
           </div>
         )}
+        {dir === "outputs" && p.shape === "texture" && (
+          <div className="code-port-range">
+            <label title="Cells a side: the grid the body runs over, once per cell each frame. More is sharper and costs more; a cellular automaton's cells are this grid's.">
+              <span>resolution</span>
+              <select
+                value={p.resolution ?? DEFAULT_TEXTURE_RESOLUTION}
+                disabled={!canEdit}
+                aria-label={`Output ${p.name} resolution`}
+                onChange={(e) => setResolution(i, Number(e.target.value))}
+              >
+                {CODE_TEXTURE_RESOLUTIONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r} × {r}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
       </div>
     ));
 
@@ -522,7 +557,7 @@ export function CodePanel({
       )}
       <details className="code-ref">
         <summary>What the body can use</summary>
-        <CodeRefNotes tier={tier} texture={codeTextureOutput(def)?.name} />
+        <CodeRefNotes tier={tier} texture={texture?.name} size={textureSize} />
       </details>
     </div>
   );
