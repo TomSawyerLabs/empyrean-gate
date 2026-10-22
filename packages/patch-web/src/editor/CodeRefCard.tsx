@@ -5,6 +5,7 @@
 import { useMemo, useState } from "react";
 import { CTX_FALLBACK, outputFns, portFns, WGSL_BUILTINS, type CodeScope } from "./CodeEditor";
 import { snippetTemplates } from "./code-snippets";
+import { DEFAULT_TEXTURE_RESOLUTION } from "../types";
 
 export interface RefItem {
   /** What is shown, and what the filter matches. */
@@ -141,8 +142,16 @@ export function CodeRefColumn({
 }
 
 /** The notes on what a body can use, per tier (the panel's card).
- * `texture`: the node renders a texture, named so. */
-export function CodeRefNotes({ tier, texture }: { tier: "cpu" | "gpu" | null; texture?: string }) {
+ * `texture`: the node renders a texture, named so, `size` cells a side. */
+export function CodeRefNotes({
+  tier,
+  texture,
+  size = DEFAULT_TEXTURE_RESOLUTION,
+}: {
+  tier: "cpu" | "gpu" | null;
+  texture?: string;
+  size?: number;
+}) {
   return (
     <ul>
       <li>
@@ -155,7 +164,8 @@ export function CodeRefNotes({ tier, texture }: { tier: "cpu" | "gpu" | null; te
         <>
           {texture && (
             <li>
-              This node renders a 128 × 128 texture: the body runs once per cell, and <code>c</code> is
+              This node renders a {size} × {size} texture (its output's resolution): the body runs once
+              per cell, and <code>c</code> is
               the cell's centre (<code>c.pos</code>, <code>c.rn</code>, <code>c.theta</code>,{" "}
               <code>c.r01</code>; not <code>c.spoke</code> or <code>c.i</code>). Assign the cell's RGBA
               to <code>{texture}</code>; <code>{texture}_at(uv)</code> reads the texture as it was last

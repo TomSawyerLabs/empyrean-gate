@@ -153,6 +153,9 @@ export interface CodePort {
   /** A Scalar input that is a rate: the engine integrates it into a phase
    * (× master speed), like a built-in node's `speed` knob. GPU tier only. */
   integrate?: boolean;
+  /** A texture output only: its cells a side, 64, 128 or 256 (128 when
+   * absent). The body runs once per cell, so this is the grid it works on. */
+  resolution?: number;
 }
 
 /** A Code node's interface and body (WGSL; see plans/code-node.md). */
@@ -381,6 +384,12 @@ export function codeTextureOutput(def: CodeDef): CodePort | undefined {
   const [only, ...rest] = def.outputs;
   return only?.shape === "texture" && rest.length === 0 ? only : undefined;
 }
+
+/** The sizes a Code node's texture may render at, in cells a side (crate
+ * `code::TEXTURE_RESOLUTIONS`, the built-in kinds' Resolution choices). */
+export const CODE_TEXTURE_RESOLUTIONS = [64, 128, 256] as const;
+/** A texture output's size when its port gives none. */
+export const DEFAULT_TEXTURE_RESOLUTION = 128;
 
 /** A Code node's input ports (every declared input). */
 export function codeInputs(node: PatchNode | undefined): { name: string; shape: PatchShape }[] {

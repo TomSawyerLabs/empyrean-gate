@@ -132,6 +132,33 @@ test("the body editor completes the node's own ports and the lib's helpers", asy
     .toBe(true);
 });
 
+test("a texture output has a resolution, saved only when it is not 128", async ({ page }) => {
+  const sent: string[] = [];
+  const node = await newPatchWithCode(page, sent);
+  await node.click();
+  const panel = page.locator(".patch-side");
+  const size = panel.getByLabel("Output out resolution");
+  await expect(size).toHaveCount(0);
+  await panel.getByLabel("Output 1 shape").selectOption("texture");
+  await expect(size).toHaveValue("128");
+  await expect(panel.locator(".code-tier")).toContainText("128 × 128 texture");
+  await size.selectOption("256");
+  await expect(panel.locator(".code-tier")).toContainText("256 × 256 texture");
+  await expect(panel.locator(".code-panel")).toContainText("renders a 256 × 256 texture");
+  await expect
+    .poll(() => sent.some((m) => m.includes('"patch_save"') && m.includes('"shape":"texture","min":0,"max":1,"default":0,"resolution":256')))
+    .toBe(true);
+  // Back to 128 is no field at all, as in a patch from before.
+  const lastSave = () => sent.findLast((m) => m.includes('"patch_save"')) ?? "";
+  await size.selectOption("128");
+  await expect.poll(() => lastSave().includes('"shape":"texture"') && !lastSave().includes('"resolution"')).toBe(true);
+  // A field output has no size, and loses the one it had.
+  await size.selectOption("64");
+  await panel.getByLabel("Output 1 shape").selectOption("field_color");
+  await expect(size).toHaveCount(0);
+  await expect.poll(() => lastSave().includes('"shape":"field_color"') && !lastSave().includes('"resolution"')).toBe(true);
+});
+
 test("a built-in node converts to a Code node in place, keeping its id and wire", async ({ page }) => {
   const sent: string[] = [];
   page.on("websocket", (ws) =>
