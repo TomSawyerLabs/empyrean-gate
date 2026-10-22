@@ -14,6 +14,7 @@ export {
   MiniRing,
   MiniTap,
   miniRenderer,
+  ringSamples,
   tapsAsRing,
   pushScalar,
   SCALAR_HISTORY,

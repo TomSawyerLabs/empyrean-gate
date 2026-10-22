@@ -61,11 +61,19 @@ const SPOKE_SPAN = 0.38;
  * are averaged together, as the eye would see them from further away. */
 const MIN_SPACING = 0.75;
 
-/** A finer cell (a Debug node at every LED) brought down to what a view
+/** Samples along a spoke a view `size` px wide (backing) can show; by
+ * default the largest view there is. A Debug node at Full detail is drawn
+ * at no more than this, so a host streaming its cells (the gate) need send
+ * no more. */
+export function ringSamples(size = STAGE_MAX): number {
+  return Math.max(MINI_SAMPLES, Math.floor((SPOKE_SPAN * Math.min(size, STAGE_MAX)) / MIN_SPACING));
+}
+
+/** A finer cell (a Debug node at Full detail) brought down to what a view
  * `size` px wide can show: each spoke's LEDs averaged in even runs. Returns
  * the cell as it is when it already fits. */
 function fitCell(rgb: Uint8Array, spokes: number, pixels: number, size: number): [Uint8Array, number] {
-  const fit = Math.max(MINI_SAMPLES, Math.floor((SPOKE_SPAN * size) / MIN_SPACING));
+  const fit = ringSamples(size);
   if (pixels <= fit) return [rgb, pixels];
   const out = new Uint8Array(spokes * fit * 3);
   for (let s = 0; s < spokes; s++) {
