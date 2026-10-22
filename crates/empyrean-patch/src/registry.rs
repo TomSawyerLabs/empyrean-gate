@@ -188,7 +188,8 @@ pub const DEBUG_KIND: &str = "debug";
 /// A Debug node's `live` Select: whether the gate's Live tab shows it too.
 pub const DEBUG_LIVE: &str = "live";
 
-/// A Debug node's `detail` Select: 0 a mini's resolution, 1 every LED.
+/// A Debug node's `detail` Select: 0 Mini (a mini's resolution), 1 Full
+/// detail (every LED).
 pub const DEBUG_DETAIL: &str = "detail";
 
 /// Node kinds the evaluator runs on the CPU every frame (Scalar/Event
@@ -3363,8 +3364,8 @@ pub const TYPES: &[NodeType] = &[
             sel(
                 "detail",
                 "Resolution",
-                &["Mini", "Every LED"],
-                "How finely a picture, stream or texture is shown. Mini: 16 samples along each spoke, as every node's thumbnail. Every LED: the array's own resolution (378 along each spoke on the gate), for detail a mini blurs. Every LED renders in the browser playground; the gate's own views show it as a Mini. Numbers and events are the same either way.",
+                &["Mini", "Full detail"],
+                "How finely a picture, stream or texture is shown. Mini: worked out at 16 points along each spoke, as every node's thumbnail, so a thin ring or a lone bright LED between them is missed. Full detail: worked out at every LED (378 along each spoke on the gate), then averaged down to what the view can show, for detail a mini misses or makes up. Up to 4 per patch. Numbers and events are the same either way.",
             ),
         ],
     },
