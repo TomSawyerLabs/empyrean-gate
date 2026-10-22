@@ -130,7 +130,8 @@ I, round 4).
      Textures at the cell's uv (and `name_at(uv)`), Scalars, Points and
      Effects as in a field body.
    - **Two regions** (this frame, last frame) and the Trails copy pass;
-     resolution fixed at 128² for now (see Open questions).
+     resolution 64 / 128 / 256 on the output port (`resolution`, 128 when
+     absent), step 8.
    - A port can't be named `<texture output>_at` / `_cell` (they'd shadow
      the helpers); `_at` is already refused for every port.
 
@@ -148,6 +149,13 @@ I, round 4).
    behaviour spec; README (gate and site).
 7. Checks, merge, web-dist bump, check on dev in Chrome. Done but the
    look on dev (see Progress log).
+8. Done 2026-10-21: a Code node's Texture output gets a
+   Resolution (64 / 128 / 256), approved by Cameron. Stored on the port as
+   `resolution` (cells a side, 128 when absent, so old patches are
+   unchanged), not as a node param: a Code node's params are its Scalar
+   inputs' knobs, keyed by port name. The port editor shows a Resolution
+   select under a Texture output; the tier line, Code reference card and
+   agent guide name the size.
 
 ## Findings / gotchas
 
@@ -204,17 +212,20 @@ radius 0 vs 0.3 visibly softens the arms on the ring.
   Playwright patch suites 60 and layout 136, all passing. On gate master as
   `a7b4347..6d9e6c0` (CI Checks and Web dist green); site dev web-dist bump
   `46ce1cb` (web-dist `d78266a`) and README `78b4211`, Workers build green.
-- [ ] A look at dev.empyreangate.org in Chrome: not done by the agent (behind
-  Cloudflare Access; no Chrome tools in that session). The same patch-web
-  build was checked locally through `PATCH_WEB_DIR` (pictures above).
+- [x] A look at dev.empyreangate.org in Chrome: dropped by Cameron
+  (2026-10-21). The same patch-web build was checked locally through
+  `PATCH_WEB_DIR` (pictures above).
+- [x] Step 8, a Code node's texture Resolution: crate 172 tests (sizes,
+  save format, and a knob named `resolution` no longer sizing the texture,
+  which it did before), src-tauri 362 + 6 + 3, patch-web 231 + `test:browser`
+  9/9, typecheck, Playwright `patch-code` 19 (a new spec for the select and
+  what is saved). In Chrome, a Game of Life at 64 dispatches 16 workgroups
+  per pass and at 256, 256; at 64 the cells are long streaks on the ring, at
+  256 fine dots.
 
 ## Open questions for Cameron
 
-1. A Code node's Texture output renders at a fixed 128² for now (Render to
-   texture, Blur and Trails have a Resolution select). Worth a per-port
-   resolution choice (64 / 128 / 256) in the port editor? Recommendation:
-   yes, as a follow-up once the node is in use; it touches the patch schema
-   and the port editor, not the shader design.
+None open. (1, a Code node texture's resolution: approved and done, step 8.)
 
 ## Things not to do
 
