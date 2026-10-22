@@ -149,6 +149,18 @@ fn grid_regions(node: &NodeInst) -> u32 {
     }
 }
 
+/// A rendered texture's cells a side. A Code node keeps its size on the
+/// Texture output port, since its params are its knobs (an input named
+/// `resolution` is a knob, not this); the built-in kinds have a
+/// `resolution` Select. Never more than a region holds.
+fn grid_res(node: &NodeInst) -> u32 {
+    let res = match node.code().and_then(|d| d.texture_output()) {
+        Some(out) => out.resolution,
+        None => registry::grid_resolution(node.params.get("resolution").copied().unwrap_or(0.0).max(0.0) as u32),
+    };
+    res.clamp(1, crate::abi::GRID_SIZE as u32)
+}
+
 /// One mini-preview cell: a node's principal output (`port` None: its `out`,
 /// or what a stream/texture source would draw), or one more field output of
 /// a Code node, by name.
@@ -495,7 +507,7 @@ fn compile_validated(doc: &PatchDoc, validated: &Validated) -> Result<Program, S
         grids.push(GridAlloc {
             node: i,
             base: regions * crate::abi::GRID_REGION_CELLS as u32,
-            res: registry::grid_resolution(node.params.get("resolution").copied().unwrap_or(0.0).max(0.0) as u32),
+            res: grid_res(node),
         });
         regions += n;
     }
@@ -2696,7 +2708,7 @@ mod tests {
             min: 0.0,
             max: 2.0,
             default: 1.0,
-            integrate: false,
+            ..Default::default()
         };
         code::CodeDef {
             inputs: inputs.iter().map(port).collect(),
@@ -3289,6 +3301,31 @@ mod tests {
         assert!(prog.wgsl.contains(&format!("grid_at({region}u, 128u, uv)")), "the last frame");
         assert!(prog.wgsl.contains("grid_at(0u, 128u, uv"), "Blur reads the Code node's texture");
         assert!(prog.preview_cells.iter().any(|c| c.node == l), "the Code node gets a thumbnail");
+    }
+
+    /// A Code node's texture is the size its output port says, and a knob
+    /// that happens to be named `resolution` has nothing to do with it.
+    #[test]
+    fn a_code_node_texture_is_the_size_its_port_says() {
+        for res in code::TEXTURE_RESOLUTIONS {
+            let mut def = code_def(&[("resolution", Shape::Scalar)], &[("out", Shape::Texture)], "out = out_cell(1, 0);");
+            def.outputs[0].resolution = res;
+            let mut n = node("n", code::KIND);
+            n.code = Some(Box::new(def));
+            n.params.insert("resolution".into(), 2.0);
+            let doc = PatchDoc {
+                nodes: vec![n, node("ts", "texture_sample"), node("o", "output")],
+                edges: vec![edge("n", "out", "ts", "tex"), edge("ts", "out", "o", "in")],
+                ..Default::default()
+            };
+            let prog = compile(&doc).unwrap();
+            validate_wgsl(&format!("code texture {res}"), &prog.wgsl);
+            assert!(prog.grid_passes.iter().all(|p| p.cells == res * res), "{res}: {:?}", prog.grid_passes);
+            let region = crate::abi::GRID_REGION_CELLS;
+            assert!(prog.wgsl.contains(&format!("grid_at({region}u, {res}u, uv)")), "{res}: the last frame");
+            assert!(prog.wgsl.contains(&format!("n0_k % {res}u")), "{res}: a neighbour cell");
+            assert!(prog.wgsl.contains(&format!("grid_at(0u, {res}u, uv")), "{res}: Texture sample reads it");
+        }
     }
 
     /// A patch of plain fields stays one dispatch.

@@ -25,6 +25,15 @@ pub const MAX_CODE_BYTES: usize = 8192;
 pub const MAX_CODE_PORTS: usize = 16;
 /// Longest accepted port name.
 pub const MAX_IDENT_LEN: usize = 32;
+/// The sizes a Texture output may render at, in cells a side (the
+/// Resolution choices of Render to texture, Blur and Trails).
+pub const TEXTURE_RESOLUTIONS: [u32; 3] = [64, 128, 256];
+/// A Texture output's size when none is given.
+pub const DEFAULT_TEXTURE_RESOLUTION: u32 = 128;
+
+fn is_default_resolution(r: &u32) -> bool {
+    *r == DEFAULT_TEXTURE_RESOLUTION
+}
 
 /// One declared port. `min`/`max`/`default` only mean something for a
 /// Scalar input, where they make the port a knob like a built-in node's
@@ -57,6 +66,11 @@ pub struct CodePort {
     /// body integrates for itself with `dt`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub integrate: bool,
+    /// A Texture output only: the texture's cells a side, 64, 128 or 256
+    /// (128 when absent). The body runs once per cell, so this is the grid
+    /// it works on, and four times the cells cost four times the runs.
+    #[serde(skip_serializing_if = "is_default_resolution")]
+    pub resolution: u32,
 }
 
 impl Default for CodePort {
@@ -68,6 +82,7 @@ impl Default for CodePort {
             max: 1.0,
             default: 0.0,
             integrate: false,
+            resolution: DEFAULT_TEXTURE_RESOLUTION,
         }
     }
 }
@@ -251,6 +266,12 @@ impl CodeDef {
             Tier::Gpu => {
                 check_gpu_body(self)?;
                 if let Some(out) = self.texture_output() {
+                    if !TEXTURE_RESOLUTIONS.contains(&out.resolution) {
+                        return Err(format!(
+                            "output \"{}\": a texture is 64, 128 or 256 cells a side, not {}",
+                            out.name, out.resolution
+                        ));
+                    }
                     if self.reads_leds() {
                         return Err(
                             "a Code node that makes a Texture runs once per texture cell, not per LED: `c.spoke` and `c.i` mean nothing there (`c.pos` is the cell's place)"
@@ -846,7 +867,7 @@ mod tests {
         };
         assert!(huge.check().is_err());
         let bad_range = CodeDef {
-            inputs: vec![CodePort { name: "a".into(), shape: Shape::Scalar, min: 2.0, max: 1.0, default: 0.0, integrate: false }],
+            inputs: vec![CodePort { name: "a".into(), shape: Shape::Scalar, min: 2.0, max: 1.0, ..Default::default() }],
             outputs: vec![port("out", Shape::Scalar)],
             body: String::new(),
         };
@@ -955,6 +976,12 @@ mod tests {
             .unwrap_err()
             .contains("Resample"));
         assert!(tex("", vec![port("out_cell", Shape::Scalar)], one()).check().unwrap_err().contains("last frame"));
+        // Its size is one of the three a rendered texture offers.
+        let sized = |resolution| vec![CodePort { resolution, ..port("out", Shape::Texture) }];
+        for r in TEXTURE_RESOLUTIONS {
+            assert!(tex("", vec![], sized(r)).check().is_ok(), "{r}");
+        }
+        assert!(tex("", vec![], sized(100)).check().unwrap_err().contains("64, 128 or 256"));
         // A body can't reach the textures behind its port.
         assert!(tex("GRID[0] = vec4f(1.0);", vec![], one()).check().unwrap_err().contains("engine"));
         assert!(tex("grid_put(0u, vec4f(1.0));", vec![], one()).check().unwrap_err().contains("engine"));
@@ -964,6 +991,17 @@ mod tests {
             "out = n4_last(uv) + n4_cell(-1, 0) + n4_in_img(uv); // out_at"
         );
         assert_eq!(rewrite_body("o_cell(0, 0)", 4, &[], &[], None, "R"), "o_cell(0, 0)");
+    }
+
+    #[test]
+    fn a_texture_resolution_is_saved_only_when_it_is_not_128() {
+        let read = |json: &str| serde_json::from_str::<CodePort>(json).unwrap();
+        assert_eq!(read(r#"{"name":"out","shape":"texture"}"#).resolution, 128, "a patch from before");
+        let big = read(r#"{"name":"out","shape":"texture","resolution":256}"#);
+        assert_eq!(big.resolution, 256);
+        assert!(serde_json::to_string(&big).unwrap().contains(r#""resolution":256"#));
+        let plain = serde_json::to_string(&port("out", Shape::Texture)).unwrap();
+        assert!(!plain.contains("resolution"), "{plain}");
     }
 
     #[test]

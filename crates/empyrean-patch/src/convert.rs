@@ -158,6 +158,7 @@ fn knob_port(p: &registry::ParamDef) -> CodePort {
         max: p.max,
         default: p.default,
         integrate: p.integrate,
+        ..Default::default()
     }
 }
 
