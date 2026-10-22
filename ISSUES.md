@@ -85,3 +85,19 @@ on 2026-10-17 (ports now carry their shape in `aria-label`); the rest remain.
 - **Why it matters:** trails and echoes lag a frame, and odd and even frames
   feed two separate chains; the gate and the playground share the shader,
   so both do it. A fix changes how every Feedback patch looks.
+
+## The games assume the old 8 / 25 hole
+
+- **What:** five game sims hard-code the hole as `HOLE = 0.32`
+  (`src-tauri/src/game/{gathering,perimeter,rally,spacewar,trails}.rs`, and
+  `rps.rs`'s comment), which is the old default geometry's inner/outer
+  (8 ft of 25 ft). The default is now 8.38 / 28.99 = 0.289 (the 60 ft ring
+  from the 2022 drawings, 2026-10-22), and any rig can set its own in
+  Settings → Geometry. The engine already maps taps with the configured
+  ratio (`engine/mod.rs`, game inputs), but each sim converts its world
+  positions to rings with 0.32, so the world is drawn radially squeezed
+  onto the real strip.
+- **Why it matters:** small (0.03 of the array radius at the hole, nothing
+  at the rim), but physical shapes (Perimeter's fence, Rally's ball against the hole) are not
+  where the sim thinks they are. Passing the configured ratio into the sims
+  means retuning constants that were placed relative to 0.32.
