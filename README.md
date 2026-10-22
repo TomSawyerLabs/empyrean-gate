@@ -2,8 +2,9 @@
 
 GPU pattern generator and sACN pixel driver for the **Empyrean Gate** — a radial array
 of lights above a dance floor: 64 spokes of LED strip (378 px each, fed from the
-outside) in a 50 ft diameter ring, driven by 16× Advatek PixLite E4-S Mk3 controllers over
-sACN (E1.31).
+outside) under a 60 ft diameter truss ring, driven by 16× Advatek PixLite E4-S Mk3
+controllers over sACN (E1.31). Each strip runs from about 29 ft out to about 8.4 ft from
+the centre (the default geometry, from the 2022 design drawings; Settings → Geometry).
 
 Every frame is computed from scratch on the GPU (wgpu locked to **Vulkan** — no
 fallback renderers, just clear errors), read back, and scattered into prebuilt sACN
