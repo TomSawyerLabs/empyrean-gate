@@ -52,6 +52,23 @@ impl Default for GeometryConfig {
 }
 
 impl GeometryConfig {
+    /// The default radii until 2026-10-22: a guessed 50 ft ring.
+    const OLD_DEFAULT_RADII_FT: (f32, f32) = (25.0, 8.0);
+
+    /// Moves a config still on the old default radii to the drawings' (see
+    /// `Default`). Every saved config carries a geometry, so `serde(default)`
+    /// alone never reaches one written before the change. Radii someone set by
+    /// hand are left alone. True if anything changed.
+    pub fn migrate_old_default_radii(&mut self) -> bool {
+        if (self.outer_radius_ft, self.inner_radius_ft) != Self::OLD_DEFAULT_RADII_FT {
+            return false;
+        }
+        let new = Self::default();
+        self.outer_radius_ft = new.outer_radius_ft;
+        self.inner_radius_ft = new.inner_radius_ft;
+        true
+    }
+
     pub fn pixel_count(&self) -> usize {
         (self.spokes as usize)
             .saturating_mul(self.pixels_per_spoke as usize)
@@ -1635,6 +1652,14 @@ pub fn load() -> AppConfig {
         log::info!("generated sACN source CID {}", cfg.output.cid);
         dirty = true;
     }
+    if cfg.geometry.migrate_old_default_radii() {
+        log::info!(
+            "geometry: moved the old default radii (25 / 8 ft) to the drawings' ({} / {} ft)",
+            cfg.geometry.outer_radius_ft,
+            cfg.geometry.inner_radius_ft
+        );
+        dirty = true;
+    }
     if dirty {
         if file_lock.is_none() {
             log::error!(
@@ -1777,6 +1802,33 @@ mod tests {
     fn fixture_comparison_ignores_line_endings() {
         assert_eq!(normalize_lines("a\r\nb\r\n"), normalize_lines("a\nb"));
         assert_ne!(normalize_lines("a\nb"), normalize_lines("a\nc"));
+    }
+
+    /// The show machine's config was saved with the old 25 / 8 ft default, and
+    /// must reach the drawings' radii on the next launch without anyone opening
+    /// Settings. A hand-set geometry must not move.
+    #[test]
+    fn the_old_default_radii_move_to_the_drawings() {
+        let new = GeometryConfig::default();
+        let mut old = GeometryConfig {
+            outer_radius_ft: 25.0,
+            inner_radius_ft: 8.0,
+            ..GeometryConfig::default()
+        };
+        assert!(old.migrate_old_default_radii());
+        assert_eq!(
+            (old.outer_radius_ft, old.inner_radius_ft),
+            (new.outer_radius_ft, new.inner_radius_ft)
+        );
+        assert!(!old.migrate_old_default_radii(), "runs once");
+
+        let mut set = GeometryConfig {
+            outer_radius_ft: 25.0,
+            inner_radius_ft: 7.5,
+            ..GeometryConfig::default()
+        };
+        assert!(!set.migrate_old_default_radii());
+        assert_eq!((set.outer_radius_ft, set.inner_radius_ft), (25.0, 7.5));
     }
 
     /// A config written by an older build has no `phase_reset_at`, and what it
