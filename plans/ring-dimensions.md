@@ -38,10 +38,13 @@ copies it.
   strip anyone sells; 30/m would need 41 ft. So 60/m it is, and about 1.9 ft of each
   sail by the hub is bare (or the strip starts a little in from the outer edge; not
   measured either way).
-- **No migration of saved configs.** `GeometryConfig` is `serde(default)`, so the new
-  default only reaches a config without a geometry. The show machine keeps 25 / 8 until
-  the operator enters the new values in Settings → Geometry; silently changing how a
-  running show looks on update is not this PR's call.
+- **Saved configs on the old default move on their own** (user, 2026-10-25: "why?
+  can't we force fix it?"). PR #6 first left them alone: `GeometryConfig` is
+  `serde(default)`, but every saved config carries a geometry, so the new default
+  never reached the show machine. Now `load()` calls
+  `GeometryConfig::migrate_old_default_radii`: a config with exactly 25 / 8 ft gets
+  28.99 / 8.38 and is written back, once. Radii anyone set by hand stay. It reaches
+  the show machine with the next release (self-update).
 - **The games' `HOLE = 0.32` stays** (logged in `ISSUES.md`): retuning five game sims is
   its own job.
 - Historical plan docs that quote 0.32 (`doom.md`, `game-mode.md`, `hidden-modes.md`,
@@ -80,15 +83,15 @@ Absolute feet appear only in the Settings sanity check, which now reads consiste
       patch-web typecheck + `test` 231 + `test:browser` 9, layout gate 136 passed /
       8 skipped, behaviour 182 passed.
 - [x] PR opened against `master`.
+- [x] Migration of saved 25 / 8 configs on load, with a unit test (2026-10-25).
 - [ ] Not done: `docs/*.png` screenshots still show the old hole (32 % vs 29 %); a
       `bun run screenshots` pass would also pick up unrelated UI drift, so it is left
       for a screenshots refresh.
 
 ## Open questions for the user
 
-1. Apply the new geometry on the show machine (Settings → Geometry: outer 28.99,
-   inner 8.38)? Recommendation: yes, before the next show, and look at a few radial
-   patches on the rig.
+1. ~~Apply the new geometry on the show machine?~~ Automatic now, from the next
+   release on. Still worth looking at a few radial patches on the rig after it.
 2. If anyone measures where the strip starts on a sail, the inner radius can be
    tightened (outer = start, inner = start − 20.61 ft).
 
