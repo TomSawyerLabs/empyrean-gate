@@ -678,7 +678,10 @@ fn make_inputs(scenario: &Scenario, spokes: u32, pixels: u32) -> FrameInputs {
             effect_count: effects.len() as u32,
             dt: 1.0 / 60.0,
             master: 1.0,
-            inner_over_outer: 8.0 / 25.0,
+            inner_over_outer: {
+                let g = empyrean_gate_lib::config::GeometryConfig::default();
+                g.inner_radius_ft / g.outer_radius_ft
+            },
             dab_count: dabs.len() as u32,
             video_width: if has_video { BENCH_VIDEO_DIMENSION } else { 0 },
             video_height: if has_video { BENCH_VIDEO_DIMENSION } else { 0 },

@@ -67,7 +67,7 @@ pub fn controller_for_spoke(out: &OutputConfig, spoke: u32) -> Option<&str> {
 }
 
 /// Implied physical strip length vs. the configured radii, for the settings UI to
-/// display ("350 px at 60/m = 5.83 m = 19.1 ft; outer->inner span is 17.0 ft").
+/// display ("378 px at 60/m = 6.30 m = 20.7 ft; outer->inner span is 20.6 ft").
 pub fn implied_strip_ft(geo: &GeometryConfig) -> (f32, f32) {
     let strip_m = geo.pixels_per_spoke as f32 / geo.leds_per_meter.max(1.0);
     let strip_ft = strip_m * 3.28084;

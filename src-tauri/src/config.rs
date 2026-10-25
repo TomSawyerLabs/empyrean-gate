@@ -21,7 +21,9 @@ pub struct GeometryConfig {
     pub spokes: u32,
     /// Pixels per spoke. Pixel 0 is at the OUTER radius (strings are fed from outside).
     pub pixels_per_spoke: u32,
-    /// Outer (major) radius in feet — 50 ft diameter installation.
+    /// Outer (major) radius in feet, where pixel 0 of each spoke sits. Not the
+    /// truss: the Gate's truss circle is 60 ft across, but the strips start at
+    /// the sails' outer edge, just inside it (see the default).
     pub outer_radius_ft: f32,
     /// Inner (minor) radius in feet, where the last pixel of each spoke sits.
     pub inner_radius_ft: f32,
@@ -34,8 +36,16 @@ impl Default for GeometryConfig {
         Self {
             spokes: 64,
             pixels_per_spoke: 378,
-            outer_radius_ft: 25.0,
-            inner_radius_ft: 8.0,
+            // From the Entheos design drawings A-06/A-07 (2022-04-28): truss
+            // circle 60'-0" outside, ~58'-0" inside; each LED sail runs from
+            // 57'-11¾" across (28.99 ft radius) in to 13'-0⅛" (6.5 ft), and
+            // the strips are fed from the outside, so pixel 0 sits at the
+            // sail's outer edge. The strip is shorter than the sail: 378 px
+            // at 60/m put the last pixel 377/60 m = 20.61 ft further in, at
+            // 8.38 ft, leaving ~1.9 ft of sail bare by the hub. Was 25 / 8
+            // (a 50 ft ring) until 2026-10-22.
+            outer_radius_ft: 28.99,
+            inner_radius_ft: 8.38,
             leds_per_meter: 60.0,
         }
     }
