@@ -10,7 +10,10 @@ on:
 jobs:
   ui:
     name: Frontend + layout gate
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: that moved to 26.04 (2026-10), where
+    # Playwright's WebKit build can't find libicudata.so.74 and every WebKit
+    # test fails to launch. Unpin once Playwright ships a 26.04 build.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
@@ -60,8 +63,9 @@ jobs:
     # The browser build of the patch core and the shared editor/runtime
     # package (packages/patch-web), which empyreangate.org consumes from the
     # web-dist branch. Catches a core change that breaks the wasm build or the
-    # TypeScript that hosts it before it reaches master.
-    runs-on: ubuntu-latest
+    # TypeScript that hosts it before it reaches master. Pinned with the
+    # Frontend job (Chromium from the same Playwright).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
 
