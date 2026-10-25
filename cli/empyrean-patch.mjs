@@ -10590,7 +10590,7 @@ class LoopStats {
 }
 
 // src/runtime/index.ts
-var GATE_GEOMETRY = { spokes: 64, pixels: 378, innerOverOuter: 0.32 }, PREVIEW_INTERVAL_MS = 100, SHAKE_TAU = 0.3, STEP_HZ = 60, MAX_CAPTURE_FRAMES = 16;
+var GATE_GEOMETRY = { spokes: 64, pixels: 378, innerOverOuter: 0.2890651948947914 }, PREVIEW_INTERVAL_MS = 100, SHAKE_TAU = 0.3, STEP_HZ = 60, MAX_CAPTURE_FRAMES = 16;
 
 class PatchRuntime {
   core;
