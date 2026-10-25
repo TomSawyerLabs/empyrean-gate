@@ -96,7 +96,9 @@ jobs:
           BS_WINDOWS=blacksmith-16vcpu-windows-2025
           BS_LINUX=blacksmith-16vcpu-ubuntu-2404
           GH_WINDOWS=windows-latest
-          GH_LINUX=ubuntu-latest
+          # 24.04, like BS_LINUX: on 26.04 Playwright's WebKit can't launch
+          # (libicudata.so.74 missing), and the release runs the WebKit tests.
+          GH_LINUX=ubuntu-24.04
 
           emit() {  # emit <windows-label> <linux-label> <over_budget> <reason>
             {
