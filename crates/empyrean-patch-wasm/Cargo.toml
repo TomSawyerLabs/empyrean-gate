@@ -1,6 +1,6 @@
 [package]
 name = "empyrean-patch-wasm"
-version = "0.16.0"
+version = "0.17.0"
 description = "Browser build of the Empyrean Gate's patch core (wasm-bindgen)"
 license = "MIT"
 edition = "2024"
