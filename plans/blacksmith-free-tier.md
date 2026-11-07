@@ -109,9 +109,15 @@ nothing, and flip to "spend freely" only on purpose.
       Blacksmith runners regardless of spend" and the build jobs got the
       Blacksmith labels; `vars.SHOW_MODE` resolves inside the reusable workflow.
       Variable set back to `false` afterwards.
-- [ ] Check the morning after: the 09:00 UTC warm-cache cron should show a run
-      whose gate job is *skipped* while SHOW_MODE is false (`gh run list
-      --workflow warm-cache.yml --limit 1`, then `gh run view <id>`).
+- [x] Check the morning after: confirmed. Every nightly warm-cache cron from
+      2026-10-29 to 2026-11-07 ran with its jobs *skipped* (1-8 s, $0) while
+      SHOW_MODE was false.
+- [x] **Show mode ON since 2026-11-07 1:15 PM PST (21:15Z)**, for a live session
+      bringing the gate back online (self-update to v0.17.0, then features cut live).
+      A manual warm-cache was dispatched at the same time (run 42414983930), because
+      the last release was 2026-10-25 and the cache entry had expired.
+- [ ] Turn show mode back OFF when the live work winds down:
+      `gh variable set SHOW_MODE --body false --repo TomSawyerLabs/empyrean-gate`
 
 ## Show mode: the toggle
 
