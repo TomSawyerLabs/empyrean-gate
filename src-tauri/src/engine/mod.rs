@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 
 pub mod minis;
 mod patch_build;
+mod phase_lock;
 
 // The live video frame lives in media cell 0 (Still images follow it), so it
 // must fit in one cell.
@@ -2117,9 +2118,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut game_prev_beat = 0.0f32;
 
     // Beat taps and the operator beat pulse follow the lighting-time clock, which
-    // can run at half/normal/double the detector's inferred tempo.
-    let mut prev_raw_beat_phase = [0.0f32; MAX_AUDIO_SOURCES];
-    let mut raw_beat_count = [0u64; MAX_AUDIO_SOURCES];
+    // can run at half/normal/double the detector's inferred tempo. Each audio
+    // source's wrapped phase is unwrapped into a continuous beat total (a
+    // backwards straddle counts back down rather than as an extra beat), and a
+    // per-source follower turns whichever clock is selected into a phase that
+    // never steps backwards (plans/beat-phase-lock.md).
+    let mut raw_beat_unwrap = [phase_lock::PhaseUnwrap::default(); MAX_AUDIO_SOURCES];
+    let mut beat_locks = [phase_lock::PhaseLock::default(); MAX_AUDIO_SOURCES];
     let mut manual_beat_phase = 0.0f32;
     let mut manual_beat_count = 0u64;
     let mut prev_beat_phase = [0.0f32; MAX_AUDIO_SOURCES];
@@ -2656,14 +2661,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             .map(|(_, features)| features.level)
             .collect();
         let audio_follow_brightness = audio_brightness.step(&brightness_levels, dt);
-        for (i, a) in audio_inputs.iter().enumerate() {
+        let raw_beat_total: [f64; MAX_AUDIO_SOURCES] = std::array::from_fn(|i| {
+            let a = &audio_inputs[i];
             if a.bpm <= 0.0 {
-                raw_beat_count[i] = 0;
-            } else if a.beat_phase < prev_raw_beat_phase[i] - 0.5 {
-                raw_beat_count[i] = raw_beat_count[i].wrapping_add(1);
+                raw_beat_unwrap[i].reset();
+                0.0
+            } else {
+                raw_beat_unwrap[i].push(a.beat_phase)
             }
-            prev_raw_beat_phase[i] = a.beat_phase;
-        }
+        });
         let clock_now = Instant::now();
         let clock_latency = cfg.rhythm.latency_ms.clamp(-500.0, 500.0);
         let midi_clock = state.midi_clock.lock().snapshot(clock_now, clock_latency);
@@ -2776,26 +2782,53 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             );
         }
 
+        // Which clock drives the lights, and whether it (or the beat-time
+        // division) just changed: a switch is a deliberate discontinuity, so
+        // the phase lock snaps and beat events skip the frame.
+        let timing_signature = if cfg.render.manual_bpm.is_some() {
+            (1, 0)
+        } else if external_selected && external_clock.usable {
+            (2, 0)
+        } else if external_selected && cfg.rhythm.fallback_to_audio {
+            (3, fallback_index as u32)
+        } else if external_selected {
+            (4, 0)
+        } else {
+            (0, 0)
+        };
+        let beat_time_changed = last_beat_time != Some(cfg.render.beat_time)
+            || last_timing_signature != Some(timing_signature);
+        last_beat_time = Some(cfg.render.beat_time);
+        last_timing_signature = Some(timing_signature);
+
         let mut audio = [AudioUniform::default(); MAX_AUDIO_SOURCES];
         for (i, a) in audio_inputs.iter().enumerate() {
-            let (base_phase, base_count, base_bpm) = match cfg.render.manual_bpm {
-                Some(bpm) => (manual_beat_phase, manual_beat_count, bpm.clamp(10.0, 400.0)),
+            // The selected source's beat position as a continuous total.
+            let (source_total, base_bpm) = match cfg.render.manual_bpm {
+                Some(bpm) => (
+                    manual_beat_count as f64 + f64::from(manual_beat_phase),
+                    bpm.clamp(10.0, 400.0),
+                ),
                 None if external_selected && external_clock.usable => (
-                    external_clock.beat_phase,
-                    external_clock.beat_count,
+                    external_clock.beat_count as f64 + f64::from(external_clock.beat_phase),
                     external_clock.bpm,
                 ),
-                None if external_selected && cfg.rhythm.fallback_to_audio => {
-                    let fallback = &audio_inputs[fallback_index];
-                    (
-                        fallback.beat_phase,
-                        raw_beat_count[fallback_index],
-                        fallback.bpm,
-                    )
-                }
-                None if external_selected => (0.0, 0, 0.0),
-                None => (a.beat_phase, raw_beat_count[i], a.bpm),
+                None if external_selected && cfg.rhythm.fallback_to_audio => (
+                    raw_beat_total[fallback_index],
+                    audio_inputs[fallback_index].bpm,
+                ),
+                None if external_selected => (0.0, 0.0),
+                None => (raw_beat_total[i], a.bpm),
             };
+            // Half-time needs the beat parity, so it locks across two beats.
+            let quantum = if cfg.render.beat_time == crate::config::BeatTime::Half {
+                2.0
+            } else {
+                1.0
+            };
+            let locked_total =
+                beat_locks[i].step(source_total, base_bpm, dt, quantum, beat_time_changed);
+            let (base_phase, base_count) = phase_lock::split_total(locked_total);
             audio[i] = AudioUniform {
                 // LINK supplies phase/BPM below, but a configured interface
                 // remains the amplitude source. Fall back to analyzed-track
@@ -2845,21 +2878,6 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // Beat taps: on each detected beat (phase wrap) of the chosen source, fire
         // a burst at a point orbiting the ring — the automated spiral-tap.
         let bt = &cfg.beat_taps;
-        let timing_signature = if cfg.render.manual_bpm.is_some() {
-            (1, 0)
-        } else if external_selected && external_clock.usable {
-            (2, 0)
-        } else if external_selected && cfg.rhythm.fallback_to_audio {
-            (3, fallback_index as u32)
-        } else if external_selected {
-            (4, 0)
-        } else {
-            (0, 0)
-        };
-        let beat_time_changed = last_beat_time != Some(cfg.render.beat_time)
-            || last_timing_signature != Some(timing_signature);
-        last_beat_time = Some(cfg.render.beat_time);
-        last_timing_signature = Some(timing_signature);
         for (i, a) in audio.iter().enumerate() {
             let wrapped = !beat_time_changed && a.beat_phase < prev_beat_phase[i] - 0.5;
             prev_beat_phase[i] = a.beat_phase;
