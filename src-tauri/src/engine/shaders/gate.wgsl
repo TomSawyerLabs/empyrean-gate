@@ -369,7 +369,8 @@ fn meteor_event(L: Layer, ctx: Ctx, epoch: u32, progress: f32) -> vec4f {
         1.0 - (0.1 + L.param_a * 0.5),
         hash01(ctx.spoke * 31337u + epoch * 269u)
     );
-    let dir_r = select(ctx.r01, 1.0 - ctx.r01, L.param_c > 0.5);
+    // `>= 0.5` matches the walk's floor() grid (LayerKind::discrete_params).
+    let dir_r = select(ctx.r01, 1.0 - ctx.r01, L.param_c >= 0.5);
     let head = progress * 1.3;
     let d = head - dir_r;
     let tail = 0.08 + L.param_b * 0.15;
@@ -504,11 +505,17 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
         // BeatRings — a ring expands outward (or inward) on every beat
         case 9u: {
             let A2 = AUDIO[L.audio_source];
-            let dir = select(1.0 - ctx.r01, ctx.r01, L.param_b > 0.5);
+            // `>= 0.5` matches the walk's floor() grid (LayerKind::discrete_params).
+            let dir = select(1.0 - ctx.r01, ctx.r01, L.param_b >= 0.5);
             let width = 0.02 + L.param_a * 0.3;
             let front = A2.beat_phase;
             let d = abs(dir - front);
-            let v = exp(-(d * d) / (width * width)) * (1.0 - A2.beat_phase * 0.5);
+            // Bloom in over the first few percent of the beat and fade out over
+            // the last fifth, so the ring is dark on both sides of the wrap: a
+            // phase that lands on the wrong side of it can't pop a full-bright
+            // ring for a frame (plans/beat-phase-lock.md).
+            let life = smoothstep(0.0, 0.06, front) * (1.0 - smoothstep(0.8, 1.0, front));
+            let v = exp(-(d * d) / (width * width)) * (1.0 - front * 0.5) * life;
             let strength = mix(1.0, A2.onset * 0.7 + 0.5, aud);
             let hue = L.hue + front * L.hue_range;
             return vec4f(hsv2rgb(hue, L.saturation, v * L.brightness * strength), v);
@@ -630,7 +637,8 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
             let e = spec_at(L.audio_source, u32(t * f32(SPEC_N)));
             let extent = clamp(e * (0.35 + L.param_a * 0.9), 0.0, 1.0);
             // Position along the spoke measured from the bar's root end.
-            let pos = select(ctx.r01, 1.0 - ctx.r01, L.param_b > 0.5);
+            // `>= 0.5` matches the walk's floor() grid (LayerKind::discrete_params).
+            let pos = select(ctx.r01, 1.0 - ctx.r01, L.param_b >= 0.5);
             let v = smoothstep(extent, extent - 0.2, pos) * (0.35 + e * 0.65);
             let hue = L.hue + t * L.hue_range;
             return vec4f(hsv2rgb(hue, L.saturation, v * L.brightness), v);
