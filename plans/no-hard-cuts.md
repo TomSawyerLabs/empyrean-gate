@@ -12,6 +12,11 @@ From three idj captures (2026-09-02, one thought split across three dictations):
 Nothing that affects light output should snap on (or off). Every boolean toggle rides
 a short envelope; the rig never pops.
 
+**Amended 2026-11-09 by the user:** "Nothing *automatic* turns on instantly, and
+patterns should usually fade in/out gracefully. Local expert VJ control should
+however be allowed to 'make mistakes'." Blackout is a live show button and must be
+instant, so master brightness no longer glides (see the decision below).
+
 ## Environment / context
 
 - Repo: `~/git/Personal Projects/Empyrean` (Empyrean Gate app, Rust engine in
@@ -32,6 +37,12 @@ a short envelope; the rig never pops.
 - The self-update **handover must stay seamless**: when the successor adopts the
   predecessor's sACN sequence (`sacn_resume_pending`), the output-on ramp is skipped
   (env forced to 1.0) so a mid-show update doesn't dip the rig.
+- Master brightness (Blackout, the master fader) is the operator's live control
+  and lands on the next frame (2026-11-09, replacing step 4's glide). Automatic
+  master changes still fade: scene transitions crossfade it, and first light
+  after launch rides the output-on fade. Before this, the 0.15 s one-pole took
+  ~0.7 s to reach 1% and ~1.4 s to reach zero, which read as a slow fade in a
+  dark space.
 - `MasterDropDetector` (audio-drop blackout, tau 0.085 s) is deliberately fast —
   untouched.
 - Test-mode blink/patterns stay binary while armed (they're hardware evidence);
@@ -46,7 +57,8 @@ a short envelope; the rig never pops.
    multiplied into opacity next to the walk env; newly added layers and boot start
    at 0 and fade in; transition-grown slots start at 1 so scene crossfades aren't
    double-faded; env carried across the scene-transition shift-down).
-4. [x] Master brightness one-pole glide (Blackout quick-setting, slider jumps).
+4. [x] ~~Master brightness one-pole glide (Blackout quick-setting, slider jumps).~~
+   Removed 2026-11-09: master brightness is instant (operator control).
 5. [x] sACN output-on fade-up from black (`output_env`, scale bytes into a scratch
    buf before `send_frame`; preview untouched; handover exempt).
 6. [x] Master hue enable/amount glide (one-pole on `hue_amount`).
@@ -91,6 +103,8 @@ a short envelope; the rig never pops.
 ## Things not to do
 
 - Don't ramp output-off / E1.31 termination.
+- Don't put an envelope on an operator's live show control (Blackout, master
+  fader). Fades are for things the show does by itself.
 - Don't smooth inside `testmode.rs` render (frames are evidence); the fade lives in
   the engine's substitution site.
 - Don't add a per-frame allocation on the sACN path — scratch buffers only.
