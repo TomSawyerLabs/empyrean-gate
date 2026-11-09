@@ -871,9 +871,23 @@ impl PioneerClockState {
         self.player = beat.player;
         self.player_name = beat.name;
         self.bpm = beat.bpm;
+        let had_beat = self.last_beat.is_some();
         self.last_beat = Some(now);
+        // Progression from the beat this clock anchored last time, counting any
+        // beats whose packets were lost.
+        let progressed = self.beat_count.wrapping_add(u64::from(elapsed_beats));
         if let Some(number) = self.beat_numbers.get(&beat.player).copied() {
-            self.beat_count = number;
+            // Status packets (~5 Hz) race the beat packet, so the status beat
+            // number is either this beat or still the previous one. Taking it
+            // as-is flipped the count's parity at random — a half-cycle jump
+            // in half-time. Keep the progression while status agrees with it
+            // to within that one beat of staleness; anything else is a seek.
+            let agrees = number == progressed || number.wrapping_add(1) == progressed;
+            self.beat_count = if !changed_player && had_beat && agrees {
+                progressed
+            } else {
+                number
+            };
         } else if changed_player && (1..=4).contains(&beat.beat_within_bar) {
             let bar_base = self.beat_count.saturating_sub(self.beat_count % 4);
             self.beat_count = bar_base + u64::from(beat.beat_within_bar - 1);
@@ -2524,6 +2538,33 @@ mod tests {
         let addresses = link_bind_addresses(Ipv4Addr::new(10, 255, 12, 135));
         assert!(addresses.contains(&Ipv4Addr::new(10, 255, 12, 135)));
         assert!(addresses.contains(&Ipv4Addr::new(10, 255, 15, 255)));
+    }
+
+    #[test]
+    fn pioneer_beat_count_ignores_stale_status_numbers() {
+        let start = Instant::now();
+        let period = Duration::from_millis(500);
+        let mut clock = PioneerClockState::default();
+        clock.receive_status(&link_status(1, true, 100), start);
+        clock.receive_beat(&link_beat(1, 120.0, 1), 0, start);
+        assert_eq!(clock.beat_count, 100);
+        // Status sometimes lands just before the beat packet (already says the
+        // new beat), sometimes not (still the old one). The count must advance
+        // by exactly one either way, or half-time parity flips.
+        let mut expected = 100;
+        for (i, fresh) in [false, true, false, false, true, true, false].into_iter().enumerate() {
+            let now = start + period * (i as u32 + 1);
+            expected += 1;
+            let status = if fresh { expected } else { expected - 1 };
+            clock.receive_status(&link_status(1, true, status as u32), now);
+            clock.receive_beat(&link_beat(1, 120.0, ((i + 1) % 4 + 1) as u8), 0, now);
+            assert_eq!(clock.beat_count, expected, "beat {i} (status fresh: {fresh})");
+        }
+        // A seek: status jumps far away and is adopted.
+        let now = start + period * 9;
+        clock.receive_status(&link_status(1, true, 400), now);
+        clock.receive_beat(&link_beat(1, 120.0, 1), 0, now);
+        assert_eq!(clock.beat_count, 400);
     }
 
     #[test]
