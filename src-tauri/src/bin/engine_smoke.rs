@@ -24,6 +24,7 @@ struct Options {
     json: bool,
     suite: bool,
     patch: bool,
+    seams: bool,
     pixels: u32,
     layers: usize,
     effects: usize,
@@ -39,6 +40,7 @@ impl Default for Options {
             json: false,
             suite: false,
             patch: false,
+            seams: false,
             pixels: 24_192,
             layers: AppConfig::default().layers.len(),
             effects: 0,
@@ -146,6 +148,13 @@ fn run() -> Result<()> {
 
     if options.patch {
         return run_patch_demo(&mut engine, &options);
+    }
+    // The plain smoke run checks seams too; `--seams` checks only them.
+    if options.seams || args.is_empty() {
+        seam_check(&mut engine, options.pixels)?;
+        if options.seams {
+            return Ok(());
+        }
     }
 
     let mut results = Vec::with_capacity(scenarios.len());
@@ -715,6 +724,114 @@ fn benchmark_video_frame() -> Vec<u8> {
     rgba
 }
 
+/// One frame of beat at 128 BPM and 60 fps: the step a layer sees between two
+/// consecutive frames.
+const SEAM_STEP: f32 = 128.0 / 60.0 / 60.0;
+
+/// Probes (by printed name) whose jump on the beat *is* the look, with the
+/// reason. Everything else must change no more a frame either side of the beat
+/// wrap than a frame either side of mid-beat (plans/beat-phase-lock.md). Empty
+/// on purpose: a beat hit can rise over a couple of frames (`beat_hit` in
+/// gate.wgsl) and still land as a hit.
+const SEAM_ATTACKS: &[(&str, &str)] = &[];
+
+/// Render each layer kind alone, one frame either side of the beat wrap and,
+/// as a control, one frame either side of mid-beat. A layer whose wrap step is
+/// far bigger than its ordinary per-frame motion pops on every beat, and any
+/// jitter in the beat clock near the wrap turns that pop into a flicker.
+fn seam_check(engine: &mut Engine, pixels: u32) -> Result<()> {
+    engine.ensure_capacity(pixels);
+    let (spokes, pixels_per_spoke) = geometry_for(pixels);
+    let base = make_inputs(
+        &Scenario {
+            name: "seam".into(),
+            pixels,
+            layers: 1,
+            effects: 0,
+            dabs: 0,
+            video_only: false,
+        },
+        spokes,
+        pixels_per_spoke,
+    );
+    let mut failures = Vec::new();
+    println!("beat-wrap seams (mean |delta| per channel, 0-255; wrap vs mid-beat):");
+    // Each layer kind alone, then the DJ Link overlay over an empty stack.
+    let probes = LayerKind::ALL
+        .into_iter()
+        .filter(|&kind| kind != LayerKind::Video) // needs a live frame; no beat
+        .map(Some)
+        .chain([None]);
+    for kind in probes {
+        let mut inputs = base.clone();
+        let name = match kind {
+            Some(kind) => {
+                inputs.layers = vec![
+                    LayerCfg {
+                        kind,
+                        ..Default::default()
+                    }
+                    .to_gpu(0.3, 0),
+                ];
+                inputs.globals.layer_count = 1;
+                format!("{kind:?}")
+            }
+            None => {
+                inputs.layers.clear();
+                inputs.globals.layer_count = 0;
+                inputs.globals.dj_link_visual_active = 1;
+                "DJ Link overlay".to_owned()
+            }
+        };
+        let mut probe = |phase: f32| -> Result<Vec<u8>> {
+            for audio in &mut inputs.audio {
+                audio.beat_phase = phase.rem_euclid(1.0);
+                audio.bpm_conf = 1.0;
+            }
+            // The output is read back a frame late; render until it settles.
+            let mut last = None;
+            for _ in 0..4 {
+                if let Some(rgb) = engine.render(&inputs)? {
+                    last = Some(rgb.to_vec());
+                }
+            }
+            last.context("engine produced no frame")
+        };
+        let half = SEAM_STEP * 0.5;
+        let wrap = mean_abs_diff(&probe(1.0 - half)?, &probe(half)?);
+        let mid = mean_abs_diff(&probe(0.5 - half)?, &probe(0.5 + half)?);
+        let seam = wrap > mid * 4.0 + 1.0;
+        let allowed = SEAM_ATTACKS.iter().find(|(k, _)| *k == name);
+        let verdict = match (seam, allowed) {
+            (false, None) => "ok".to_owned(),
+            (true, Some((_, why))) => format!("attack, allowed: {why}"),
+            (true, None) => {
+                failures.push(format!(
+                    "{name} jumps at the beat wrap ({wrap:.2} vs {mid:.2} mid-beat)"
+                ));
+                "SEAM".to_owned()
+            }
+            (false, Some(_)) => {
+                failures.push(format!(
+                    "{name} is listed in SEAM_ATTACKS but no longer jumps at the wrap"
+                ));
+                "stale allowlist entry".to_owned()
+            }
+        };
+        println!("  {name:<16} wrap {wrap:6.2}  mid {mid:6.2}  {verdict}");
+    }
+    if !failures.is_empty() {
+        bail!("beat-wrap seam check failed:\n  {}", failures.join("\n  "));
+    }
+    println!("beat-wrap seams OK");
+    Ok(())
+}
+
+fn mean_abs_diff(a: &[u8], b: &[u8]) -> f64 {
+    let total: u64 = a.iter().zip(b).map(|(x, y)| u64::from(x.abs_diff(*y))).sum();
+    total as f64 / a.len().max(1) as f64
+}
+
 fn advance_inputs(inputs: &mut FrameInputs, frame: u32) {
     // A live source uploads only on a new browser frame. Seed the GPU on the first
     // warmup frame, then benchmark steady-state sampling rather than PCIe traffic.
@@ -777,6 +894,7 @@ fn parse_options(args: &[String]) -> Result<Options> {
             "--json" => options.json = true,
             "--suite" => options.suite = true,
             "--patch" => options.patch = true,
+            "--seams" => options.seams = true,
             "--warmup" => options.warmup_frames = parse_next(args, &mut i, "--warmup")?,
             "--frames" => options.measured_frames = parse_next(args, &mut i, "--frames")?,
             "--fps-budget" => options.fps_budget = parse_next(args, &mut i, "--fps-budget")?,
@@ -878,6 +996,8 @@ fn print_help() {
 Usage: engine-smoke [OPTIONS]\n\n\
   --suite              Run 24,192-pixel installed and 70k headroom scenarios\n\
   --patch              Render the node-graph patch demo (codegen end-to-end)\n\
+  --seams              Only check every layer for a jump at the beat wrap\n\
+                       (the plain no-argument run checks it too)\n\
   --pixels N           Total pixels for a custom scenario (max 500000)\n\
   --layers N           Active layers (1..24)\n\
   --effects N          Concurrent effects (0..32)\n\

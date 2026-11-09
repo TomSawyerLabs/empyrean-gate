@@ -273,6 +273,16 @@ fn fbm3(p: vec3f, octaves: u32) -> f32 {
 // Small helpers
 // ---------------------------------------------------------------------------
 
+/// A beat hit: rises over the first `attack` of the beat, then decays as
+/// `exp(-decay * t)` from its peak. Zero at both ends of the beat, so the beat
+/// wrap is continuous; a hit that jumps from dark to full in one frame is a hard
+/// cut, and any jitter in the beat clock turns it into a flicker
+/// (plans/beat-phase-lock.md). An attack of ~5% of a beat is two frames at
+/// 128 BPM: still a hit.
+fn beat_hit(phase: f32, attack: f32, decay: f32) -> f32 {
+    return smoothstep(0.0, attack, phase) * exp(-decay * max(phase - attack, 0.0));
+}
+
 fn hsv2rgb(h: f32, s: f32, v: f32) -> vec3f {
     let hh = fract(h) * 6.0;
     let c = v * s;
@@ -524,7 +534,9 @@ fn layer_color(L: Layer, ctx: Ctx) -> vec4f {
         case 10u: {
             let A2 = AUDIO[L.audio_source];
             let free = 0.5 + 0.5 * sin(L.phase);
-            let beat = 1.0 - A2.beat_phase * 0.7;
+            // Swells over the first 8% of the beat instead of jumping from
+            // the trough to full in one frame, then the same linear ebb.
+            let beat = mix(0.3, 1.0 - A2.beat_phase * 0.7, smoothstep(0.0, 0.08, A2.beat_phase));
             let env = mix(free, beat, aud);
             let floor_v = L.param_a; // how deep the breath dips
             let v = mix(floor_v, 1.0, env) * L.brightness;
@@ -1613,7 +1625,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         // Master-clock geometry remains expressive even when the DJ is
         // monitoring entirely in headphones and no audio energy reaches Gate.
         // A four-lobed fan snaps outward on each beat and slowly rotates.
-        let master_hit = exp(-AUDIO[0].beat_phase * 11.0);
+        let master_hit = beat_hit(AUDIO[0].beat_phase, 0.05, 11.0);
         let master_fan = pow(max(0.0, cos(ctx.theta * 4.0 - G.time * 0.32)), 10.0);
         let master_ring = 0.45 + 0.55 * cos(TAU * (ctx.rn * 1.35 - AUDIO[0].beat_phase));
         let master_col = hsv2rgb(fract(0.52 + G.time * 0.006 + ctx.rn * 0.08), 0.78, 1.0);
