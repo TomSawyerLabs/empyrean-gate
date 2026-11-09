@@ -101,8 +101,9 @@ Two independent causes turned out to produce that snap, and both are fixed:
 
 ## Open questions for the user
 
-None blocking. It is unknown which clock source and `latency_ms` were in use at
-Decompression. The walk-dither cause doesn't depend on either.
+None. The walk-off 0.5 direction change was approved on 2026-11-09. It is
+unknown which clock source and `latency_ms` were in use at Decompression; the
+walk-dither cause doesn't depend on either. Left to the user: merging PR #9.
 
 ## Things not to do
 
