@@ -14,6 +14,7 @@ pub mod firewall;
 pub mod doom;
 pub mod game;
 pub mod geometry;
+pub mod guardrails;
 pub mod layers;
 pub mod logging;
 pub mod media;

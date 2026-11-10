@@ -1864,22 +1864,20 @@ const GAME_ENDED_SECS: f32 = 12.0;
 
 // Nothing automatic turns on instantly (plans/no-hard-cuts.md): every on/off
 // the show makes by itself rides one of these short envelopes instead of
-// hard-cutting. The operator's live controls (master brightness, so Blackout)
-// act on the next frame: the VJ is allowed to make a hard cut.
+// hard-cutting. How fast an operator's own changes land is up to their
+// device's guardrail level (plans/guardrail-modes.md, `crate::guardrails`):
+// layer toggles, the masters and the layer sliders slew at the rate of
+// whoever last wrote them.
 
 /// Seconds for the show ↔ test-frame crossfade on arm/disarm. Short enough not
 /// to slow commissioning, long enough that the rig never snaps.
 const TEST_FADE_SECS: f32 = 0.75;
-/// Seconds for a layer's enable toggle to fade it in or out of the mix.
+/// Seconds for a layer toggle to fade on the Ready bus preview. Program
+/// toggles fade at the toggling device's guardrail rate instead.
 const LAYER_TOGGLE_SECS: f32 = 1.0;
 /// Seconds for the rig to fade up from black when sACN output turns on.
 /// Turning output OFF stays instant: termination packets are the point.
 const OUTPUT_ON_SECS: f32 = 1.0;
-/// Time constant for the master hue enable/amount glide.
-const MASTER_HUE_TAU: f32 = 0.3;
-/// Time constant for the floor-input level (taps/drawing/pads from every
-/// client) — one-pole, so muting the floor is a quick fade, not a cut.
-const FLOOR_LEVEL_TAU: f32 = 0.15;
 /// Seconds for a freshly started Video source to fade into the mix. Stopping
 /// is instant: the frame data is cleared the moment the source goes away.
 const VIDEO_FADE_SECS: f32 = 1.0;
@@ -2097,12 +2095,20 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut test_fade_rgb: Vec<u8> = Vec::new();
 
     // plans/no-hard-cuts.md: enable-toggle envelopes. Layers fade in/out of the
-    // mix, master hue glides, and the wire fades up from black when output
-    // turns on (`wire_rgb` is its scratch buffer). Master brightness has no
-    // envelope: it is the operator's live control.
+    // mix and the wire fades up from black when output turns on (`wire_rgb` is
+    // its scratch buffer). plans/guardrail-modes.md: the masters and layer
+    // sliders slew at the rate of whoever last wrote them (`control_rates`);
+    // `None` until the first frame, which starts on the config.
     let mut layer_enable_env: Vec<f32> = Vec::new();
+    let mut layer_slews: Vec<crate::guardrails::LayerSlew> = Vec::new();
+    let mut control_rates = crate::guardrails::ControlRates::default();
+    let mut master_env: Option<f32> = None;
+    let mut speed_env: Option<f32> = None;
     let mut hue_env = 0.0f32;
-    let mut floor_env = 0.0f32;
+    let mut floor_env: Option<f32> = None;
+    // Seconds the current manual handoff takes: the manual transition time,
+    // or longer when a Guided device asked for the change.
+    let mut handoff_secs = 0.0f32;
     let mut output_env = 0.0f32;
     let mut wire_rgb: Vec<u8> = Vec::new();
 
@@ -2177,7 +2183,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let patch_settling = wanted.is_some() && (wanted != patch_key || patch_building);
         if requested_handoff != handoff_epoch && !patch_settling {
             handoff_epoch = requested_handoff;
-            if cfg.render.manual_transition_secs > 0.001 && !last_normal_rgb.is_empty() {
+            handoff_secs = cfg.render.manual_transition_secs.max(f32::from_bits(
+                state.transition_min_secs.load(Ordering::Relaxed),
+            ));
+            if handoff_secs > 0.001 && !last_normal_rgb.is_empty() {
                 handoff_from.clone_from(&last_normal_rgb);
                 handoff_started = Some(Instant::now());
                 handoff_active = true;
@@ -2623,6 +2632,35 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             performance_event_index = 0;
         }
 
+        // Guardrail rates: copy when a write moved them. A structural layer
+        // edit, a scene transition or a Ready take snaps the layer slews (a
+        // reorder is not a slider move).
+        {
+            let rates = state.control_rates.lock();
+            if rates.version != control_rates.version {
+                if rates.structure != control_rates.structure {
+                    layer_slews.iter_mut().for_each(crate::guardrails::LayerSlew::snap);
+                }
+                control_rates = rates.clone();
+            }
+        }
+        if render_transition_active {
+            layer_slews.iter_mut().for_each(crate::guardrails::LayerSlew::snap);
+        }
+        layer_slews.resize(render_layers.len(), Default::default());
+        {
+            use crate::guardrails::{Control as C, slew};
+            let speed = slew(
+                speed_env.unwrap_or(render_master_speed),
+                render_master_speed,
+                control_rates.master(C::MasterSpeed),
+                dt,
+                false,
+            );
+            speed_env = Some(speed);
+            render_master_speed = speed;
+        }
+
         layer_phases.resize(render_layers.len(), 0.0);
         layer_walks.resize(render_layers.len(), LayerWalk::default());
         layer_target.resize(render_layers.len(), true);
@@ -3061,6 +3099,15 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let mut offair_layers: Vec<(usize, GpuLayer)> = Vec::new();
         let mut gpu_transition_split = 0u32;
         for (i, l) in render_layers.iter().take(render_layer_limit).enumerate() {
+            // Guardrails: the sliders slew at their writer's rate. Mid
+            // transition the crossfade carries the change instead.
+            let slewed;
+            let l = if render_transition_active {
+                l
+            } else {
+                slewed = layer_slews[i].step(l, dt, |c| control_rates.layer(i, c));
+                &slewed
+            };
             // Envelope eases layers in/out of the mix over a few seconds.
             let target = if walk_layers_on {
                 layer_target[i]
@@ -3069,11 +3116,16 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             };
             let goal = if target { 1.0 } else { 0.0 };
             layer_env[i] += (goal - layer_env[i]) * (dt / 4.0).min(1.0);
-            // The enable toggle rides its own short envelope so switching a
-            // layer on (or adding one) never pops it into the frame.
-            layer_enable_env[i] = (layer_enable_env[i]
-                + if l.enabled { dt } else { -dt } / LAYER_TOGGLE_SECS)
-                .clamp(0.0, 1.0);
+            // The enable toggle rides its own envelope, at the toggler's rate
+            // (1 s in Guided and Standard, a cut in Expert), so switching a
+            // layer on (or adding one) need not pop it into the frame.
+            layer_enable_env[i] = crate::guardrails::slew(
+                layer_enable_env[i],
+                if l.enabled { 1.0 } else { 0.0 },
+                control_rates.layer(i, crate::guardrails::Control::LayerEnable),
+                dt,
+                false,
+            );
             let level = audio[(l.audio_source as usize).min(MAX_AUDIO_SOURCES - 1)].level;
             if !l.enabled && layer_enable_env[i] <= 0.0 {
                 // Fully faded out and off: skip the GPU, but keep the phase
@@ -3334,13 +3386,17 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         let game_suppress = game_gain <= 0.0;
         // The floor-input level is the operator's volume knob on the play
         // surface: every tap, stroke and pad from every client is scaled by
-        // it, glided so turning the crowd down never pops.
+        // it, at the rate of the device that last moved it.
         let floor_goal = cfg.render.floor_level.clamp(0.0, 1.0);
-        floor_env += (floor_goal - floor_env) * (1.0 - (-dt / FLOOR_LEVEL_TAU).exp());
-        if (floor_env - floor_goal).abs() < 1e-4 {
-            floor_env = floor_goal;
-        }
-        let overlay_gain = game_gain * floor_env;
+        let floor = crate::guardrails::slew(
+            floor_env.unwrap_or(floor_goal),
+            floor_goal,
+            control_rates.master(crate::guardrails::Control::FloorLevel),
+            dt,
+            false,
+        );
+        floor_env = Some(floor);
+        let overlay_gain = game_gain * floor;
 
         // Capture the urgency marker before the effect snapshot. The receiver
         // publishes it only after inserting the effects; this ordering ensures
@@ -3547,11 +3603,20 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             state.touches.lock().gpu(touch_clock, rotation_angle)
         };
 
-        // Master brightness is the operator's live control and lands on the
-        // next frame: Blackout is a show button and must be instant
-        // (plans/no-hard-cuts.md). Automatic changes already fade elsewhere:
-        // scene transitions crossfade `render_master_brightness`, and first
-        // light after launch rides the sACN output-on fade.
+        // Master brightness (Blackout, the master fader) moves at the rate of
+        // the device that set it: a quick fade from a Guided device, the next
+        // frame from Standard or Expert (plans/guardrail-modes.md). Automatic
+        // changes fade elsewhere: scene transitions crossfade
+        // `render_master_brightness`, and first light after launch rides the
+        // sACN output-on fade.
+        let master = crate::guardrails::slew(
+            master_env.unwrap_or(render_master_brightness),
+            render_master_brightness,
+            control_rates.master(crate::guardrails::Control::MasterBrightness),
+            dt,
+            false,
+        );
+        master_env = Some(master);
         // Same treatment for the master hue toggle/amount: the whole-composite
         // colour shift glides in rather than snapping.
         let hue_goal = if cfg.render.master_hue_enabled {
@@ -3559,7 +3624,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         } else {
             0.0
         };
-        hue_env += (hue_goal - hue_env) * (1.0 - (-dt / MASTER_HUE_TAU).exp());
+        hue_env = crate::guardrails::slew(
+            hue_env,
+            hue_goal,
+            control_rates.master(crate::guardrails::Control::MasterHueAmount),
+            dt,
+            false,
+        );
 
         let inputs = FrameInputs {
             globals: Globals {
@@ -3569,7 +3640,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 effect_count: effects.len() as u32,
                 time: state.started.elapsed().as_secs_f32(),
                 dt,
-                master: render_master_brightness * master_drop_brightness * audio_follow_brightness,
+                master: master * master_drop_brightness * audio_follow_brightness,
                 inner_over_outer: (cfg.geometry.inner_radius_ft
                     / cfg.geometry.outer_radius_ft.max(0.001))
                 .clamp(0.0, 1.0),
@@ -3878,7 +3949,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
 
         if let Some(rendered_rgb) = rgb {
             let normal_rgb: &[u8] = if let Some(started) = handoff_started {
-                let duration = cfg.render.manual_transition_secs.clamp(0.0, 30.0);
+                let duration = handoff_secs.clamp(0.0, 30.0);
                 let linear = if duration <= 0.001 {
                     1.0
                 } else {
@@ -4360,6 +4431,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                             crate::protocol::ClientInfo {
                                 id: c.id.clone(),
                                 name: c.name.clone(),
+                                guardrail: c.guardrail.clone(),
                                 connected: is_connected,
                                 revoked: c.revoked,
                                 admin: c.admin,

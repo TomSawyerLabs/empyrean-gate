@@ -639,6 +639,12 @@ pub struct SharedState {
     /// Bumped only by Program/Ready takes, so the render loop can exchange the
     /// actual GPU engines and animation state rather than merely reload a look.
     pub ready_take_epoch: AtomicU64,
+    /// Seconds the next render transition must take at least (f32 bits): a
+    /// Guided device's scene change never cuts (plans/guardrail-modes.md).
+    pub transition_min_secs: AtomicU32,
+    /// The rate limit of whoever last wrote each control
+    /// (plans/guardrail-modes.md); the engine slews toward the config by it.
+    pub control_rates: Mutex<crate::guardrails::ControlRates>,
     /// Live exposed-param changes queued for the active patch runtime — applied
     /// by the engine loop with NO pipeline rebuild (that's the point).
     pub patch_params: Mutex<Vec<(String, String, f32)>>,
@@ -841,6 +847,8 @@ impl SharedState {
             patch_epoch: AtomicU32::new(0),
             render_transition_epoch: AtomicU64::new(0),
             ready_take_epoch: AtomicU64::new(0),
+            transition_min_secs: AtomicU32::new(0),
+            control_rates: Mutex::new(Default::default()),
             patch_params: Mutex::new(Vec::new()),
             effect_seq: AtomicU64::new(0),
             low_latency_render_seq: AtomicU64::new(0),
@@ -1328,6 +1336,14 @@ impl SharedState {
     }
 
     pub fn request_render_transition(&self) {
+        self.request_render_transition_min(0.0);
+    }
+
+    /// A render transition that takes at least `min_secs`, whatever the
+    /// manual transition time says.
+    pub fn request_render_transition_min(&self, min_secs: f32) {
+        self.transition_min_secs
+            .store(min_secs.max(0.0).to_bits(), Ordering::SeqCst);
         self.render_transition_epoch.fetch_add(1, Ordering::SeqCst);
     }
 

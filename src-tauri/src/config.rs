@@ -418,6 +418,9 @@ pub struct ClientRecord {
     /// everyone else gets the play surfaces only. Loopback connections are
     /// always admin regardless of this flag.
     pub admin: bool,
+    /// How much this device's changes are smoothed and limited
+    /// (plans/guardrail-modes.md).
+    pub guardrail: crate::guardrails::GuardrailCfg,
 }
 
 /// Random URL-safe token used by join links and authenticated local handover.
@@ -1939,6 +1942,7 @@ mod tests {
             name: "Booth iPad".into(),
             revoked: false,
             admin: true,
+            guardrail: Default::default(),
         });
 
         let mut remote = AppConfig::default();

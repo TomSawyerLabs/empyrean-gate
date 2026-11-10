@@ -243,6 +243,14 @@ pub enum ClientMsg {
     SetClientName {
         name: String,
     },
+    /// Set a device's guardrail level and Expert rate limits
+    /// (plans/guardrail-modes.md). `id: None` is this device; another
+    /// device's needs the local operator.
+    SetClientGuardrail {
+        #[serde(default)]
+        id: Option<String>,
+        guardrail: crate::guardrails::GuardrailCfg,
+    },
     /// Operator: rename a known client.
     RenameClient {
         id: String,
@@ -625,6 +633,8 @@ pub struct HandoverGrant {
 pub struct ClientInfo {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub guardrail: crate::guardrails::GuardrailCfg,
     pub connected: bool,
     pub revoked: bool,
     pub admin: bool,
