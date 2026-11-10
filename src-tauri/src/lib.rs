@@ -52,15 +52,106 @@ pub struct Backend {
     pub state: Arc<SharedState>,
 }
 
-/// What the instance already holding our port reports, or `None` if it is too
-/// old to say (pre-0.5.2) or unreachable.
-fn running_instance_version(port: u16) -> Option<String> {
+/// The exact executable a process runs from: its size and modification time.
+///
+/// Two launches of the same file match, and so does a promoted launcher copy
+/// of it, because `std::fs::copy` (CopyFileExW) carries the source's mtime
+/// across. A rebuilt binary does not match, even at the same version number, so
+/// a dev build still takes over a running one. Hashing the file would be exact
+/// but costs real time on a ~100 MB exe at every launch; this is free.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct BuildIdentity {
+    pub size: u64,
+    pub mtime_ms: u64,
+}
+
+impl BuildIdentity {
+    pub fn current() -> Option<Self> {
+        let meta = std::env::current_exe().ok()?.metadata().ok()?;
+        let mtime_ms = meta
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_millis() as u64;
+        Some(Self { size: meta.len(), mtime_ms })
+    }
+}
+
+/// What the instance already holding our port says about itself.
+struct RunningInstance {
+    version: String,
+    /// Absent on instances older than this field.
+    exe: Option<BuildIdentity>,
+    headless: bool,
+}
+
+/// Ask the instance holding the port who it is. `None` if it is too old to say
+/// (pre-0.5.2), not an Empyrean Gate at all, or not answering.
+fn running_instance(port: u16) -> Option<RunningInstance> {
     let mut resp = handover_agent()
         .get(format!("http://127.0.0.1:{port}/version"))
         .call()
         .ok()?;
     let body: serde_json::Value = resp.body_mut().read_json().ok()?;
-    body["version"].as_str().map(str::to_owned)
+    Some(RunningInstance {
+        version: body["version"].as_str()?.to_owned(),
+        exe: serde_json::from_value(body["exe"].clone()).ok(),
+        headless: body["headless"].as_bool().unwrap_or(false),
+    })
+}
+
+fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
+    let mut it = v
+        .trim_start_matches('v')
+        .split('.')
+        .map(|p| p.parse::<u32>().ok());
+    Some((it.next()??, it.next()??, it.next()??))
+}
+
+/// What a fresh launch should do about an instance already on its port.
+#[derive(Debug, PartialEq, Eq)]
+enum LaunchDecision {
+    /// Take over: the two-phase handover, then the old process exits.
+    TakeOver,
+    /// Leave the running one alone: bring its window forward and exit. The
+    /// string is the log line saying why.
+    Yield(String),
+}
+
+/// Pure, for tests. `ours` is this binary; `headless` is this launch's mode.
+fn decide_launch(
+    running: Option<&RunningInstance>,
+    ours_version: &str,
+    ours_exe: Option<BuildIdentity>,
+    headless: bool,
+) -> LaunchDecision {
+    // Unknown (pre-0.5.2 or unreachable): take over, as every build always has.
+    let Some(running) = running else {
+        return LaunchDecision::TakeOver;
+    };
+    if let (Some(theirs), Some(mine)) = (parse_version(&running.version), parse_version(ours_version))
+        && theirs > mine
+    {
+        // Taking over from a newer build is a downgrade, and if a show is
+        // running it happens on the wire.
+        return LaunchDecision::Yield(format!(
+            "v{} is already running and this binary is v{ours_version}; \
+             refusing to take over — that would downgrade a running show",
+            running.version
+        ));
+    }
+    let same_build = running.version == ours_version && running.exe.is_some() && running.exe == ours_exe;
+    // A windowed launch over a headless instance of the same build still takes
+    // over: the operator asked for a window, and a headless process has none
+    // to bring forward.
+    if same_build && !(running.headless && !headless) {
+        return LaunchDecision::Yield(format!(
+            "this exact build (v{ours_version}) is already running; \
+             a second launch must not restart the show"
+        ));
+    }
+    LaunchDecision::TakeOver
 }
 
 /// Ask the instance holding the port to bring its window forward. Best effort:
@@ -71,61 +162,44 @@ fn focus_running_instance(port: u16) {
         .send_empty();
 }
 
-/// True when the instance on our port is NEWER than us, in which case taking
-/// over from it would be a silent downgrade of a possibly-live show.
-///
-/// This is the failure that was reported from the field: a self-update leaves the
-/// updated binary running while the launcher path still holds the old one, so the
-/// next double-click started the OLD version, which found the port busy, took
-/// over, and put v0.4.0 back on the rig. Updates now also promote themselves over
-/// the launcher path (see `updater`), but this guard is what makes the downgrade
-/// impossible rather than merely unlikely.
-fn running_instance_is_newer(port: u16) -> Option<String> {
-    let running = running_instance_version(port)?;
-    let ours = updater::effective_version();
-    let parse = |v: &str| -> Option<(u32, u32, u32)> {
-        let mut it = v
-            .trim_start_matches('v')
-            .split('.')
-            .map(|p| p.parse::<u32>().ok());
-        Some((it.next()??, it.next()??, it.next()??))
-    };
-    match (parse(&running), parse(&ours)) {
-        (Some(theirs), Some(mine)) if theirs > mine => Some(running),
-        _ => None,
-    }
-}
-
 /// Start every backend subsystem. UI-independent; returns immediately.
 ///
 /// If another instance is already running on our port, take over from it: warm the
 /// GPU engine first (sACN gated), ask the old instance to stop and hand back its
 /// running state (config + layer phases), then start sending — the structure sees
 /// at most a few frames of hold, and patterns continue without a visual jump.
-/// The exception is an instance NEWER than us, which we refuse to displace.
-pub fn start_backend() -> Backend {
+/// The exceptions are an instance NEWER than us, or this exact build already
+/// running: we bring its window forward and exit (see `decide_launch`).
+pub fn start_backend(headless: bool) -> Backend {
     let cfg = config::load();
-    // Re-register at every launch so the Run key follows the current exe across
-    // self-update binary swaps.
-    autostart::sync(cfg.autostart);
     let port = cfg.server.port;
     let handover_token = cfg.server.join_token.clone();
     let lan_server = cfg.server.bind != "127.0.0.1";
     let takeover = port_in_use(port);
-    // Refuse to take the port from a NEWER instance — that is a downgrade, and
-    // if a show is running it happens on the wire. Checked before any subsystem
-    // starts, so the loser leaves nothing behind.
-    if takeover && let Some(newer) = running_instance_is_newer(port) {
-        log::warn!(
-            "v{newer} is already running on port {port} and this binary is v{}; \
-             refusing to take over — that would downgrade a running show. \
-             Focusing the running instance and exiting.",
-            updater::CURRENT_VERSION
-        );
-        focus_running_instance(port);
-        std::process::exit(0);
+    // A second launch either takes over or gets out of the way: focus the
+    // running window and exit. Decided before any subsystem starts (and before
+    // launch-at-login is re-pointed at this exe), so a launch that yields leaves
+    // nothing behind. plans/single-instance.md has the history.
+    if takeover {
+        let running = running_instance(port);
+        if let LaunchDecision::Yield(why) = decide_launch(
+            running.as_ref(),
+            &updater::effective_version(),
+            BuildIdentity::current(),
+            headless,
+        ) {
+            log::warn!("{why} (port {port}). Focusing the running instance and exiting.");
+            focus_running_instance(port);
+            std::process::exit(0);
+        }
     }
+    // Re-register at every launch so the Run key follows the current exe across
+    // self-update binary swaps.
+    autostart::sync(cfg.autostart);
     let state = SharedState::new(cfg);
+    // Before the server can answer /version: a later launch reads it to decide
+    // whether there is a window to bring forward.
+    state.headless.store(headless, Ordering::SeqCst);
     // No instance may transmit until it either owns the control port or has
     // completed an authenticated handover from the process that does.
     state.sacn_hold.store(true, Ordering::SeqCst);
@@ -233,9 +307,28 @@ pub fn start_backend() -> Backend {
                 handover_committed = true;
             }
             Err(e) => {
+                log::warn!("takeover commit failed ({e}); waiting for the old process to let go");
+                // The old process may simply be slow to exit. If it is still
+                // holding the port AND answering after that, it is alive and
+                // refused us (or never got the message): it keeps the show, we
+                // get out of the way. Lingering here — window open, a second
+                // engine rendering its own copy of the show — is how a show
+                // machine ended up with four gate windows. Only a holder that
+                // has stopped answering altogether is waited out, since nothing
+                // else will ever replace it.
+                if !wait_for_port_release(port, TAKEOVER_COMMIT_GRACE)
+                    && running_instance(port).is_some()
+                {
+                    log::warn!(
+                        "the instance on port {port} is still running and answering after \
+                         a failed takeover; focusing it and exiting rather than lingering \
+                         as a second instance"
+                    );
+                    focus_running_instance(port);
+                    std::process::exit(0);
+                }
                 log::warn!(
-                    "takeover commit failed ({e}); holding sACN until the old process \
-                     releases the control port"
+                    "holding sACN until the old process releases the control port"
                 );
             }
         }
@@ -305,6 +398,23 @@ pub fn start_backend() -> Backend {
     }
     updater::spawn(state.clone());
     Backend { state }
+}
+
+/// How long a failed takeover waits for the old process to exit on its own
+/// before deciding it is alive and leaving it be.
+const TAKEOVER_COMMIT_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// True once nothing is listening on `port` any more; false if it is still
+/// taken when `timeout` runs out.
+fn wait_for_port_release(port: u16, timeout: std::time::Duration) -> bool {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if !port_in_use(port) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    !port_in_use(port)
 }
 
 fn port_in_use(port: u16) -> bool {
@@ -434,7 +544,7 @@ pub fn run(headless: bool, promote_to: Option<std::path::PathBuf>) {
             diagnostics.error
         );
     }
-    let backend = start_backend();
+    let backend = start_backend(headless);
     let state = backend.state.clone();
     state.headless.store(headless, Ordering::SeqCst);
 
@@ -890,5 +1000,64 @@ mod aux_window_tests {
         assert!(!valid_aux_tab(""));
         assert!(!valid_aux_tab("../settings"));
         assert!(!valid_aux_tab("live-2"));
+    }
+}
+
+#[cfg(test)]
+mod launch_decision_tests {
+    use super::{BuildIdentity, LaunchDecision, RunningInstance, decide_launch};
+
+    fn running(version: &str, exe: Option<BuildIdentity>, headless: bool) -> RunningInstance {
+        RunningInstance { version: version.into(), exe, headless }
+    }
+
+    const BUILD: BuildIdentity = BuildIdentity { size: 100, mtime_ms: 5 };
+    const REBUILT: BuildIdentity = BuildIdentity { size: 101, mtime_ms: 9 };
+
+    fn yields(d: LaunchDecision) -> bool {
+        matches!(d, LaunchDecision::Yield(_))
+    }
+
+    #[test]
+    fn same_build_relaunch_yields_instead_of_restarting_the_show() {
+        let r = running("0.18.0", Some(BUILD), false);
+        assert!(yields(decide_launch(Some(&r), "0.18.0", Some(BUILD), false)));
+        // A headless launch over a windowed one of the same build also yields.
+        assert!(yields(decide_launch(Some(&r), "0.18.0", Some(BUILD), true)));
+    }
+
+    #[test]
+    fn windowed_launch_takes_over_a_headless_instance_of_the_same_build() {
+        let r = running("0.18.0", Some(BUILD), true);
+        assert_eq!(decide_launch(Some(&r), "0.18.0", Some(BUILD), false), LaunchDecision::TakeOver);
+        assert!(yields(decide_launch(Some(&r), "0.18.0", Some(BUILD), true)));
+    }
+
+    #[test]
+    fn a_rebuilt_binary_at_the_same_version_still_takes_over() {
+        let r = running("0.18.0", Some(BUILD), false);
+        assert_eq!(decide_launch(Some(&r), "0.18.0", Some(REBUILT), false), LaunchDecision::TakeOver);
+    }
+
+    #[test]
+    fn newer_running_instance_is_never_displaced() {
+        let r = running("0.19.0", Some(REBUILT), true);
+        assert!(yields(decide_launch(Some(&r), "0.18.0", Some(BUILD), false)));
+    }
+
+    #[test]
+    fn older_or_unknown_instances_are_taken_over() {
+        let older = running("0.17.0", None, false);
+        assert_eq!(decide_launch(Some(&older), "0.18.0", Some(BUILD), false), LaunchDecision::TakeOver);
+        // Same version but too old to report its build: can't prove it's us.
+        let unidentified = running("0.18.0", None, false);
+        assert_eq!(
+            decide_launch(Some(&unidentified), "0.18.0", Some(BUILD), false),
+            LaunchDecision::TakeOver
+        );
+        // Neither can a launch that can't read its own exe.
+        let r = running("0.18.0", Some(BUILD), false);
+        assert_eq!(decide_launch(Some(&r), "0.18.0", None, false), LaunchDecision::TakeOver);
+        assert_eq!(decide_launch(None, "0.18.0", Some(BUILD), false), LaunchDecision::TakeOver);
     }
 }

@@ -524,6 +524,12 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   restarting at zero would land in the window receivers discard as out-of-order and
   freeze the rig on its last look. Deploying a new build mid-show is just "start the
   new binary".
+- **One instance at a time**: launching the app again while the same build is
+  already running brings the running window forward and exits, rather than
+  restarting the show (a windowed launch over a headless instance still takes
+  over, so a window appears). A launch whose takeover is refused gives up after
+  10 seconds and does the same, so a second copy never lingers beside the first
+  with its own window and engine.
 - **Network follower + automatic backup transmitter (opt-in both ends)**: a second
   Gate machine can point Settings → Redundancy at the show machine and become a
   **follower** — it mirrors the leader's show over the same WS protocol every UI

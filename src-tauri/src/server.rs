@@ -612,9 +612,16 @@ fn parse_range(range: &str, total: u64) -> Option<(u64, u64)> {
 /// must work even when the running instance is a different (older or newer)
 /// build. Absent on instances older than v0.5.2, which the caller treats as
 /// "unknown".
-async fn running_version() -> Response {
-    axum::Json(serde_json::json!({ "version": crate::updater::effective_version() }))
-        .into_response()
+/// Who is holding the port, for a second launch deciding whether to take over.
+/// `exe` identifies the exact build (see `crate::BuildIdentity`); `headless`
+/// says whether there is a window a focus request could bring forward.
+async fn running_version(State(ctx): State<Ctx>) -> Response {
+    axum::Json(serde_json::json!({
+        "version": crate::updater::effective_version(),
+        "exe": crate::BuildIdentity::current(),
+        "headless": ctx.state.headless.load(Ordering::SeqCst),
+    }))
+    .into_response()
 }
 
 /// Bring the running instance's window forward. Called by a second launch that
