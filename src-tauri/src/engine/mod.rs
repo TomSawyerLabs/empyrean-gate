@@ -1863,17 +1863,16 @@ const GAME_BUFFER_U32S: usize = {
 /// started it to show.
 const GAME_ENDED_SECS: f32 = 12.0;
 
-// Nothing turns on instantly (plans/no-hard-cuts.md): every on/off that reaches
-// light output rides one of these short envelopes instead of hard-cutting.
+// Nothing automatic turns on instantly (plans/no-hard-cuts.md): every on/off
+// the show makes by itself rides one of these short envelopes instead of
+// hard-cutting. The operator's live controls (master brightness, so Blackout)
+// act on the next frame: the VJ is allowed to make a hard cut.
 
 /// Seconds for the show ↔ test-frame crossfade on arm/disarm. Short enough not
 /// to slow commissioning, long enough that the rig never snaps.
 const TEST_FADE_SECS: f32 = 0.75;
 /// Seconds for a layer's enable toggle to fade it in or out of the mix.
 const LAYER_TOGGLE_SECS: f32 = 1.0;
-/// Time constant for master-brightness moves (the Blackout quick-setting, a
-/// slider jump) — one-pole, so a step becomes a glide.
-const MASTER_BRIGHTNESS_TAU: f32 = 0.15;
 /// Seconds for the rig to fade up from black when sACN output turns on.
 /// Turning output OFF stays instant: termination packets are the point.
 const OUTPUT_ON_SECS: f32 = 1.0;
@@ -2099,10 +2098,10 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut test_fade_rgb: Vec<u8> = Vec::new();
 
     // plans/no-hard-cuts.md: enable-toggle envelopes. Layers fade in/out of the
-    // mix, master brightness and hue glide, and the wire fades up from black
-    // when output turns on (`wire_rgb` is its scratch buffer).
+    // mix, master hue glides, and the wire fades up from black when output
+    // turns on (`wire_rgb` is its scratch buffer). Master brightness has no
+    // envelope: it is the operator's live control.
     let mut layer_enable_env: Vec<f32> = Vec::new();
-    let mut master_env = 0.0f32;
     let mut hue_env = 0.0f32;
     let mut floor_env = 0.0f32;
     let mut output_env = 0.0f32;
@@ -3566,16 +3565,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             state.touches.lock().gpu(touch_clock, rotation_angle)
         };
 
-        // Master brightness never steps: the Blackout quick-setting and slider
-        // jumps glide over ~MASTER_BRIGHTNESS_TAU instead. Starting at zero
-        // also makes first light after launch a fade-up, not a slam. The
-        // drop-detector and audio-follower multipliers keep their own
-        // deliberately faster dynamics.
-        master_env +=
-            (render_master_brightness - master_env) * (1.0 - (-dt / MASTER_BRIGHTNESS_TAU).exp());
-        if (master_env - render_master_brightness).abs() < 1e-4 {
-            master_env = render_master_brightness;
-        }
+        // Master brightness is the operator's live control and lands on the
+        // next frame: Blackout is a show button and must be instant
+        // (plans/no-hard-cuts.md). Automatic changes already fade elsewhere:
+        // scene transitions crossfade `render_master_brightness`, and first
+        // light after launch rides the sACN output-on fade.
         // Same treatment for the master hue toggle/amount: the whole-composite
         // colour shift glides in rather than snapping.
         let hue_goal = if cfg.render.master_hue_enabled {
@@ -3593,7 +3587,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 effect_count: effects.len() as u32,
                 time: state.started.elapsed().as_secs_f32(),
                 dt,
-                master: master_env * master_drop_brightness * audio_follow_brightness,
+                master: render_master_brightness * master_drop_brightness * audio_follow_brightness,
                 inner_over_outer: (cfg.geometry.inner_radius_ft
                     / cfg.geometry.outer_radius_ft.max(0.001))
                 .clamp(0.0, 1.0),
