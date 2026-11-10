@@ -535,6 +535,12 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   restarting at zero would land in the window receivers discard as out-of-order and
   freeze the rig on its last look. Deploying a new build mid-show is just "start the
   new binary".
+- **One instance at a time**: launching the app again while the same build is
+  already running brings the running window forward and exits, rather than
+  restarting the show (a windowed launch over a headless instance still takes
+  over, so a window appears). A launch whose takeover is refused gives up after
+  10 seconds and does the same, so a second copy never lingers beside the first
+  with its own window and engine.
 - **Network follower + automatic backup transmitter (opt-in both ends)**: a second
   Gate machine can point Settings → Redundancy at the show machine and become a
   **follower** — it mirrors the leader's show over the same WS protocol every UI
@@ -624,7 +630,13 @@ Useful during pattern development:
 - Edit `src-tauri/src/engine/shaders/gate.wgsl` while the app runs — the pipeline
   rebuilds on save.
 - `cargo run --bin engine-smoke` (in `src-tauri/`) — quick headless correctness +
-  timing check, no window.
+  timing check, no window. It also checks every layer for a jump at the beat
+  wrap (`-- --seams` runs only that): a pattern must change no more a frame
+  either side of the beat than a frame either side of mid-beat, so a hit rises
+  over a couple of frames (`beat_hit` in `gate.wgsl`) instead of cutting in.
+- Walked params that `gate.wgsl` floors or thresholds belong in
+  `LayerKind::discrete_params`, and direction flags compare with `>= 0.5`; a
+  unit test reads the shader and enforces both.
 - `cargo run --release --bin engine-smoke -- --suite --warmup 120 --frames 600`
   — repeatable GPU regression suite at the 24,192-pixel installation size plus
   a 70k heavy-load headroom case. Add

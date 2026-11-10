@@ -16,7 +16,7 @@
     { "id": "tunnel_light", "kind": "scalar_math", "name": "loop tunnel level", "params": { "b": 0.72, "op": 0 }, "pos": [404, 726] },
     { "id": "render_fx", "kind": "render_effects", "name": "PRO DJ LINK events", "params": { "intensity": 0.82, "size": 0.9 }, "pos": [1366, 247] },
     { "id": "tunnel", "kind": "spiral", "name": "loop tunnel", "params": { "arms": 6, "brightness": 0.34, "hue": 0.76, "saturation": 0.84, "sharpness": 0.82, "speed": 0.34, "twist": 2.8 }, "pos": [737, 577] },
-    { "id": "ring", "kind": "beat_rings", "name": "wrap ring", "params": { "brightness": 0, "direction": 0, "front": 0, "hue": 0.52, "hue_range": 0.16, "saturation": 0.55, "width": 0.055 }, "pos": [730, 282] },
+    { "id": "ring", "kind": "beat_rings", "name": "wrap ring", "params": { "brightness": 0, "direction": 0, "ends": 1, "front": 0, "hue": 0.52, "hue_range": 0.16, "saturation": 0.55, "width": 0.055 }, "pos": [730, 282] },
     { "id": "mix", "kind": "blend", "name": "wrap over tunnel", "params": { "mode": 0, "opacity": 0.94 }, "pos": [1057, 464] },
     { "id": "handoff", "kind": "transform", "name": "mixer handoff", "params": { "rotate": 0, "spin": 0.025, "zoom": 1 }, "pos": [1393, 523] },
     { "id": "performance", "kind": "blend", "name": "transport over spiral", "params": { "mode": 2, "opacity": 0.88 }, "pos": [1709, 425] },

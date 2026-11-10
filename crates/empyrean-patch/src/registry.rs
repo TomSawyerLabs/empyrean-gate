@@ -2380,6 +2380,12 @@ pub const TYPES: &[NodeType] = &[
                 &["outward", "inward"],
                 "outward: Front 0 is the inner end and 1 the rim; inward: the reverse.",
             ),
+            sel(
+                "ends",
+                "Ends",
+                &["hold", "fade"],
+                "hold: the ring shows wherever Front is. fade: it blooms in just after 0 and fades out over the last fifth, so a Front that wraps (beat_phase) is dark on both sides of the wrap instead of jumping from the far end to the start.",
+            ),
             HUE,
             num(
                 "hue_range",

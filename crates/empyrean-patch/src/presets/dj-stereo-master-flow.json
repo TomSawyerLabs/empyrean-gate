@@ -33,7 +33,7 @@
     { "id": "tunnel", "kind": "spiral", "name": "loop spiral tunnel", "params": { "arms": 6, "brightness": 0.34, "hue": 0.74, "saturation": 0.84, "sharpness": 0.82, "speed": 0.25, "twist": 2.8 }, "pos": [2195, 711] },
     { "id": "ring_bass", "kind": "scalar_math", "name": "beat ring bass", "params": { "b": 0.34, "op": 2 }, "pos": [1245, 152] },
     { "id": "ring_light", "kind": "scalar_math", "name": "bass plus loop wrap", "params": { "op": 0 }, "pos": [1551, 162] },
-    { "id": "ring", "kind": "beat_rings", "name": "beat and wrap horizon", "params": { "brightness": 0.34, "direction": 0, "front": 0, "hue": 0.52, "hue_range": 0.16, "saturation": 0.58, "width": 0.07 }, "pos": [1861, 132] },
+    { "id": "ring", "kind": "beat_rings", "name": "beat and wrap horizon", "params": { "brightness": 0.34, "direction": 0, "ends": 1, "front": 0, "hue": 0.52, "hue_range": 0.16, "saturation": 0.58, "width": 0.07 }, "pos": [1861, 132] },
     { "id": "spoke_light", "kind": "scalar_math", "name": "detail plus mixer motion", "params": { "op": 0 }, "pos": [1218, 1243] },
     { "id": "spokes", "kind": "spoke_chase", "name": "soft spoke current", "params": { "brightness": 0.32, "direction": 0, "hue": 0.59, "hue_range": 0.12, "saturation": 0.72, "speed": 0.34, "tail": 0.28 }, "pos": [1537, 1173] },
     { "id": "mix_ring", "kind": "blend", "name": "ring over tunnel", "params": { "mode": 0, "opacity": 0.72 }, "pos": [2478, 364] },

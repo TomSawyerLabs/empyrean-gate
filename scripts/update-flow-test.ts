@@ -91,6 +91,17 @@ async function version(): Promise<string | null> {
   }
 }
 
+function exitsWithin(child: ChildProcess, seconds: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    if (child.exitCode !== null) return resolve(true);
+    const timer = setTimeout(() => resolve(false), seconds * 1000);
+    child.on("exit", () => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+}
+
 async function waitForVersion(want: string, seconds: number): Promise<void> {
   for (let i = 0; i < seconds * 10; i++) {
     if ((await version()) === want) return;
@@ -160,6 +171,47 @@ try {
   await waitForVersion(newVersion, 60);
   await waitForPromotion(launcher, versioned, 12);
   console.log("successor with no --promote-to found and healed the launcher itself");
+
+  // --- 5. the (now promoted) launcher is double-clicked while that build runs ---
+  // Same version, same file contents and mtime (promotion copies carry the
+  // source's mtime): it must bring the running one forward and exit, not
+  // restart the show by taking over. plans/single-instance.md.
+  const twin = start(launcher, []);
+  if (!(await exitsWithin(twin, 20))) {
+    fail("a second launch of the exact same build did not exit");
+  }
+  if ((await version()) !== newVersion) fail("the running instance was lost after a same-build relaunch");
+  console.log("same-build relaunch yielded to the running instance and exited");
+
+  // --- 6. a takeover the running instance refuses must not linger ---
+  // Stand-in for an old instance that answers but whose handover fails (auth
+  // mismatch, wedged engine, pre-handover build). Before the fix the new
+  // process waited forever beside it with a window open and its own engine
+  // running: the four-windows field report.
+  for (const child of children.splice(0)) {
+    child.kill();
+  }
+  await sleep(1500);
+  const refuser = Bun.serve({
+    hostname: "127.0.0.1",
+    port: PORT,
+    fetch(req) {
+      const path = new URL(req.url).pathname;
+      if (path === "/version") return Response.json({ version: OLD_VERSION });
+      if (path === "/focus") return new Response(null, { status: 204 });
+      return new Response("handover authorization failed", { status: 403 });
+    },
+  });
+  try {
+    const hopeful = start(versioned, []);
+    // engine warm-up (≤8 s) + the commit grace (10 s) + startup slack
+    if (!(await exitsWithin(hopeful, 45))) {
+      fail("a launch whose takeover was refused kept running beside the instance it failed to replace");
+    }
+  } finally {
+    refuser.stop(true);
+  }
+  console.log("refused takeover gave up and exited instead of lingering");
 
   console.log("UPDATE FLOW PASS");
 } finally {

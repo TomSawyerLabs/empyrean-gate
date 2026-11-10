@@ -1365,11 +1365,20 @@ impl Gen<'_> {
                 } else {
                     "1.0 - c.r01"
                 };
+                // Ends = fade blooms the ring in at the start of its run and
+                // fades it out at the end, so a Front driven by a wrapping beat
+                // phase is dark on both sides of the wrap
+                // (plans/beat-phase-lock.md).
+                let life = if self.select(i, "ends") == 1 {
+                    "smoothstep(0.0, 0.06, front) * (1.0 - smoothstep(0.8, 1.0, front))"
+                } else {
+                    "1.0"
+                };
                 format!(
                     "    let front = clamp({front}, 0.0, 1.0);\n\
                      \x20   let d = abs(({dir}) - front);\n\
                      \x20   let w = {width};\n\
-                     \x20   let v = exp(-(d * d) / (w * w)) * (1.0 - front * 0.5);\n\
+                     \x20   let v = exp(-(d * d) / (w * w)) * (1.0 - front * 0.5) * ({life});\n\
                      \x20   let hue = {h} + front * {hr};\n\
                      \x20   return vec4f(hsv2rgb(hue, {sat}, v * {bright}), v);",
                     front = self.p(i, "front"),
