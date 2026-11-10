@@ -145,10 +145,20 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   Going thinner is allowed and the readout warns you when the line will start
   breaking into dashes. Everything the floor sends — taps, strokes, pads, from
   every phone — is scaled by one **Floor input** fader in the master cluster
-  (Live and Control), glided so turning the crowd down never pops; it is also a
+  (Live and Control), which moves as fast as the device's guardrail level allows
+  (below); it is also a
   quick-setting target, so a hold-to-mute button is one tap to make. Switching
   every layer off does *not* silence the floor by itself, which is why the fader
-  exists. And you can see who the floor *is*: the **clients** stat on Live
+  exists. **Guardrails** (Settings → This device, or per device in the Clients
+  panel) set how much a device's changes are smoothed: **Guided** fades every
+  change (Blackout takes a quarter second, layer toggles a second), narrows the
+  risky ranges (speed, scale, brightness, walk) on the server, and makes scene
+  changes take at least 1.5 s; **Standard**, the default, fades patterns in and
+  out while Blackout, the masters and the layer sliders act at once;
+  **Expert** smooths nothing, and offers a per-slider speed limit ("seconds for a
+  full swing") instead. A change always moves at the rate of the device that
+  made it, so a beginner's phone and an expert's laptop can share one show
+  (`plans/guardrail-modes.md`). And you can see who the floor *is*: the **clients** stat on Live
   unfolds into a roster (Control has it as a panel) — every connected device in
   the order it arrived, what it last did and how long ago, a dashed line where the
   live-view slots run out and the rest are waiting, and a one-tap **Block** per

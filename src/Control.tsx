@@ -30,6 +30,7 @@ import {
   type SavedStack,
   type SavedPerformance,
 } from "./types";
+import { guardRange, useGuardrail } from "./guardrails";
 
 const newId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -172,6 +173,10 @@ function autopilotForecast(
 
 export default function Control() {
   const { client, config, status } = useGate();
+  const guard = useGuardrail();
+  const [speedMin, speedMax] = guardRange(guard, "master_speed", 0, 4);
+  const [walkSpeedMin, walkSpeedMax] = guardRange(guard, "walk_speed", 0.1, 5);
+  const [walkDepthMin, walkDepthMax] = guardRange(guard, "walk_depth", 0, 3);
   const setBrightness = useThrottled((v: number) => client.setMaster({ brightness: v }));
   const setSpeed = useThrottled((v: number) => client.setMaster({ speed: v }));
   const setFloor = useThrottled((v: number) => client.setMaster({ floor: v }));
@@ -268,8 +273,8 @@ export default function Control() {
           <span>Speed</span>
           <input
             type="range"
-            min={0}
-            max={4}
+            min={speedMin}
+            max={speedMax}
             step={0.05}
             value={speed}
             {...speedDrag}
@@ -366,8 +371,8 @@ export default function Control() {
           <span>Walk speed</span>
           <input
             type="range"
-            min={0.1}
-            max={5}
+            min={walkSpeedMin}
+            max={walkSpeedMax}
             step={0.1}
             value={walkSpeed}
             {...walkSpeedDrag}
@@ -382,8 +387,8 @@ export default function Control() {
           <span>Walk depth</span>
           <input
             type="range"
-            min={0}
-            max={3}
+            min={walkDepthMin}
+            max={walkDepthMax}
             step={0.1}
             value={walkDepth}
             {...walkDepthDrag}

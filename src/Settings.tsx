@@ -34,6 +34,9 @@ import { generateCodeWord } from "./deviceNames";
 import { HIDDEN_GAMES } from "./gameCatalog";
 import { BRC_EVENT_CATEGORIES } from "./ambientScenes";
 import LayerColorControls from "./LayerColor";
+import GuardrailPicker from "./GuardrailPicker";
+import { DEFAULT_GUARDRAIL, LEVELS, guardRange, useGuardrail } from "./guardrails";
+import type { GuardrailLevel } from "./types";
 import { entryKind, parseControllerList } from "./controllerAddress";
 
 export default function Settings() {
@@ -880,6 +883,22 @@ function ClientsPanel() {
             <span className="hint">{c.id === client.clientId ? "this device" : c.id}</span>
           </div>
           <div className="client-actions">
+            <select
+              aria-label="Guardrails"
+              title="Guardrails: how much this device's changes are smoothed and limited"
+              value={c.guardrail?.level ?? "standard"}
+              onChange={(e) =>
+                client.send({
+                  type: "set_client_guardrail",
+                  id: c.id,
+                  guardrail: { ...(c.guardrail ?? DEFAULT_GUARDRAIL), level: e.target.value as GuardrailLevel },
+                })
+              }
+            >
+              {LEVELS.map((l) => (
+                <option key={l.id} value={l.id}>{l.label}</option>
+              ))}
+            </select>
             <label className="check-row">
               <input
                 type="checkbox"
@@ -1467,6 +1486,10 @@ function NumberField({
 
 function LayerEditor({ layer, index }: { layer: LayerCfg; index: number }) {
   const { client, config } = useGate();
+  const guard = useGuardrail();
+  const [speedMin, speedMax] = guardRange(guard, "layer_speed", -4, 4);
+  const [scaleMin, scaleMax] = guardRange(guard, "layer_scale", 0.05, 5);
+  const [, brightMax] = guardRange(guard, "layer_brightness", 0, 2);
   const throttledUpdate = useThrottled(
     (l: LayerCfg) => client.updateLayer(index, l),
     100,
@@ -1539,8 +1562,8 @@ function LayerEditor({ layer, index }: { layer: LayerCfg; index: number }) {
       </div>
       <div className="layer-sliders">
         <Slider label="Opacity" value={local.opacity} onChange={(v) => up({ opacity: v })} />
-        <Slider label="Speed" value={local.speed} min={-4} max={4} onChange={(v) => up({ speed: v })} />
-        <Slider label="Scale" value={local.scale} min={0.05} max={5} onChange={(v) => up({ scale: v })} />
+        <Slider label="Speed" value={local.speed} min={speedMin} max={speedMax} onChange={(v) => up({ speed: v })} />
+        <Slider label="Scale" value={local.scale} min={scaleMin} max={scaleMax} onChange={(v) => up({ scale: v })} />
         <Slider label="Audio" value={local.audio_amount} onChange={(v) => up({ audio_amount: v })} />
         <LayerColorControls
           hue={local.hue}
@@ -1549,7 +1572,7 @@ function LayerEditor({ layer, index }: { layer: LayerCfg; index: number }) {
           brightness={local.brightness}
           onPatch={up}
         />
-        <Slider label="Brightness" value={local.brightness} max={2} onChange={(v) => up({ brightness: v })} />
+        <Slider label="Brightness" value={local.brightness} max={brightMax} onChange={(v) => up({ brightness: v })} />
         <Slider label="Tilt (IMU)" value={local.tilt_amount} onChange={(v) => up({ tilt_amount: v })} />
         <Slider label="Walk" value={local.walk_amount} onChange={(v) => up({ walk_amount: v })} />
         <Slider label={params[0] ?? "Param A"} value={local.param_a} onChange={(v) => up({ param_a: v })} />
@@ -2293,6 +2316,7 @@ function ThisDevicePanel() {
           onBlur={(e) => client.setDeviceName(e.target.value)}
         />
       </label>
+      <GuardrailPicker />
       <div className="add-row">
         <button
           onClick={async () => {

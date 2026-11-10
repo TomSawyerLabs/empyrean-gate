@@ -12,6 +12,11 @@ From three idj captures (2026-09-02, one thought split across three dictations):
 Nothing that affects light output should snap on (or off). Every boolean toggle rides
 a short envelope; the rig never pops.
 
+**Superseded in part, 2026-11-09:** how fast an *operator's* changes land is now
+set per device by its guardrail level (`plans/guardrail-modes.md`). This plan
+still covers the automatic fades (output-on, video start, test mode, scene
+transitions).
+
 **Amended 2026-11-09 by the user:** "Nothing *automatic* turns on instantly, and
 patterns should usually fade in/out gracefully. Local expert VJ control should
 however be allowed to 'make mistakes'." Blackout is a live show button and must be

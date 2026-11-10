@@ -25,7 +25,7 @@ a device's guardrail level turns on.
 
 - **Worktree:** `C:/Users/camer/.t3/worktrees/Empyrean/guardrail-modes`.
 - **Branch:** `guardrail-modes`, stacked on `instant-blackout` (PR #10: master
-  brightness made instant, `3e0f5b1`).
+  brightness made instant, `5ee512e`).
 - **Exploration map (file:line):**
   - **Device id:** `ws.ts:140`, `localStorage empyrean-client-id`, sent in
     `Hello`. `handle_msg(ctx, msg, client_id, …)` at `server.rs:2189` has it.
@@ -106,37 +106,41 @@ move.
 
 ## Plan / steps
 
-1. [ ] `src-tauri/src/guardrails.rs`:
+1. [x] `src-tauri/src/guardrails.rs`:
    - `Level`, `Control` (master fields and layer fields), the rate table per
      level, Guided ranges, `GuardrailCfg {level, rates}`.
    - A slew helper that handles hue wrap.
    - Unit tests.
-2. [ ] Config and protocol:
+2. [x] Config and protocol:
    - `ClientRecord.guardrail` (serde default).
    - `ClientInfo` carries it.
    - `SetClientGuardrail` for the device itself, and for the local operator on
      any device.
-3. [ ] Attribution:
+3. [x] Attribution:
    - A writer-rate map on `SharedState`.
    - `handle_msg` fills it for `SetMaster`, `SetMasterHue`, `UpdateLayer`
      (diff), `SetConfig` (diff) and the layer structure messages.
    - Guided range clamps on those writes.
-4. [ ] Engine:
+4. [x] Engine:
    - Slew master brightness, speed, floor, hue amount and the layer fields per
      frame using the map.
    - The layer enable envelope uses the writer's toggle rate.
    - The slew state joins the per-layer vector bookkeeping, and snaps on a
      structural change or a kind change.
-5. [ ] Guided minimum scene transition for `ActivateStack` / `TakeReady` from a
+5. [x] Guided minimum scene transition for `ActivateStack` / `TakeReady` from a
    Guided device.
-6. [ ] Frontend:
+6. [x] Frontend:
    - Level picker for this device (Settings), and level shown in the roster.
    - Guided ranges on the master clusters and the layer slider wrappers.
    - Expert per-slider rate editor.
-7. [ ] README, `plans/no-hard-cuts.md` points here, tests, `engine-smoke`,
+7. [x] README, `plans/no-hard-cuts.md` points here, tests, `engine-smoke`,
    frontend typecheck/tests, commit, PR (base `instant-blackout`).
 
 ## Findings / gotchas
+
+- Ready-bus edits (`PrepareStack`) are not clamped on the server; only the UI
+  narrows them. Saved scenes keep their own values when a Guided device plays
+  them. The ranges limit what a Guided device *dials in*, not what it may play.
 
 - Fader drags reach the engine as 10 Hz steps (client throttle). In Expert,
   with no limit, that stair-step is visible on the rig. This existed before;
@@ -151,7 +155,20 @@ move.
 - [x] Master brightness instant (PR #10). This is the Standard and Expert
   behavior.
 - [x] Design agreed (answers above).
-- [ ] Steps 1–7.
+- [x] Steps 1–7 (`b127b4d` backend, then the UI and docs commit).
+  - `cargo test --release --lib`: 373 passed. `bun run typecheck`: clean.
+  - **End-to-end check** against a headless release backend on :9541 with an
+    isolated config. Script: `guardrail-e2e.ts` in the session scratchpad. It
+    confirmed:
+    - A device can set its own level.
+    - Guided clamps master speed 4 → 2 and layer scale 5 → 3.
+    - The local operator can set another device's level, and Expert rates are
+      stored.
+    - Expert is unclamped.
+  - `bun run test:unit`: 201/202. The one failure is `patch core` missing
+    `wasm/patch.js`, which this fresh worktree hasn't built. That is
+    environment, not this change.
+- [ ] Watch it on the rig: Guided Blackout fade, Expert per-slider limits.
 
 ## Open questions for the user
 

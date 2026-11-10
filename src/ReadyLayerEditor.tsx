@@ -9,6 +9,7 @@ import {
   type LayerCfg,
   type LayerKind,
 } from "./types";
+import { guardRange, useGuardrail } from "./guardrails";
 
 function ReadySlider({
   label,
@@ -48,6 +49,10 @@ export default function ReadyLayerEditor({
   onMove: (direction: -1 | 1) => void;
   onRemove: () => void;
 }) {
+  const guard = useGuardrail();
+  const [speedMin, speedMax] = guardRange(guard, "layer_speed", -4, 4);
+  const [scaleMin, scaleMax] = guardRange(guard, "layer_scale", 0.05, 5);
+  const [, brightMax] = guardRange(guard, "layer_brightness", 0, 2);
   const [local, setLocal] = useState(layer);
   const dragging = useRef(false);
   const throttledChange = useThrottled(onChange, 100);
@@ -99,11 +104,11 @@ export default function ReadyLayerEditor({
       <div className="ready-layer-sliders">
         <section><h4>Mix</h4>
           <ReadySlider label="Opacity" value={local.opacity} onChange={(value) => update({ opacity: value })} />
-          <ReadySlider label="Brightness" value={local.brightness} max={2} onChange={(value) => update({ brightness: value })} />
+          <ReadySlider label="Brightness" value={local.brightness} max={brightMax} onChange={(value) => update({ brightness: value })} />
         </section>
         <section><h4>Motion</h4>
-          <ReadySlider label="Speed" value={local.speed} min={-4} max={4} onChange={(value) => update({ speed: value })} />
-          <ReadySlider label="Scale" value={local.scale} min={0.05} max={5} onChange={(value) => update({ scale: value })} />
+          <ReadySlider label="Speed" value={local.speed} min={speedMin} max={speedMax} onChange={(value) => update({ speed: value })} />
+          <ReadySlider label="Scale" value={local.scale} min={scaleMin} max={scaleMax} onChange={(value) => update({ scale: value })} />
           <ReadySlider label="Walk" value={local.walk_amount} onChange={(value) => update({ walk_amount: value })} />
         </section>
         <section><h4>Colour</h4>

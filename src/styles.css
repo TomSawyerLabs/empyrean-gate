@@ -7004,3 +7004,23 @@ button.hue-swatch-button[aria-expanded="true"] {
   flex-wrap: wrap;
   margin-top: 8px;
 }
+
+/* Guardrail level picker (plans/guardrail-modes.md). */
+.guardrail-picker .segmented {
+  display: flex;
+  gap: 4px;
+}
+.guardrail-picker .segmented button {
+  min-height: 36px;
+  padding: 0 12px;
+}
+.guardrail-picker .segmented button.active {
+  border-color: var(--accent2);
+  box-shadow: inset 0 0 0 1px var(--accent2);
+}
+.guardrail-rates {
+  margin-top: 6px;
+}
+.guardrail-rates .field-row input {
+  width: 7em;
+}
