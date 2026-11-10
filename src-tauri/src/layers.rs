@@ -100,16 +100,25 @@ impl LayerKind {
     /// A walked value sitting near a cell boundary crosses it many times a
     /// second, so the pattern strobes between (say) five and six spiral arms.
     /// The autopilot uses this to step such params deliberately instead — see
-    /// `walked_discrete` in `engine/mod.rs`. Keep in step with `gate.wgsl`.
+    /// `walked_discrete` in `engine/mod.rs`. Keep in step with `gate.wgsl`:
+    /// every `floor`, `u32(...)` or `>= 0.5` of a walked param belongs here. A
+    /// direction flag compares with `>=`, never `>`, so 0.5 lands in the same
+    /// cell walked or not (`floor(0.5 * 2) == 1`).
     pub fn discrete_params(self) -> &'static [DiscreteParam] {
         match self {
+            // harmonics = 1 + u32(param_b * 6)
+            LayerKind::RadialWaves => &[DiscreteParam {
+                index: 1,
+                steps: 6.0,
+                bias: 0.0,
+            }],
             // arms = max(1, floor(param_a * 12))
             LayerKind::Spiral => &[DiscreteParam {
                 index: 0,
                 steps: 12.0,
                 bias: 0.0,
             }],
-            // dir = param_b > 0.5 — a flip reverses every comet at once
+            // dir = param_b >= 0.5 — a flip reverses every comet at once
             LayerKind::SpokeChase => &[DiscreteParam {
                 index: 1,
                 steps: 2.0,
@@ -121,15 +130,29 @@ impl LayerKind {
                 steps: 4.0,
                 bias: 0.5,
             }],
+            // dir = param_b >= 0.5 — inward vs outward. Every default beat-ring
+            // layer sits right on it at 0.5, so an unstepped walk flipped the
+            // ring between expanding and contracting many times a second.
+            LayerKind::BeatRings => &[DiscreteParam {
+                index: 1,
+                steps: 2.0,
+                bias: 0.0,
+            }],
             // n = 2 + floor(param_a * 14)
             LayerKind::Wedges => &[DiscreteParam {
                 index: 0,
                 steps: 14.0,
                 bias: 0.0,
             }],
-            // dir_r = param_c > 0.5 — inward vs outward streaks
+            // dir_r = param_c >= 0.5 — inward vs outward streaks
             LayerKind::Meteors => &[DiscreteParam {
                 index: 2,
+                steps: 2.0,
+                bias: 0.0,
+            }],
+            // pos = param_b >= 0.5 — which end the bars grow from
+            LayerKind::Spectrum => &[DiscreteParam {
+                index: 1,
                 steps: 2.0,
                 bias: 0.0,
             }],
@@ -141,11 +164,19 @@ impl LayerKind {
             }],
             // petals = 3 + 2 * floor(param_a * 4): the odd rose families
             // 3, 5, 7, and 9 retain one petal per harmonic.
-            LayerKind::GoldenRose => &[DiscreteParam {
-                index: 0,
-                steps: 4.0,
-                bias: 0.0,
-            }],
+            // seed_count = 24 + floor(param_c * 40)
+            LayerKind::GoldenRose => &[
+                DiscreteParam {
+                    index: 0,
+                    steps: 4.0,
+                    bias: 0.0,
+                },
+                DiscreteParam {
+                    index: 2,
+                    steps: 40.0,
+                    bias: 0.0,
+                },
+            ],
             _ => &[],
         }
     }
@@ -308,7 +339,8 @@ impl LayerCfg {
         match self.kind {
             // case 7 — comet travel along each spoke, either direction.
             LayerKind::SpokeChase => {
-                let dir = if self.param_b > 0.5 { -1.0 } else { 1.0 };
+                // `>=` matches the walk's floor() grid (`discrete_params`).
+                let dir = if self.param_b >= 0.5 { -1.0 } else { 1.0 };
                 (0.2 + self.param_a * 1.5 + aud * 0.8) * 0.2 * dir
             }
             // case 8 — twinkle re-roll clock.
@@ -475,5 +507,73 @@ mod tests {
         let patch_shader = crate::patch::codegen::PATCH_LIB_WGSL;
         assert!(patch_shader.contains("col = hsv2rgb(E.hue, E.saturation, E.brightness);"));
         assert!(patch_shader.contains("col = hsv2rgb(D.hue, D.saturation, D.brightness);"));
+    }
+}
+
+#[cfg(test)]
+mod discrete_param_tests {
+    use super::LayerKind;
+
+    const WALKED: [&str; 3] = ["param_a", "param_b", "param_c"];
+
+    /// `layer_color`'s arm for each kind, plus the helpers an arm calls with its
+    /// `Layer` (Meteors draws through `meteor_event`).
+    fn shader_arms() -> Vec<(LayerKind, String)> {
+        let src = include_str!("engine/shaders/gate.wgsl");
+        let section = |start: &str, end: &str| {
+            let from = src.find(start).unwrap_or_else(|| panic!("{start} missing"));
+            let to = from + src[from..].find(end).unwrap_or_else(|| panic!("{end} missing"));
+            &src[from..to]
+        };
+        let body = section("fn layer_color(", "fn layer_opacity(");
+        let meteor = section("fn meteor_event(", "fn layer_color(");
+        LayerKind::ALL
+            .iter()
+            .map(|&kind| {
+                let arm = format!("case {}u:", kind.gpu_id());
+                let start = body
+                    .find(&arm)
+                    .unwrap_or_else(|| panic!("{kind:?} has no `{arm}` arm in layer_color"));
+                let rest = &body[start + arm.len()..];
+                let end = rest.find("\n        case ").unwrap_or(rest.len());
+                let mut text = rest[..end].to_owned();
+                if kind == LayerKind::Meteors {
+                    text.push_str(meteor);
+                }
+                (kind, text)
+            })
+            .collect()
+    }
+
+    /// The walk dithers params continuously; a shader that floors or thresholds
+    /// one strobes between two versions of the layer unless the walk steps that
+    /// param deliberately. This is how the Cathedral Pulse beat ring flipped
+    /// between expanding and contracting (Direction sat on 0.5 and was walked).
+    #[test]
+    fn every_quantized_walked_param_is_stepped() {
+        for (kind, text) in shader_arms() {
+            let listed: Vec<usize> = kind.discrete_params().iter().map(|d| d.index).collect();
+            for line in text.lines() {
+                for (index, name) in WALKED.iter().enumerate() {
+                    let p = format!("L.{name}");
+                    if !line.contains(&p) {
+                        continue;
+                    }
+                    assert!(
+                        !line.contains(&format!("{p} > ")) && !line.contains(&format!("{p} < ")),
+                        "{kind:?}: compare walked params with `>=` so 0.5 lands in the \
+                         same cell as the walk's floor() grid: {line}"
+                    );
+                    let quantized = line.contains("floor(")
+                        || line.contains("u32(")
+                        || line.contains(&format!("{p} >= "));
+                    assert!(
+                        !quantized || listed.contains(&index),
+                        "{kind:?} quantizes {name} but LayerKind::discrete_params doesn't \
+                         step it, so a walk strobes it: {line}"
+                    );
+                }
+            }
+        }
     }
 }

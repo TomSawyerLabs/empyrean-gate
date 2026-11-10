@@ -619,7 +619,13 @@ Useful during pattern development:
 - Edit `src-tauri/src/engine/shaders/gate.wgsl` while the app runs — the pipeline
   rebuilds on save.
 - `cargo run --bin engine-smoke` (in `src-tauri/`) — quick headless correctness +
-  timing check, no window.
+  timing check, no window. It also checks every layer for a jump at the beat
+  wrap (`-- --seams` runs only that): a pattern must change no more a frame
+  either side of the beat than a frame either side of mid-beat, so a hit rises
+  over a couple of frames (`beat_hit` in `gate.wgsl`) instead of cutting in.
+- Walked params that `gate.wgsl` floors or thresholds belong in
+  `LayerKind::discrete_params`, and direction flags compare with `>= 0.5`; a
+  unit test reads the shader and enforces both.
 - `cargo run --release --bin engine-smoke -- --suite --warmup 120 --frames 600`
   — repeatable GPU regression suite at the 24,192-pixel installation size plus
   a 70k heavy-load headroom case. Add
