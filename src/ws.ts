@@ -392,7 +392,9 @@ export class GateClient {
   setConfig(config: AppConfig) {
     this.send({ type: "set_config", config });
   }
-  setMaster(v: { brightness?: number; speed?: number; floor?: number }) {
+  /** `instant`: a show button (Blackout, a quick-setting shortcut) that cuts
+   *  at every guardrail level (plans/guardrail-modes.md). */
+  setMaster(v: { brightness?: number; speed?: number; floor?: number; instant?: boolean }) {
     this.send({ type: "set_master", ...v });
   }
   setMasterHue(v: { enabled?: boolean; hue?: number; amount?: number; loose?: number }) {

@@ -90,6 +90,10 @@ pub enum ClientMsg {
         /// Floor input level 0..1 (taps, drawing, pads from every client).
         #[serde(default)]
         floor: Option<f32>,
+        /// A show button (Blackout, any quick-setting shortcut): lands on the
+        /// next frame at every guardrail level (plans/guardrail-modes.md).
+        #[serde(default)]
+        instant: bool,
     },
     /// Patch the master hue pull; every field is optional so the UI can flip
     /// one switch without re-sending the rest.

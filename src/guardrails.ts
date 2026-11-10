@@ -11,7 +11,7 @@ export const LEVELS: { id: GuardrailLevel; label: string; hint: string }[] = [
   {
     id: "guided",
     label: "Guided",
-    hint: "Every change fades in, risky sliders have narrower ranges, and scene changes never cut. For beginners.",
+    hint: "Every change fades in, risky sliders have narrower ranges, and scene changes never cut. Blackout still cuts. For beginners.",
   },
   {
     id: "standard",

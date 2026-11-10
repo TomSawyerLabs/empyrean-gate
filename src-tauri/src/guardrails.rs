@@ -163,7 +163,8 @@ fn preset_swing_secs(level: Level, control: Control) -> Option<f32> {
     use Control as C;
     match level {
         Level::Guided => Some(match control {
-            // Blackout from a Guided device is a quick fade, not a cut.
+            // The master fader glides. Blackout and the other show buttons
+            // send `instant` and cut at every level.
             C::MasterBrightness => 0.25,
             C::LayerEnable => 1.0,
             C::LayerHue => 2.0,

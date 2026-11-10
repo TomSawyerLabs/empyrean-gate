@@ -97,9 +97,13 @@ move.
 
 - **Three levels, per device.** New devices start at Standard, so nothing
   changes for existing rigs.
-- **Blackout follows the device's level** (Guided ≈ 0.25 s fade, Standard and
-  Expert instant). I read "show button, not safety" as "no special case"; the
-  user can still overrule this.
+- **Blackout is always instant** (user, 2026-11-09: "blackout should always be
+  instantaneous"), on press and on release. Quick-setting shortcuts send
+  `SetMaster { instant: true }`, which notes a no-limit rate whatever the
+  device's level; the device's ranges still apply. The master *fader* still
+  glides in Guided.
+- **No level lock** (user: "no. or, not yet"). Any device may change its own
+  level.
 - **Rate limits** (linear d/dt), not time constants: the user asked for d/dt.
 - **Per-slider custom limits apply in Expert only.** The other levels are fixed
   presets.
@@ -172,8 +176,7 @@ move.
 
 ## Open questions for the user
 
-1. Should an admin be able to lock a device's level, so a beginner can't switch
-   themselves to Expert? Not built yet. Recommend adding it later if wanted.
+None. (A level lock was declined for now, 2026-11-09.)
 
 ## Things not to do
 

@@ -151,7 +151,8 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   every layer off does *not* silence the floor by itself, which is why the fader
   exists. **Guardrails** (Settings → This device, or per device in the Clients
   panel) set how much a device's changes are smoothed: **Guided** fades every
-  change (Blackout takes a quarter second, layer toggles a second), narrows the
+  slider change (the master fader takes a quarter second, layer toggles a
+  second; Blackout and the other show buttons still cut), narrows the
   risky ranges (speed, scale, brightness, walk) on the server, and makes scene
   changes take at least 1.5 s; **Standard**, the default, fades patterns in and
   out while Blackout, the masters and the layer sliders act at once;

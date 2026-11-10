@@ -2004,6 +2004,7 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
             brightness,
             speed,
             floor,
+            ..
         } => rec.event(
             "master",
             &name(),
@@ -2189,6 +2190,7 @@ pub(crate) fn record_performance(state: &SharedState, msg: &ClientMsg, is_loopba
             brightness,
             speed,
             floor,
+            ..
         } => A::SetMaster {
             brightness: *brightness,
             speed: *speed,
@@ -2567,9 +2569,16 @@ async fn handle_msg(
             brightness,
             speed,
             floor,
+            instant,
         } => {
-            use crate::guardrails::Control as C;
-            let guard = sender_guardrail(state, client_id);
+            use crate::guardrails::{Control as C, GuardrailCfg, Level};
+            let sender = sender_guardrail(state, client_id);
+            // Show buttons cut at every level; the device's ranges still hold.
+            let guard = if instant {
+                GuardrailCfg { level: Level::Expert, ..Default::default() }
+            } else {
+                sender.clone()
+            };
             {
                 let mut rates = state.control_rates.lock();
                 for (set, control) in [
@@ -2587,7 +2596,7 @@ async fn handle_msg(
                     c.render.master_brightness = b.clamp(0.0, 1.0);
                 }
                 if let Some(s) = speed {
-                    c.render.master_speed = guard.clamp(C::MasterSpeed, s.clamp(0.0, 8.0));
+                    c.render.master_speed = sender.clamp(C::MasterSpeed, s.clamp(0.0, 8.0));
                 }
                 if let Some(f) = floor {
                     c.render.floor_level = f.clamp(0.0, 1.0);
@@ -3350,6 +3359,7 @@ mod diagnostics_tests {
             brightness: Some(0.0),
             speed: None,
             floor: None,
+            instant: false,
         }));
         assert!(requires_admin(&ClientMsg::SetTestMode { active: true }));
         assert!(requires_admin(&ClientMsg::StopVideo { force: true }));
