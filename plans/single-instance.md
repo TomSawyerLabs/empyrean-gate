@@ -74,8 +74,12 @@ or take over cleanly. It must never park forever as a silent second instance.
       18 assets. Warm cache paid off: Windows 5.6 min, Linux 9.9 min,
       macOS 17 min. Local checks at the tag: tsc, cargo
       lib 370, engine-smoke 6, Playwright 338 passed / 16 skipped.
+- [x] v0.19.0 (2026-11-10, Cameron said go) carries this fix plus PRs #9 phase
+      lock, #10 instant blackout and #11 guardrail levels. Published 2:43 PM PST
+      (22:43Z), run 42913547855, 18 assets. Checks at the tag: tsc, cargo lib 389,
+      engine-smoke 6, Playwright 338 passed / 16 skipped.
 - [ ] **Current step.** When `empyreangate` is back on the tailnet, confirm it
-      self-updated to v0.18.0, then: read
+      self-updated to v0.19.0, then: read
       `%APPDATA%/EmpyreanGate/logs/empyrean-gate.log` for `takeover commit failed`
       to confirm what happened in the field.
 
