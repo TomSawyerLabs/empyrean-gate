@@ -69,8 +69,13 @@ or take over cleanly. It must never park forever as a silent second instance.
       (a holder that answers but refuses the handover: the newcomer exits).
 - [x] `cargo test --lib` 370 passed; update-flow test PASS (all 6 steps);
       `tsc -b` clean; README "One instance at a time" bullet.
-- [ ] Ship in the next release (v0.18.0) so the gate gets it on self-update.
-- [ ] When `empyreangate` is back on the tailnet: read
+- [x] Shipped in v0.18.0 (Cameron said go, 2026-11-09). Tag pushed 7:20 PM PST
+      (03:20Z); release run 42748768546 green, published 7:38 PM PST (03:38Z),
+      18 assets. Warm cache paid off: Windows 5.6 min, Linux 9.9 min,
+      macOS 17 min. Local checks at the tag: tsc, cargo
+      lib 370, engine-smoke 6, Playwright 338 passed / 16 skipped.
+- [ ] **Current step.** When `empyreangate` is back on the tailnet, confirm it
+      self-updated to v0.18.0, then: read
       `%APPDATA%/EmpyreanGate/logs/empyrean-gate.log` for `takeover commit failed`
       to confirm what happened in the field.
 
