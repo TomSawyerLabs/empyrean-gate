@@ -344,16 +344,48 @@ export interface PeerConfig {
   watchdog_ms: number;
 }
 
+/** How much a device's changes are smoothed and limited (plans/guardrail-modes.md). */
+export type GuardrailLevel = "guided" | "standard" | "expert";
+
+export type GuardrailControl =
+  | "master_brightness"
+  | "master_speed"
+  | "floor_level"
+  | "master_hue_amount"
+  | "layer_enable"
+  | "layer_opacity"
+  | "layer_speed"
+  | "layer_scale"
+  | "layer_audio_amount"
+  | "layer_hue"
+  | "layer_hue_range"
+  | "layer_saturation"
+  | "layer_brightness"
+  | "layer_tilt_amount"
+  | "layer_walk_amount"
+  | "layer_param_a"
+  | "layer_param_b"
+  | "layer_param_c"
+  | "layer_param_d";
+
+export interface GuardrailCfg {
+  level: GuardrailLevel;
+  /** Expert only: rate limits in slider units per second. */
+  rates: Partial<Record<GuardrailControl, number>>;
+}
+
 export interface ClientRecord {
   id: string;
   name: string;
   revoked: boolean;
   admin: boolean;
+  guardrail?: GuardrailCfg;
 }
 
 export interface ClientInfo {
   id: string;
   name: string;
+  guardrail?: GuardrailCfg;
   connected: boolean;
   revoked: boolean;
   admin: boolean;

@@ -881,7 +881,7 @@ mod tests {
         assert_eq!(gate(&ClientMsg::SubscribePreview { fps: 5.0, decimate: 12, include_ready: false }), Gate::Needs("preview"));
         // Show control, telemetry inputs, disk writers, process control.
         assert_eq!(gate(&ClientMsg::SetSacnEnabled { enabled: false }), Gate::Refuse);
-        assert_eq!(gate(&ClientMsg::SetMaster { brightness: Some(0.0), speed: None, floor: None }), Gate::Refuse);
+        assert_eq!(gate(&ClientMsg::SetMaster { brightness: Some(0.0), speed: None, floor: None, instant: false }), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::Imu { yaw: 0.0, pitch: 0.0, roll: 0.0, shake: 0.0 }), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::Report { description: String::new(), seconds: 1.0 }), Gate::Refuse);
         assert_eq!(gate(&ClientMsg::CheckUpdate), Gate::Refuse);

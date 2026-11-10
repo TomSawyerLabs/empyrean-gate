@@ -54,9 +54,11 @@ export function QuickSettingsPanel({
     if (!current) return;
     const next = patchQuickSetting(current, target, value);
     configRef.current = next;
-    if (target === "master_brightness") client.setMaster({ brightness: Number(value) });
-    else if (target === "master_speed") client.setMaster({ speed: Number(value) });
-    else if (target === "floor_level") client.setMaster({ floor: Number(value) });
+    // Shortcuts are show buttons: they cut at every guardrail level, on press
+    // and on release.
+    if (target === "master_brightness") client.setMaster({ brightness: Number(value), instant: true });
+    else if (target === "master_speed") client.setMaster({ speed: Number(value), instant: true });
+    else if (target === "floor_level") client.setMaster({ floor: Number(value), instant: true });
     else client.setConfig(next);
   };
 

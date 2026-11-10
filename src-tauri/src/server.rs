@@ -1605,6 +1605,80 @@ fn deactivate_video_audio(ctx: &Ctx) {
 /// test mode, updates). Loopback always may; a remote client needs the admin
 /// flag on its record — earned by joining with the admin token, or granted from
 /// the Clients panel.
+/// A scene or stack swap replaces every layer and the masters: the layer
+/// slews snap, and the masters go back to the automatic (Standard) rates, so a
+/// slow per-slider limit doesn't drag the new scene's brightness in behind the
+/// crossfade.
+fn note_scene_change(state: &SharedState) {
+    use crate::guardrails::{Control as C, GuardrailCfg};
+    let mut rates = state.control_rates.lock();
+    rates.restructure();
+    let automatic = GuardrailCfg::default();
+    rates.note_master(C::MasterBrightness, &automatic);
+    rates.note_master(C::MasterSpeed, &automatic);
+}
+
+/// The guardrails a change from `client_id` carries (plans/guardrail-modes.md).
+/// Unknown devices get the default level.
+fn sender_guardrail(state: &SharedState, client_id: &str) -> crate::guardrails::GuardrailCfg {
+    state
+        .config
+        .read()
+        .clients
+        .iter()
+        .find(|c| c.id == client_id)
+        .map(|c| c.guardrail.clone())
+        .unwrap_or_default()
+}
+
+/// Note what a full-config write changed in the controls a guardrail limits,
+/// and clamp those changes to the sender's ranges.
+fn note_config_write(
+    state: &SharedState,
+    old: &crate::config::AppConfig,
+    new: &mut crate::config::AppConfig,
+    by: &crate::guardrails::GuardrailCfg,
+) {
+    use crate::guardrails::Control as C;
+    let mut rates = state.control_rates.lock();
+    let (o, n) = (&old.render, &mut new.render);
+    if o.master_brightness != n.master_brightness {
+        rates.note_master(C::MasterBrightness, by);
+    }
+    if o.master_speed != n.master_speed {
+        n.master_speed = by.clamp(C::MasterSpeed, n.master_speed);
+        rates.note_master(C::MasterSpeed, by);
+    }
+    if o.floor_level != n.floor_level {
+        rates.note_master(C::FloorLevel, by);
+    }
+    if o.master_hue_amount != n.master_hue_amount || o.master_hue_enabled != n.master_hue_enabled {
+        rates.note_master(C::MasterHueAmount, by);
+    }
+    if let Some(((dlo, dhi), (slo, shi))) = by.walk_range() {
+        if o.walk_depth != n.walk_depth {
+            n.walk_depth = n.walk_depth.clamp(dlo, dhi);
+        }
+        if o.walk_speed != n.walk_speed {
+            n.walk_speed = n.walk_speed.clamp(slo, shi);
+        }
+    }
+    let same_shape = old.layers.len() == new.layers.len()
+        && old.layers.iter().zip(&new.layers).all(|(a, b)| a.kind == b.kind);
+    if same_shape {
+        for (i, (a, b)) in old.layers.iter().zip(new.layers.iter_mut()).enumerate() {
+            crate::guardrails::note_layer_edit(&mut rates, i, a, b, by);
+        }
+    } else {
+        rates.restructure();
+        for l in &mut new.layers {
+            for c in crate::guardrails::LAYER_FIELDS {
+                c.set(l, by.clamp(c, c.get(l)));
+            }
+        }
+    }
+}
+
 fn client_is_admin(state: &SharedState, addr: SocketAddr, client_id: &str) -> bool {
     if addr.ip().is_loopback() {
         return true;
@@ -1937,6 +2011,7 @@ fn record_timeline(state: &SharedState, msg: &ClientMsg, client_id: &str) {
             brightness,
             speed,
             floor,
+            ..
         } => rec.event(
             "master",
             &name(),
@@ -2122,6 +2197,7 @@ pub(crate) fn record_performance(state: &SharedState, msg: &ClientMsg, is_loopba
             brightness,
             speed,
             floor,
+            ..
         } => A::SetMaster {
             brightness: *brightness,
             speed: *speed,
@@ -2283,6 +2359,7 @@ async fn handle_msg(
                             name: display_name,
                             revoked: false,
                             admin: admin_join || is_local,
+                            guardrail: Default::default(),
                         });
                     });
                 } else if admin_join {
@@ -2316,6 +2393,24 @@ async fn handle_msg(
         }
         ClientMsg::UnblockPublic { id } => {
             state.public.lock().unblock(&id);
+        }
+        ClientMsg::SetClientGuardrail { id, guardrail } => {
+            let target = match id {
+                Some(other) if other != *client_id => {
+                    if !require_local_operator(tx, addr, "Client administration").await {
+                        return Ok(());
+                    }
+                    other
+                }
+                _ => client_id.to_string(),
+            };
+            if !target.is_empty() {
+                state.update_config(|c| {
+                    if let Some(r) = c.clients.iter_mut().find(|r| r.id == target) {
+                        r.guardrail = guardrail;
+                    }
+                });
+            }
         }
         ClientMsg::SetClientName { name } => {
             let id = client_id.clone();
@@ -2433,6 +2528,7 @@ async fn handle_msg(
                 .await;
                 return Ok(());
             }
+            let guard = sender_guardrail(state, client_id);
             let port_changed = addr.ip().is_loopback() && {
                 let cur = state.config.read();
                 cur.server.port != config.server.port || cur.server.bind != config.server.bind
@@ -2449,6 +2545,7 @@ async fn handle_msg(
                 let launch_at_startup = c.windows.launch_at_startup;
                 let submissions_token = c.submissions.token.clone();
                 let mut incoming = *config;
+                note_config_write(state, c, &mut incoming, &guard);
                 // Key redemption counters are the server's; a Settings page
                 // holding a stale copy must not reset them.
                 crate::public::preserve_key_uses(&c.public, &mut incoming.public);
@@ -2479,13 +2576,34 @@ async fn handle_msg(
             brightness,
             speed,
             floor,
+            instant,
         } => {
+            use crate::guardrails::{Control as C, GuardrailCfg, Level};
+            let sender = sender_guardrail(state, client_id);
+            // Show buttons cut at every level; the device's ranges still hold.
+            let guard = if instant {
+                GuardrailCfg { level: Level::Expert, ..Default::default() }
+            } else {
+                sender.clone()
+            };
+            {
+                let mut rates = state.control_rates.lock();
+                for (set, control) in [
+                    (brightness.is_some(), C::MasterBrightness),
+                    (speed.is_some(), C::MasterSpeed),
+                    (floor.is_some(), C::FloorLevel),
+                ] {
+                    if set {
+                        rates.note_master(control, &guard);
+                    }
+                }
+            }
             state.update_config(|c| {
                 if let Some(b) = brightness {
                     c.render.master_brightness = b.clamp(0.0, 1.0);
                 }
                 if let Some(s) = speed {
-                    c.render.master_speed = s.clamp(0.0, 8.0);
+                    c.render.master_speed = sender.clamp(C::MasterSpeed, s.clamp(0.0, 8.0));
                 }
                 if let Some(f) = floor {
                     c.render.floor_level = f.clamp(0.0, 1.0);
@@ -2498,6 +2616,13 @@ async fn handle_msg(
             amount,
             loose,
         } => {
+            if enabled.is_some() || amount.is_some() {
+                let guard = sender_guardrail(state, client_id);
+                state
+                    .control_rates
+                    .lock()
+                    .note_master(crate::guardrails::Control::MasterHueAmount, &guard);
+            }
             state.update_config(|c| {
                 if let Some(e) = enabled {
                     c.render.master_hue_enabled = e;
@@ -2514,7 +2639,9 @@ async fn handle_msg(
             });
         }
         ClientMsg::ActivateStack { stack } => {
-            state.request_render_transition();
+            let guard = sender_guardrail(state, client_id);
+            note_scene_change(state);
+            state.request_render_transition_min(guard.min_transition_secs());
             state.update_config(|c| {
                 c.active_patch = None;
                 c.show_scheduler.enabled = false;
@@ -2539,6 +2666,7 @@ async fn handle_msg(
                 .ready_stack
                 .as_ref()
                 .map(|stack| stack.id.clone());
+            let guard = sender_guardrail(state, client_id);
             if current_ready.as_deref() != Some(ready_id.as_str()) {
                 let _ = send_json(
                     tx,
@@ -2570,10 +2698,11 @@ async fn handle_msg(
                 c.render.walk_depth = next.walk_depth;
                 c.rhythm.pro_dj_link_effects = next.dj_link_effects;
                 c.ready_stack = Some(old_program);
+                note_scene_change(state);
                 // Publish the epochs while the config write lock is still held:
                 // the render loop can observe neither half of the swap alone.
                 state.request_ready_take();
-                state.request_render_transition();
+                state.request_render_transition_min(guard.min_transition_secs());
             });
         }
         ClientMsg::PerformanceRecordStart { name } => {
@@ -2696,16 +2825,34 @@ async fn handle_msg(
         ClientMsg::SetSacnEnabled { enabled } => {
             state.update_config(|c| c.output.enabled = enabled);
         }
-        ClientMsg::AddLayer { layer } => {
+        ClientMsg::AddLayer { mut layer } => {
+            let guard = sender_guardrail(state, client_id);
             state.update_config(|c| {
                 if c.layers.len() < crate::layers::MAX_LAYERS {
+                    for f in crate::guardrails::LAYER_FIELDS {
+                        let v = guard.clamp(f, f.get(&layer));                        f.set(&mut layer, v);
+                    }
+                    // It fades in at the adder's toggle rate.
+                    state.control_rates.lock().note_layer(
+                        c.layers.len(),
+                        crate::guardrails::Control::LayerEnable,
+                        &guard,
+                    );
                     c.layers.push(layer);
                 }
             });
         }
-        ClientMsg::UpdateLayer { index, layer } => {
+        ClientMsg::UpdateLayer { index, mut layer } => {
+            let guard = sender_guardrail(state, client_id);
             state.update_config(|c| {
                 if let Some(slot) = c.layers.get_mut(index) {
+                    crate::guardrails::note_layer_edit(
+                        &mut state.control_rates.lock(),
+                        index,
+                        slot,
+                        &mut layer,
+                        &guard,
+                    );
                     *slot = layer;
                 }
             });
@@ -2714,6 +2861,7 @@ async fn handle_msg(
             state.update_config(|c| {
                 if index < c.layers.len() {
                     c.layers.remove(index);
+                    state.control_rates.lock().restructure();
                 }
             });
         }
@@ -2722,6 +2870,7 @@ async fn handle_msg(
                 if from < c.layers.len() && to < c.layers.len() {
                     let l = c.layers.remove(from);
                     c.layers.insert(to, l);
+                    state.control_rates.lock().restructure();
                 }
             });
         }
@@ -3147,6 +3296,7 @@ mod diagnostics_tests {
             name: "Operator".into(),
             revoked: false,
             admin: false,
+            guardrail: Default::default(),
         });
         let state = SharedState::new(config);
 
@@ -3169,6 +3319,7 @@ mod diagnostics_tests {
             name: "Revoked".into(),
             revoked: true,
             admin: false,
+            guardrail: Default::default(),
         });
         let state = SharedState::new(config);
         assert!(!diagnostics_authorized(
@@ -3215,6 +3366,7 @@ mod diagnostics_tests {
             brightness: Some(0.0),
             speed: None,
             floor: None,
+            instant: false,
         }));
         assert!(requires_admin(&ClientMsg::SetTestMode { active: true }));
         assert!(requires_admin(&ClientMsg::StopVideo { force: true }));
@@ -3239,12 +3391,14 @@ mod diagnostics_tests {
             name: "Crew".into(),
             revoked: false,
             admin: true,
+            guardrail: Default::default(),
         });
         config.clients.push(ClientRecord {
             id: "guest".into(),
             name: "Guest".into(),
             revoked: false,
             admin: false,
+            guardrail: Default::default(),
         });
         let state = SharedState::new(config);
         let loopback: SocketAddr = "127.0.0.1:1234".parse().unwrap();
@@ -3267,14 +3421,15 @@ mod diagnostics_tests {
             ..Default::default()
         });
         config.clients = vec![
-            ClientRecord { id: "crew".into(), name: "Crew".into(), revoked: false, admin: true },
-            ClientRecord { id: "guest".into(), name: "Guest".into(), revoked: false, admin: false },
+            ClientRecord { id: "crew".into(), name: "Crew".into(), revoked: false, admin: true, guardrail: Default::default() },
+            ClientRecord { id: "guest".into(), name: "Guest".into(), revoked: false, admin: false, guardrail: Default::default() },
         ];
         let mut status = crate::protocol::RuntimeStatus::default();
         for id in ["crew", "guest"] {
             status.client_list.push(crate::protocol::ClientInfo {
                 id: id.into(),
                 name: id.into(),
+                guardrail: Default::default(),
                 connected: true,
                 revoked: false,
                 admin: id == "crew",

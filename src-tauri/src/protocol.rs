@@ -90,6 +90,10 @@ pub enum ClientMsg {
         /// Floor input level 0..1 (taps, drawing, pads from every client).
         #[serde(default)]
         floor: Option<f32>,
+        /// A show button (Blackout, any quick-setting shortcut): lands on the
+        /// next frame at every guardrail level (plans/guardrail-modes.md).
+        #[serde(default)]
+        instant: bool,
     },
     /// Patch the master hue pull; every field is optional so the UI can flip
     /// one switch without re-sending the rest.
@@ -242,6 +246,14 @@ pub enum ClientMsg {
     /// Set this device's own friendly name (shown in the Clients panel).
     SetClientName {
         name: String,
+    },
+    /// Set a device's guardrail level and Expert rate limits
+    /// (plans/guardrail-modes.md). `id: None` is this device; another
+    /// device's needs the local operator.
+    SetClientGuardrail {
+        #[serde(default)]
+        id: Option<String>,
+        guardrail: crate::guardrails::GuardrailCfg,
     },
     /// Operator: rename a known client.
     RenameClient {
@@ -625,6 +637,8 @@ pub struct HandoverGrant {
 pub struct ClientInfo {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub guardrail: crate::guardrails::GuardrailCfg,
     pub connected: bool,
     pub revoked: bool,
     pub admin: bool,

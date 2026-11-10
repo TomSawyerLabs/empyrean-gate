@@ -19,6 +19,7 @@ import {
   type LayerCfg,
   type LayerKind,
 } from "./types";
+import { guardRange, useGuardrail } from "./guardrails";
 
 const BLEND_MODES: BlendMode[] = ["add", "multiply", "screen", "alpha_over", "max"];
 
@@ -70,6 +71,10 @@ export default function LayerQuickEdit({
 }) {
   const { client, config } = useGate();
   const layer = config?.layers[anchor.index];
+  const guard = useGuardrail();
+  const [speedMin, speedMax] = guardRange(guard, "layer_speed", -4, 4);
+  const [scaleMin, scaleMax] = guardRange(guard, "layer_scale", 0.05, 5);
+  const [, brightMax] = guardRange(guard, "layer_brightness", 0, 2);
 
   const throttledUpdate = useThrottled(
     (l: LayerCfg) => client.updateLayer(anchor.index, l),
@@ -134,7 +139,7 @@ export default function LayerQuickEdit({
             <QuickSlider
               label="Brightness"
               value={local.brightness}
-              max={2}
+              max={brightMax}
               onChange={(v) => up({ brightness: v })}
             />
             <label className="field-row">
@@ -152,15 +157,15 @@ export default function LayerQuickEdit({
             <QuickSlider
               label="Speed"
               value={local.speed}
-              min={-4}
-              max={4}
+              min={speedMin}
+              max={speedMax}
               onChange={(v) => up({ speed: v })}
             />
             <QuickSlider
               label="Scale"
               value={local.scale}
-              min={0.05}
-              max={5}
+              min={scaleMin}
+              max={scaleMax}
               onChange={(v) => up({ scale: v })}
             />
             <QuickSlider label="Walk" value={local.walk_amount} onChange={(v) => up({ walk_amount: v })} />

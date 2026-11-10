@@ -41,6 +41,7 @@ import Sparkbars from "./Sparkbars";
 import { useGate, useThrottled } from "./state";
 import ToolIcon, { type ToolKind } from "./ToolIcon";
 import type { LayerCfg, RenderConfig, ShapeKind } from "./types";
+import { guardRange, useGuardrail } from "./guardrails";
 
 /** One layer in the Live cluster: tap toggles it, hold or right-click edits it. */
 function LayerChip({
@@ -162,6 +163,7 @@ const TOOLS: { kind: ToolKind; label: string }[] = [
 
 export default function Live() {
   const { client, config, status, beatAt, admin } = useGate();
+  const [speedMin, speedMax] = guardRange(useGuardrail(), "master_speed", 0, 4);
   const [tool, setTool] = useState<LiveTool>("tap");
   const [growMode, setGrowMode] = useState<GrowMode>("static");
   const [quickEdit, setQuickEdit] = useState<QuickEditAnchor | null>(null);
@@ -549,8 +551,8 @@ export default function Live() {
         <span>Speed</span>
         <input
           type="range"
-          min={0}
-          max={4}
+          min={speedMin}
+          max={speedMax}
           step={0.05}
           value={masterSpeed}
           {...masterDrag}
