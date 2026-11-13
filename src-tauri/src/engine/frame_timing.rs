@@ -38,6 +38,9 @@ pub struct Second {
 
 #[derive(Debug, Default)]
 pub struct FrameTiming {
+    /// The loop's first frame has no previous frame: its "interval" is
+    /// engine start-up (hundreds of ms), not a hitch.
+    started: bool,
     stages: Stages,
     busy_ms: f32,
     late: u32,
@@ -65,6 +68,9 @@ impl FrameTiming {
     pub fn frame_started(&mut self, work: Duration, interval: Duration, budget: Duration) {
         let (work_ms, interval_ms, budget_ms) = (ms(work), ms(interval), ms(budget));
         let s = std::mem::take(&mut self.stages);
+        if !std::mem::replace(&mut self.started, true) {
+            return;
+        }
         self.busy_ms += work_ms;
         if interval_ms > budget_ms * LATE_FRAME_RATIO {
             self.late += 1;
@@ -185,9 +191,24 @@ mod tests {
         Duration::from_secs_f32(ms / 1000.0)
     }
 
+    /// A timing that has already seen the loop's start-up frame.
+    fn running() -> FrameTiming {
+        let mut t = FrameTiming::default();
+        t.frame_started(d(300.0), d(340.0), BUDGET);
+        t
+    }
+
+    #[test]
+    fn start_up_is_not_a_hitch() {
+        let mut t = FrameTiming::default();
+        t.frame_started(d(300.0), d(340.0), BUDGET);
+        let s = t.close_second();
+        assert_eq!((s.late, s.load_pct, s.worst), (0, 0, None));
+    }
+
     #[test]
     fn late_frames_and_load_are_counted_per_second() {
-        let mut t = FrameTiming::default();
+        let mut t = running();
         for _ in 0..58 {
             t.frame_started(d(2.0), d(16.7), BUDGET);
         }
@@ -208,7 +229,7 @@ mod tests {
 
     #[test]
     fn overrun_is_attributed_to_its_stage() {
-        let mut t = FrameTiming::default();
+        let mut t = running();
         t.program(30.0);
         t.frame_started(d(35.0), d(35.0), BUDGET);
         let w = t.close_second().worst.unwrap();
@@ -220,7 +241,7 @@ mod tests {
 
     #[test]
     fn slowest_looks_back_a_few_seconds() {
-        let mut t = FrameTiming::default();
+        let mut t = running();
         t.frame_started(d(2.0), d(50.0), BUDGET);
         t.close_second();
         for _ in 0..3 {
