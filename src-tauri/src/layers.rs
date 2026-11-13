@@ -322,7 +322,36 @@ pub struct GpuLayer {
 }
 
 
+/// Below this a layer's opacity or brightness adds well under one 8-bit code
+/// value to the frame, so the engine may leave it off the GPU.
+const INVISIBLE_EPSILON: f32 = 1e-4;
+
 impl LayerCfg {
+    /// True when this layer cannot change the composite, so the program
+    /// render can skip it entirely (its phase still advances, so it is in
+    /// motion when it comes back).
+    ///
+    /// - Opacity 0 is the identity for every blend mode (`apply_blend` in
+    ///   `engine/shaders/gate.wgsl` scales by it throughout).
+    /// - Brightness 0 makes a layer emit black, which is the identity only
+    ///   for Add, Screen and Max: under Multiply or AlphaOver black is a
+    ///   colour that darkens what is beneath, so those keep rendering. The
+    ///   kinds whose output is not plain `colour × brightness` (Video, which
+    ///   can pass its texture through, and the BRC maps, whose markers are
+    ///   drawn unscaled) never qualify.
+    pub fn is_invisible(&self) -> bool {
+        if self.opacity <= INVISIBLE_EPSILON {
+            return true;
+        }
+        let black_is_identity =
+            matches!(self.blend, BlendMode::Add | BlendMode::Screen | BlendMode::Max);
+        let colour_scales_with_brightness = !matches!(
+            self.kind,
+            LayerKind::Video | LayerKind::BrcMap | LayerKind::BrcPlan
+        );
+        black_is_identity && colour_scales_with_brightness && self.brightness <= INVISIBLE_EPSILON
+    }
+
     /// Rate factor the engine folds into this layer's phase integration.
     ///
     /// Four kinds animate at a rate derived from a parameter. Written naively the
@@ -472,7 +501,32 @@ mod patch_transient_abi_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{GpuDab, GpuEffect};
+    use super::{BlendMode, GpuDab, GpuEffect, LayerCfg, LayerKind};
+
+    /// Opacity 0 is invisible under every blend; brightness 0 only where
+    /// black is the identity, and only for kinds that scale by brightness.
+    #[test]
+    fn invisible_layers_are_only_true_no_ops() {
+        let base = LayerCfg::default();
+        assert!(!base.is_invisible());
+        for blend in [
+            BlendMode::Add,
+            BlendMode::Multiply,
+            BlendMode::Screen,
+            BlendMode::AlphaOver,
+            BlendMode::Max,
+        ] {
+            let clear = LayerCfg { opacity: 0.0, blend, ..base.clone() };
+            assert!(clear.is_invisible(), "opacity 0 under {blend:?}");
+            let black = LayerCfg { brightness: 0.0, blend, ..base.clone() };
+            let identity = matches!(blend, BlendMode::Add | BlendMode::Screen | BlendMode::Max);
+            assert_eq!(black.is_invisible(), identity, "brightness 0 under {blend:?}");
+        }
+        for kind in [LayerKind::Video, LayerKind::BrcMap, LayerKind::BrcPlan] {
+            let black = LayerCfg { brightness: 0.0, kind, ..base.clone() };
+            assert!(!black.is_invisible(), "{kind:?} draws unscaled ink");
+        }
+    }
 
     /// `GpuEffect` and `GpuDab` are bytemuck'd straight into storage buffers
     /// read by TWO shaders — `gate.wgsl` and `patch_lib.wgsl`, which carry

@@ -3193,6 +3193,21 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             if recording {
                 effective_layers.push(l.clone());
             }
+            if l.is_invisible() {
+                // On, but adding nothing (opacity 0, or black under an
+                // additive blend): keep it off the program dispatch. Its
+                // thumbnail rides the off-air sweep so the chip still has one.
+                let cfg_index = if render_transition_active {
+                    i.checked_sub(render_transition_split)
+                } else {
+                    Some(i)
+                };
+                if let Some(cfg_index) = cfg_index {
+                    let (gpu_phase, gpu_epoch) = l.split_phase(layer_phases[i]);
+                    offair_layers.push((cfg_index, l.to_gpu(gpu_phase, gpu_epoch)));
+                }
+                continue;
+            }
             if render_transition_active && i < render_transition_split {
                 gpu_transition_split += 1;
             }
@@ -3810,6 +3825,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                     (layer.phase_rate(level) * layer.speed * stack.master_speed * dt) as f64;
                 if let Some(period) = layer.phase_period() {
                     ready_phases[index] = ready_phases[index].rem_euclid(period);
+                }
+                if layer.is_invisible() {
+                    continue;
                 }
                 let (phase, phase_epoch) = layer.split_phase(ready_phases[index]);
                 ready_layers.push(layer.to_gpu(phase, phase_epoch));
