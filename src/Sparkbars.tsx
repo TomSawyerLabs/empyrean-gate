@@ -7,6 +7,7 @@ export default function Sparkbars({
   label,
   value,
   warn,
+  max: fixedMax,
 }: {
   /** Oldest-first per-second buckets. */
   data: number[];
@@ -17,18 +18,20 @@ export default function Sparkbars({
   value: string;
   /** Highlight the value (e.g. 0 pkt/s while output is enabled). */
   warn?: boolean;
+  /** Fixed full-scale value; by default the bars scale to the largest one. */
+  max?: number;
 }) {
   const W = 90;
   const H = 22;
   const n = 30;
   const slots = data.slice(-n);
-  const max = Math.max(1, ...slots);
+  const max = fixedMax ?? Math.max(1, ...slots);
   const bw = W / n;
   return (
     <span className="sparkbars">
       <svg width={W} height={H} shapeRendering="crispEdges" aria-hidden="true">
         {slots.map((v, i) => {
-          const h = Math.max(v > 0 ? 1 : 0, (v / max) * H);
+          const h = Math.max(v > 0 ? 1 : 0, Math.min(1, v / max) * H);
           return (
             <rect
               key={i}

@@ -15,6 +15,13 @@ import { SCENE_PRESETS, type ScenePreset } from "./scenes";
 import ShapeIcon from "./ShapeIcon";
 import ClientRoster from "./ClientRoster";
 import Sparkbars from "./Sparkbars";
+import {
+  HITCH_METER_MAX,
+  HITCH_WARN_PER_SEC,
+  describeSlowFrame,
+  hitchesNow,
+  slowFrame,
+} from "./frameTiming";
 import { useGate, useThrottled } from "./state";
 import {
   codeParams,
@@ -335,7 +342,20 @@ export default function Control() {
               value={`${status.load_history.at(-1) ?? 0}%`}
               warn={status.load_warning}
             />
+            <Sparkbars
+              data={status.late_history}
+              color="#ff5c7a"
+              label="hitches"
+              value={String(hitchesNow(status))}
+              warn={hitchesNow(status) >= HITCH_WARN_PER_SEC}
+              max={HITCH_METER_MAX}
+            />
           </div>
+        )}
+        {status && slowFrame(status) && (
+          // The worst recent frame and the stage that ate it: the first thing
+          // to know when the rig stutters (plans/frame-spikes.md).
+          <p className="hint slow-frame">Slowest: {describeSlowFrame(slowFrame(status)!)}</p>
         )}
       </section>
 

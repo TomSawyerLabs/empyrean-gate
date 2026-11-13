@@ -60,11 +60,22 @@ draws (it swallows pan gestures), a drag anywhere else scrolls to the controls b
   where it left off; "Stop now" or the timer ends the process.
 - **Know when the engine is behind.** Beside fps and packets-per-second, the
   Live ring and Control meters carry a **load** sparkline: the share of each
-  second the GPU dispatch + readback actually took (one number for GPU and CPU,
-  because the frame loop is one thread; it passes 100 % when frames overrun).
-  When load stays over budget or frames stay starved for several seconds in a
-  row the engine raises a warning and every UI shows a dismissible **"The
-  engine is behind"** toast with the three cheapest load-shedding moves: cap
+  second the frame loop spent working rather than waiting (scene prep, the
+  Ready and thumbnail buses, the main dispatch + readback, sACN and preview
+  fan-out; one number for GPU and CPU, because the loop is one thread; it
+  passes 100 % when frames overrun). Average load is not what makes the rig
+  stutter, though: single frames arriving tens of ms late are, and they happen
+  at 20 % load. So a **hitches** meter beside it counts, per second, the frames
+  that started more than 1.5 frame intervals after the previous one, each a
+  visible hold on the rig, and turns red at three a second. The engine also
+  keeps the slowest frame of the last ten seconds split by stage; Control,
+  the Patch tab's status card and the toast name the stage that ate it ("48 ms
+  frame 2 s ago, mostly main render (38 ms)"), and the log gets the full split
+  at most every ten seconds. Layers that cannot change the frame (opacity 0,
+  or brightness 0 under Add, Screen or Max) are left off the GPU entirely.
+  When load stays over budget, frames stay starved, or hitches keep coming for
+  several seconds in a row the engine raises a warning and every UI shows a
+  dismissible **"The engine is behind"** toast with the three cheapest load-shedding moves: cap
   phone previews at 15 fps (applies to streams already running), pause the
   off-air Ready bus (a whole second render per frame), or render at 45 fps.
   All three are ordinary settings, so they undo in Settings / on the Ready tab.

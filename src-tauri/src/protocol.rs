@@ -1080,6 +1080,30 @@ pub struct ImuTurnInfo {
     pub seconds_left: Option<f32>,
 }
 
+/// One frame's time, split by frame-loop stage, all in ms. `work` is
+/// everything the loop did for the frame; `interval` is how long after the
+/// previous frame it actually started. The stages add up to `work`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct FrameBreakdown {
+    pub interval_ms: f32,
+    pub work_ms: f32,
+    /// Config snapshot, audio, layer packing: everything before the buses.
+    pub prep_ms: f32,
+    /// The off-air Ready bus render.
+    pub ready_ms: f32,
+    /// The mini-preview bus (one solo thumbnail per frame).
+    pub minis_ms: f32,
+    /// Program dispatch + readback (the old "frame time").
+    pub program_ms: f32,
+    /// The rest: handoff bus, sACN, preview fan-out, status.
+    pub other_ms: f32,
+    /// Lateness that is not the loop's own work: the thread woke late from
+    /// its pacing sleep (OS scheduling, power state, another process).
+    pub stall_ms: f32,
+    /// How long ago this frame was, in whole seconds.
+    pub secs_ago: u32,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RuntimeStatus {
     /// Phone motion turns: who holds the Phone IMU controls and who waits.
@@ -1137,12 +1161,24 @@ pub struct RuntimeStatus {
     pub fps_history: Vec<u32>,
     /// sACN packets sent in each of the last ~30 one-second buckets (oldest first).
     pub pps_history: Vec<u32>,
-    /// Render load per one-second bucket (oldest first): the share of the frame
-    /// budget the GPU dispatch + readback consumed, in percent (100 = every
-    /// microsecond of 1/fps was spent rendering; can exceed 100 when frames
-    /// overrun). GPU and CPU are one number here because the loop is one
-    /// thread: compute, readback, scatter.
+    /// Render load per one-second bucket (oldest first): the share of the
+    /// second the frame loop spent working rather than waiting for the next
+    /// frame, in percent (100 = no idle time left; can exceed 100 when frames
+    /// overrun). It counts the whole loop (scene prep, the Ready and mini
+    /// buses, Program dispatch + readback, sACN and preview fan-out), and GPU
+    /// and CPU are one number because the loop is one thread.
     pub load_history: Vec<u32>,
+    /// Late frames per one-second bucket (oldest first): frames that started
+    /// more than `LATE_FRAME_RATIO` × the frame interval after the one
+    /// before. Each is a visible hitch on the rig, even when the average load
+    /// looks fine, so this is the meter that says "about to glitch".
+    pub late_history: Vec<u32>,
+    /// The longest frame interval in each one-second bucket, in ms.
+    pub worst_frame_history: Vec<f32>,
+    /// The target frame interval, ms (1000 / render fps).
+    pub frame_budget_ms: f32,
+    /// Where the time went in the slowest frame of the last few seconds.
+    pub slowest_frame: Option<FrameBreakdown>,
     /// Sustained underperformance: load over LOAD_WARN_PCT, or frames well
     /// under the target rate, for LOAD_WARN_SECS in a row. Cleared once a bucket
     /// comes in healthy. The UI turns this into a dismissible toast with the

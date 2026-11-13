@@ -12,6 +12,7 @@ import Settings from "./Settings";
 import Test from "./Test";
 import { contenders, peerLabel, peerVerdict, severity } from "./sacnPeers";
 import Ready from "./Ready";
+import { describeSlowFrame, hitchesNow, slowFrame } from "./frameTiming";
 import { useGate } from "./state";
 import { deviceNameUnconfirmed, generateDeviceName } from "./deviceNames";
 import { IDLE_MS, scan, snooze, startSentry, type IdleWindow } from "./windowSentry";
@@ -828,6 +829,8 @@ function LoadBanner() {
   if (!warning || dismissedAt !== null || !config) return null;
   const load = status?.load_history.at(-1) ?? 0;
   const fps = status?.fps_history.at(-1) ?? 0;
+  const hitches = status ? hitchesNow(status) : 0;
+  const slow = status ? slowFrame(status) : null;
   const target = Math.round(config.render.fps);
   const cap = config.server.preview_fps_cap;
   const ready = config.ready_stack !== null && !config.render.ready_bus_paused;
@@ -839,8 +842,10 @@ function LoadBanner() {
     <div className="banner warn load-banner" role="status">
       <div className="load-banner-text">
         <strong>The engine is behind.</strong> Render load {load}% of budget,
-        {" "}{fps} of {target} fps, for several seconds. Stutter on the rig is likely;
-        second monitors, a cable flapping, or another GPU program are the usual causes.
+        {" "}{fps} of {target} fps{hitches > 0 ? `, ${hitches} hitches a second` : ""}, for
+        several seconds. Stutter on the rig is likely; second monitors, a cable flapping,
+        or another GPU program are the usual causes.
+        {slow && <> Slowest: {describeSlowFrame(slow)}.</>}
       </div>
       {admin && (
         <div className="load-banner-actions">

@@ -720,6 +720,19 @@ export interface PatchTapInfo {
   shape: PatchShape;
 }
 
+/** One frame's time by frame-loop stage, ms (`FrameBreakdown` in protocol.rs). */
+export interface FrameBreakdown {
+  interval_ms: number;
+  work_ms: number;
+  prep_ms: number;
+  ready_ms: number;
+  minis_ms: number;
+  program_ms: number;
+  other_ms: number;
+  stall_ms: number;
+  secs_ago: number;
+}
+
 export interface RuntimeStatus {
   gpu_error: string | null;
   gpu_name: string;
@@ -763,6 +776,14 @@ export interface RuntimeStatus {
   tdr_last_day: number;
   /** Render load per second bucket, percent of budget (can exceed 100). */
   load_history: number[];
+  /** Late frames per second bucket: each one a visible hitch on the rig. */
+  late_history: number[];
+  /** Longest frame interval per second bucket, ms. */
+  worst_frame_history: number[];
+  /** Target frame interval, ms. */
+  frame_budget_ms: number;
+  /** Where the time went in the slowest frame of the last few seconds. */
+  slowest_frame: FrameBreakdown | null;
   /** Backend-judged sustained underperformance; see LoadBanner. */
   load_warning: boolean;
   clients: number;

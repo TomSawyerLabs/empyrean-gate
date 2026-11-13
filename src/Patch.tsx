@@ -17,6 +17,7 @@ import {
 } from "@empyrean-gate/patch-web/editor";
 import { getMiniHub } from "./miniPreview";
 import { SubmissionsDrawer } from "./PatchSubmissions";
+import { describeSlowFrame, hitchesNow, slowFrame } from "./frameTiming";
 import { useGate, useThrottled } from "./state";
 import type { GateClient } from "./ws";
 
@@ -100,6 +101,8 @@ export default function Patch() {
           ["Frame rate", `${Math.round(status.engine_fps)} fps`],
           ["Frame time", `${status.frame_time_ms.toFixed(1)} ms`],
           ["Render load", `${status.load_history.at(-1) ?? 0}%`],
+          ["Hitches", `${hitchesNow(status)} in the last second`],
+          ["Slowest frame", slowFrame(status) ? describeSlowFrame(slowFrame(status)!) : "on time"],
           ["GPU", status.gpu_name || "unknown"],
         ],
         note: "Measured by the gate's render engine.",

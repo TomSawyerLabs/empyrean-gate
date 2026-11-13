@@ -38,6 +38,7 @@ import { tapsAsRing } from "@empyrean-gate/patch-web/editor";
 import ClientRoster from "./ClientRoster";
 import ShapeIcon from "./ShapeIcon";
 import Sparkbars from "./Sparkbars";
+import { HITCH_METER_MAX, HITCH_WARN_PER_SEC, hitchesNow } from "./frameTiming";
 import { useGate, useThrottled } from "./state";
 import ToolIcon, { type ToolKind } from "./ToolIcon";
 import type { LayerCfg, RenderConfig, ShapeKind } from "./types";
@@ -816,6 +817,14 @@ export default function Live() {
               label="load"
               value={`${status.load_history.at(-1) ?? 0}%`}
               warn={status.load_warning}
+            />
+            <Sparkbars
+              data={status.late_history}
+              color="#ff5c7a"
+              label="hitches"
+              value={String(hitchesNow(status))}
+              warn={hitchesNow(status) >= HITCH_WARN_PER_SEC}
+              max={HITCH_METER_MAX}
             />
             {status.sacn_enabled && (
               <Sparkbars

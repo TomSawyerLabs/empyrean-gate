@@ -26,6 +26,40 @@ test("a load warning becomes a dismissible toast with shedding actions", async (
   await expect(banner).toHaveCount(0);
 });
 
+test("hitches show on the meters and name the stage that caused them", async ({ page, request }) => {
+  const id = "hitch-test";
+  await page.addInitScript((c) => localStorage.setItem("empyrean-client-id", c), id);
+  await request.post(`/mock/status?client=${id}`, {
+    data: {
+      load_warning: true,
+      load_history: [20, 22, 21],
+      late_history: [0, 1, 6],
+      frame_budget_ms: 16.7,
+      slowest_frame: {
+        interval_ms: 48,
+        work_ms: 44,
+        prep_ms: 1,
+        ready_ms: 2,
+        minis_ms: 1,
+        program_ms: 38,
+        other_ms: 2,
+        stall_ms: 0,
+        secs_ago: 2,
+      },
+    },
+  });
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto("/#control");
+  await page.locator('.app[data-connected="yes"]').waitFor({ state: "attached" });
+
+  // Load is low; the hitches are what the banner and the meter call out.
+  const banner = page.locator(".load-banner");
+  await expect(banner).toContainText("6 hitches a second");
+  await expect(banner).toContainText("48 ms frame 2 s ago, mostly main render (38 ms)");
+  await expect(page.locator(".meter-stack .spark-warn", { hasText: "hitches" })).toContainText("6 hitches");
+  await expect(page.locator(".slow-frame")).toContainText("mostly main render");
+});
+
 test("a flapping display becomes a red banner naming the cable", async ({ page, request }) => {
   const id = "display-flap-test";
   await page.addInitScript((c) => localStorage.setItem("empyrean-client-id", c), id);

@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
+mod frame_timing;
 pub mod minis;
 mod patch_build;
 mod phase_lock;
@@ -1890,6 +1891,13 @@ const LOAD_WARN_PCT: u32 = 85;
 const LOAD_WARN_FPS_RATIO: f32 = 0.85;
 /// Unhealthy seconds in a row before the warning trips.
 const LOAD_WARN_SECS: u32 = 8;
+/// Late frames in one second that make it an unhealthy second: a few visible
+/// hitches a second is a stutter even when the average load is low.
+const LOAD_WARN_LATE_PER_SEC: u32 = 3;
+/// A frame this many intervals long gets its breakdown logged…
+const SLOW_FRAME_LOG_RATIO: f32 = 2.0;
+/// …at most this often.
+const SLOW_FRAME_LOG_EVERY: Duration = Duration::from_secs(10);
 
 /// Scale a frame of perceptual RGB bytes by an eased 0..1 mix (smoothstep is
 /// applied here so callers track a plain linear envelope). Used to fade the
@@ -2039,16 +2047,16 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
     let mut sec_start = Instant::now();
     let mut frames_this_sec: u32 = 0;
     let mut pkts_this_sec: u32 = 0;
-    // Render time spent this second, for the load bucket (share of budget).
-    let mut busy_ms_this_sec: f32 = 0.0;
-    let mut load_hist: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
+    // Load, late frames and the slowest frame's stage breakdown.
+    let mut timing = frame_timing::FrameTiming::default();
+    let mut last_slow_log: Option<Instant> = None;
     // Consecutive unhealthy one-second buckets; the warning trips at
     // LOAD_WARN_SECS and clears on the first healthy one.
     let mut unhealthy_secs: u32 = 0;
     let mut load_warning = false;
     let mut fps_hist: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
     let mut pps_hist: std::collections::VecDeque<u32> = std::collections::VecDeque::new();
-    const HIST_LEN: usize = 30;
+    const HIST_LEN: usize = frame_timing::HIST_LEN;
 
     // Gray-code layer walk: at most one layer's on/off state changes per step, and
     // never fewer than `walk_min_layers` stay on. Fades via an opacity envelope so
@@ -2426,6 +2434,9 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             }
         }
         let now = Instant::now();
+        // `elapsed` (before the wait) is everything the loop did since the
+        // previous frame began; `now - last_frame` is when this one began.
+        timing.frame_started(elapsed, now - last_frame, target_dt);
         let dt = (now - last_frame).as_secs_f32();
         last_frame = now;
 
@@ -3723,6 +3734,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         // Render the prepared scene on its own GPU bus. It shares live global
         // inputs (audio, controls, effects and video) but owns its layer phases,
         // so it keeps moving while off air and does not perturb Program.
+        timing.prep(now);
+        let ready_started = Instant::now();
         if cfg.render.ready_bus_paused {
             // Load shedding: the prepared scene is not rendered at all; its
             // preview shows nothing until unpaused. Phases keep their values.
@@ -3865,8 +3878,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             ready_rgb.clear();
         }
 
+        timing.ready(ready_started);
+
         // Mini previews: solo thumbnails of each contribution (idle without
         // subscribers). Reads the packed GPU layers out of `inputs`.
+        let minis_started = Instant::now();
         mini_bus.tick(
             state,
             &inputs,
@@ -3875,6 +3891,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             patch_preview.as_ref(),
             patch_rt.as_ref(),
         );
+        timing.minis(minis_started);
 
         // Read before the vectors move into FrameInputs; the recorder reports
         // what this frame actually had live, not what survives to the next one.
@@ -3982,6 +3999,7 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         };
         low_latency_render_seq = requested_low_latency;
         let frame_ms = t0.elapsed().as_secs_f32() * 1000.0;
+        timing.program(frame_ms);
 
         if let Some(rendered_rgb) = rgb {
             let normal_rgb: &[u8] = if let Some(started) = handoff_started {
@@ -4191,15 +4209,26 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
         }
 
         // Close out per-second history buckets.
-        busy_ms_this_sec += frame_ms;
         if sec_start.elapsed() >= Duration::from_secs(1) {
             sec_start += Duration::from_secs(1);
-            // Load = render time as a share of the second (the budget is the
-            // whole second at any target rate). Overruns push it past 100.
-            let load_pct = (busy_ms_this_sec / 10.0).round().clamp(0.0, 999.0) as u32;
+            let second = timing.close_second();
+            let load_pct = second.load_pct;
             let target_fps = cfg.render.fps.clamp(1.0, 240.0);
+            let budget_ms = 1000.0 / target_fps;
+            if let Some(worst) = second.worst.filter(|w| {
+                w.interval_ms > budget_ms * SLOW_FRAME_LOG_RATIO
+                    && last_slow_log.is_none_or(|at| at.elapsed() >= SLOW_FRAME_LOG_EVERY)
+            }) {
+                last_slow_log = Some(Instant::now());
+                log::info!(
+                    "slow frame: {} ({} late this second)",
+                    frame_timing::describe(&worst, budget_ms),
+                    second.late
+                );
+            }
             let starved = (frames_this_sec as f32) < target_fps * LOAD_WARN_FPS_RATIO;
-            if load_pct >= LOAD_WARN_PCT || starved {
+            let stuttering = second.late >= LOAD_WARN_LATE_PER_SEC;
+            if load_pct >= LOAD_WARN_PCT || starved || stuttering {
                 unhealthy_secs = unhealthy_secs.saturating_add(1);
             } else {
                 unhealthy_secs = 0;
@@ -4210,7 +4239,8 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 if warn_now {
                     log::warn!(
                         "render load sustained: {load_pct}% of budget, {frames_this_sec} fps \
-                         against a {target_fps:.0} fps target for {unhealthy_secs}s"
+                         against a {target_fps:.0} fps target, {} late frames, for {unhealthy_secs}s",
+                        second.late
                     );
                 } else {
                     log::info!("render load back within budget");
@@ -4218,18 +4248,13 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
             }
             fps_hist.push_back(frames_this_sec);
             pps_hist.push_back(pkts_this_sec);
-            load_hist.push_back(load_pct);
             frames_this_sec = 0;
             pkts_this_sec = 0;
-            busy_ms_this_sec = 0.0;
             while fps_hist.len() > HIST_LEN {
                 fps_hist.pop_front();
             }
             while pps_hist.len() > HIST_LEN {
                 pps_hist.pop_front();
-            }
-            while load_hist.len() > HIST_LEN {
-                load_hist.pop_front();
             }
         }
 
@@ -4250,7 +4275,11 @@ fn run_frames(state: &Arc<SharedState>, engine: &mut Engine) {
                 }
                 st.fps_history = fps_hist.iter().copied().collect();
                 st.pps_history = pps_hist.iter().copied().collect();
-                st.load_history = load_hist.iter().copied().collect();
+                st.load_history = timing.load_hist.iter().copied().collect();
+                st.late_history = timing.late_hist.iter().copied().collect();
+                st.worst_frame_history = timing.worst_hist.iter().copied().collect();
+                st.frame_budget_ms = 1000.0 / cfg.render.fps.clamp(1.0, 240.0);
+                st.slowest_frame = timing.slowest();
                 st.load_warning = load_warning;
                 {
                     let (events, flapping) =
